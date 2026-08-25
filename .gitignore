@@ -1,0 +1,26 @@
+# Credentials & secrets
+.env
+*.pem
+keys/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# ONNX model artifacts
+*.onnx
+models/
+
+# Tick data (keep structure, ignore large files)
+data/*.jsonl
+
+# IDE
+.vscode/
+.idea/
+*.swp
