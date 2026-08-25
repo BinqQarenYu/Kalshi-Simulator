@@ -151,7 +151,8 @@ class KalshiOrderflowFeatureExtractor:
         if best_ask <= best_bid:
             best_ask = best_bid + 0.01
 
-        spread_bps = math.log(best_ask / best_bid) * 10000.0
+        # Binary contract spread scaled to match normalized continuous asset training distribution
+        spread_bps = float(max(0.001, min(0.25, best_ask - best_bid)))
 
         # 2. Spatial Volumes
         bid_sizes = [float(lv.quantity) for lv in bids] + [0.0] * (self.target_depth - len(bids))

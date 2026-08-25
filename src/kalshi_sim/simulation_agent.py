@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -19,6 +20,8 @@ from typing import Any, Dict, List, Optional
 
 from kalshi_sim.execution_logger import ExecutionLogger
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
+from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
+from kalshi_sim.order_client import KalshiDemoOrderClient
 from kalshi_sim.order_simulator import OrderSimulator
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.portfolio import Portfolio
@@ -38,15 +41,15 @@ from kalshi_sim.settlement import run_settlement_cycle
 logger = logging.getLogger(__name__)
 
 # Strategy parameters
-SCALP_IMBALANCE_THRESHOLD = Decimal("0.65")
+SCALP_IMBALANCE_THRESHOLD = Decimal("0.60")
 SCALP_MAX_POSITION_SIZE = 20
-MOMENTUM_CONSECUTIVE_TICKS = 3
+MOMENTUM_CONSECUTIVE_TICKS = 2
 MOMENTUM_MAX_POSITION_SIZE = 50
-SWING_DEPTH_RATIO_THRESHOLD = Decimal("2.0")
+SWING_DEPTH_RATIO_THRESHOLD = Decimal("1.8")
 SWING_MAX_POSITION_SIZE = 100
 
-PNL_REPORT_INTERVAL_S = 60.0
-SETTLEMENT_CHECK_INTERVAL_S = 30.0
+PNL_REPORT_INTERVAL_S = 10.0
+SETTLEMENT_CHECK_INTERVAL_S = 10.0
 MAX_CONCURRENT_POSITIONS = 5
 MAX_POSITION_COST_PCT = Decimal("0.10")  # max 10% of equity per position
 
@@ -61,15 +64,18 @@ class SimulationAgent:
         starting_capital: Decimal = Decimal("10000"),
         data_dir: Path = Path("data"),
         model_path: Optional[Path] = None,
+        order_client: Optional[KalshiDemoOrderClient] = None,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
+        self._order_client = order_client
 
         # Components
         self._portfolio = Portfolio(starting_balance=starting_capital)
         self._simulator = OrderSimulator()
         self._exec_logger = ExecutionLogger(data_dir=data_dir)
         self._onnx_engine = KalshiONNXEngine(model_path=model_path)
+        self._ev_engine = StatisticalEVEngine()
 
         # Market metadata cache (populated by ingestion agent)
         self._market_cache: dict[str, MarketInfo] = {}
@@ -85,6 +91,11 @@ class SimulationAgent:
         self._shutdown = asyncio.Event()
 
     # -- Lifecycle -----------------------------------------------------------
+
+    @property
+    def portfolio(self) -> Portfolio:
+        """Access the internal simulated portfolio."""
+        return self._portfolio
 
     async def start(self) -> None:
         """Start background tasks (P&L reporting, settlement checks)."""
@@ -144,7 +155,21 @@ class SimulationAgent:
 
         # 1. Run ONNX Model Inference
         trades = self._recent_trades.get(ticker, [])
+        t0 = time.perf_counter()
         onnx_res = self._onnx_engine.process_orderbook_tick(book, latest_trades=trades)
+        latency_ms = (time.perf_counter() - t0) * 1000.0
+
+        onnx_signal = onnx_res.get("signal", "WAIT")
+        onnx_conf = onnx_res.get("confidence", 0.0)
+        vpin_score = onnx_res.get("vpin_score", 0.0)
+
+        # Log AI inference telemetry periodically or on directional signal
+        self._eval_count = getattr(self, "_eval_count", 0) + 1
+        if onnx_signal in ("LONG", "SHORT") or self._eval_count % 10 == 0:
+            logger.info(
+                "[ONNX AI]   %-18s | Signal=%-5s (%4.1f%%) | VPIN=%.2f | OFI_L1=%+.2f | Latency=%.2fms",
+                ticker, onnx_signal, onnx_conf * 100.0, vpin_score, onnx_res.get("ofi_l1", 0.0), latency_ms
+            )
 
         # 2. Check VPIN Adverse Selection Override
         if onnx_res.get("vpin_veto"):
@@ -154,40 +179,51 @@ class SimulationAgent:
             )
             return
 
-        # 3. ONNX Directional Execution Signal
-        onnx_signal = onnx_res.get("signal", "WAIT")
-        onnx_conf = onnx_res.get("confidence", 0.0)
-        vpin_score = onnx_res.get("vpin_score", 0.0)
+        # 3. Stage 2 Mathematical Expected Value & Kelly Optimization
+        prob_long = onnx_res.get("prob_long", 0.33)
+        prob_short = onnx_res.get("prob_short", 0.33)
+        best_yes_ask = book.best_yes_ask
+        best_yes_bid = book.best_yes_bid
+        best_no_ask = (Decimal("1.00") - best_yes_bid) if best_yes_bid is not None else None
 
-        if onnx_signal == "LONG":
+        ev_result = self._ev_engine.compute_optimal_execution(
+            prob_up=prob_long,
+            prob_down=prob_short,
+            best_yes_ask=best_yes_ask,
+            best_no_ask=best_no_ask,
+            total_equity=self._portfolio.equity,
+            max_position_size=self._get_max_size_for_tf(timeframe),
+        )
+
+        if ev_result.has_positive_edge and ev_result.recommended_side is not None:
+            logger.info(
+                "[STAGE 2 EV] %-18s | %-3s @ $%-4s | AI_P=%.1f%% | EV=+%s/ct | Edge=%+.1f%% | Kelly=%.1f%% (%d cts)",
+                ticker,
+                ev_result.recommended_side.value.upper(),
+                ev_result.market_price,
+                ev_result.ai_prob * 100.0,
+                f"${ev_result.expected_value:.3f}",
+                ev_result.statistical_edge * 100.0,
+                ev_result.kelly_fraction * 100.0,
+                ev_result.recommended_contracts,
+            )
             await self._place_virtual_order(
                 book,
                 ticker,
-                OrderSide.YES,
-                self._get_max_size_for_tf(timeframe),
+                ev_result.recommended_side,
+                ev_result.recommended_contracts,
                 timeframe,
-                f"ONNX Model LONG ({onnx_conf:.1%} conf) | VPIN: {vpin_score:.2f}",
-            )
-            return
-        elif onnx_signal == "SHORT":
-            await self._place_virtual_order(
-                book,
-                ticker,
-                OrderSide.NO,
-                self._get_max_size_for_tf(timeframe),
-                timeframe,
-                f"ONNX Model SHORT ({onnx_conf:.1%} conf) | VPIN: {vpin_score:.2f}",
+                ev_result.rationale,
             )
             return
 
-        # 4. Fallback Microstructure Heuristics when ONNX is in WAIT state
-        if timeframe in (Timeframe.FIVE_MIN, Timeframe.FIFTEEN_MIN) and Timeframe.FIVE_MIN in self._timeframes:
-            await self._evaluate_scalp(book, ticker, Timeframe.FIVE_MIN)
-
-        if timeframe == Timeframe.FIFTEEN_MIN and Timeframe.FIFTEEN_MIN in self._timeframes:
+        # 4. Fallback Microstructure Heuristics when EV is neutral/sub-threshold
+        if timeframe == Timeframe.FIVE_MIN:
+            await self._evaluate_scalp(book, ticker, timeframe)
+        elif timeframe == Timeframe.FIFTEEN_MIN:
             await self._evaluate_momentum(book, ticker, timeframe)
-
-        if timeframe == Timeframe.ONE_HOUR and Timeframe.ONE_HOUR in self._timeframes:
+            await self._evaluate_scalp(book, ticker, timeframe)
+        elif timeframe == Timeframe.ONE_HOUR:
             await self._evaluate_swing(book, ticker, timeframe)
 
     async def on_ticker_update(self, update: TickerUpdate) -> None:
@@ -203,6 +239,29 @@ class SimulationAgent:
 
         if update.yes_bid is not None:
             self._portfolio.mark_to_market(update.market_ticker, update.yes_bid)
+
+    def settle_expired_market(
+        self, ticker: str, market_info: MarketInfo, final_tick: TickerUpdate
+    ) -> None:
+        """Immediately settle an expired position against the final BTC settlement price."""
+        from kalshi_sim.settlement import settle_position
+        result = settle_position(
+            portfolio=self._portfolio,
+            ticker=ticker,
+            market_info=market_info,
+            last_ticker_update=final_tick,
+        )
+        if result:
+            self._exec_logger.log_settlement(result)
+            logger.info(
+                "[SETTLED]   %-18s | %-3s %s %d contracts | P&L=%+$7.2f | Balance=$%.2f",
+                ticker,
+                result.side.value.upper(),
+                result.outcome.upper(),
+                result.position_size,
+                result.pnl,
+                self._portfolio.balance,
+            )
 
     async def on_trade_event(self, trade: TradeEvent) -> None:
         """Accumulate recent trade executions for ONNX feature extraction."""
@@ -352,6 +411,29 @@ class SimulationAgent:
 
         self._portfolio.open_position(fill, timeframe)
         self._exec_logger.log_execution(order, fill)
+        logger.info(
+            "[SIM FILL]  %-18s | %-4s %-3d contracts @ $%-4s | Cost=$%-6.2f | Balance=$%-8.2f | [%s]",
+            ticker, fill.side.value.upper(), fill.size, fill.fill_price,
+            float(fill.cost), float(self._portfolio.balance), reasoning
+        )
+
+        # If live Demo execution client is attached, place real order on Kalshi Demo exchange
+        if self._order_client is not None:
+            try:
+                demo_order = await self._order_client.place_order(
+                    ticker=ticker,
+                    side=side,
+                    count=fill.size,
+                    action="buy",
+                    order_type="market",
+                )
+                if demo_order:
+                    logger.info(
+                        "[KALSHI DEMO EXCHANGE] Live Order Placed: %s | Status: %s",
+                        demo_order.get("order_id"), demo_order.get("status"),
+                    )
+            except Exception as exc:
+                logger.error("Failed to send order to Kalshi Demo exchange: %s", exc)
 
     # -- Background loops ----------------------------------------------------
 

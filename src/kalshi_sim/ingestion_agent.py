@@ -54,8 +54,10 @@ class IngestionAgent:
         data_dir: Path = Path("data"),
         enable_simulation: bool = False,
         starting_capital: Decimal = Decimal("10000"),
+        live_demo_orders: bool = False,
     ) -> None:
         self._api_key_id = api_key_id
+        self._private_key_path = private_key_path
         self._private_key = load_private_key(private_key_path)
         self._timeframes = timeframes
         self._data_dir = data_dir
@@ -68,6 +70,16 @@ class IngestionAgent:
             data_dir=data_dir,
             timeframe="_".join(tf.value for tf in timeframes),
         )
+
+        # Order client for actual Kalshi Demo exchange execution
+        self._order_client = None
+        if live_demo_orders:
+            from kalshi_sim.order_client import KalshiDemoOrderClient
+            self._order_client = KalshiDemoOrderClient(
+                api_key_id=api_key_id,
+                private_key_path=private_key_path,
+            )
+
         self._sim_agent: SimulationAgent | None = None
         if enable_simulation:
             self._sim_agent = SimulationAgent(
@@ -75,6 +87,7 @@ class IngestionAgent:
                 timeframes=timeframes,
                 starting_capital=starting_capital,
                 data_dir=data_dir,
+                order_client=self._order_client,
             )
 
         # State

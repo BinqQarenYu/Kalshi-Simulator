@@ -56,6 +56,11 @@ class Portfolio:
         return self._balance
 
     @property
+    def equity(self) -> Decimal:
+        total_unrealized = sum(p.unrealized_pnl for p in self._positions.values())
+        return self._balance + total_unrealized
+
+    @property
     def open_positions(self) -> dict[str, Position]:
         return dict(self._positions)
 

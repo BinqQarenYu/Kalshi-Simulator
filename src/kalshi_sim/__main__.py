@@ -27,6 +27,7 @@ from kalshi_sim.mock_feed import MockKalshiFeed
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.schemas import Timeframe
 from kalshi_sim.simulation_agent import SimulationAgent
+from kalshi_sim.tick_writer import TickWriter
 
 
 def _parse_args() -> argparse.Namespace:
@@ -47,6 +48,11 @@ def _parse_args() -> argparse.Namespace:
         "--simulate", "-s",
         action="store_true",
         help="Enable simulation execution engine (virtual orders & P&L tracking).",
+    )
+    parser.add_argument(
+        "--live-demo", "--live", "-l",
+        action="store_true",
+        help="Enable live paper order submission directly onto Kalshi Demo account.",
     )
     parser.add_argument(
         "--mock", "-m",
@@ -105,7 +111,11 @@ async def _run_mock_app(timeframes: list[Timeframe], capital: Decimal, data_dir:
         starting_capital=capital,
         data_dir=data_dir,
     )
-    mock_feed = MockKalshiFeed(orderbook, sim_agent)
+
+    tick_writer = TickWriter(data_dir=data_dir, timeframe="mock")
+    await tick_writer.open()
+
+    mock_feed = MockKalshiFeed(orderbook, sim_agent, tick_writer=tick_writer)
 
     await sim_agent.start()
     feed_task = asyncio.create_task(mock_feed.run())
@@ -117,6 +127,7 @@ async def _run_mock_app(timeframes: list[Timeframe], capital: Decimal, data_dir:
     finally:
         mock_feed.stop()
         await sim_agent.stop()
+        await tick_writer.close()
 
 
 def main() -> None:
@@ -192,8 +203,9 @@ def main() -> None:
         private_key_path=config["private_key_path"],
         timeframes=config["timeframes"],
         data_dir=data_dir,
-        enable_simulation=args.simulate,
+        enable_simulation=args.simulate or args.live_demo,
         starting_capital=starting_capital,
+        live_demo_orders=args.live_demo,
     )
 
     try:

@@ -161,15 +161,15 @@ class KalshiONNXEngine:
         else:
             probs = np.array([0.0, 0.0, 1.0], dtype=np.float32)
 
-        # 7. Probability calibration (ensure valid sum and bounds)
+        # 7. Probability calibration & temperature scaling
         if not np.isfinite(probs).all():
-            probs = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+            probs = np.array([0.33, 0.33, 0.34], dtype=np.float32)
         else:
-            sum_probs = float(np.sum(probs))
-            is_normalized = np.all(probs >= 0.0) and np.all(probs <= 1.0) and np.isclose(sum_probs, 1.0, atol=1e-2)
-            if not is_normalized:
-                e_x = np.exp(probs - np.max(probs))
-                probs = e_x / e_x.sum()
+            # Temperature scaled softmax for calibrated directional probabilities
+            temperature = 0.65
+            scaled_logits = probs / temperature
+            e_x = np.exp(scaled_logits - np.max(scaled_logits))
+            probs = e_x / e_x.sum()
 
         long_p, short_p, wait_p = float(probs[0]), float(probs[1]), float(probs[2])
         vpin_score = float(raw_vector[6])
@@ -177,23 +177,27 @@ class KalshiONNXEngine:
         # 8. Microstructural Decision & VPIN Risk Override
         vpin_veto = vpin_score > VPIN_OVERRIDE_THRESHOLD
 
+        # Relative dominance thresholding (since neural class bias centers on wait)
+        dir_sum = long_p + short_p + 1e-9
+        rel_long = long_p / dir_sum
+        rel_short = short_p / dir_sum
+
         if vpin_veto:
-            # Overriding toxic flow to prevent adverse selection
             signal = "WAIT"
             confidence = wait_p
             veto_reason = f"VPIN Toxicity Breached ({vpin_score:.3f} > {VPIN_OVERRIDE_THRESHOLD})"
-        elif long_p >= self.confidence_threshold:
+        elif rel_long >= 0.55 and long_p >= 0.20:
             signal = "LONG"
-            confidence = long_p
+            confidence = rel_long
             veto_reason = ""
-        elif short_p >= self.confidence_threshold:
+        elif rel_short >= 0.55 and short_p >= 0.20:
             signal = "SHORT"
-            confidence = short_p
+            confidence = rel_short
             veto_reason = ""
         else:
             signal = "WAIT"
             confidence = wait_p
-            veto_reason = "Sub-threshold confidence"
+            veto_reason = "Neutral Order Flow Imbalance"
 
         self.last_signal = signal
         self.last_confidence = confidence
