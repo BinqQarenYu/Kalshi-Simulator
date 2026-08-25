@@ -103,6 +103,8 @@ async def discover_btc_markets(
                 raw_markets = data.get("markets", [])
                 for raw_market in raw_markets:
                     try:
+                        if isinstance(raw_market, dict) and not raw_market.get("series_ticker"):
+                            raw_market["series_ticker"] = series
                         market_info = MarketInfo.model_validate(raw_market)
                         if market_info.ticker not in seen_tickers:
                             seen_tickers.add(market_info.ticker)

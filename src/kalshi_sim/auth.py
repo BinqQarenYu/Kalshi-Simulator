@@ -15,22 +15,23 @@ PROD_REST_BASE = "https://external-api.kalshi.com/trade-api/v2"
 PROD_WS_URL = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
 
 
-def load_private_key(pem_path: str | Path) -> RSAPrivateKey:
-    """Load an RSA private key from a PEM file.
+def load_private_key(pem_source: str | Path) -> RSAPrivateKey:
+    """Load an RSA private key from a PEM file path or raw PEM/Base64 string.
 
     Args:
-        pem_path: Path to the PEM-encoded private key file.
+        pem_source: Path to the PEM file or raw PEM content string.
 
     Returns:
         RSAPrivateKey: The loaded RSA private key instance.
-
-    Raises:
-        FileNotFoundError: If the PEM file does not exist.
-        TypeError: If the loaded key is not an RSA private key.
-        ValueError: If the key file cannot be parsed.
     """
-    path = Path(pem_path)
-    pem_bytes = path.read_bytes()
+    if isinstance(pem_source, Path) or (isinstance(pem_source, str) and (Path(pem_source).exists() and not "\n" in pem_source)):
+        pem_bytes = Path(pem_source).read_bytes()
+    else:
+        content = str(pem_source).strip()
+        if not "BEGIN" in content:
+            content = f"-----BEGIN RSA PRIVATE KEY-----\n{content}\n-----END RSA PRIVATE KEY-----\n"
+        pem_bytes = content.encode("utf-8")
+
     private_key = serialization.load_pem_private_key(
         pem_bytes,
         password=None,

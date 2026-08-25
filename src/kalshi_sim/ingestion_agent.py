@@ -155,7 +155,8 @@ class IngestionAgent:
         """Dry-run mode: validate auth, discover markets, print tickers, exit."""
         logger.info("=== DRY RUN MODE ===")
 
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+        async with aiohttp.ClientSession(connector=connector) as session:
             markets = await discover_btc_markets(
                 session, self._api_key_id, self._private_key, self._timeframes
             )
@@ -282,7 +283,8 @@ class IngestionAgent:
 
     async def _refresh_markets(self) -> None:
         """Scan REST API for current active BTC markets."""
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+        async with aiohttp.ClientSession(connector=connector) as session:
             markets = await discover_btc_markets(
                 session, self._api_key_id, self._private_key, self._timeframes
             )

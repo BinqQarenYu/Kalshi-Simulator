@@ -37,8 +37,8 @@ from dotenv import load_dotenv
 # Constants & Configuration (Hard-locked to Demo)
 # ---------------------------------------------------------------------------
 
-DEMO_REST_BASE = "https://external-api.demo.kalshi.co/trade-api/v2"
-DEMO_WS_URL = "wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2"
+DEMO_REST_BASE = "https://demo-api.kalshi.co/trade-api/v2"
+DEMO_WS_URL = "wss://demo-api.kalshi.co/trade-api/ws/v2"
 
 TIMEFRAME_SERIES_MAP = {
     "5m": "KXBTC15M",    # Shortest native interval available; windowed locally
@@ -59,12 +59,16 @@ logger = logging.getLogger("KalshiWS")
 # Cryptographic Authentication (RSA-PSS SHA-256)
 # ---------------------------------------------------------------------------
 
-def load_private_key(pem_path: str | Path) -> RSAPrivateKey:
-    """Load an RSA private key from a PEM-encoded file."""
-    path = Path(pem_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Private key file not found: {path.resolve()}")
-    pem_bytes = path.read_bytes()
+def load_private_key(pem_source: str | Path) -> RSAPrivateKey:
+    """Load an RSA private key from a PEM file path or raw PEM/Base64 string."""
+    if isinstance(pem_source, Path) or (isinstance(pem_source, str) and (Path(pem_source).exists() and not "\n" in pem_source)):
+        pem_bytes = Path(pem_source).read_bytes()
+    else:
+        content = str(pem_source).strip()
+        if not "BEGIN" in content:
+            content = f"-----BEGIN RSA PRIVATE KEY-----\n{content}\n-----END RSA PRIVATE KEY-----\n"
+        pem_bytes = content.encode("utf-8")
+
     private_key = serialization.load_pem_private_key(pem_bytes, password=None)
     if not isinstance(private_key, RSAPrivateKey):
         raise TypeError(f"Expected RSAPrivateKey, loaded {type(private_key).__name__}")
@@ -245,7 +249,8 @@ class KalshiWebSocketRunner:
                 headers = get_ws_handshake_headers(self.api_key_id, self.private_key)
                 logger.info("Connecting to Kalshi Demo WebSocket: %s", DEMO_WS_URL)
 
-                async with aiohttp.ClientSession() as session:
+                connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+                async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.ws_connect(
                         DEMO_WS_URL,
                         headers=headers,
@@ -442,7 +447,8 @@ async def main_async() -> None:
         target_tickers = [t.strip() for t in args.tickers.split(",") if t.strip()]
     else:
         series = TIMEFRAME_SERIES_MAP.get(args.timeframe, "KXBTC15M")
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+        async with aiohttp.ClientSession(connector=connector) as session:
             markets = await discover_btc_markets(session, api_key_id, private_key, series)
             target_tickers = [m["ticker"] for m in markets]
 

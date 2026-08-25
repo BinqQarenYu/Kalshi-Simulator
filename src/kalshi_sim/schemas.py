@@ -28,9 +28,12 @@ class Timeframe(str, Enum):
 
 class MarketStatus(str, Enum):
     OPEN = "open"
+    ACTIVE = "active"
     UNOPENED = "unopened"
     CLOSED = "closed"
     SETTLED = "settled"
+    FINALIZED = "finalized"
+    DETERMINED = "determined"
 
 
 # ---------------------------------------------------------------------------
@@ -40,11 +43,11 @@ class MarketStatus(str, Enum):
 class MarketInfo(BaseModel):
     """Parsed market metadata from ``GET /trade-api/v2/markets``."""
     ticker: str
-    event_ticker: str
-    series_ticker: str
+    event_ticker: str = ""
+    series_ticker: str = ""
     title: str = ""
     subtitle: str = ""
-    status: MarketStatus
+    status: MarketStatus | str = MarketStatus.OPEN
     open_time: datetime | None = None
     close_time: datetime | None = None
     latest_expiration_time: datetime | None = None

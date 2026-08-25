@@ -95,8 +95,9 @@ class KalshiWSClient:
 
     async def connect(self) -> None:
         """Establish authenticated WebSocket connection."""
-        if self._session is None:
-            self._session = aiohttp.ClientSession()
+        if self._session is None or self._session.closed:
+            connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+            self._session = aiohttp.ClientSession(connector=connector)
 
         headers = get_ws_auth_headers(self._api_key_id, self._private_key)
         logger.info("Connecting to %s ...", self._ws_url)
