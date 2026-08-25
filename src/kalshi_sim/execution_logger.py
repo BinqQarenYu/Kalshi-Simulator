@@ -76,6 +76,12 @@ class ExecutionLogger:
         self._file = open(self._file_path, "ab")
         self._logger.info("Execution logger initialized: %s", self._file_path)
 
+    def open(self) -> Path:
+        """Ensure log file is open and return its path."""
+        if self._file is None or self._file.closed:
+            self._file = open(self._file_path, "ab")
+        return self._file_path
+
     @property
     def file_path(self) -> Path:
         """Path to the active execution log file."""
