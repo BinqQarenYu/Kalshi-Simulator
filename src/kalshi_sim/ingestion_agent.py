@@ -268,6 +268,10 @@ class IngestionAgent:
         """Process a public trade event."""
         trade = TradeEvent.from_ws(msg)
         await self._tick_writer.write(trade)
+
+        if self._sim_agent is not None:
+            await self._sim_agent.on_trade_event(trade)
+
         logger.debug(
             "[TRADE] %s | %s %s @ %s | count=%s",
             trade.market_ticker, trade.taker_side,

@@ -9,6 +9,8 @@ dependencies = [
     "python-dotenv>=1.0,<2",
     "pydantic>=2.5,<3",
     "orjson>=3.9,<4",
+    "numpy>=1.26",
+    "onnxruntime>=1.18",
 ]
 
 [project.optional-dependencies]

@@ -1,6 +1,7 @@
-"""Simulation Execution Agent — strategy coordinator.
+"""Simulation Execution Agent — strategy coordinator with ONNX Microstructure Engine.
 
-Evaluates entry/exit signals per timeframe mode, submits virtual orders
+Evaluates entry/exit signals using the QuoLas Nano Microscope ONNX AI model
+and timeframe-specific microstructure heuristics, submits virtual orders
 against the L2 book, manages the portfolio, runs settlement cycles,
 and publishes structured P&L reports.
 
@@ -14,9 +15,10 @@ import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from kalshi_sim.execution_logger import ExecutionLogger
+from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.order_simulator import OrderSimulator
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.portfolio import Portfolio
@@ -29,28 +31,20 @@ from kalshi_sim.schemas import (
     Position,
     TickerUpdate,
     Timeframe,
+    TradeEvent,
 )
 from kalshi_sim.settlement import run_settlement_cycle
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Strategy parameters per mode
-# ---------------------------------------------------------------------------
-
-# Mode A (5m): Scalp — high-frequency imbalance
-SCALP_IMBALANCE_THRESHOLD = Decimal("0.65")  # 65% order flow imbalance
-SCALP_MAX_POSITION_SIZE = 20  # contracts per trade
-
-# Mode B (15m): Momentum — consecutive directional moves
-MOMENTUM_CONSECUTIVE_TICKS = 3  # ticks in same direction to trigger
+# Strategy parameters
+SCALP_IMBALANCE_THRESHOLD = Decimal("0.65")
+SCALP_MAX_POSITION_SIZE = 20
+MOMENTUM_CONSECUTIVE_TICKS = 3
 MOMENTUM_MAX_POSITION_SIZE = 50
-
-# Mode C (1h): Swing — book depth asymmetry
-SWING_DEPTH_RATIO_THRESHOLD = Decimal("2.0")  # bid/ask volume ratio
+SWING_DEPTH_RATIO_THRESHOLD = Decimal("2.0")
 SWING_MAX_POSITION_SIZE = 100
 
-# General
 PNL_REPORT_INTERVAL_S = 60.0
 SETTLEMENT_CHECK_INTERVAL_S = 30.0
 MAX_CONCURRENT_POSITIONS = 5
@@ -58,11 +52,7 @@ MAX_POSITION_COST_PCT = Decimal("0.10")  # max 10% of equity per position
 
 
 class SimulationAgent:
-    """Coordinates strategy evaluation, virtual order execution, and P&L tracking.
-
-    Receives order book updates from the Data Ingestion Agent and evaluates
-    timeframe-specific entry/exit conditions.
-    """
+    """Coordinates ONNX orderflow inference, virtual order execution, and P&L tracking."""
 
     def __init__(
         self,
@@ -70,6 +60,7 @@ class SimulationAgent:
         timeframes: list[Timeframe],
         starting_capital: Decimal = Decimal("10000"),
         data_dir: Path = Path("data"),
+        model_path: Optional[Path] = None,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
@@ -78,10 +69,12 @@ class SimulationAgent:
         self._portfolio = Portfolio(starting_balance=starting_capital)
         self._simulator = OrderSimulator()
         self._exec_logger = ExecutionLogger(data_dir=data_dir)
+        self._onnx_engine = KalshiONNXEngine(model_path=model_path)
 
         # Market metadata cache (populated by ingestion agent)
         self._market_cache: dict[str, MarketInfo] = {}
         self._ticker_cache: dict[str, TickerUpdate] = {}
+        self._recent_trades: dict[str, list[TradeEvent]] = {}
 
         # Strategy state
         self._mid_price_history: dict[str, list[Decimal]] = {}
@@ -96,7 +89,7 @@ class SimulationAgent:
     async def start(self) -> None:
         """Start background tasks (P&L reporting, settlement checks)."""
         logger.info(
-            "Simulation Agent started | Capital: $%s | Timeframes: %s",
+            "Simulation Agent started | Capital: $%s | Timeframes: %s | ONNX Engine: Active",
             self._portfolio.balance,
             [tf.value for tf in self._timeframes],
         )
@@ -133,10 +126,7 @@ class SimulationAgent:
     # -- Signal evaluation (called by ingestion agent) -----------------------
 
     async def on_orderbook_update(self, ticker: str) -> None:
-        """Evaluate strategy signals after an order book update.
-
-        Called by the ingestion agent after every snapshot or delta.
-        """
+        """Evaluate ONNX ML models & heuristic signals after an order book update."""
         book = self._orderbook.get_book(ticker)
         if book is None or book.is_stale:
             return
@@ -145,47 +135,90 @@ class SimulationAgent:
         if timeframe is None:
             return
 
-        # Don't exceed max concurrent positions
+        # Position limits
         if len(self._portfolio.open_positions) >= MAX_CONCURRENT_POSITIONS:
             return
 
-        # Already have a position in this ticker
         if self._portfolio.get_position(ticker) is not None:
             return
 
-        # Evaluate based on timeframe mode
-        if timeframe in (Timeframe.FIVE_MIN, Timeframe.FIFTEEN_MIN) and \
-                Timeframe.FIVE_MIN in self._timeframes:
+        # 1. Run ONNX Model Inference
+        trades = self._recent_trades.get(ticker, [])
+        onnx_res = self._onnx_engine.process_orderbook_tick(book, latest_trades=trades)
+
+        # 2. Check VPIN Adverse Selection Override
+        if onnx_res.get("vpin_veto"):
+            logger.debug(
+                "[%s] VPIN Risk Override Active: score=%.3f — suppressing trades.",
+                ticker, onnx_res.get("vpin_score", 0.0)
+            )
+            return
+
+        # 3. ONNX Directional Execution Signal
+        onnx_signal = onnx_res.get("signal", "WAIT")
+        onnx_conf = onnx_res.get("confidence", 0.0)
+        vpin_score = onnx_res.get("vpin_score", 0.0)
+
+        if onnx_signal == "LONG":
+            await self._place_virtual_order(
+                book,
+                ticker,
+                OrderSide.YES,
+                self._get_max_size_for_tf(timeframe),
+                timeframe,
+                f"ONNX Model LONG ({onnx_conf:.1%} conf) | VPIN: {vpin_score:.2f}",
+            )
+            return
+        elif onnx_signal == "SHORT":
+            await self._place_virtual_order(
+                book,
+                ticker,
+                OrderSide.NO,
+                self._get_max_size_for_tf(timeframe),
+                timeframe,
+                f"ONNX Model SHORT ({onnx_conf:.1%} conf) | VPIN: {vpin_score:.2f}",
+            )
+            return
+
+        # 4. Fallback Microstructure Heuristics when ONNX is in WAIT state
+        if timeframe in (Timeframe.FIVE_MIN, Timeframe.FIFTEEN_MIN) and Timeframe.FIVE_MIN in self._timeframes:
             await self._evaluate_scalp(book, ticker, Timeframe.FIVE_MIN)
 
-        if timeframe == Timeframe.FIFTEEN_MIN and \
-                Timeframe.FIFTEEN_MIN in self._timeframes:
+        if timeframe == Timeframe.FIFTEEN_MIN and Timeframe.FIFTEEN_MIN in self._timeframes:
             await self._evaluate_momentum(book, ticker, timeframe)
 
-        if timeframe == Timeframe.ONE_HOUR and \
-                Timeframe.ONE_HOUR in self._timeframes:
+        if timeframe == Timeframe.ONE_HOUR and Timeframe.ONE_HOUR in self._timeframes:
             await self._evaluate_swing(book, ticker, timeframe)
 
     async def on_ticker_update(self, update: TickerUpdate) -> None:
         """Process a ticker update — update caches and mark-to-market."""
         self._ticker_cache[update.market_ticker] = update
 
-        # Track mid-price history for momentum detection
         if update.yes_bid is not None and update.yes_ask is not None:
             mid = (update.yes_bid + update.yes_ask) / 2
-            history = self._mid_price_history.setdefault(
-                update.market_ticker, []
-            )
+            history = self._mid_price_history.setdefault(update.market_ticker, [])
             history.append(mid)
-            # Keep last 20 ticks
             if len(history) > 20:
                 history.pop(0)
 
-        # Mark-to-market open positions
         if update.yes_bid is not None:
-            self._portfolio.mark_to_market(
-                update.market_ticker, update.yes_bid
-            )
+            self._portfolio.mark_to_market(update.market_ticker, update.yes_bid)
+
+    async def on_trade_event(self, trade: TradeEvent) -> None:
+        """Accumulate recent trade executions for ONNX feature extraction."""
+        trades = self._recent_trades.setdefault(trade.market_ticker, [])
+        trades.append(trade)
+        if len(trades) > 50:
+            trades.pop(0)
+        self._onnx_engine.extractor.process_trade(trade)
+
+    def _get_max_size_for_tf(self, timeframe: Timeframe) -> int:
+        if timeframe == Timeframe.FIVE_MIN:
+            return SCALP_MAX_POSITION_SIZE
+        elif timeframe == Timeframe.FIFTEEN_MIN:
+            return MOMENTUM_MAX_POSITION_SIZE
+        else:
+            return SWING_MAX_POSITION_SIZE
 
     # -- Strategy Modes ------------------------------------------------------
 
@@ -207,18 +240,16 @@ class SimulationAgent:
         bid_pct = bid_volume / total_volume
 
         if bid_pct > SCALP_IMBALANCE_THRESHOLD:
-            # Strong bid imbalance → buy Yes
             await self._place_virtual_order(
                 book, ticker, OrderSide.YES, SCALP_MAX_POSITION_SIZE,
                 timeframe,
-                f"Scalp: bid imbalance {bid_pct:.1%} > {SCALP_IMBALANCE_THRESHOLD}",
+                f"Scalp Imbalance: Bid {bid_pct:.1%} > {SCALP_IMBALANCE_THRESHOLD}",
             )
         elif (1 - bid_pct) > SCALP_IMBALANCE_THRESHOLD:
-            # Strong ask imbalance → buy No
             await self._place_virtual_order(
                 book, ticker, OrderSide.NO, SCALP_MAX_POSITION_SIZE,
                 timeframe,
-                f"Scalp: ask imbalance {1 - bid_pct:.1%} > {SCALP_IMBALANCE_THRESHOLD}",
+                f"Scalp Imbalance: Ask {1 - bid_pct:.1%} > {SCALP_IMBALANCE_THRESHOLD}",
             )
 
     async def _evaluate_momentum(
@@ -268,13 +299,13 @@ class SimulationAgent:
             await self._place_virtual_order(
                 book, ticker, OrderSide.YES, SWING_MAX_POSITION_SIZE,
                 timeframe,
-                f"Swing: bid/ask depth ratio {ratio:.1f}:1 > {SWING_DEPTH_RATIO_THRESHOLD}",
+                f"Swing Depth Asymmetry: {ratio:.1f}:1 > {SWING_DEPTH_RATIO_THRESHOLD}",
             )
         elif (Decimal("1") / ratio) > SWING_DEPTH_RATIO_THRESHOLD:
             await self._place_virtual_order(
                 book, ticker, OrderSide.NO, SWING_MAX_POSITION_SIZE,
                 timeframe,
-                f"Swing: ask/bid depth ratio {Decimal('1') / ratio:.1f}:1 > {SWING_DEPTH_RATIO_THRESHOLD}",
+                f"Swing Depth Asymmetry: Ask {Decimal('1') / ratio:.1f}:1 > {SWING_DEPTH_RATIO_THRESHOLD}",
             )
 
     # -- Virtual order placement ---------------------------------------------
@@ -289,12 +320,9 @@ class SimulationAgent:
         reasoning: str,
     ) -> None:
         """Submit a virtual market order against the L2 book."""
-        # Risk check: max cost = 10% of equity
         snapshot = self._portfolio.get_pnl_snapshot()
         max_cost = snapshot.total_equity * MAX_POSITION_COST_PCT
 
-        # Estimate cost: worst case = size × $1.00
-        # Better estimate: size × current ask
         if side == OrderSide.YES:
             ask = book.best_yes_ask
             est_price = ask if ask is not None else Decimal("0.50")
@@ -307,7 +335,6 @@ class SimulationAgent:
             logger.debug("Cannot afford order on %s (equity=$%s)", ticker, snapshot.total_equity)
             return
 
-        # Simulate the fill
         result = self._simulator.simulate_market_order(
             book, side, affordable_size, timeframe, reasoning
         )
@@ -316,7 +343,6 @@ class SimulationAgent:
 
         order, fill = result
 
-        # Check if portfolio can afford the actual cost
         if not self._portfolio.can_afford(fill.cost):
             logger.warning(
                 "Post-simulation cost check failed: $%s > balance $%s",
@@ -324,7 +350,6 @@ class SimulationAgent:
             )
             return
 
-        # Execute the virtual trade
         self._portfolio.open_position(fill, timeframe)
         self._exec_logger.log_execution(order, fill)
 
