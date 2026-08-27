@@ -89,3 +89,99 @@ def test_fractional_kelly_sizing_caps():
     # Max size was capped at 30
     assert res.recommended_contracts <= 30
     assert res.recommended_contracts >= 1
+
+
+def test_vpin_safe_zone_no_taper():
+    """VPIN below safe threshold applies no taper — full Kelly sizing."""
+    engine = StatisticalEVEngine()
+    res = engine.compute_optimal_execution(
+        prob_up=0.75,
+        prob_down=0.25,
+        best_yes_ask=Decimal("0.50"),
+        best_no_ask=Decimal("0.52"),
+        total_equity=Decimal("10000"),
+        max_position_size=50,
+        vpin=0.20,
+    )
+    assert res.has_positive_edge is True
+    assert res.recommended_contracts > 0
+    assert "VPIN_taper" not in res.rationale
+
+
+def test_vpin_warning_zone_tapers_kelly():
+    """VPIN in warning zone linearly tapers Kelly fraction and contracts."""
+    engine = StatisticalEVEngine()
+
+    # Safe baseline (vpin=0.0)
+    res_safe = engine.compute_optimal_execution(
+        prob_up=0.75, prob_down=0.25,
+        best_yes_ask=Decimal("0.50"), best_no_ask=Decimal("0.52"),
+        total_equity=Decimal("10000"), max_position_size=100,
+        vpin=0.0,
+    )
+
+    # Tapered (vpin=0.52 is in the warning band [0.40, 0.65])
+    res_tapered = engine.compute_optimal_execution(
+        prob_up=0.75, prob_down=0.25,
+        best_yes_ask=Decimal("0.50"), best_no_ask=Decimal("0.52"),
+        total_equity=Decimal("10000"), max_position_size=100,
+        vpin=0.52,
+    )
+
+    assert res_tapered.has_positive_edge is True
+    assert res_tapered.kelly_fraction < res_safe.kelly_fraction
+    assert res_tapered.recommended_contracts <= res_safe.recommended_contracts
+    assert "VPIN_taper" in res_tapered.rationale
+
+
+def test_vpin_toxic_freeze():
+    """VPIN above toxic threshold completely freezes new positions."""
+    engine = StatisticalEVEngine()
+    res = engine.compute_optimal_execution(
+        prob_up=0.90,
+        prob_down=0.10,
+        best_yes_ask=Decimal("0.50"),
+        best_no_ask=Decimal("0.52"),
+        total_equity=Decimal("10000"),
+        max_position_size=50,
+        vpin=0.70,
+    )
+    assert res.has_positive_edge is False
+    assert res.recommended_contracts == 0
+    assert "TOXIC FREEZE" in res.rationale
+
+
+def test_vpin_taper_math_linearity():
+    """The taper function produces correct linear interpolation."""
+    engine = StatisticalEVEngine(
+        vpin_safe_threshold=0.40,
+        vpin_warn_threshold=0.55,
+        vpin_toxic_threshold=0.65,
+    )
+    # Exactly at safe boundary
+    assert engine._compute_vpin_taper(0.40) == 1.0
+    # Exactly at toxic boundary
+    assert engine._compute_vpin_taper(0.65) == 0.0
+    # Midpoint of warning band: (0.40 + 0.65) / 2 = 0.525
+    mid_taper = engine._compute_vpin_taper(0.525)
+    assert 0.45 < mid_taper < 0.55  # Should be ~0.50
+
+
+def test_wait_regime_dominance_rejection():
+    """When P(WAIT) dominates directional signals, trade is rejected."""
+    engine = StatisticalEVEngine(min_ev_threshold=Decimal("0.02"), min_edge_pct=0.02)
+    res = engine.compute_optimal_execution(
+        prob_up=0.25,
+        prob_down=0.15,
+        best_yes_ask=Decimal("0.50"),
+        best_no_ask=Decimal("0.50"),
+        total_equity=Decimal("10000"),
+        max_position_size=50,
+        prob_wait=0.60,  # WAIT dominates (60%)
+    )
+    assert res.has_positive_edge is False
+    assert res.recommended_side is None
+    assert res.recommended_contracts == 0
+    assert "AI WAIT Regime" in res.rationale
+
+

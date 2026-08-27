@@ -23,7 +23,7 @@ from pathlib import Path
 import aiohttp
 from dotenv import load_dotenv
 
-from kalshi_sim.auth import DEMO_REST_BASE, load_private_key
+from kalshi_sim.auth import DEMO_REST_BASE, create_aiohttp_connector, load_private_key
 from kalshi_sim.market_discovery import discover_btc_markets, get_all_tickers
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.schemas import (
@@ -168,8 +168,7 @@ class IngestionAgent:
         """Dry-run mode: validate auth, discover markets, print tickers, exit."""
         logger.info("=== DRY RUN MODE ===")
 
-        connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with aiohttp.ClientSession(connector=create_aiohttp_connector()) as session:
             markets = await discover_btc_markets(
                 session, self._api_key_id, self._private_key, self._timeframes
             )
@@ -296,8 +295,7 @@ class IngestionAgent:
 
     async def _refresh_markets(self) -> None:
         """Scan REST API for current active BTC markets."""
-        connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with aiohttp.ClientSession(connector=create_aiohttp_connector()) as session:
             markets = await discover_btc_markets(
                 session, self._api_key_id, self._private_key, self._timeframes
             )

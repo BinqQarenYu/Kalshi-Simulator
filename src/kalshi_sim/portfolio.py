@@ -39,7 +39,11 @@ class Portfolio:
         snapshot = portfolio.get_pnl_snapshot()
     """
 
-    def __init__(self, starting_balance: Decimal = Decimal("10000")) -> None:
+    def __init__(
+        self,
+        starting_balance: Decimal = Decimal("10000"),
+        max_drawdown_pct: Decimal = Decimal("0.20"),
+    ) -> None:
         self._starting_balance = starting_balance
         self._balance = starting_balance
         self._positions: dict[str, Position] = {}
@@ -49,10 +53,21 @@ class Portfolio:
         self._wins = 0
         self._losses = 0
 
+        # Circuit breaker state
+        self._max_drawdown_pct = max_drawdown_pct
+        self._max_drawdown_limit = starting_balance * max_drawdown_pct
+        self._circuit_breaker_tripped = False
+        self._peak_equity = starting_balance
+
     # -- Properties ----------------------------------------------------------
 
     @property
     def balance(self) -> Decimal:
+        return self._balance
+
+    @property
+    def current_balance(self) -> Decimal:
+        """Alias for balance."""
         return self._balance
 
     @property
@@ -64,9 +79,63 @@ class Portfolio:
     def open_positions(self) -> dict[str, Position]:
         return dict(self._positions)
 
+    def get_open_positions(self) -> list[Position]:
+        """Return a list of all active open positions."""
+        return list(self._positions.values())
+
     @property
     def total_trades(self) -> int:
         return self._total_trades
+
+    @property
+    def circuit_breaker_tripped(self) -> bool:
+        """True when max drawdown has been exceeded and all trading is halted."""
+        return self._circuit_breaker_tripped
+
+    @property
+    def current_drawdown(self) -> Decimal:
+        """Current drawdown from peak equity as a positive dollar amount."""
+        return max(Decimal("0"), self._peak_equity - self.equity)
+
+    @property
+    def current_drawdown_pct(self) -> Decimal:
+        """Current drawdown as a percentage of starting capital."""
+        if self._starting_balance == 0:
+            return Decimal("0")
+        return self.current_drawdown / self._starting_balance
+
+    # -- Circuit Breaker -----------------------------------------------------
+
+    def _update_circuit_breaker(self) -> None:
+        """Evaluate drawdown against threshold and trip the breaker if exceeded.
+
+        Called after every settlement and position close to continuously
+        monitor portfolio health.
+        """
+        current_equity = self.equity
+        if current_equity > self._peak_equity:
+            self._peak_equity = current_equity
+
+        drawdown = self._peak_equity - current_equity
+        if drawdown >= self._max_drawdown_limit and not self._circuit_breaker_tripped:
+            self._circuit_breaker_tripped = True
+            logger.warning(
+                "⚠️  CIRCUIT BREAKER TRIPPED: Drawdown $%.2f (%.1f%%) exceeds max "
+                "allowed $%.2f (%.0f%%). ALL TRADING HALTED.",
+                drawdown,
+                (drawdown / self._starting_balance) * 100,
+                self._max_drawdown_limit,
+                self._max_drawdown_pct * 100,
+            )
+
+    def reset_circuit_breaker(self) -> None:
+        """Manually reset the circuit breaker to resume trading."""
+        self._circuit_breaker_tripped = False
+        self._peak_equity = self.equity
+        logger.info(
+            "Circuit breaker RESET. Peak equity re-anchored to $%.2f. Trading resumed.",
+            self._peak_equity,
+        )
 
     # -- Risk Check ----------------------------------------------------------
 
@@ -203,10 +272,58 @@ class Portfolio:
         logger.info(
             "SETTLED %s: %s %s %d contracts | entry=$%s | settlement=$%s | "
             "outcome=%s | P&L=$%s | balance=$%s",
-            ticker, position.side.value, outcome.upper(), position.size,
+            ticker, position.side.value.upper(), outcome.upper(), position.size,
             position.avg_entry_price, settlement_price,
             outcome, pnl, self._balance,
         )
+        self._update_circuit_breaker()
+        return result
+
+    def close_position(self, ticker: str, exit_price: Decimal) -> SettlementResult | None:
+        """Close an open position at current market exit price before contract expiry.
+
+        Args:
+            ticker: Market contract ticker to close.
+            exit_price: Exit price per contract in USD ($0.01 - $0.99).
+
+        Returns:
+            SettlementResult with realized P&L, or None if position was not found.
+        """
+        position = self._positions.pop(ticker, None)
+        if position is None:
+            return None
+
+        # Calculate proceeds from liquidating contracts
+        proceeds = exit_price * position.size
+        cost = position.avg_entry_price * position.size
+        pnl = proceeds - cost
+        outcome = "win" if pnl >= Decimal("0") else "loss"
+
+        if outcome == "win":
+            self._wins += 1
+        else:
+            self._losses += 1
+
+        # Credit liquidation proceeds to balance
+        self._balance += proceeds
+
+        result = SettlementResult(
+            ticker=ticker,
+            side=position.side,
+            size=position.size,
+            entry_price=position.avg_entry_price,
+            settlement_price=exit_price,
+            outcome=outcome,
+            pnl=pnl,
+        )
+        self._settlement_history.append(result)
+
+        logger.info(
+            "CLOSED %s: %s %d contracts @ exit=$%s (entry=$%s) | P&L=$%s | balance=$%s",
+            ticker, position.side.value.upper(), position.size,
+            exit_price, position.avg_entry_price, pnl, self._balance,
+        )
+        self._update_circuit_breaker()
         return result
 
     @staticmethod
@@ -245,16 +362,16 @@ class Portfolio:
         if position is None:
             return
 
-        position.current_price = current_price
-
         if position.side == OrderSide.YES:
             # Mark yes position: if we sold now at current_price
+            position.current_price = current_price
             position.unrealized_pnl = (
                 (current_price - position.avg_entry_price) * position.size
             )
         else:
             # Mark no position: current value = 1 - current_yes_price
             no_value = Decimal("1") - current_price
+            position.current_price = no_value
             position.unrealized_pnl = (
                 (no_value - position.avg_entry_price) * position.size
             )

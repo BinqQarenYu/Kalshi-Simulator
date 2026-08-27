@@ -227,3 +227,7 @@ class KalshiOrderflowFeatureExtractor:
         feature_vector.extend(spatial_imbalances)
 
         return np.array(feature_vector, dtype=np.float32)
+
+    def calculate_vpin(self) -> float:
+        """Return the current VPIN toxicity score."""
+        return float(self.vpin_score)

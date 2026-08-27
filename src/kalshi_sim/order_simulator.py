@@ -37,6 +37,116 @@ class OrderSimulator:
     No real orders are placed — fills are computed locally from book state.
     """
 
+    def __init__(self) -> None:
+        self._resting_orders: dict[str, list[SimulatedOrder]] = {}
+
+    def place_resting_limit_order(
+        self,
+        book: L2BookState,
+        side: OrderSide,
+        size: int,
+        limit_price: Decimal,
+        timeframe: Timeframe,
+        reasoning: str = "",
+    ) -> SimulatedOrder:
+        """Place a resting limit order on the book queue."""
+        order_id = str(uuid.uuid4())[:8]
+        now = datetime.now(timezone.utc)
+
+        order = SimulatedOrder(
+            order_id=order_id,
+            ticker=book.market_ticker,
+            side=side,
+            order_type=OrderType.LIMIT,
+            size=size,
+            limit_price=limit_price,
+            timeframe=timeframe,
+            reasoning=reasoning,
+            created_at=now,
+            status="resting",
+        )
+
+        if book.market_ticker not in self._resting_orders:
+            self._resting_orders[book.market_ticker] = []
+        self._resting_orders[book.market_ticker].append(order)
+
+        logger.info(
+            "RESTING ORDER PLACED: %s %s %d @ $%s on %s (ID: %s)",
+            side.value.upper(), "LIMIT", size, limit_price, book.market_ticker, order_id,
+        )
+        return order
+
+    def cancel_resting_order(self, order_id: str) -> bool:
+        """Cancel a resting limit order by ID."""
+        for ticker, orders in self._resting_orders.items():
+            for i, ord in enumerate(orders):
+                if ord.order_id == order_id:
+                    orders.pop(i)
+                    logger.info("CANCELLED RESTING ORDER: %s on %s", order_id, ticker)
+                    return True
+        return False
+
+    def get_all_resting_orders(self) -> list[SimulatedOrder]:
+        """Return all currently active resting limit orders."""
+        all_orders = []
+        for orders in self._resting_orders.values():
+            all_orders.extend(orders)
+        return all_orders
+
+    def process_resting_orders(
+        self,
+        book: L2BookState,
+    ) -> list[tuple[SimulatedOrder, SimulatedFill]]:
+        """Evaluate and match resting orders against new book state."""
+        orders = self._resting_orders.get(book.market_ticker, [])
+        if not orders:
+            return []
+
+        filled: list[tuple[SimulatedOrder, SimulatedFill]] = []
+        remaining: list[SimulatedOrder] = []
+        now = datetime.now(timezone.utc)
+
+        for ord in orders:
+            is_filled = False
+            fill_price = ord.limit_price or Decimal("0.50")
+
+            if ord.side == OrderSide.YES:
+                best_ask = book.best_yes_ask
+                if best_ask is not None and ord.limit_price is not None and ord.limit_price >= best_ask:
+                    is_filled = True
+                    fill_price = min(ord.limit_price, best_ask)
+            else:
+                best_no_bid = book.best_no_bid
+                if best_no_bid is not None:
+                    best_no_ask = Decimal("1") - book.best_yes_bid if book.best_yes_bid else None
+                    if best_no_ask is not None and ord.limit_price is not None and ord.limit_price >= best_no_ask:
+                        is_filled = True
+                        fill_price = min(ord.limit_price, best_no_ask)
+
+            if is_filled:
+                cost = fill_price * ord.size
+                ord.status = "filled"
+                fill = SimulatedFill(
+                    order_id=ord.order_id,
+                    ticker=ord.ticker,
+                    side=ord.side,
+                    size=ord.size,
+                    fill_price=fill_price,
+                    slippage=Decimal("0"),
+                    cost=cost,
+                    timestamp=now,
+                )
+                filled.append((ord, fill))
+                logger.info(
+                    "RESTING ORDER MATCHED & FILLED: %s %s %d @ $%s (cost=$%s) [ID: %s]",
+                    ord.side.value.upper(), ord.ticker, ord.size, fill_price, cost, ord.order_id,
+                )
+            else:
+                remaining.append(ord)
+
+        self._resting_orders[book.market_ticker] = remaining
+        return filled
+
     def simulate_market_order(
         self,
         book: L2BookState,

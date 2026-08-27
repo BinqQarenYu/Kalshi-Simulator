@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable, Coroutine
 
 import aiohttp
 
-from kalshi_sim.auth import get_ws_auth_headers
+from kalshi_sim.auth import create_aiohttp_connector, get_ssl_context, get_ws_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +96,7 @@ class KalshiWSClient:
     async def connect(self) -> None:
         """Establish authenticated WebSocket connection."""
         if self._session is None or self._session.closed:
-            connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
-            self._session = aiohttp.ClientSession(connector=connector)
+            self._session = aiohttp.ClientSession(connector=create_aiohttp_connector())
 
         headers = get_ws_auth_headers(self._api_key_id, self._private_key)
         logger.info("Connecting to %s ...", self._ws_url)
@@ -109,6 +108,7 @@ class KalshiWSClient:
                 heartbeat=10.0,
                 autoclose=True,
                 autoping=True,
+                ssl=get_ssl_context(),
             )
             self._connected.set()
             self._last_connect_time = time.monotonic()

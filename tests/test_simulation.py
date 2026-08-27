@@ -144,6 +144,57 @@ class TestKalshiSimulation(unittest.TestCase):
         self.assertGreater(fill.fill_price, Decimal("0.48"))
         self.assertEqual(fill.cost, fill.fill_price * 30)
 
+    def test_circuit_breaker_triggers_on_max_drawdown(self):
+        """Circuit breaker trips when cumulative losses exceed max drawdown percent."""
+        port = Portfolio(starting_balance=Decimal("1000"), max_drawdown_pct=Decimal("0.20"))
+        self.assertFalse(port.circuit_breaker_tripped)
+        self.assertEqual(port.current_drawdown, Decimal("0"))
+
+        # Open and lose a position of $250 (> 20% of $1000 = $200)
+        fill = SimulatedFill(
+            order_id="test-loss",
+            ticker="KXBTC15M-LOSS",
+            side=OrderSide.YES,
+            size=500,
+            fill_price=Decimal("0.50"),
+            cost=Decimal("250.00"),
+        )
+        port.open_position(fill, Timeframe.FIFTEEN_MIN)
+
+        # Settle as loss
+        port.settle_position(
+            ticker="KXBTC15M-LOSS",
+            settlement_price=Decimal("60000"),
+            floor_strike=Decimal("65000"),
+            cap_strike=None,
+            strike_type="greater",
+        )
+
+        self.assertTrue(port.circuit_breaker_tripped)
+        self.assertEqual(port.current_drawdown, Decimal("250.00"))
+        self.assertEqual(port.current_drawdown_pct, Decimal("0.25"))
+
+        # Test reset
+        port.reset_circuit_breaker()
+        self.assertFalse(port.circuit_breaker_tripped)
+
+    def test_circuit_breaker_on_close_position(self):
+        """Closing positions with heavy losses trips the circuit breaker."""
+        port = Portfolio(starting_balance=Decimal("1000"), max_drawdown_pct=Decimal("0.15"))
+        fill = SimulatedFill(
+            order_id="test-close-loss",
+            ticker="KXBTC15M-CLOSELOSS",
+            side=OrderSide.YES,
+            size=200,
+            fill_price=Decimal("0.90"),
+            cost=Decimal("180.00"),
+        )
+        port.open_position(fill, Timeframe.FIFTEEN_MIN)
+
+        # Close position at $0.05 (loss of $170, > 15% of $1000 = $150)
+        port.close_position("KXBTC15M-CLOSELOSS", exit_price=Decimal("0.05"))
+        self.assertTrue(port.circuit_breaker_tripped)
+
 
 if __name__ == "__main__":
     unittest.main()

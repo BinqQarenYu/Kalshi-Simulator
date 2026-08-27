@@ -63,6 +63,9 @@ class MockKalshiFeed:
         now = datetime.now(timezone.utc)
 
         contract_configs = [
+            ("KXBTC15M-T78650", "KXBTC15M", Timeframe.FIFTEEN_MIN, Decimal("78656.27"), "Bitcoin above $78,656.27 (15m)", 900),
+            ("KXBTC5M-T78600",  "KXBTC5M",  Timeframe.FIVE_MIN,    Decimal("78600.00"), "Bitcoin above $78,600.00 (5m)",  300),
+            ("KXBTCH-T78500",   "KXBTCH",   Timeframe.ONE_HOUR,    Decimal("78500.00"), "Bitcoin above $78,500.00 (1h)",  3600),
             ("KXBTC15M-T65000", "KXBTC15M", Timeframe.FIFTEEN_MIN, Decimal("65000"), "Bitcoin above $65,000 (15m)", 45),
             ("KXBTC15M-T65500", "KXBTC15M", Timeframe.FIFTEEN_MIN, Decimal("65500"), "Bitcoin above $65,500 (15m)", 60),
             ("KXBTC5M-T65250",  "KXBTC5M",  Timeframe.FIVE_MIN,    Decimal("65250"), "Bitcoin above $65,250 (5m)",  30),

@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from kalshi_sim.db import DatabaseWriter, get_db_writer
 from kalshi_sim.execution_logger import ExecutionLogger
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
@@ -65,6 +67,7 @@ class SimulationAgent:
         data_dir: Path = Path("data"),
         model_path: Optional[Path] = None,
         order_client: Optional[KalshiDemoOrderClient] = None,
+        db_writer: Optional[DatabaseWriter] = None,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
@@ -76,6 +79,7 @@ class SimulationAgent:
         self._exec_logger = ExecutionLogger(data_dir=data_dir)
         self._onnx_engine = KalshiONNXEngine(model_path=model_path)
         self._ev_engine = StatisticalEVEngine()
+        self._db_writer = db_writer or get_db_writer()
 
         # Market metadata cache (populated by ingestion agent)
         self._market_cache: dict[str, MarketInfo] = {}
@@ -99,6 +103,7 @@ class SimulationAgent:
 
     async def start(self) -> None:
         """Start background tasks (P&L reporting, settlement checks)."""
+        await self._db_writer.start()
         logger.info(
             "Simulation Agent started | Capital: $%s | Timeframes: %s | ONNX Engine: Active",
             self._portfolio.balance,
@@ -117,6 +122,8 @@ class SimulationAgent:
             task.cancel()
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
+
+        await self._db_writer.stop()
 
         # Final P&L report
         snapshot = self._portfolio.get_pnl_snapshot()
@@ -142,8 +149,21 @@ class SimulationAgent:
         if book is None or book.is_stale:
             return
 
+        # Process and match any active resting limit orders on this book
+        filled_resting = self._simulator.process_resting_orders(book)
+        for ord, fill in filled_resting:
+            if self._portfolio.can_afford(fill.cost):
+                tf = self._ticker_timeframe_map.get(ticker, Timeframe.FIFTEEN_MIN)
+                self._portfolio.open_position(fill, tf)
+                if self._exec_logger:
+                    self._exec_logger.log_execution(ord, fill)
+
         timeframe = self._ticker_timeframe_map.get(ticker)
         if timeframe is None:
+            return
+
+        # Circuit breaker: halt all new trades when max drawdown exceeded
+        if self._portfolio.circuit_breaker_tripped:
             return
 
         # Position limits
@@ -182,6 +202,7 @@ class SimulationAgent:
         # 3. Stage 2 Mathematical Expected Value & Kelly Optimization
         prob_long = onnx_res.get("prob_long", 0.33)
         prob_short = onnx_res.get("prob_short", 0.33)
+        prob_wait = onnx_res.get("prob_wait", 0.34)
         best_yes_ask = book.best_yes_ask
         best_yes_bid = book.best_yes_bid
         best_no_ask = (Decimal("1.00") - best_yes_bid) if best_yes_bid is not None else None
@@ -193,6 +214,20 @@ class SimulationAgent:
             best_no_ask=best_no_ask,
             total_equity=self._portfolio.equity,
             max_position_size=self._get_max_size_for_tf(timeframe),
+            vpin=vpin_score,
+            prob_wait=prob_wait,
+        )
+
+        self._db_writer.enqueue_ai_prediction(
+            ticker=ticker,
+            p_up=prob_long,
+            p_down=prob_short,
+            p_wait=prob_wait,
+            vpin=vpin_score,
+            ev_yes=float(ev_result.expected_value if ev_result.recommended_side == OrderSide.YES else 0.0),
+            ev_no=float(ev_result.expected_value if ev_result.recommended_side == OrderSide.NO else 0.0),
+            recommended_side=ev_result.recommended_side.value if ev_result.recommended_side else "none",
+            rationale=ev_result.rationale,
         )
 
         if ev_result.has_positive_edge and ev_result.recommended_side is not None:
@@ -253,12 +288,23 @@ class SimulationAgent:
         )
         if result:
             self._exec_logger.log_settlement(result)
+            self._db_writer.enqueue_settlement(
+                settlement_id=f"st_{int(time.time()*1000)}_{result.ticker}_{random.randint(100, 999)}",
+                ticker=result.ticker,
+                side=result.side.value,
+                size=result.size,
+                entry_price=float(result.entry_price),
+                settlement_price=float(result.settlement_price),
+                outcome=result.outcome,
+                pnl=float(result.pnl),
+                balance_after=float(self._portfolio.balance),
+            )
             logger.info(
                 "[SETTLED]   %-18s | %-3s %s %d contracts | P&L=%+$7.2f | Balance=$%.2f",
                 ticker,
                 result.side.value.upper(),
                 result.outcome.upper(),
-                result.position_size,
+                result.size,
                 result.pnl,
                 self._portfolio.balance,
             )
@@ -411,6 +457,17 @@ class SimulationAgent:
 
         self._portfolio.open_position(fill, timeframe)
         self._exec_logger.log_execution(order, fill)
+        self._db_writer.enqueue_trade(
+            trade_id=f"tr_{int(time.time()*1000)}_{ticker}_{random.randint(100, 999)}",
+            ticker=ticker,
+            side=fill.side.value,
+            size=fill.size,
+            price=float(fill.fill_price),
+            gross_value=float(fill.cost),
+            timeframe=timeframe.value,
+            execution_mode="simulated",
+            status="filled",
+        )
         logger.info(
             "[SIM FILL]  %-18s | %-4s %-3d contracts @ $%-4s | Cost=$%-6.2f | Balance=$%-8.2f | [%s]",
             ticker, fill.side.value.upper(), fill.size, fill.fill_price,
@@ -438,12 +495,22 @@ class SimulationAgent:
     # -- Background loops ----------------------------------------------------
 
     async def _pnl_report_loop(self) -> None:
-        """Publish P&L summaries every 60 seconds."""
+        """Publish P&L summaries every 10 seconds."""
         while not self._shutdown.is_set():
             await asyncio.sleep(PNL_REPORT_INTERVAL_S)
             try:
                 snapshot = self._portfolio.get_pnl_snapshot()
                 self._exec_logger.log_pnl_summary(snapshot)
+                self._db_writer.enqueue_equity_snapshot(
+                    balance=float(snapshot.current_balance),
+                    equity=float(snapshot.total_equity),
+                    realized_pnl=float(snapshot.total_realized_pnl),
+                    unrealized_pnl=float(snapshot.total_unrealized_pnl),
+                    drawdown_pct=float(self._portfolio.current_drawdown_pct * 100),
+                    win_rate=float((snapshot.win_rate or 0) * 100),
+                    total_trades=snapshot.total_trades,
+                    open_positions_count=snapshot.open_positions,
+                )
 
                 positions = self._portfolio.get_all_positions()
                 if positions:
@@ -453,7 +520,7 @@ class SimulationAgent:
                 logger.error("P&L report error: %s", exc)
 
     async def _settlement_loop(self) -> None:
-        """Check for expired positions and settle them every 30 seconds."""
+        """Check for expired positions and settle them every 10 seconds."""
         while not self._shutdown.is_set():
             await asyncio.sleep(SETTLEMENT_CHECK_INTERVAL_S)
             try:
@@ -464,5 +531,16 @@ class SimulationAgent:
                 )
                 for result in results:
                     self._exec_logger.log_settlement(result)
+                    self._db_writer.enqueue_settlement(
+                        settlement_id=f"st_{int(time.time()*1000)}_{result.ticker}_{random.randint(100, 999)}",
+                        ticker=result.ticker,
+                        side=result.side.value,
+                        size=result.size,
+                        entry_price=float(result.entry_price),
+                        settlement_price=float(result.settlement_price),
+                        outcome=result.outcome,
+                        pnl=float(result.pnl),
+                        balance_after=float(self._portfolio.balance),
+                    )
             except Exception as exc:
                 logger.error("Settlement cycle error: %s", exc)

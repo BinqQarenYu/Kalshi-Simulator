@@ -26,6 +26,25 @@ class Timeframe(str, Enum):
     DAILY = "daily"
 
 
+class CandleInterval(str, Enum):
+    """Candlestick aggregation intervals."""
+    ONE_MIN = "1m"
+    FIVE_MIN = "5m"
+    FIFTEEN_MIN = "15m"
+    ONE_HOUR = "1h"
+
+
+class OHLCVCandle(BaseModel):
+    """Standardized OHLCV candlestick bar."""
+    timestamp: int = Field(description="Bar open timestamp in UNIX epoch seconds")
+    open: Decimal = Field(description="Opening price")
+    high: Decimal = Field(description="Highest price during interval")
+    low: Decimal = Field(description="Lowest price during interval")
+    close: Decimal = Field(description="Closing / last price")
+    volume: Decimal = Field(default=Decimal("0"), description="Total traded volume")
+    trades_count: int = Field(default=0, description="Number of tick updates or trade events")
+
+
 class MarketStatus(str, Enum):
     OPEN = "open"
     ACTIVE = "active"
@@ -315,6 +334,7 @@ class OrderStatus(str, Enum):
     FILLED = "filled"
     PARTIAL = "partial"
     CANCELLED = "cancelled"
+    RESTING = "resting"
 
 
 # ---------------------------------------------------------------------------
@@ -389,3 +409,89 @@ class PnLSnapshot(BaseModel):
     wins: int = 0
     losses: int = 0
     win_rate: Decimal | None = None
+
+
+# ---------------------------------------------------------------------------
+# Kalshi Live API Credentials & Authentication Schemas
+# ---------------------------------------------------------------------------
+
+class ValidateCredentialsRequest(BaseModel):
+    """Payload to validate Kalshi API Key and RSA signature."""
+    api_key_id: str | None = Field(default=None, description="Kalshi API Key ID UUID")
+    private_key: str | None = Field(default=None, description="RSA Private Key in PEM or Base64 format")
+    is_demo: bool = Field(default=True, description="True for demo sandbox, False for production")
+
+
+class ValidateCredentialsResponse(BaseModel):
+    """Validation response with exchange account metadata."""
+    valid: bool = Field(description="Whether the credentials successfully authenticated")
+    message: str = Field(description="Human-readable status or error description")
+    mode: Literal["demo", "prod"] = Field(description="Target exchange environment")
+    account_info: dict = Field(default_factory=dict, description="Account balance and margin payload if authenticated")
+
+
+# ---------------------------------------------------------------------------
+# Live Portfolio & Reconciliation Schemas
+# ---------------------------------------------------------------------------
+
+class LivePositionItem(BaseModel):
+    """Live contract position on Kalshi exchange."""
+    ticker: str = Field(description="Market contract ticker")
+    position: int = Field(description="Net contract count (positive for long YES, negative for long NO or short)")
+    side: OrderSide = Field(description="YES or NO side")
+    fees_paid: Decimal = Field(default=Decimal("0"), description="Total exchange fees paid in USD")
+    realized_pnl: Decimal = Field(default=Decimal("0"), description="Realized P&L from closed portions in USD")
+    resting_orders_count: int = Field(default=0, description="Resting orders for this contract")
+
+
+class LivePortfolioState(BaseModel):
+    """Live Kalshi exchange balance and active positions."""
+    balance_dollars: Decimal = Field(description="Cash balance available in USD")
+    available_margin: Decimal = Field(description="Margin available for new orders in USD")
+    payout_pending: Decimal = Field(default=Decimal("0"), description="Pending settlement credits in USD")
+    positions: list[LivePositionItem] = Field(default_factory=list, description="Active market positions")
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class ReconciliationReport(BaseModel):
+    """Discrepancy and synchronization report between simulated ledger and real exchange."""
+    is_synchronized: bool = Field(description="True if cash and position sizes match within tolerance")
+    simulated_cash: Decimal = Field(description="Cash balance according to local simulator")
+    exchange_cash: Decimal = Field(description="Cash balance on live Kalshi exchange")
+    cash_discrepancy: Decimal = Field(description="Difference (exchange_cash - simulated_cash)")
+    simulated_positions_count: int = Field(description="Count of open positions in simulator")
+    exchange_positions_count: int = Field(description="Count of open positions on exchange")
+    alerts: list[str] = Field(default_factory=list, description="List of warnings or synchronization issues")
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+# ---------------------------------------------------------------------------
+# Live Order Dispatch Schemas
+# ---------------------------------------------------------------------------
+
+class LiveOrderRequest(BaseModel):
+    """Request payload to place an order on the live or demo Kalshi exchange."""
+    ticker: str = Field(description="Target contract ticker (e.g. KXBTC15M-T78650)")
+    side: Literal["yes", "no"] = Field(description="Order side")
+    count: int = Field(gt=0, description="Number of contracts to trade")
+    action: Literal["buy", "sell"] = Field(default="buy", description="Buy or sell action")
+    order_type: Literal["market", "limit"] = Field(default="market", description="Order execution type")
+    limit_price_dollars: Decimal | None = Field(default=None, description="Limit price in dollars ($0.01 - $0.99) if limit order")
+    dry_run: bool | None = Field(default=None, description="If True, validates and simulates without routing real funds")
+    is_demo: bool = Field(default=True, description="Target environment (demo vs prod)")
+
+
+class LiveOrderResponse(BaseModel):
+    """Response returned after submitting an order to Kalshi."""
+    success: bool = Field(description="Whether the order was successfully executed or placed")
+    order_id: str | None = Field(default=None, description="Exchange order ID UUID")
+    status: str = Field(description="Order status ('executed', 'resting', 'dry_run', 'rejected', 'error')")
+    ticker: str = Field(description="Market ticker")
+    side: str = Field(description="Order side")
+    count: int = Field(description="Contracts filled or resting")
+    fill_price: Decimal | None = Field(default=None, description="Executed fill price in USD if filled")
+    is_dry_run: bool = Field(default=False, description="True if executed in safety dry-run mode")
+    message: str = Field(description="Status message or error explanation")
+
+
+
