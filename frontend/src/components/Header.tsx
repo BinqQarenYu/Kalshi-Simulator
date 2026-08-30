@@ -152,28 +152,8 @@ export const Header: React.FC<HeaderProps> = ({
                 BTC {timeframe === '15m' ? '15 min' : timeframe === '5m' ? '5 min' : '1 hour'}
               </h1>
               <div className="flex items-center gap-1.5 text-xs text-[#8b949e]">
-                <span className="text-white/80 font-medium">
-                  {(() => {
-                    try {
-                      const now = new Date();
-                      const cycleEnd = new Date(now.getTime() + (market.expiry_countdown_seconds ?? 0) * 1000);
-                      const durMins = timeframe === '5m' ? 5 : timeframe === '1h' ? 60 : 15;
-                      const cycleStart = new Date(cycleEnd.getTime() - durMins * 60 * 1000);
-                      const offsetMin = -now.getTimezoneOffset();
-                      const sign = offsetMin >= 0 ? '+' : '-';
-                      const absHours = Math.floor(Math.abs(offsetMin) / 60);
-                      const gmtStr = `GMT${sign}${absHours}`;
-                      const dateStr = cycleStart.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-                      const sTime = cycleStart.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-                      const eTime = cycleEnd.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-                      return `${dateStr}, ${sTime} – ${eTime} ${gmtStr}`;
-                    } catch {
-                      return market.time_window_str || 'Live Expiry Window';
-                    }
-                  })()}
-                </span>
-                <span className="text-[#8b949e] font-normal hidden sm:inline">
-                  ({market.time_window_str || '10:15 - 10:30 AM ET'})
+                <span className="text-white/90 font-medium">
+                  {market.time_window_str || 'August 30, 4:00 - 4:15 PM ET'}
                 </span>
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-400 font-bold text-[10px]">
                   <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-ping" />

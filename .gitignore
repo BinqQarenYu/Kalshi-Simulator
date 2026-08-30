@@ -22,11 +22,13 @@ models/
 *.db
 *.db-wal
 *.db-shm
+*.jsonl
 data/*.jsonl
 data/*.db
 data/*.db-wal
 data/*.db-shm
 data/*.csv
+src/data/
 scratch/
 
 # Node & Frontend

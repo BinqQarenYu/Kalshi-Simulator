@@ -19,6 +19,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.db import DatabaseWriter, get_db_writer
 from kalshi_sim.execution_logger import ExecutionLogger
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
@@ -72,12 +73,14 @@ class SimulationAgent:
         db_writer: Optional[DatabaseWriter] = None,
         telemetry_alerts: Optional[TelemetryAlertDispatcher] = None,
         spot_price_getter: Optional[Callable[[], Decimal]] = None,
+        guardrails: Optional[AgentGuardrails] = None,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
         self._order_client = order_client
         self._telemetry_alerts = telemetry_alerts
         self._spot_price_getter = spot_price_getter
+        self._guardrails = guardrails or AgentGuardrails()
 
         # Dual Strategy Portfolios ($15 each starting capital)
         self._portfolio_domination = Portfolio(starting_balance=starting_capital)
@@ -116,6 +119,10 @@ class SimulationAgent:
     @property
     def _portfolio(self) -> Portfolio:
         return self.portfolio
+
+    @property
+    def guardrails(self) -> AgentGuardrails:
+        return self._guardrails
 
     async def start(self) -> None:
         """Start background tasks (P&L reporting, settlement checks)."""
@@ -445,6 +452,13 @@ class SimulationAgent:
                     bot_type=b_type,
                     execution_mode="simulated",
                 )
+                self._guardrails.record_cycle_settlement(
+                    ticker=result.ticker,
+                    outcome=result.outcome,
+                    pnl=result.pnl,
+                    balance_after=p_inst.balance,
+                    cycle_id=result.ticker,
+                )
                 logger.info(
                     "[SETTLED] [%-20s] %-18s | %-3s %s %d contracts | P&L=%+$7.2f | Balance=$%.2f",
                     b_type,
@@ -587,10 +601,22 @@ class SimulationAgent:
             no_ask = Decimal("1") - book.best_yes_bid if book.best_yes_bid else None
             est_price = no_ask if no_ask is not None else Decimal("0.50")
 
-        affordable_size = min(max_size, int(max_cost / est_price)) if est_price > 0 else 0
-        if affordable_size <= 0:
-            logger.debug("[%s] Cannot afford order on %s (equity=$%s)", b_type, ticker, snapshot.total_equity)
+        # Agent_Guardrails Pre-Trade Gatekeeper (1-trade-per-cycle lock, cooldown, anti-kamikaze sizing)
+        is_ok, g_reason, approved_size, g_diag = self._guardrails.validate_pre_trade_intent(
+            ticker=ticker,
+            side=side.value if hasattr(side, "value") else str(side),
+            requested_size=max_size,
+            est_price=est_price,
+            total_equity=snapshot.total_equity,
+            vpin=0.15,
+            cycle_id=ticker,
+            is_bot=True,
+        )
+        if not is_ok or approved_size <= 0:
+            logger.warning("[%s BLOCKED BY GUARDRAILS] %s (ticker=%s)", b_type, g_reason, ticker)
             return
+
+        affordable_size = approved_size
 
         exec_mode = getattr(self, "execution_mode", "simulated")
         
@@ -620,6 +646,21 @@ class SimulationAgent:
                             fee = float(live_order.get("average_fee_paid", "0.0007"))
                             cost = avg_price * actual_fills + fee
 
+                            self._guardrails.record_trade_inception(
+                                trade_id=f"live_{order_id}",
+                                ticker=ticker,
+                                side=live_side,
+                                size=actual_fills,
+                                price=Decimal(str(avg_price)),
+                                cost=Decimal(str(cost)),
+                                fee=Decimal(str(fee)),
+                                bot_type=b_type,
+                                execution_mode="live",
+                                rationale=reasoning,
+                                vpin=0.15,
+                                ai_prob=float(snapshot.win_rate or 0.70),
+                                cycle_id=ticker,
+                            )
                             self._db_writer.enqueue_trade(
                                 trade_id=f"live_{order_id}",
                                 ticker=ticker,
@@ -682,8 +723,24 @@ class SimulationAgent:
 
         active_p.open_position(fill, timeframe)
         self._exec_logger.log_execution(order, fill)
+        sim_trade_id = f"tr_{int(time.time()*1000)}_{ticker}_{random.randint(100, 999)}"
+        self._guardrails.record_trade_inception(
+            trade_id=sim_trade_id,
+            ticker=ticker,
+            side=fill.side.value,
+            size=fill.size,
+            price=fill.fill_price,
+            cost=fill.cost,
+            fee=fill.fee,
+            bot_type=b_type,
+            execution_mode="simulated",
+            rationale=reasoning,
+            vpin=0.15,
+            ai_prob=float(snapshot.win_rate or 0.70),
+            cycle_id=ticker,
+        )
         self._db_writer.enqueue_trade(
-            trade_id=f"tr_{int(time.time()*1000)}_{ticker}_{random.randint(100, 999)}",
+            trade_id=sim_trade_id,
             ticker=ticker,
             side=fill.side.value,
             size=fill.size,

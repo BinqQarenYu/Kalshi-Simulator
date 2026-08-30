@@ -60,12 +60,18 @@ async def discover_btc_markets(
                     params["cursor"] = cursor
 
                 try:
-                    headers = get_auth_headers(
-                        api_key_id=api_key_id,
-                        private_key=private_key,
-                        method="GET",
-                        path=endpoint_path,
-                    )
+                    if api_key_id and private_key:
+                        headers = get_auth_headers(
+                            api_key_id=api_key_id,
+                            private_key=private_key,
+                            method="GET",
+                            path=endpoint_path,
+                        )
+                    else:
+                        headers = {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                            "Accept": "application/json",
+                        }
                     async with session.get(
                         url,
                         params=params,

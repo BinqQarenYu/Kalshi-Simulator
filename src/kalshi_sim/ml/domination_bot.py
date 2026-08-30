@@ -62,10 +62,10 @@ class ThreeStepDominationBot:
 
     def __init__(
         self,
-        min_edge_pct: float = 0.025,  # 2.5% minimum edge (calibrated for active paper alpha capture)
-        min_ev_dollars: Decimal = Decimal("0.015"),  # Minimum $0.015 net EV per contract
-        vpin_toxic_threshold: float = 0.75,
-        vpin_safe_threshold: float = 0.45,
+        min_edge_pct: float = 0.04,  # 4.0% minimum edge (conservative risk-first calibration)
+        min_ev_dollars: Decimal = Decimal("0.02"),  # Minimum $0.02 net EV per contract
+        vpin_toxic_threshold: float = 0.60,
+        vpin_safe_threshold: float = 0.35,
         default_btc_1m_volatility: float = 14.0,  # $14 typical 1-min BTC spot std dev
     ) -> None:
         self.min_edge_pct = min_edge_pct
@@ -79,7 +79,8 @@ class ThreeStepDominationBot:
             min_ev_threshold=min_ev_dollars,
             min_edge_pct=min_edge_pct,
             fee_per_contract=Decimal("0.01"),
-            fractional_kelly=0.30,  # 30% Kelly sizing for faster alpha capture
+            fractional_kelly=0.15,  # 15% Fractional Kelly for capital preservation
+            max_portfolio_risk_pct=Decimal("0.05"),  # 5% max risk per trade
             vpin_safe_threshold=vpin_safe_threshold,
             vpin_toxic_threshold=vpin_toxic_threshold,
         )

@@ -39,13 +39,13 @@ class StatisticalEVEngine:
     def __init__(
         self,
         min_ev_threshold: Decimal = Decimal("0.02"),
-        min_edge_pct: float = 0.02,
+        min_edge_pct: float = 0.03,
         fee_per_contract: Decimal = Decimal("0.01"),
-        fractional_kelly: float = 0.25,
+        fractional_kelly: float = 0.15,
         max_portfolio_risk_pct: Decimal = Decimal("0.05"),
-        vpin_safe_threshold: float = 0.40,
-        vpin_warn_threshold: float = 0.55,
-        vpin_toxic_threshold: float = 0.65,
+        vpin_safe_threshold: float = 0.35,
+        vpin_warn_threshold: float = 0.50,
+        vpin_toxic_threshold: float = 0.60,
     ) -> None:
         """Initialize the Stage 2 Mathematical Optimizer.
 

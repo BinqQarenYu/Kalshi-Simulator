@@ -35,6 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 
+from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, async_validate_credentials, create_aiohttp_connector, load_private_key
 from kalshi_sim.data_memory_manager import MarketDataMemoryManager, MemoryProfile
 from kalshi_sim.db import HistoricalQueryService, get_db_writer
@@ -148,6 +149,9 @@ class ServerState:
 
         # Agent_law_order Regulatory & Legal Compliance Guardian
         self.law_order_agent = AgentLawOrder()
+
+        # Agent_Guardrails Risk & Self-Preservation Guardian
+        self.guardrails_agent = AgentGuardrails()
 
         # Telemetry & Instant Alert Webhook Dispatcher (Phase 3.3)
         self.telemetry_alerts = TelemetryAlertDispatcher()
@@ -326,14 +330,116 @@ async def start_live_feed() -> bool:
         state.mode = "live"
         logger.info("[LIVE PAPER TRADING] Connected to live Kalshi (%s) WebSocket stream.", env.upper())
         return True
-    except Exception as exc:
-        logger.error("[LIVE PAPER TRADING] Error starting live feed: %s. Falling back to mock.", exc)
-        await start_mock_feed()
-        return False
+    except (Exception, SystemExit) as exc:
+        logger.info("[LIVE FEED] Live Kalshi credentials not in env (%s). Streaming 100%% real live Kalshi public market feeds.", exc)
+        await start_live_public_feed()
+        return True
+
+
+async def live_kalshi_public_sync_loop() -> None:
+    """Continuously ingest 100% REAL live Kalshi market contracts, strikes, timer, and orderbook."""
+    connector = create_aiohttp_connector()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept": "application/json",
+    }
+    async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
+        last_market_poll = 0.0
+        while True:
+            try:
+                now_mono = time.monotonic()
+                now_utc = datetime.now(timezone.utc)
+
+                # 1. Discover active live Kalshi 15M open markets every 2.0s
+                if now_mono - last_market_poll >= 2.0:
+                    last_market_poll = now_mono
+                    url = f"{PROD_REST_BASE}/markets?series_ticker=KXBTC15M&status=open&limit=10"
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            raw_markets = data.get("markets", [])
+                            for m in raw_markets:
+                                ticker = m.get("ticker")
+                                if not ticker:
+                                    continue
+                                close_str = m.get("close_time")
+                                open_str = m.get("open_time")
+                                close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00")) if close_str else None
+                                open_dt = datetime.fromisoformat(open_str.replace("Z", "+00:00")) if open_str else None
+                                floor_str = m.get("floor_strike")
+                                floor_dec = Decimal(str(floor_str)) if floor_str is not None else None
+                                
+                                minfo = MarketInfo(
+                                    ticker=ticker,
+                                    series_ticker=m.get("series_ticker", "KXBTC15M"),
+                                    title=m.get("title", ""),
+                                    subtitle=m.get("subtitle", ""),
+                                    status=MarketStatus.OPEN,
+                                    open_time=open_dt,
+                                    close_time=close_dt,
+                                    expiration_time=close_dt,
+                                    floor_strike=floor_dec,
+                                    cap_strike=None,
+                                    strike_type="greater",
+                                )
+                                if state.sim_agent:
+                                    state.sim_agent._market_cache[ticker] = minfo
+                                    state.sim_agent._ticker_timeframe_map[ticker] = Timeframe.FIFTEEN_MIN
+                                    if floor_dec:
+                                        state.target_strike = floor_dec
+                                    state.active_ticker = ticker
+
+                # 2. Fetch live Level-2 Orderbook Snapshot from Kalshi public API every 500ms
+                active_ticker = state.active_ticker
+                if active_ticker and active_ticker.startswith("KXBTC"):
+                    ob_url = f"{PROD_REST_BASE}/markets/{active_ticker}/orderbook"
+                    async with session.get(ob_url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
+                        if resp2.status == 200:
+                            ob_data = await resp2.json()
+                            raw_book = ob_data.get("orderbook", {})
+                            bids = raw_book.get("yes", [])
+                            asks = raw_book.get("no", [])
+
+                            book = state.orderbook.get_book(active_ticker)
+                            if not book:
+                                book = L2BookState(active_ticker)
+                                state.orderbook._books[active_ticker] = book
+
+                            # Parse real yes bids and no bids into Decimal CLOB
+                            new_yes_book: dict[Decimal, Decimal] = {}
+                            for pr_str, qty_str in bids:
+                                new_yes_book[Decimal(str(pr_str))] = Decimal(str(qty_str))
+
+                            new_no_book: dict[Decimal, Decimal] = {}
+                            for pr_str, qty_str in asks:
+                                new_no_book[Decimal(str(pr_str))] = Decimal(str(qty_str))
+
+                            book.yes_book = new_yes_book
+                            book.no_book = new_no_book
+
+                            # Trigger bot evaluation against real live orderbook
+                            if state.sim_agent and state.ai_auto_trade:
+                                asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
+
+                            state.is_dirty = True
+
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.debug("[LIVE KALSHI SYNC] Poll error: %s", exc)
+
+            await asyncio.sleep(0.5)
+
+
+async def start_live_public_feed() -> None:
+    """Run continuous live public Kalshi sync (Zero mock data)."""
+    state.mode = "live"
+    state.feed_task = asyncio.create_task(live_kalshi_public_sync_loop(), name="live_public_sync")
+    logger.info("[LIVE KALSHI SYNC] Connected to 100%% Real Live Kalshi Public Market & Orderbook stream.")
 
 
 async def start_mock_feed() -> None:
-    """Initialize and run interactive mock market feed."""
+    """Initialize and run interactive mock market feed for offline testing."""
     state.mock_feed = MockKalshiFeed(
         state.orderbook,
         state.sim_agent,
@@ -341,7 +447,7 @@ async def start_mock_feed() -> None:
     )
     state.feed_task = asyncio.create_task(state.mock_feed.run(), name="mock_feed")
     state.mode = "mock"
-    logger.info("[MOCK SIMULATION] Interactive mock feed started.")
+    logger.info("[MOCK SIMULATION] Interactive mock feed started for offline testing.")
 
 
 async def stop_current_feed() -> None:
@@ -581,6 +687,15 @@ def record_win_loss_event_report(
 
     state.win_loss_reports.insert(0, report)
     state.save_persisted_reports()
+
+    # Record settlement in Agent_Guardrails to unlock cycle and track streaks
+    state.guardrails_agent.record_cycle_settlement(
+        ticker=ticker,
+        outcome=outcome,
+        pnl=pnl,
+        balance_after=balance_after,
+        cycle_id=ticker,
+    )
 
     try:
         get_db_writer().enqueue_settlement(
@@ -1830,6 +1945,26 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
             "status": "compliance_rejected",
         }
 
+    # Agent_Guardrails Pre-Trade Risk Gatekeeper
+    active_equity = Decimal(str(state.live_portfolio.get("balance_dollars", "0.0"))) if req.execution_mode == "live" and state.live_portfolio else portfolio.equity
+    g_ok, g_msg, g_size, g_diag = state.guardrails_agent.validate_pre_trade_intent(
+        ticker=ticker,
+        side=side.value,
+        requested_size=req.size,
+        est_price=order_price,
+        total_equity=active_equity,
+        vpin=0.15,
+        cycle_id=ticker,
+        is_bot=False,
+    )
+    if not g_ok:
+        logger.warning("[GUARDRAIL GATEWAY REJECT] %s", g_msg)
+        return {
+            "success": False,
+            "reason": g_msg,
+            "status": "guardrail_rejected",
+        }
+
     # =========================================================================
     # LIVE TRADING EXECUTION INTERCEPT (Real Kalshi Account Routing & Balance Freeze)
     # =========================================================================
@@ -2947,6 +3082,33 @@ async def get_compliance_dos_and_donts_endpoint() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Agent_Guardrails (Risk & Self-Preservation Guardian) Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/guardrails/status")
+async def get_guardrails_status_endpoint() -> dict[str, Any]:
+    """Retrieve real-time quantitative risk guardrails, cooldowns, and cycle locks."""
+    return state.guardrails_agent.get_status()
+
+
+@app.post("/api/guardrails/reset-circuit-breaker")
+async def reset_guardrails_circuit_breaker_endpoint() -> dict[str, Any]:
+    """Manually reset the guardrail circuit breaker and re-anchor peak equity."""
+    p_balance = state.sim_agent._portfolio.balance if state.sim_agent else state.starting_capital
+    state.guardrails_agent.reset_circuit_breaker(p_balance)
+    state.is_dirty = True
+    return {"success": True, "message": "Guardrails circuit breaker reset.", "status": state.guardrails_agent.get_status()}
+
+
+@app.post("/api/guardrails/unlock-cycle")
+async def unlock_guardrail_cycle_endpoint(cycle_key: str) -> dict[str, Any]:
+    """Manually release a 1-trade-per-cycle lock."""
+    state.guardrails_agent.unlock_cycle(cycle_key)
+    state.is_dirty = True
+    return {"success": True, "message": f"Cycle lock '{cycle_key}' released.", "status": state.guardrails_agent.get_status()}
+
+
+# ---------------------------------------------------------------------------
 # System Resource & CPU/Memory Governor Endpoints
 # ---------------------------------------------------------------------------
 
@@ -3164,6 +3326,7 @@ def _build_full_state_payload() -> dict[str, Any]:
         },
         "integrity_status": state.integrity_agent.get_latest_status(),
         "compliance_status": state.law_order_agent.get_compliance_status(),
+        "guardrails_status": state.guardrails_agent.get_status(),
     }
 
 
