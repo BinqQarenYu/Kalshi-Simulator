@@ -592,6 +592,71 @@ class SimulationAgent:
             logger.debug("[%s] Cannot afford order on %s (equity=$%s)", b_type, ticker, snapshot.total_equity)
             return
 
+        exec_mode = getattr(self, "execution_mode", "simulated")
+        
+        # ------------------------------------------------------------------
+        # LIVE MODE: Pure real exchange order routing (Zero paper trading)
+        # ------------------------------------------------------------------
+        if exec_mode == "live":
+            if self._order_client is not None and b_type == self.active_strategy_bot:
+                try:
+                    live_side = side.value if hasattr(side, "value") else str(side).lower()
+                    live_count = max(1, min(affordable_size, 4))  # Strict risk cap: 1-4 contracts for micro-bankroll
+                    
+                    live_order = await self._order_client.place_order(
+                        ticker=ticker,
+                        side=live_side,
+                        count=live_count,
+                        action="buy",
+                        order_type="market",
+                    )
+                    if live_order:
+                        order_id = live_order.get("order_id", "live_ord")
+                        fill_count = live_order.get("fill_count", str(live_count))
+                        avg_price = float(live_order.get("average_fill_price", "0.50"))
+                        fee = float(live_order.get("average_fee_paid", "0.0007"))
+                        cost = avg_price * float(fill_count) + fee
+
+                        self._db_writer.enqueue_trade(
+                            trade_id=f"live_{order_id}",
+                            ticker=ticker,
+                            side=live_side,
+                            size=int(float(fill_count)),
+                            price=avg_price,
+                            gross_value=cost,
+                            timeframe=timeframe.value,
+                            bot_type=b_type,
+                            execution_mode="live",
+                            status="filled",
+                        )
+                        logger.info(
+                            "[KALSHI LIVE PRODUCTION EXCHANGE] Order Executed: %s | Fills: %s | Ticker: %s | Side: %s | Count: %d | Cost: $%.4f",
+                            order_id, fill_count, ticker, live_side.upper(), live_count, cost,
+                        )
+                        if self._telemetry_alerts is not None:
+                            try:
+                                asyncio.create_task(
+                                    self._telemetry_alerts.send_order_alert(
+                                        ticker=ticker,
+                                        side=live_side,
+                                        contracts=int(float(fill_count)),
+                                        price=Decimal(str(avg_price)),
+                                        cost=Decimal(str(cost)),
+                                        fee=Decimal(str(fee)),
+                                        ai_prob=float(snapshot.win_rate or 0.70),
+                                        vpin=0.15,
+                                        execution_mode="live",
+                                    )
+                                )
+                            except Exception as exc:
+                                logger.debug("Failed to dispatch live order telemetry: %s", exc)
+                except Exception as exc:
+                    logger.error("Failed to send order to Kalshi Live Production exchange: %s", exc)
+            return
+
+        # ------------------------------------------------------------------
+        # PAPER TRADING MODE: Active ONLY in mock/testing simulation regimes
+        # ------------------------------------------------------------------
         result = self._simulator.simulate_market_order(
             book, side, affordable_size, timeframe, reasoning
         )
@@ -609,7 +674,6 @@ class SimulationAgent:
 
         active_p.open_position(fill, timeframe)
         self._exec_logger.log_execution(order, fill)
-        exec_mode = getattr(self, "execution_mode", "simulated")
         self._db_writer.enqueue_trade(
             trade_id=f"tr_{int(time.time()*1000)}_{ticker}_{random.randint(100, 999)}",
             ticker=ticker,
@@ -619,17 +683,15 @@ class SimulationAgent:
             gross_value=float(fill.cost),
             timeframe=timeframe.value,
             bot_type=b_type,
-            execution_mode=exec_mode,
+            execution_mode="simulated",
             status="filled",
         )
         logger.info(
-            "[%s]  [%-22s] %-18s | %-4s %-3d contracts @ $%-4s | Cost=$%-6.2f | Balance=$%-8.2f | [%s]",
-            "LIVE FILL" if exec_mode == "live" else "SIM FILL",
+            "[SIM FILL]  [%-22s] %-18s | %-4s %-3d contracts @ $%-4s | Cost=$%-6.2f | Balance=$%-8.2f | [%s]",
             b_type, ticker, fill.side.value.upper(), fill.size, fill.fill_price,
             float(fill.cost), float(active_p.balance), reasoning
         )
 
-        # Dispatch instant telemetry alert (Phase 3.3)
         if self._telemetry_alerts is not None:
             try:
                 asyncio.create_task(
@@ -642,31 +704,11 @@ class SimulationAgent:
                         fee=fill.fee,
                         ai_prob=float(snapshot.win_rate or 0.70),
                         vpin=0.15,
-                        execution_mode="live" if exec_mode == "live" else "paper",
+                        execution_mode="paper",
                     )
                 )
             except Exception as exc:
                 logger.debug("Failed to dispatch order telemetry alert: %s", exc)
-
-        # If live execution client is attached and active bot matches, route micro-order
-        if self._order_client is not None and b_type == self.active_strategy_bot:
-            try:
-                live_side = side.value if hasattr(side, "value") else str(side).lower()
-                live_count = max(1, min(int(fill.size), 4))  # Safe micro-contract sizing for $15 bankroll
-                live_order = await self._order_client.place_order(
-                    ticker=ticker,
-                    side=live_side,
-                    count=live_count,
-                    action="buy",
-                    order_type="market",
-                )
-                if live_order:
-                    logger.info(
-                        "[KALSHI LIVE PRODUCTION EXCHANGE] Order Executed: %s | Status: %s | Ticker: %s | Side: %s | Count: %d",
-                        live_order.get("order_id"), live_order.get("status"), ticker, live_side.upper(), live_count,
-                    )
-            except Exception as exc:
-                logger.error("Failed to send order to Kalshi Live Production exchange: %s", exc)
 
     # -- Background loops ----------------------------------------------------
 

@@ -16,8 +16,10 @@ description: Autonomous agent execution directives and quantitative algorithmic 
 - **Floating Point Disallowance (`Decimal` / `decimal.js`)**:
   - Never use native IEEE 754 floating-point math (`float` in Python / `number` in JS) for financial calculations (balances, order amounts, entry/exit prices, PnL, fee calculations, slippage, mark prices).
   - Use Python's `decimal.Decimal` and TypeScript's `decimal.js` / string-wrapped allocations for all monetary values and trading math.
-- **Strict Execution Mode Isolation**:
-  - Maintain complete segregation between `BACKTESTING`, `MOCK_SIMULATION`, `PAPER_TRADING`, and `LIVE_TRADING`. Ensure `KALSHI_ENV=demo` is strictly enforced and never hit production endpoints.
+- **Strict Execution Mode Isolation & Live Resource Dedication**:
+  - Maintain complete segregation between `MOCK_SIMULATION` (testing/paper) and `LIVE_TRADING` (real money).
+  - **Never paper trade when live trading is active**: All paper trading, virtual books, and simulated routines MUST stop completely. 100% of compute, CPU, event loop, network, memory, and ONNX inference are focused exclusively on live execution.
+  - Paper trading is strictly for testing and validation in `mode === 'mock'`.
   - Live exchange credentials (`KALSHI_API_KEY_ID`, `KALSHI_PRIVATE_KEY_PATH`) must never be accessible or leaked into client-side bundles or mock execution logs.
 - **Exchange Connectivity & Rate Limits**:
   - All outbound multi-market transactions must execute asynchronously with proper concurrency handling.
