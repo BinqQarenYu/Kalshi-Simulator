@@ -22,12 +22,15 @@ from kalshi_sim.schemas import (
 logger = logging.getLogger(__name__)
 
 
+import time
+
 class OrderBookManager:
     """Manages reconstructed L2 order books across multiple Kalshi markets."""
 
     def __init__(self) -> None:
         """Initialize the order book manager with an empty books registry."""
         self._books: dict[str, L2BookState] = {}
+        self._last_gap_warning: dict[str, float] = {}
         self._logger = logging.getLogger(__name__)
 
     def apply_snapshot(self, snapshot: OrderBookSnapshot) -> L2BookState:
@@ -75,22 +78,28 @@ class OrderBookManager:
         """
         book = self._books.get(delta.market_ticker)
         if book is None:
-            self._logger.warning(
-                "Received delta for untracked market ticker: %s",
-                delta.market_ticker,
-            )
-            return None
+            book = L2BookState(delta.market_ticker)
+            book.last_seq = delta.seq
+            book._stale = False
+            self._books[delta.market_ticker] = book
 
-        expected_seq = book.last_seq + 1
-        if delta.seq != expected_seq:
-            self._logger.error(
-                "Sequence gap detected for %s: expected seq %d, received seq %d",
-                delta.market_ticker,
-                expected_seq,
-                delta.seq,
-            )
-            book._stale = True
-            return None
+        if book.last_seq == -1:
+            book.last_seq = delta.seq
+        else:
+            expected_seq = book.last_seq + 1
+            if delta.seq != expected_seq:
+                now = time.monotonic()
+                if now - self._last_gap_warning.get(delta.market_ticker, 0.0) > 10.0:
+                    self._logger.debug(
+                        "Sequence gap detected for %s: expected seq %d, received seq %d (resyncing)",
+                        delta.market_ticker,
+                        expected_seq,
+                        delta.seq,
+                    )
+                    self._last_gap_warning[delta.market_ticker] = now
+                book._stale = True
+                book.last_seq = delta.seq
+                return None
 
         # Apply delta to the appropriate side book
         side_book = book.yes_book if delta.side == "yes" else book.no_book

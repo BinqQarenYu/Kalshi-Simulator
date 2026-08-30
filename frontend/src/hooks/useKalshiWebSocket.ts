@@ -7,12 +7,12 @@ const INITIAL_STATE: DashboardState = {
     title: 'BTC 15 min',
     series: 'KXBTC15M',
     ticker: 'KXBTC15M-T78650',
-    target_strike: 78656.27,
-    target_strike_str: '$78,656.27',
-    current_btc_price: 78500.66,
-    current_btc_price_str: '$78,500.66',
-    diff: -155.61,
-    diff_pct: -0.198,
+    target_strike: 77645.14,
+    target_strike_str: '$77,645.14',
+    current_btc_price: 78500.22,
+    current_btc_price_str: '$78,500.22',
+    diff: 855.08,
+    diff_pct: 1.10,
     expiry_countdown_seconds: 87,
     expiry_countdown_str: '01:27',
     market_chance_pct: 5.9,
@@ -52,8 +52,8 @@ const INITIAL_STATE: DashboardState = {
     rationale: 'High OFI buyer pressure & positive EV edge (+4.2¢)',
   },
   portfolio: {
-    balance: 10000,
-    equity: 10000,
+    balance: 100,
+    equity: 100,
     realized_pnl: 0,
     unrealized_pnl: 0,
     win_rate: 0,
@@ -75,6 +75,21 @@ export function useKalshiWebSocket() {
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const pendingDataRef = useRef<DashboardState | null>(null);
+  const throttleTimeoutRef = useRef<number | null>(null);
+  const lastCommitTimeRef = useRef<number>(0);
+
+  const THROTTLE_INTERVAL_MS = 250; // Smooth 4Hz updates (250ms) for rock-solid zero-jitter rendering
+
+  const commitData = useCallback((nextState: DashboardState) => {
+    setData(nextState);
+    lastCommitTimeRef.current = performance.now();
+    pendingDataRef.current = null;
+    if (throttleTimeoutRef.current !== null) {
+      clearTimeout(throttleTimeoutRef.current);
+      throttleTimeoutRef.current = null;
+    }
+  }, []);
 
   const connect = useCallback(() => {
     // Connect to WebSocket server
@@ -94,7 +109,21 @@ export function useKalshiWebSocket() {
         try {
           const parsed = JSON.parse(event.data);
           if (parsed && parsed.market) {
-            setData(parsed);
+            const now = performance.now();
+            const elapsed = now - lastCommitTimeRef.current;
+
+            if (elapsed >= THROTTLE_INTERVAL_MS) {
+              commitData(parsed);
+            } else {
+              pendingDataRef.current = parsed;
+              if (throttleTimeoutRef.current === null) {
+                throttleTimeoutRef.current = window.setTimeout(() => {
+                  if (pendingDataRef.current) {
+                    commitData(pendingDataRef.current);
+                  }
+                }, THROTTLE_INTERVAL_MS - elapsed);
+              }
+            }
           }
         } catch (err) {
           console.error('Error parsing WebSocket payload:', err);
@@ -118,12 +147,42 @@ export function useKalshiWebSocket() {
         connect();
       }, 2000);
     }
-  }, []);
+  }, [commitData]);
+
+  // Immediate fetch on mount & resilient fallback polling when disconnected
+  useEffect(() => {
+    const fetchState = async () => {
+      try {
+        const resp = await fetch('/api/state');
+        if (resp.ok) {
+          const s = await resp.json();
+          if (s && s.market) {
+            setData(s);
+          }
+        }
+      } catch {
+        // Ignore background fetch error
+      }
+    };
+
+    fetchState();
+    const interval = setInterval(() => {
+      if (!isConnected) {
+        fetchState();
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isConnected]);
 
   useEffect(() => {
     connect();
 
     return () => {
+      if (throttleTimeoutRef.current !== null) {
+        clearTimeout(throttleTimeoutRef.current);
+        throttleTimeoutRef.current = null;
+      }
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -133,12 +192,14 @@ export function useKalshiWebSocket() {
     };
   }, [connect]);
 
+
   const sendOrder = async (
     side: 'yes' | 'no',
     size: number,
     limitPrice?: number,
     orderType: 'market' | 'limit' = 'market',
-    restingOnly: boolean = false
+    restingOnly: boolean = false,
+    executionMode: 'paper' | 'live' = 'paper'
   ) => {
     try {
       const resp = await fetch('/api/orders', {
@@ -151,6 +212,7 @@ export function useKalshiWebSocket() {
           order_type: orderType,
           limit_price: limitPrice,
           resting_only: restingOnly,
+          execution_mode: executionMode,
         }),
       });
       return await resp.json();
@@ -160,9 +222,12 @@ export function useKalshiWebSocket() {
     }
   };
 
-  const cancelOrder = async (orderId: string) => {
+  const cancelOrder = async (orderId: string, executionMode: 'paper' | 'live' = 'paper') => {
     try {
-      const resp = await fetch(`/api/orders/${orderId}`, {
+      const url = executionMode === 'live'
+        ? `/api/kalshi/orders/live/${orderId}`
+        : `/api/orders/${orderId}`;
+      const resp = await fetch(url, {
         method: 'DELETE',
       });
       return await resp.json();
@@ -196,7 +261,7 @@ export function useKalshiWebSocket() {
     }
   };
 
-  const resetPortfolio = async (capital: number = 10000) => {
+  const resetPortfolio = async (capital: number = 15) => {
     try {
       await fetch('/api/reset', {
         method: 'POST',
@@ -208,12 +273,12 @@ export function useKalshiWebSocket() {
     }
   };
 
-  const closePosition = async (ticker: string) => {
+  const closePosition = async (ticker: string, executionMode: 'paper' | 'live' = 'paper') => {
     try {
       const resp = await fetch('/api/positions/close', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker }),
+        body: JSON.stringify({ ticker, execution_mode: executionMode }),
       });
       return await resp.json();
     } catch (err) {
@@ -251,6 +316,55 @@ export function useKalshiWebSocket() {
     }
   };
 
+  const triggerKillSwitch = async () => {
+    try {
+      const resp = await fetch('/api/bot/kill-switch', {
+        method: 'POST',
+      });
+      return await resp.json();
+    } catch (err) {
+      console.error('Failed to trigger emergency kill switch:', err);
+      return { success: false, error: String(err) };
+    }
+  };
+
+  const testBotTrade = async () => {
+    try {
+      const resp = await fetch('/api/bot/test-trade', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      return await resp.json();
+    } catch (err) {
+      console.error('Failed to execute bot test trade:', err);
+      return { success: false, error: String(err) };
+    }
+  };
+
+  const selectStrategyBot = async (strategyId: string) => {
+    try {
+      const resp = await fetch('/api/bot/strategy/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strategy_id: strategyId }),
+      });
+      return await resp.json();
+    } catch (err) {
+      console.error('Failed to select strategy bot:', err);
+      return { success: false, error: String(err) };
+    }
+  };
+
+  const fetchWinLossReports = async (limit: number = 50) => {
+    try {
+      const resp = await fetch(`/api/reports/win-loss?limit=${limit}`);
+      return await resp.json();
+    } catch (err) {
+      console.error('Failed to fetch win/loss reports:', err);
+      return null;
+    }
+  };
+
   return {
     data,
     isConnected,
@@ -262,5 +376,10 @@ export function useKalshiWebSocket() {
     changeTimeframe,
     resetPortfolio,
     resetCircuitBreaker,
+    triggerKillSwitch,
+    selectStrategyBot,
+    testBotTrade,
+    fetchWinLossReports,
   };
 }
+

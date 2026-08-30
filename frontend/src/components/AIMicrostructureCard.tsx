@@ -1,77 +1,303 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { AISignals } from '../types';
-import { Cpu, ShieldCheck, ShieldAlert, TrendingUp, DollarSign, Activity } from 'lucide-react';
+import {
+  Cpu,
+  Zap,
+  ShieldCheck,
+  ShieldAlert,
+  DollarSign,
+  Activity,
+  Play,
+  Loader2,
+  Award,
+  ChevronDown,
+  Check,
+  Sliders,
+  Flame,
+  TrendingUp,
+  Target,
+  Sparkles,
+} from 'lucide-react';
+import { soundFX } from '../utils/audioFX';
 
 interface AIMicrostructureCardProps {
   signals: AISignals;
+  onSelectStrategy?: (strategyId: string) => Promise<any>;
+  onTestBot?: () => Promise<any>;
+  onOpenReports?: () => void;
 }
 
-export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = ({ signals }) => {
+export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.memo(({
+  signals,
+  onSelectStrategy,
+  onTestBot,
+  onOpenReports,
+}) => {
+  const [isTesting, setIsTesting] = useState<boolean>(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const activeStrategy = signals.strategy_id || '3_step_domination_bot';
+  const is3StepBot = activeStrategy === '3_step_domination_bot';
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   const pUpPct = (signals.p_up * 100).toFixed(1);
   const pDnPct = (signals.p_down * 100).toFixed(1);
   const pWaitPct = (signals.p_wait * 100).toFixed(1);
 
+  const handleStrategyChange = async (strategyId: string) => {
+    soundFX.playClickSound();
+    setIsDropdownOpen(false);
+    if (onSelectStrategy) {
+      try {
+        await onSelectStrategy(strategyId);
+      } catch (err) {
+        console.error('Failed to change strategy:', err);
+      }
+    }
+  };
+
+  const handleTestBot = async () => {
+    if (!onTestBot || isTesting) return;
+    setIsTesting(true);
+    setFeedback(null);
+    try {
+      const res = await onTestBot();
+      if (res?.message) {
+        setFeedback(res.message);
+        setTimeout(() => setFeedback(null), 6000);
+      }
+    } catch (err) {
+      setFeedback(`Test failed: ${err}`);
+      setTimeout(() => setFeedback(null), 6000);
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
+  // Playbook badge visual styling
+  const getPlaybookBadge = () => {
+    const stage = signals.playbook_stage || 'gamma_snub';
+    if (stage === 'breakout') {
+      return {
+        icon: <Flame className="h-3 w-3 text-orange-400" />,
+        text: '🔥 Playbook 1: Early Momentum Breakout (0:00 - 5:00)',
+        bg: 'bg-orange-500/15 border-orange-500/30 text-orange-300',
+      };
+    } else if (stage === 'drift') {
+      return {
+        icon: <TrendingUp className="h-3 w-3 text-blue-400" />,
+        text: '📊 Playbook 2: Mid-Cycle OFI Trend Drift (5:00 - 11:00)',
+        bg: 'bg-blue-500/15 border-blue-500/30 text-blue-300',
+      };
+    } else if (stage === 'gamma_snub') {
+      return {
+        icon: <Zap className="h-3 w-3 text-amber-400" />,
+        text: '⚡ Playbook 3: Late Gamma Snub (11:00 - 14:00)',
+        bg: 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-sm shadow-amber-500/10',
+      };
+    }
+    return {
+      icon: <Target className="h-3 w-3 text-emerald-400" />,
+      text: signals.active_playbook || 'Quantitative Playbook Active',
+      bg: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300',
+    };
+  };
+
+  const playbook = getPlaybookBadge();
+
   return (
     <div className="bg-[#111620] border border-[#21262d] rounded-2xl p-4 sm:p-5 flex flex-col gap-4 shadow-xl">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-[#21262d] pb-2.5">
-        <div className="flex items-center gap-2">
-          <Cpu className="h-4 w-4 text-[#3b82f6]" />
-          <h3 className="text-xs font-bold uppercase tracking-wider text-white">
-            Stage 1 & 2: ONNX AI Engine
-          </h3>
+      {/* Header with Strategy Dropdown Selector */}
+      <div className="flex items-center justify-between border-b border-[#21262d] pb-3">
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={() => {
+              soundFX.playClickSound();
+              setIsDropdownOpen(!isDropdownOpen);
+            }}
+            className="flex items-center gap-2 px-3 py-1.5 bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded-xl transition-all shadow-sm group"
+            title="Click to switch strategy bot"
+          >
+            {is3StepBot ? (
+              <div className="h-5 w-5 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                <Zap className="h-3.5 w-3.5 text-amber-400" />
+              </div>
+            ) : (
+              <div className="h-5 w-5 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center">
+                <Cpu className="h-3.5 w-3.5 text-blue-400" />
+              </div>
+            )}
+
+            <div className="text-left">
+              <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                <span>{is3StepBot ? '3-Step Domination Bot' : 'ONNX Microstructure Bot'}</span>
+                <ChevronDown className={`h-3 w-3 text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
+              </div>
+            </div>
+          </button>
+
+          {/* Strategy Dropdown Menu */}
+          {isDropdownOpen && (
+            <div className="absolute left-0 top-full mt-2 w-72 bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl z-50 p-2 flex flex-col gap-1 animate-in fade-in zoom-in-95">
+              <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-[#21262d]">
+                Select Quantitative Trading Bot
+              </div>
+
+              {/* Bot 1: 3-Step Domination Bot */}
+              <button
+                onClick={() => handleStrategyChange('3_step_domination_bot')}
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${
+                  is3StepBot
+                    ? 'bg-amber-500/15 border border-amber-500/40'
+                    : 'hover:bg-[#21262d] border border-transparent'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="h-7 w-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                    <Zap className="h-4 w-4 text-amber-400" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>3-Step Domination Bot</span>
+                      <span className="px-1.5 py-0.2 text-[9px] font-mono bg-amber-500/20 text-amber-300 rounded-full font-bold">
+                        Playbooks
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
+                      Early Breakout • Mid OFI Drift • Late Gamma Snub
+                    </p>
+                  </div>
+                </div>
+                {is3StepBot && <Check className="h-4 w-4 text-amber-400 shrink-0 mt-1" />}
+              </button>
+
+              {/* Bot 2: ONNX Microstructure Bot */}
+              <button
+                onClick={() => handleStrategyChange('onnx_microstructure_bot')}
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${
+                  !is3StepBot
+                    ? 'bg-blue-500/15 border border-blue-500/40'
+                    : 'hover:bg-[#21262d] border border-transparent'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="h-7 w-7 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                    <Cpu className="h-4 w-4 text-blue-400" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>ONNX Microstructure Bot</span>
+                      <span className="px-1.5 py-0.2 text-[9px] font-mono bg-blue-500/20 text-blue-300 rounded-full font-bold">
+                        Neural Net
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
+                      28-D Deep Feature Tensor + ONNX CPU Inference
+                    </p>
+                  </div>
+                </div>
+                {!is3StepBot && <Check className="h-4 w-4 text-blue-400 shrink-0 mt-1" />}
+              </button>
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-1 text-[11px] font-mono text-gray-400">
-          <span>nano_microscope_overhauled.onnx</span>
+
+        {/* Reports & Model Indicator */}
+        <div className="flex items-center gap-2">
+          {onOpenReports && (
+            <button
+              onClick={onOpenReports}
+              className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl transition-colors shadow-sm"
+              title="Open 15-Minute Event Win/Loss Reports"
+            >
+              <Award className="h-3.5 w-3.5" />
+              <span>Reports</span>
+            </button>
+          )}
+          <span className="text-[10px] font-mono text-gray-500 hidden sm:inline">
+            {is3StepBot ? '3_step_domination.py' : 'nano_microscope.onnx'}
+          </span>
         </div>
       </div>
 
-      {/* Stage 1: Directional Probabilities */}
+      {/* 3-Step Domination Bot: Active Playbook Stage Badge */}
+      {is3StepBot && (
+        <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs font-semibold ${playbook.bg}`}>
+          <div className="flex items-center gap-2">
+            {playbook.icon}
+            <span className="text-[11px] font-bold tracking-tight">{playbook.text}</span>
+          </div>
+          <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-black/30 rounded-full uppercase">
+            Active
+          </span>
+        </div>
+      )}
+
+      {/* Directional Probabilities */}
       <div className="flex flex-col gap-2">
         <div className="flex justify-between items-center text-xs">
-          <span className="text-[#8b949e] font-semibold">Directional Inference</span>
-          <span className="text-[11px] font-mono text-gray-400">28-D Microstructure Tensor</span>
+          <span className="text-[#8b949e] font-semibold">
+            {is3StepBot ? 'Digital Option Moneyness Probability' : 'Directional Microstructure Inference'}
+          </span>
+          <span className="text-[11px] font-mono text-gray-400">
+            {is3StepBot ? 'Phi(z) Normal CDF' : '28-D Feature Tensor'}
+          </span>
         </div>
 
         {/* Probability Bar */}
         <div className="h-3 w-full bg-[#161b22] rounded-full overflow-hidden flex border border-[#30363d]">
           <div
             style={{ width: `${pUpPct}%` }}
-            className="bg-[#00d084] h-full transition-all duration-500"
-            title={`P(UP): ${pUpPct}%`}
+            className="bg-[#00d084] h-full transition-all duration-300"
+            title={`P(YES/UP): ${pUpPct}%`}
           />
           <div
             style={{ width: `${pWaitPct}%` }}
-            className="bg-gray-500 h-full transition-all duration-500"
+            className="bg-gray-500 h-full transition-all duration-300"
             title={`P(WAIT): ${pWaitPct}%`}
           />
           <div
             style={{ width: `${pDnPct}%` }}
-            className="bg-[#ff4d4d] h-full transition-all duration-500"
-            title={`P(DOWN): ${pDnPct}%`}
+            className="bg-[#ff4d4d] h-full transition-all duration-300"
+            title={`P(NO/DOWN): ${pDnPct}%`}
           />
         </div>
 
         <div className="grid grid-cols-3 text-center text-xs font-mono pt-1">
           <div className="text-[#00d084] font-bold">
-            P(UP): {pUpPct}%
+            YES: {pUpPct}%
           </div>
           <div className="text-gray-400 font-medium">
-            P(WAIT): {pWaitPct}%
+            WAIT: {pWaitPct}%
           </div>
           <div className="text-[#ff4d4d] font-bold">
-            P(DN): {pDnPct}%
+            NO: {pDnPct}%
           </div>
         </div>
       </div>
 
-      {/* Stage 2: Mathematical EV & Kelly Optimizer */}
+      {/* Mathematical EV & Kelly Optimizer (Net Post-Fee) */}
       <div className="grid grid-cols-2 gap-2.5 pt-1 text-xs">
         {/* Expected Value YES */}
         <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-2.5 flex flex-col gap-1">
-          <div className="text-[11px] text-[#8b949e] flex items-center gap-1 font-semibold">
-            <DollarSign className="h-3 w-3 text-[#00d084]" />
-            <span>E[YES] Value</span>
+          <div className="text-[11px] text-[#8b949e] flex items-center justify-between font-semibold">
+            <span className="flex items-center gap-1">
+              <DollarSign className="h-3 w-3 text-[#00d084]" />
+              <span>Net E[YES]</span>
+            </span>
+            <span className="text-[9px] text-gray-500 font-mono">-1¢ fee</span>
           </div>
           <div className={`font-mono text-sm font-bold ${signals.ev_yes >= 0.02 ? 'text-[#00d084]' : 'text-gray-300'}`}>
             {signals.ev_yes >= 0 ? '+' : ''}${(signals.ev_yes * 100).toFixed(1)}¢
@@ -83,9 +309,12 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = ({ sign
 
         {/* Expected Value NO */}
         <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-2.5 flex flex-col gap-1">
-          <div className="text-[11px] text-[#8b949e] flex items-center gap-1 font-semibold">
-            <DollarSign className="h-3 w-3 text-[#ff4d4d]" />
-            <span>E[NO] Value</span>
+          <div className="text-[11px] text-[#8b949e] flex items-center justify-between font-semibold">
+            <span className="flex items-center gap-1">
+              <DollarSign className="h-3 w-3 text-[#ff4d4d]" />
+              <span>Net E[NO]</span>
+            </span>
+            <span className="text-[9px] text-gray-500 font-mono">-1¢ fee</span>
           </div>
           <div className={`font-mono text-sm font-bold ${signals.ev_no >= 0.02 ? 'text-[#ff4d4d]' : 'text-gray-300'}`}>
             {signals.ev_no >= 0 ? '+' : ''}${(signals.ev_no * 100).toFixed(1)}¢
@@ -131,14 +360,49 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = ({ sign
       </div>
 
       {/* AI Decision Rationale */}
-      <div className="p-2.5 rounded-xl bg-[#161b22] border border-[#30363d] text-xs">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-[#8b949e] mb-1">
+      <div className="p-2.5 rounded-xl bg-[#161b22] border border-[#30363d] text-xs flex flex-col gap-1">
+        <div className="text-[10px] font-bold uppercase tracking-wider text-[#8b949e]">
           Quantitative Alpha Rationale
         </div>
-        <p className="text-gray-300 font-medium leading-relaxed">
+        <p className="text-gray-300 font-medium leading-relaxed text-[11px]">
           {signals.rationale}
         </p>
       </div>
+
+      {/* Test Bot Trigger Button */}
+      {onTestBot && (
+        <div className="flex flex-col gap-2 pt-1">
+          <button
+            onClick={handleTestBot}
+            disabled={isTesting}
+            className={`w-full py-2.5 px-4 text-white font-bold text-xs rounded-xl shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${
+              is3StepBot
+                ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-500/20'
+                : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-500/20'
+            }`}
+            title="Execute immediate AI Evaluation & 15-Minute Cycle Test Trade"
+          >
+            {isTesting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin text-white" />
+                <span>Running {is3StepBot ? '3-Step Playbook' : 'ONNX AI'} Evaluation...</span>
+              </>
+            ) : (
+              <>
+                <Play className="h-3.5 w-3.5 fill-current text-white/90" />
+                <span>🧪 Test {is3StepBot ? '3-Step Domination Bot' : 'ONNX Bot'} (15M Trade Event)</span>
+              </>
+            )}
+          </button>
+
+          {feedback && (
+            <div className="p-2 bg-blue-500/15 border border-blue-500/30 rounded-xl text-[11px] font-mono text-blue-300 flex items-center gap-1.5 animate-in fade-in">
+              <Activity className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+              <span className="truncate">{feedback}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
-};
+});

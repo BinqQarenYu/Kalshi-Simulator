@@ -34,14 +34,14 @@ from kalshi_sim.schemas import (
 logger = logging.getLogger("OrderClient")
 
 
-class KalshiDemoOrderClient:
-    """Asynchronous client for placing and managing orders on Kalshi Demo and Live Exchange."""
+class KalshiLiveOrderClient:
+    """Asynchronous client for placing and managing orders on Kalshi Production Exchange."""
 
     def __init__(
         self,
         api_key_id: str,
         private_key_path: str | Path | Any,
-        base_url: str = DEMO_REST_BASE,
+        base_url: str = PROD_REST_BASE,
     ) -> None:
         self.api_key_id = api_key_id
         if hasattr(private_key_path, "sign"):
@@ -76,7 +76,7 @@ class KalshiDemoOrderClient:
                 logger.error("Failed to fetch balance (HTTP %d): %s", resp.status, err_text)
                 return {"balance": 0, "status": resp.status, "error": err_text}
             data = await resp.json()
-            logger.info("Kalshi Demo Account Balance: %s", data)
+            logger.info("Kalshi Live Account Balance: %s", data)
             return data
 
     async def get_positions(self) -> List[Dict[str, Any]]:
@@ -119,17 +119,19 @@ class KalshiDemoOrderClient:
         order_type: str = "market",
         price_dollars: Optional[Decimal] = None,
         client_order_id: Optional[str] = None,
+        resting_only: bool = False,
     ) -> Optional[Dict[str, Any]]:
-        """Submit a new order to the Kalshi Demo exchange.
+        """Submit a new order to the Kalshi exchange using the official V2 Trade API.
 
         Args:
-            ticker: Market contract ticker (e.g. 'KXBTC15M-26AUG251830-30').
-            side: OrderSide.YES or OrderSide.NO.
+            ticker: Market contract ticker (e.g. 'KXBTC15M-26AUG300215-15').
+            side: OrderSide.YES ('yes') or OrderSide.NO ('no').
             count: Number of contracts to buy/sell.
             action: 'buy' or 'sell' (default: 'buy').
             order_type: 'market' or 'limit' (default: 'market').
             price_dollars: Limit price in dollars ($0.01 - $0.99) if limit order.
             client_order_id: Optional idempotency UUID. Generated automatically if omitted.
+            resting_only: If true, enables post_only to guarantee maker liquidity.
 
         Returns:
             Dict containing order response and fill details, or None on failure.
@@ -139,23 +141,32 @@ class KalshiDemoOrderClient:
         url = f"{self.base_url}/portfolio/orders"
 
         order_uuid = client_order_id or str(uuid.uuid4())
-
-        payload: Dict[str, Any] = {
-            "action": action.lower(),
-            "count": count,
-            "type": order_type.lower(),
-            "ticker": ticker,
-            "side": side_val,
-            "client_order_id": order_uuid,
-        }
-
-        # Handle price specifications
-        if price_dollars is not None:
-            # Send fixed-point dollar price
-            if side_val == "yes":
-                payload["yes_price_dollars"] = f"{price_dollars:.4f}"
+        
+        # In Kalshi's V2 single-book architecture:
+        # Buying YES = side "bid", price = yes_price
+        # Buying NO  = side "ask", price = 1.0 - no_price (or equivalent YES price)
+        if side_val == "yes":
+            v2_side = "bid"
+            v2_price = price_dollars if price_dollars is not None else Decimal("0.65")
+        else:
+            # Buying NO is matching against the ask side or posting ask
+            v2_side = "ask"
+            if price_dollars is not None:
+                v2_price = Decimal("1.00") - price_dollars
             else:
-                payload["no_price_dollars"] = f"{price_dollars:.4f}"
+                v2_price = Decimal("0.35")
+
+        is_limit = order_type.lower() == "limit"
+        payload: Dict[str, Any] = {
+            "ticker": ticker,
+            "client_order_id": order_uuid,
+            "side": v2_side,
+            "count": f"{count:.2f}",
+            "price": f"{v2_price:.4f}",
+            "time_in_force": "good_till_canceled" if is_limit else "immediate_or_cancel",
+            "self_trade_prevention_type": "taker_at_cross",
+            "post_only": bool(resting_only and is_limit),
+        }
 
         headers = get_auth_headers(self.api_key_id, self.private_key, "POST", endpoint)
         headers["Content-Type"] = "application/json"
@@ -166,33 +177,33 @@ class KalshiDemoOrderClient:
                 if resp.status not in (200, 201):
                     err_text = await resp.text()
                     logger.error(
-                        "Order rejected by Kalshi Demo (HTTP %d): %s | Payload: %s",
+                        "Order rejected by Kalshi (HTTP %d): %s | Payload: %s",
                         resp.status, err_text, payload,
                     )
                     return None
                 order_data = await resp.json()
-                order_info = order_data.get("order", order_data)
                 logger.info(
-                    "DEMO ORDER PLACED: %s %s %d %s | ID: %s | Status: %s",
+                    "KALSHI V2 ORDER PLACED: %s %s %d %s | ID: %s | Status: %s",
                     action.upper(), side_val.upper(), count, ticker,
-                    order_info.get("order_id", order_uuid),
-                    order_info.get("status", "executed"),
+                    order_data.get("order_id", order_uuid),
+                    order_data.get("status", "executed"),
                 )
-                return order_info
+                return order_data
         except Exception as exc:
-            logger.error("Network error placing order on Kalshi Demo: %s", exc, exc_info=True)
+            logger.error("Network error placing order on Kalshi V2: %s", exc, exc_info=True)
             return None
 
-    async def cancel_order(self, order_id: str) -> bool:
-        """Cancel a resting order on Kalshi Demo."""
+    async def cancel_order(self, order_id: str, ticker: Optional[str] = None) -> bool:
+        """Cancel a resting order on Kalshi using V2 Trade API."""
         endpoint = f"/trade-api/v2/portfolio/orders/{order_id}"
-        url = f"{self.base_url}/portfolio/orders/{order_id}"
+        query_suffix = f"?market_ticker={ticker}" if ticker else ""
+        url = f"{self.base_url}/portfolio/orders/{order_id}{query_suffix}"
         headers = get_auth_headers(self.api_key_id, self.private_key, "DELETE", endpoint)
 
         session = await self._get_session()
         async with session.delete(url, headers=headers) as resp:
             if resp.status == 200:
-                logger.info("Successfully cancelled demo order: %s", order_id)
+                logger.info("Successfully cancelled order: %s", order_id)
                 return True
             err_text = await resp.text()
             logger.error("Failed to cancel order %s (HTTP %d): %s", order_id, resp.status, err_text)
@@ -203,11 +214,19 @@ class KalshiDemoOrderClient:
         bal_data = await self.get_balance()
         pos_data = await self.get_positions()
 
-        raw_balance = bal_data.get("balance", 0)
-        balance_dollars = Decimal(str(raw_balance)) / Decimal("100") if isinstance(raw_balance, int) and raw_balance > 100 else Decimal(str(raw_balance))
+        if "balance_dollars" in bal_data and bal_data["balance_dollars"] is not None:
+            balance_dollars = Decimal(str(bal_data["balance_dollars"]))
+        else:
+            raw_balance = bal_data.get("balance", 0)
+            balance_dollars = Decimal(str(raw_balance)) / Decimal("100") if isinstance(raw_balance, int) else Decimal(str(raw_balance))
 
-        raw_margin = bal_data.get("available_balance", bal_data.get("balance", 0))
-        available_margin = Decimal(str(raw_margin)) / Decimal("100") if isinstance(raw_margin, int) and raw_margin > 100 else Decimal(str(raw_margin))
+        if "available_balance_dollars" in bal_data and bal_data["available_balance_dollars"] is not None:
+            available_margin = Decimal(str(bal_data["available_balance_dollars"]))
+        elif "balance_dollars" in bal_data and bal_data["balance_dollars"] is not None:
+            available_margin = Decimal(str(bal_data["balance_dollars"]))
+        else:
+            raw_margin = bal_data.get("available_balance", bal_data.get("balance", 0))
+            available_margin = Decimal(str(raw_margin)) / Decimal("100") if isinstance(raw_margin, int) else Decimal(str(raw_margin))
 
         raw_payout = bal_data.get("payout", 0)
         payout_pending = Decimal(str(raw_payout)) / Decimal("100") if isinstance(raw_payout, int) else Decimal(str(raw_payout))
@@ -215,11 +234,29 @@ class KalshiDemoOrderClient:
         positions: List[LivePositionItem] = []
         for p in pos_data:
             ticker = p.get("ticker", "")
-            pos_cnt = p.get("position", 0)
-            side = OrderSide.YES if pos_cnt >= 0 else OrderSide.NO
-            fees = Decimal(str(p.get("fees_paid", 0))) / Decimal("100") if isinstance(p.get("fees_paid"), int) else Decimal(str(p.get("fees_paid", 0)))
-            realized = Decimal(str(p.get("realized_pnl", 0))) / Decimal("100") if isinstance(p.get("realized_pnl"), int) else Decimal(str(p.get("realized_pnl", 0)))
+            pos_raw = p.get("position", p.get("position_fp", 0))
+            try:
+                pos_cnt = int(float(str(pos_raw)))
+            except (ValueError, TypeError):
+                pos_cnt = 0
+
             resting_cnt = p.get("resting_orders_count", 0)
+
+            # Filter out flat / historical zero-contract records with zero resting orders
+            if pos_cnt == 0 and resting_cnt == 0:
+                continue
+
+            side = OrderSide.YES if pos_cnt >= 0 else OrderSide.NO
+
+            if "fees_paid_dollars" in p and p["fees_paid_dollars"] is not None:
+                fees = Decimal(str(p["fees_paid_dollars"]))
+            else:
+                fees = Decimal(str(p.get("fees_paid", 0))) / Decimal("100") if isinstance(p.get("fees_paid"), int) else Decimal(str(p.get("fees_paid", 0)))
+
+            if "realized_pnl_dollars" in p and p["realized_pnl_dollars"] is not None:
+                realized = Decimal(str(p["realized_pnl_dollars"]))
+            else:
+                realized = Decimal(str(p.get("realized_pnl", 0))) / Decimal("100") if isinstance(p.get("realized_pnl"), int) else Decimal(str(p.get("realized_pnl", 0)))
 
             positions.append(
                 LivePositionItem(
@@ -270,5 +307,5 @@ class KalshiDemoOrderClient:
 
 
 # Backwards compatibility alias
-KalshiLiveOrderClient = KalshiDemoOrderClient
+KalshiDemoOrderClient = KalshiLiveOrderClient
 

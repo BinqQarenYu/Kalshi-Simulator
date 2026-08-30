@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEMO_WS_URL = "wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2"
+DEMO_WS_URL = "wss://demo-api.kalshi.co/trade-api/ws/v2"
 
 # Backoff parameters
 BACKOFF_BASE_S = 1.0
@@ -119,6 +119,11 @@ class KalshiWSClient:
             logger.error("WebSocket connection failed: %s", exc)
             self._connected.clear()
             raise
+
+    @property
+    def is_connected(self) -> bool:
+        """Return True if WebSocket is actively connected."""
+        return self._connected.is_set() and self._ws is not None and not self._ws.closed
 
     async def disconnect(self) -> None:
         """Gracefully close the WebSocket and HTTP session."""

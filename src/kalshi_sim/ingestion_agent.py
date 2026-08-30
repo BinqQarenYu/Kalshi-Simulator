@@ -23,7 +23,7 @@ from pathlib import Path
 import aiohttp
 from dotenv import load_dotenv
 
-from kalshi_sim.auth import DEMO_REST_BASE, create_aiohttp_connector, load_private_key
+from kalshi_sim.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, create_aiohttp_connector, get_auth_headers, load_private_key
 from kalshi_sim.market_discovery import discover_btc_markets, get_all_tickers
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.schemas import (
@@ -53,8 +53,15 @@ class IngestionAgent:
         timeframes: list[Timeframe],
         data_dir: Path = Path("data"),
         enable_simulation: bool = False,
-        starting_capital: Decimal = Decimal("10000"),
+        starting_capital: Decimal = Decimal("100"),
         live_demo_orders: bool = False,
+        orderbook: OrderBookManager | None = None,
+        sim_agent: SimulationAgent | None = None,
+        tick_writer: TickWriter | None = None,
+        ws_url: str | None = None,
+        rest_base: str | None = None,
+        on_trade: Callable[[TradeEvent], Coroutine[Any, Any, None]] | None = None,
+        on_ticker: Callable[[TickerUpdate], Coroutine[Any, Any, None]] | None = None,
     ) -> None:
         self._api_key_id = api_key_id
         self._private_key_path = private_key_path
@@ -62,11 +69,17 @@ class IngestionAgent:
         self._timeframes = timeframes
         self._data_dir = data_dir
         self._enable_simulation = enable_simulation
+        self._on_trade = on_trade
+        self._on_ticker = on_ticker
+
+        env = os.getenv("KALSHI_ENV", "live").lower()
+        self._ws_url = ws_url or (PROD_WS_URL if env in ("prod", "live") else DEMO_WS_URL)
+        self._rest_base = rest_base or (PROD_REST_BASE if env in ("prod", "live") else DEMO_REST_BASE)
 
         # Components
-        self._ws_client = KalshiWSClient(api_key_id, self._private_key)
-        self._orderbook = OrderBookManager()
-        self._tick_writer = TickWriter(
+        self._ws_client = KalshiWSClient(api_key_id, self._private_key, ws_url=self._ws_url)
+        self._orderbook = orderbook or OrderBookManager()
+        self._tick_writer = tick_writer or TickWriter(
             data_dir=data_dir,
             timeframe="_".join(tf.value for tf in timeframes),
         )
@@ -80,8 +93,9 @@ class IngestionAgent:
                 private_key_path=private_key_path,
             )
 
-        self._sim_agent: SimulationAgent | None = None
-        if enable_simulation:
+        if sim_agent is not None:
+            self._sim_agent = sim_agent
+        elif enable_simulation:
             self._sim_agent = SimulationAgent(
                 orderbook_manager=self._orderbook,
                 timeframes=timeframes,
@@ -89,6 +103,9 @@ class IngestionAgent:
                 data_dir=data_dir,
                 order_client=self._order_client,
             )
+        else:
+            self._sim_agent = None
+
 
         # State
         self._active_tickers: set[str] = set()
@@ -117,31 +134,15 @@ class IngestionAgent:
             await self._refresh_markets()
 
             if not self._active_tickers:
-                logger.error(
-                    "No active BTC markets found for timeframes %s. "
-                    "The demo exchange may not have these series active right now.",
+                logger.warning(
+                    "No active BTC markets found for timeframes %s. Retrying in background...",
                     [tf.value for tf in self._timeframes],
                 )
-                return
 
-            # Connect WebSocket
-            await self._ws_client.connect()
-
-            # Subscribe to all channels for discovered tickers
-            tickers_list = list(self._active_tickers)
-            await self._ws_client.subscribe(
-                channels=["orderbook_delta", "ticker", "trade"],
-                market_tickers=tickers_list,
-            )
-            logger.info(
-                "Subscribed to %d tickers across %d channels",
-                len(tickers_list), 3,
-            )
-
-            # Launch background tasks
+            # Launch background streaming and polling tasks
             self._tasks = [
-                asyncio.create_task(self._message_loop(), name="message_loop"),
-                asyncio.create_task(self._ws_client.run_watchdog(), name="watchdog"),
+                asyncio.create_task(self._ws_lifecycle_loop(), name="ws_lifecycle"),
+                asyncio.create_task(self._poll_live_orderbooks_loop(), name="rest_orderbook_poll"),
                 asyncio.create_task(self._market_refresh_loop(), name="market_refresh"),
             ]
 
@@ -151,7 +152,7 @@ class IngestionAgent:
                 return_when=asyncio.FIRST_COMPLETED,
             )
             for task in done:
-                if task.exception():
+                if task.exception() and not isinstance(task.exception(), asyncio.CancelledError):
                     logger.error(
                         "Task %s failed: %s",
                         task.get_name(), task.exception(),
@@ -164,13 +165,14 @@ class IngestionAgent:
         finally:
             await self._shutdown()
 
+
     async def run_dry(self) -> None:
         """Dry-run mode: validate auth, discover markets, print tickers, exit."""
         logger.info("=== DRY RUN MODE ===")
 
         async with aiohttp.ClientSession(connector=create_aiohttp_connector()) as session:
             markets = await discover_btc_markets(
-                session, self._api_key_id, self._private_key, self._timeframes
+                session, self._api_key_id, self._private_key, self._timeframes, rest_base=self._rest_base
             )
 
         for tf, market_list in markets.items():
@@ -192,9 +194,77 @@ class IngestionAgent:
 
     # -- Message dispatch ----------------------------------------------------
 
+    async def _ws_lifecycle_loop(self) -> None:
+        """Maintains persistent WebSocket streaming connection with automatic recovery."""
+        while not self._shutdown_event.is_set():
+            try:
+                if self._active_tickers:
+                    await self._ws_client.connect()
+                    tickers_list = list(self._active_tickers)
+                    await self._ws_client.subscribe(
+                        channels=["orderbook_delta", "ticker", "trade"],
+                        market_tickers=tickers_list,
+                    )
+                    logger.info("WebSocket connected & subscribed to %d tickers", len(tickers_list))
+                    await self._message_loop()
+                else:
+                    await asyncio.sleep(2.0)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.debug("WebSocket connection attempt failed: %s (retrying in 10s)", exc)
+                await asyncio.sleep(10.0)
+
+    async def _poll_live_orderbooks_loop(self) -> None:
+        """Resilient polling loop for live Kalshi order books and top-of-book quotes."""
+        rest_base = self._rest_base
+        seq_counter = 1
+        connector = create_aiohttp_connector(limit=10)
+
+        async with aiohttp.ClientSession(connector=connector) as session:
+            while not self._shutdown_event.is_set():
+                try:
+                    if self._ws_client.is_connected:
+                        await asyncio.sleep(2.0)
+                        continue
+
+                    if self._active_tickers:
+                        for ticker in list(self._active_tickers):
+                            if self._shutdown_event.is_set():
+                                break
+                            endpoint_path = f"/trade-api/v2/markets/{ticker}/orderbook"
+                            url = f"{rest_base}/markets/{ticker}/orderbook"
+                            headers = get_auth_headers(self._api_key_id, self._private_key, "GET", endpoint_path)
+
+                            try:
+                                async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
+                                    if resp.status == 200:
+                                        data = await resp.json()
+                                        ob_fp = data.get("orderbook_fp") or data.get("orderbook") or {}
+                                        yes_raw = ob_fp.get("yes_dollars") or ob_fp.get("yes") or []
+                                        no_raw = ob_fp.get("no_dollars") or ob_fp.get("no") or []
+
+                                        seq_counter += 1
+                                        snapshot_payload = {
+                                            "market_ticker": ticker,
+                                            "yes_dollars_fp": yes_raw,
+                                            "no_dollars_fp": no_raw,
+                                        }
+                                        await self._handle_snapshot(snapshot_payload, seq_counter)
+                            except Exception as exc:
+                                logger.debug("REST orderbook poll failed for %s: %s", ticker, exc)
+
+                    await asyncio.sleep(1.5)
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    logger.debug("Live orderbook poll loop error: %s", exc)
+                    await asyncio.sleep(2.0)
+
     async def _message_loop(self) -> None:
         """Main message dispatch loop: reads from WebSocket, routes to handlers."""
         async for message in self._ws_client.stream():
+
             if self._shutdown_event.is_set():
                 break
 
@@ -248,10 +318,9 @@ class IngestionAgent:
         if book is None:
             # Sequence gap — need to re-subscribe for a fresh snapshot
             ticker = delta.market_ticker
-            logger.warning(
+            logger.debug(
                 "[SEQ GAP] %s — will re-subscribe for fresh snapshot", ticker
             )
-            # The stale ticker will be picked up in the next refresh cycle
             return
 
         if self._sim_agent is not None:
@@ -271,6 +340,14 @@ class IngestionAgent:
         if self._sim_agent is not None:
             await self._sim_agent.on_ticker_update(update)
 
+        if self._on_ticker is not None:
+            try:
+                res = self._on_ticker(update)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception as exc:
+                logger.debug("Error in on_ticker callback: %s", exc)
+
         logger.debug(
             "[TICKER] %s | bid=%s ask=%s | vol=%s",
             update.market_ticker, update.yes_bid,
@@ -285,6 +362,14 @@ class IngestionAgent:
         if self._sim_agent is not None:
             await self._sim_agent.on_trade_event(trade)
 
+        if self._on_trade is not None:
+            try:
+                res = self._on_trade(trade)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception as exc:
+                logger.debug("Error in on_trade callback: %s", exc)
+
         logger.debug(
             "[TRADE] %s | %s %s @ %s | count=%s",
             trade.market_ticker, trade.taker_side,
@@ -293,11 +378,26 @@ class IngestionAgent:
 
     # -- Market refresh ------------------------------------------------------
 
+    async def trigger_refresh(self) -> None:
+        """Trigger an instantaneous market discovery & re-subscription cycle."""
+        try:
+            old_tickers = set(self._active_tickers)
+            await self._refresh_markets()
+            new_tickers = self._active_tickers - old_tickers
+            if new_tickers and self._ws_client.is_connected:
+                await self._ws_client.subscribe(
+                    channels=["orderbook_delta", "ticker", "trade"],
+                    market_tickers=list(new_tickers),
+                )
+                logger.info("[INSTANT ROLL] Subscribed to %d new tickers immediately", len(new_tickers))
+        except Exception as exc:
+            logger.error("Error in trigger_refresh: %s", exc)
+
     async def _refresh_markets(self) -> None:
         """Scan REST API for current active BTC markets."""
         async with aiohttp.ClientSession(connector=create_aiohttp_connector()) as session:
             markets = await discover_btc_markets(
-                session, self._api_key_id, self._private_key, self._timeframes
+                session, self._api_key_id, self._private_key, self._timeframes, rest_base=self._rest_base
             )
 
         if self._sim_agent is not None:
@@ -387,11 +487,11 @@ def load_config() -> dict:
     """
     load_dotenv()
 
-    # Safety check: MUST be demo environment
+    # Safety check: allow demo, prod, and live
     env = os.getenv("KALSHI_ENV", "demo").lower()
-    if env != "demo":
+    if env not in ("demo", "prod", "live"):
         logger.critical(
-            "KALSHI_ENV=%s — ONLY 'demo' is allowed. Aborting.", env
+            "KALSHI_ENV=%s — ONLY 'demo', 'prod', or 'live' is allowed. Aborting.", env
         )
         sys.exit(1)
 

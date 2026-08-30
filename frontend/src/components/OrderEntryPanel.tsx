@@ -1,29 +1,40 @@
 /**
  * @file OrderEntryPanel.tsx
  * @description Right-side 1-Click execution panel matching Kalshi UI with BUY/SELL toggle,
- * LIMIT/MARKET modes, UP/DOWN contract selection cards, dynamic cost/payout math, and sound FX.
+ * LIMIT/MARKET modes, UP/DOWN contract selection cards, dynamic cost/payout math, live account balance freeze & deposit notifications.
  */
 
 import React, { useState } from 'react';
-import { MarketState, PortfolioState } from '../types';
-import { Zap, HelpCircle, Check, Sparkles } from 'lucide-react';
+import { MarketState, PortfolioState, LivePortfolioState } from '../types';
+import { Zap, HelpCircle, Check, Sparkles, AlertTriangle, Lock, ArrowUpRight } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
 
 interface OrderEntryPanelProps {
   market: MarketState;
   portfolio: PortfolioState;
-  onPlaceOrder: (side: 'yes' | 'no', size: number, limitPrice?: number, orderType?: 'market' | 'limit', restingOnly?: boolean) => Promise<any>;
+  livePortfolio?: LivePortfolioState | null;
+  tradingMode?: 'paper' | 'live';
+  onPlaceOrder: (
+    side: 'yes' | 'no',
+    size: number,
+    limitPrice?: number,
+    orderType?: 'market' | 'limit',
+    restingOnly?: boolean
+  ) => Promise<any>;
 }
 
 export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
   market,
   portfolio,
+  livePortfolio,
+  tradingMode = 'paper',
   onPlaceOrder,
 }) => {
+  const isLive = tradingMode === 'live';
   const [tradeMode, setTradeMode] = useState<'BUY' | 'SELL'>('BUY');
   const [orderType, setOrderType] = useState<'LIMIT' | 'MARKET'>('LIMIT');
   const [side, setSide] = useState<'yes' | 'no'>('yes');
-  const [shares, setShares] = useState<number>(50);
+  const [shares, setShares] = useState<number>(isLive ? 1 : 10);
   const [limitPriceCents, setLimitPriceCents] = useState<number>(4.6);
   const [restingOnly, setRestingOnly] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -34,7 +45,17 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
   const totalCost = shares * pricePerContract;
   const maxPayout = shares * 1.0; // Kalshi binary contract payout ($1.00)
 
+  // Live account balance & freeze calculations
+  const availableLiveCash = livePortfolio?.balance_dollars ?? 0.0;
+  const isLiveFrozen = isLive && (availableLiveCash <= 0.05 || availableLiveCash < totalCost);
+
   const handleExecute = async () => {
+    if (isLive && isLiveFrozen) {
+      soundFX.playLossSound();
+      setOrderFeedback(`⚠️ Live balance ($${availableLiveCash.toFixed(2)}) is insufficient. Please load funds into your Kalshi account.`);
+      return;
+    }
+
     soundFX.playClickSound();
     setIsSubmitting(true);
     setOrderFeedback(null);
@@ -46,7 +67,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
         orderType === 'LIMIT' ? 'limit' : 'market',
         orderType === 'LIMIT' && restingOnly
       );
-      if (res.success) {
+      if (res?.success) {
         soundFX.playOrderFillSound();
         if (res.status === 'resting') {
           setOrderFeedback(`Resting limit order placed @ ${(res.limit_price * 100).toFixed(1)}¢!`);
@@ -55,14 +76,14 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
         }
       } else {
         soundFX.playLossSound();
-        setOrderFeedback(`Order rejected: ${res.reason || 'Insufficient funds'}`);
+        setOrderFeedback(res?.reason || res?.error || 'Order rejected (Insufficient funds)');
       }
     } catch (e) {
       soundFX.playLossSound();
       setOrderFeedback('Error placing order');
     } finally {
       setIsSubmitting(false);
-      setTimeout(() => setOrderFeedback(null), 4000);
+      setTimeout(() => setOrderFeedback(null), 5000);
     }
   };
 
@@ -136,7 +157,8 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
           onClick={() => {
             soundFX.playClickSound();
             setSide('yes');
-            setLimitPriceCents(market.best_yes_ask * 100 || 3.4);
+            const askCents = parseFloat(((market.best_yes_ask ?? 0.5) * 100).toFixed(1));
+            setLimitPriceCents(askCents || 50.0);
           }}
           className={`flex items-center justify-between p-3 rounded-xl border transition-all text-left ${
             side === 'yes'
@@ -156,7 +178,8 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
           onClick={() => {
             soundFX.playClickSound();
             setSide('no');
-            setLimitPriceCents(market.best_no_ask * 100 || 96.9);
+            const askCents = parseFloat(((market.best_no_ask ?? 0.5) * 100).toFixed(1));
+            setLimitPriceCents(askCents || 50.0);
           }}
           className={`flex items-center justify-between p-3 rounded-xl border transition-all text-left ${
             side === 'no'
@@ -176,40 +199,55 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       <div>
         <div className="flex items-center justify-between text-xs font-semibold text-[#8b949e] mb-1">
           <label htmlFor="shares-input">Shares</label>
-          <span className="text-[11px] text-gray-400">
-            Predictions account · <strong className="text-white">${portfolio.balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong> available
-          </span>
+          <div className="flex items-center gap-1.5 text-[11px]">
+            {isLive ? (
+              <span className="text-emerald-400 font-mono" title="Live Kalshi Actual Account Cash">
+                Live Available: <strong className={`${availableLiveCash <= 0.05 ? 'text-amber-400' : 'text-emerald-300'}`}>${availableLiveCash.toFixed(2)}</strong>
+              </span>
+            ) : (
+              <span className="text-gray-300">
+                Paper Balance: <strong className="text-white font-mono">${portfolio.balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <input
             id="shares-input"
             type="number"
             min={1}
-            max={5000}
+            max={isLive ? 2 : 5000}
             value={shares}
             onChange={(e) => setShares(Math.max(1, parseInt(e.target.value) || 0))}
             className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono text-sm font-bold text-white outline-none focus:border-[#00d084]"
           />
         </div>
         {/* Quick Share Chips */}
-        <div className="flex gap-1.5 mt-1.5">
-          {[10, 50, 100, 250].map((count) => (
-            <button
-              key={count}
-              type="button"
-              onClick={() => {
-                soundFX.playClickSound();
-                setShares(count);
-              }}
-              className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all ${
-                shares === count
-                  ? 'bg-[#30363d] text-white border-gray-500'
-                  : 'bg-[#161b22] text-[#8b949e] border-[#30363d] hover:text-white'
-              }`}
-            >
-              +{count}
-            </button>
-          ))}
+        <div className="flex items-center justify-between gap-1.5 mt-1.5">
+          <div className="flex gap-1.5">
+            {(isLive ? [1, 2] : [5, 10, 20, 50]).map((count) => (
+              <button
+                key={count}
+                type="button"
+                onClick={() => {
+                  soundFX.playClickSound();
+                  setShares(count);
+                }}
+                className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all ${
+                  shares === count
+                    ? isLive ? 'bg-rose-500/30 text-rose-300 border-rose-500/50' : 'bg-[#30363d] text-white border-gray-500'
+                    : 'bg-[#161b22] text-[#8b949e] border-[#30363d] hover:text-white'
+                }`}
+              >
+                +{count}
+              </button>
+            ))}
+          </div>
+          {isLive && (
+            <span className="text-[10px] font-mono text-amber-400/90 font-semibold">
+              Live Max: 2 Contracts
+            </span>
+          )}
         </div>
       </div>
 
@@ -222,7 +260,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
               <HelpCircle className="h-3 w-3 text-[#8b949e]" />
             </div>
             <span className="text-[11px] text-gray-400">
-              Ask: <strong className="text-white">{market.yes_cents_str}</strong> · Bid: <strong className="text-white">{(market.best_yes_bid * 100).toFixed(1)}¢</strong>
+              Ask: <strong className="text-white">{market.yes_cents_str}</strong> · Bid: <strong className="text-white">{((market.best_yes_bid ?? 0.5) * 100).toFixed(1)}¢</strong>
             </span>
           </div>
           <div className="relative">
@@ -232,11 +270,57 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
               step="0.1"
               min="0.1"
               max="99.9"
-              value={limitPriceCents}
-              onChange={(e) => setLimitPriceCents(parseFloat(e.target.value) || 0)}
+              value={Number.isFinite(limitPriceCents) ? parseFloat(limitPriceCents.toFixed(1)) : ''}
+              onChange={(e) => {
+                const parsed = parseFloat(e.target.value);
+                setLimitPriceCents(Number.isFinite(parsed) ? parseFloat(parsed.toFixed(1)) : 0);
+              }}
               className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono text-sm font-bold text-white outline-none focus:border-[#00d084] pr-8"
             />
             <span className="absolute right-3 top-2.5 text-xs text-[#8b949e] font-mono">¢</span>
+          </div>
+          {/* Quick Step Controls */}
+          <div className="flex items-center justify-end gap-1.5 mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                soundFX.playClickSound();
+                setLimitPriceCents((prev) => Math.max(0.1, parseFloat((prev - 1.0).toFixed(1))));
+              }}
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400"
+            >
+              -1¢
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                soundFX.playClickSound();
+                setLimitPriceCents((prev) => Math.max(0.1, parseFloat((prev - 0.1).toFixed(1))));
+              }}
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400"
+            >
+              -0.1¢
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                soundFX.playClickSound();
+                setLimitPriceCents((prev) => Math.min(99.9, parseFloat((prev + 0.1).toFixed(1))));
+              }}
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400"
+            >
+              +0.1¢
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                soundFX.playClickSound();
+                setLimitPriceCents((prev) => Math.min(99.9, parseFloat((prev + 1.0).toFixed(1))));
+              }}
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400"
+            >
+              +1¢
+            </button>
           </div>
         </div>
       )}
@@ -276,6 +360,35 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
         </div>
       </div>
 
+      {/* LIVE BALANCE DEPLETED / INSUFFICIENT FUNDS ALERT BANNER */}
+      {isLive && isLiveFrozen && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-2.5 text-xs animate-in fade-in">
+          <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="font-bold text-white flex items-center justify-between">
+              <span>Live Balance Depleted (${availableLiveCash.toFixed(2)})</span>
+              <span className="px-1.5 py-0.2 text-[9px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded font-bold uppercase">
+                BETS FROZEN
+              </span>
+            </div>
+            <p className="text-[11px] text-amber-200/80 mt-1 leading-relaxed">
+              Available live cash is insufficient to place this order (need ${totalCost.toFixed(2)}). All live bets are currently frozen.
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <a
+                href="https://kalshi.com"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-black bg-amber-400 hover:bg-amber-300 rounded-lg shadow-sm transition-colors"
+              >
+                <span>Deposit Funds on Kalshi</span>
+                <ArrowUpRight className="h-3 w-3" />
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Order Feedback Alert */}
       {orderFeedback && (
         <div className="bg-[#161b22] border border-[#30363d] text-white px-3 py-2 rounded-xl text-xs font-mono text-center animate-fadeIn">
@@ -286,20 +399,29 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       {/* Main 1-Click Action Button */}
       <button
         type="button"
-        disabled={isSubmitting}
+        disabled={isSubmitting || (isLive && isLiveFrozen)}
         onClick={handleExecute}
-        className={`w-full py-3.5 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 shadow-xl transition-all active:scale-95 disabled:opacity-50 ${
-          side === 'yes'
+        className={`w-full py-3.5 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+          isLive && isLiveFrozen
+            ? 'bg-[#21262d] text-gray-400 border border-amber-500/30'
+            : side === 'yes'
             ? 'bg-[#00d084] hover:bg-[#00b573] text-black shadow-[#00d084]/20'
             : 'bg-[#ff4d4d] hover:bg-[#e63e3e] text-white shadow-[#ff4d4d]/20'
         }`}
       >
-        <Zap className="h-4 w-4 fill-current" />
-        <span>
-          {isSubmitting
-            ? 'Transacting...'
-            : `⚡ Buy ${side.toUpperCase()} with 1-Click`}
-        </span>
+        {isLive && isLiveFrozen ? (
+          <>
+            <Lock className="h-4 w-4 text-amber-400" />
+            <span>🔒 Live Bets Frozen (Deposit Required)</span>
+          </>
+        ) : isSubmitting ? (
+          <span>Transacting...</span>
+        ) : (
+          <>
+            <Zap className="h-4 w-4 fill-current" />
+            <span>⚡ Buy {side.toUpperCase()} with 1-Click ({isLive ? 'LIVE' : 'PAPER'})</span>
+          </>
+        )}
       </button>
     </div>
   );

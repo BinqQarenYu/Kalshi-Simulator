@@ -112,3 +112,16 @@ def test_server_portfolio_sync_endpoint():
         assert "authenticated" in data
         assert "reconciliation" in data
 
+
+def test_server_live_balance_endpoint():
+    """Test GET /api/kalshi/balance endpoint."""
+    with TestClient(app) as test_client:
+        res = test_client.get("/api/kalshi/balance")
+        assert res.status_code == 200
+        data = res.json()
+        assert "balance_dollars" in data
+        assert "available_margin" in data
+        assert "positions" in data
+        assert "is_authenticated" in data
+
+

@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any
 
 import aiohttp
 
-from kalshi_sim.auth import DEMO_REST_BASE, get_auth_headers
+import os
+from kalshi_sim.auth import DEMO_REST_BASE, PROD_REST_BASE, get_auth_headers
 from kalshi_sim.schemas import MarketInfo, MarketStatus, Timeframe
 
 if TYPE_CHECKING:
@@ -29,26 +30,16 @@ async def discover_btc_markets(
     api_key_id: str,
     private_key: RSAPrivateKey,
     timeframes: list[Timeframe],
+    rest_base: str | None = None,
 ) -> dict[Timeframe, list[MarketInfo]]:
-    """Discover open BTC markets across the specified timeframes via Kalshi REST API.
+    """Discover open BTC markets across the specified timeframes via Kalshi REST API."""
+    if rest_base is None:
+        env = os.getenv("KALSHI_ENV", "live").lower()
+        rest_base = PROD_REST_BASE if env in ("prod", "live") else DEMO_REST_BASE
 
-    Queries the Kalshi Demo exchange `/markets` endpoint for each series ticker
-    mapped to the provided timeframes, handling cursor-based pagination and
-    authenticating requests with RSA-PSS signatures.
-
-    Args:
-        session: An active aiohttp.ClientSession for making HTTP requests.
-        api_key_id: Kalshi API key identifier.
-        private_key: RSA private key for request signing.
-        timeframes: List of timeframes to discover markets for.
-
-    Returns:
-        dict[Timeframe, list[MarketInfo]]: Mapping from each timeframe to the list of
-            discovered open MarketInfo objects.
-    """
     discovered: dict[Timeframe, list[MarketInfo]] = {tf: [] for tf in timeframes}
     endpoint_path = "/trade-api/v2/markets"
-    url = f"{DEMO_REST_BASE}/markets"
+    url = f"{rest_base}/markets"
 
     for tf in timeframes:
         series_tickers = TIMEFRAME_SERIES.get(tf, [])
@@ -75,7 +66,13 @@ async def discover_btc_markets(
                         method="GET",
                         path=endpoint_path,
                     )
-                    async with session.get(url, params=params, headers=headers) as resp:
+                    async with session.get(
+                        url,
+                        params=params,
+                        headers=headers,
+                        timeout=aiohttp.ClientTimeout(total=4.0),
+                    ) as resp:
+
                         if resp.status != 200:
                             text = await resp.text()
                             logger.error(
@@ -126,22 +123,43 @@ async def discover_btc_markets(
     return discovered
 
 
-def get_all_tickers(markets: dict[Timeframe, list[MarketInfo]]) -> list[str]:
-    """Flatten all discovered markets into a deduplicated list of ticker strings.
+def get_all_tickers(
+    markets: dict[Timeframe, list[MarketInfo]],
+    max_total: int = 35,
+) -> list[str]:
+    """Flatten discovered markets into a prioritized list of active tickers.
+
+    Prioritizes high-frequency 15M, 5M, and 1H contracts, plus nearest ATM strikes,
+    preventing massive snapshot floods and WebSocket sequence congestion on connect.
 
     Args:
         markets: Dictionary mapping timeframes to lists of MarketInfo instances.
+        max_total: Maximum number of active markets to return (default 35).
 
     Returns:
-        list[str]: Deduplicated list of market ticker strings preserving discovery order.
+        list[str]: Prioritized, deduplicated list of market ticker strings.
     """
     seen: set[str] = set()
     tickers: list[str] = []
 
-    for market_list in markets.values():
+    # 1. First pass: prioritize 15M, 5M, 1H contracts
+    for tf in (Timeframe.FIFTEEN_MIN, Timeframe.FIVE_MIN, Timeframe.ONE_HOUR):
+        market_list = markets.get(tf, [])
         for m in market_list:
             if m.ticker not in seen:
                 seen.add(m.ticker)
                 tickers.append(m.ticker)
 
+    # 2. Second pass: remaining daily/other markets up to max_total
+    for tf, market_list in markets.items():
+        if tf in (Timeframe.FIFTEEN_MIN, Timeframe.FIVE_MIN, Timeframe.ONE_HOUR):
+            continue
+        for m in market_list:
+            if len(tickers) >= max_total:
+                break
+            if m.ticker not in seen:
+                seen.add(m.ticker)
+                tickers.append(m.ticker)
+
     return tickers
+

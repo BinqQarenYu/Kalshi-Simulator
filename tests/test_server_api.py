@@ -61,15 +61,28 @@ def test_switch_timeframe_endpoint(client: TestClient) -> None:
 
 
 def test_toggle_feed_mode_endpoint(client: TestClient) -> None:
+    from unittest.mock import patch
+    from kalshi_sim.server import state
     # Switch to mock
     resp_mock = client.post("/api/settings", json={"mode": "mock"})
     assert resp_mock.status_code == 200
     assert resp_mock.json()["mode"] == "mock"
 
-    # Switch to live (falls back to mock if no live credentials, but returns valid response)
-    resp_live = client.post("/api/settings", json={"mode": "live"})
-    assert resp_live.status_code == 200
-    assert resp_live.json()["mode"] in ("mock", "live")
+    # Switch to live (mocked to prevent outbound network handshake during testing)
+    async def fake_start_live() -> bool:
+        state.mode = "live"
+        return True
+
+    with patch("kalshi_sim.server.start_live_feed", side_effect=fake_start_live):
+        resp_live = client.post("/api/settings", json={"mode": "live"})
+        assert resp_live.status_code == 200
+        assert resp_live.json()["mode"] == "live"
+
+    # Restore to mock mode
+    client.post("/api/settings", json={"mode": "mock"})
+
+
+
 
 
 
@@ -100,7 +113,10 @@ def test_place_and_close_order_endpoint(client: TestClient) -> None:
 def test_close_nonexistent_position(client: TestClient) -> None:
     with client:
         response = client.post("/api/positions/close", json={"ticker": "NONEXISTENT-T99999"})
-        assert response.status_code == 404
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["status"] == "already_cleared"
 
 
 def test_resting_limit_order_lifecycle(client: TestClient) -> None:
@@ -241,7 +257,55 @@ def test_state_payload_structure() -> None:
     assert "ai_signals" in payload
     assert "p_up" in payload["ai_signals"]
     assert "vpin" in payload["ai_signals"]
+    assert "win_loss_reports" in payload
     assert "open_orders" in payload["portfolio"]
     assert "circuit_breaker_tripped" in payload["portfolio"]
     assert "current_drawdown_pct" in payload["portfolio"]
+
+
+def test_bot_test_trade_endpoint(client: TestClient) -> None:
+    with client:
+        resp = client.post("/api/bot/test-trade")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert "ai_signal" in data
+        assert "report" in data
+        report = data["report"]
+        assert "report_id" in report
+        assert "outcome" in report
+        assert report["outcome"] in ("win", "loss", "breakeven")
+        assert "pnl" in report
+        assert "roi_pct" in report
+        assert "ai_confidence" in report
+
+
+def test_win_loss_reports_endpoint(client: TestClient) -> None:
+    with client:
+        resp = client.get("/api/reports/win-loss")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "summary" in data
+        assert "reports" in data
+        assert "win_rate_pct" in data["summary"]
+        assert "total_pnl" in data["summary"]
+        assert "profit_factor" in data["summary"]
+        assert len(data["reports"]) > 0
+
+
+def test_win_loss_export_endpoints(client: TestClient) -> None:
+    with client:
+        # CSV export
+        resp_csv = client.get("/api/reports/win-loss/export.csv")
+        assert resp_csv.status_code == 200
+        assert "text/csv" in resp_csv.headers["content-type"]
+        assert "report_id,cycle_time,ticker" in resp_csv.text
+
+        # JSON export
+        resp_json = client.get("/api/reports/win-loss/export.json")
+        assert resp_json.status_code == 200
+        assert "application/json" in resp_json.headers["content-type"]
+        reports_list = resp_json.json()
+        assert isinstance(reports_list, list)
+
 

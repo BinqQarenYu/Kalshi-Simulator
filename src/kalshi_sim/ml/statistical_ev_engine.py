@@ -25,6 +25,8 @@ class ExpectedValueResult:
     ai_prob: float
     market_price: Decimal
     expected_value: Decimal
+    net_expected_value: Decimal
+    fee_per_contract: Decimal
     statistical_edge: float
     kelly_fraction: float
     recommended_contracts: int
@@ -38,6 +40,7 @@ class StatisticalEVEngine:
         self,
         min_ev_threshold: Decimal = Decimal("0.02"),
         min_edge_pct: float = 0.02,
+        fee_per_contract: Decimal = Decimal("0.01"),
         fractional_kelly: float = 0.25,
         max_portfolio_risk_pct: Decimal = Decimal("0.05"),
         vpin_safe_threshold: float = 0.40,
@@ -47,8 +50,9 @@ class StatisticalEVEngine:
         """Initialize the Stage 2 Mathematical Optimizer.
 
         Args:
-            min_ev_threshold: Minimum positive expected dollar return per contract (e.g. $0.02).
+            min_ev_threshold: Minimum positive expected dollar return per contract after fees (e.g. $0.02).
             min_edge_pct: Minimum statistical edge over market price (e.g. 0.02 = 2%).
+            fee_per_contract: Real exchange taker fee per contract (e.g. $0.01 on Kalshi).
             fractional_kelly: Kelly scaling factor (0.25 = Quarter-Kelly for risk preservation).
             max_portfolio_risk_pct: Maximum fraction of total equity to allocate per trade.
             vpin_safe_threshold: VPIN below this is considered fully safe (no taper applied).
@@ -57,11 +61,13 @@ class StatisticalEVEngine:
         """
         self.min_ev_threshold = min_ev_threshold
         self.min_edge_pct = min_edge_pct
+        self.fee_per_contract = fee_per_contract
         self.fractional_kelly = fractional_kelly
         self.max_portfolio_risk_pct = max_portfolio_risk_pct
         self.vpin_safe_threshold = vpin_safe_threshold
         self.vpin_warn_threshold = vpin_warn_threshold
         self.vpin_toxic_threshold = vpin_toxic_threshold
+
 
     def _compute_vpin_taper(self, vpin: float) -> float:
         """Compute a continuous VPIN toxicity taper multiplier in [0.0, 1.0].
@@ -118,6 +124,8 @@ class StatisticalEVEngine:
                 ai_prob=chosen_p,
                 market_price=chosen_ask,
                 expected_value=Decimal("0.00"),
+                net_expected_value=Decimal("0.00"),
+                fee_per_contract=self.fee_per_contract,
                 statistical_edge=0.0,
                 kelly_fraction=0.0,
                 recommended_contracts=0,
@@ -144,50 +152,56 @@ class StatisticalEVEngine:
         yes_ask = max(Decimal("0.01"), min(Decimal("0.99"), yes_ask))
         no_ask = max(Decimal("0.01"), min(Decimal("0.99"), no_ask))
 
-        # 2. Compute Expected Value (EV) for YES:
-        # E[YES] = P(YES) * ($1.00 - Ask_YES) - (1 - P(YES)) * Ask_YES = P(YES) - Ask_YES
+        # 3. Compute Gross and Net Expected Value (EV) for YES:
+        # Gross EV: E[YES] = P(YES) - Ask_YES
+        # Net EV (post-fee): E[YES_net] = P(YES) - Ask_YES - Fee
         p_yes_dec = Decimal(str(round(p_yes, 4)))
-        ev_yes = p_yes_dec * (Decimal("1.00") - yes_ask) - (Decimal("1.00") - p_yes_dec) * yes_ask
-        edge_yes = p_yes - float(yes_ask)
+        ev_yes_gross = p_yes_dec * (Decimal("1.00") - yes_ask) - (Decimal("1.00") - p_yes_dec) * yes_ask
+        ev_yes_net = ev_yes_gross - self.fee_per_contract
+        edge_yes = p_yes - float(yes_ask) - float(self.fee_per_contract)
 
-        # 3. Compute Expected Value (EV) for NO:
-        # E[NO] = P(NO) * ($1.00 - Ask_NO) - (1 - P(NO)) * Ask_NO = P(NO) - Ask_NO
+        # 4. Compute Gross and Net Expected Value (EV) for NO:
         p_no_dec = Decimal(str(round(p_no, 4)))
-        ev_no = p_no_dec * (Decimal("1.00") - no_ask) - (Decimal("1.00") - p_no_dec) * no_ask
-        edge_no = p_no - float(no_ask)
+        ev_no_gross = p_no_dec * (Decimal("1.00") - no_ask) - (Decimal("1.00") - p_no_dec) * no_ask
+        ev_no_net = ev_no_gross - self.fee_per_contract
+        edge_no = p_no - float(no_ask) - float(self.fee_per_contract)
 
-        # 4. Compare both sides and select the direction with higher positive EV
-        if ev_yes >= ev_no:
+        # 5. Compare both sides and select the direction with higher Net EV
+        if ev_yes_net >= ev_no_net:
             chosen_side = OrderSide.YES
-            chosen_ev = ev_yes
+            chosen_ev_gross = ev_yes_gross
+            chosen_ev_net = ev_yes_net
             chosen_edge = edge_yes
             chosen_p = p_yes
             chosen_ask = yes_ask
         else:
             chosen_side = OrderSide.NO
-            chosen_ev = ev_no
+            chosen_ev_gross = ev_no_gross
+            chosen_ev_net = ev_no_net
             chosen_edge = edge_no
             chosen_p = p_no
             chosen_ask = no_ask
 
-        # 5. Check Minimum EV & Edge Safety Thresholds
-        if chosen_ev < self.min_ev_threshold or chosen_edge < self.min_edge_pct:
+        # 6. Check Minimum Net EV & Net Edge Safety Thresholds (Friction Hardening)
+        if chosen_ev_net < self.min_ev_threshold or chosen_edge < self.min_edge_pct:
             return ExpectedValueResult(
                 has_positive_edge=False,
                 recommended_side=None,
                 ai_prob=chosen_p,
                 market_price=chosen_ask,
-                expected_value=chosen_ev,
+                expected_value=chosen_ev_gross,
+                net_expected_value=chosen_ev_net,
+                fee_per_contract=self.fee_per_contract,
                 statistical_edge=chosen_edge,
                 kelly_fraction=0.0,
                 recommended_contracts=0,
                 rationale=(
-                    f"Sub-threshold EV: Max EV=${chosen_ev:.3f} (< ${self.min_ev_threshold:.2f}) "
-                    f"or Edge={chosen_edge:.1%} (< {self.min_edge_pct:.1%})"
+                    f"Sub-threshold Net EV: Net EV=${chosen_ev_net:.3f} (< ${self.min_ev_threshold:.2f}) "
+                    f"after ${self.fee_per_contract:.2f}/ct fee, or Edge={chosen_edge:.1%} (< {self.min_edge_pct:.1%})"
                 ),
             )
 
-        # 6. VPIN Toxicity Taper — continuously scale down allocation in warning zones
+        # 7. VPIN Toxicity Taper — continuously scale down allocation in warning zones
         vpin_taper = self._compute_vpin_taper(vpin)
         if vpin_taper <= 0.0:
             return ExpectedValueResult(
@@ -195,45 +209,47 @@ class StatisticalEVEngine:
                 recommended_side=None,
                 ai_prob=chosen_p,
                 market_price=chosen_ask,
-                expected_value=chosen_ev,
+                expected_value=chosen_ev_gross,
+                net_expected_value=chosen_ev_net,
+                fee_per_contract=self.fee_per_contract,
                 statistical_edge=chosen_edge,
                 kelly_fraction=0.0,
                 recommended_contracts=0,
                 rationale=(
                     f"VPIN TOXIC FREEZE: VPIN={vpin:.3f} ≥ {self.vpin_toxic_threshold:.2f} — "
-                    f"position sizing frozen. EV=${chosen_ev:.3f}, Edge={chosen_edge:.1%}"
+                    f"position sizing frozen. Net EV=${chosen_ev_net:.3f}, Net Edge={chosen_edge:.1%}"
                 ),
             )
 
-        # 7. Compute Fractional Kelly Position Sizing
-        # Payoff ratio b = (Payout - Cost) / Cost = (1 - Ask) / Ask
-        ask_float = float(chosen_ask)
-        b = (1.0 - ask_float) / ask_float
+        # 8. Compute Fractional Kelly Position Sizing on Effective Net Cost
+        effective_cost = float(chosen_ask + self.fee_per_contract)
+        b = max(0.01, (1.0 - effective_cost) / effective_cost)
 
-        # Kelly fraction f* = (p * b - (1 - p)) / b = (p - ask) / (1 - ask)
-        full_kelly = (chosen_p * b - (1.0 - chosen_p)) / b
+        # Kelly fraction f* = (p * b - (1 - p)) / b
+        full_kelly = max(0.0, (chosen_p * b - (1.0 - chosen_p)) / b)
         scaled_kelly = max(0.0, full_kelly * self.fractional_kelly)
 
-        # 8. Apply VPIN taper to Kelly fraction (continuous risk reduction)
+        # 9. Apply VPIN taper to Kelly fraction (continuous risk reduction)
         tapered_kelly = scaled_kelly * vpin_taper
 
-        # 9. Convert Kelly Fraction to Contract Sizing with Portfolio Guardrails
+        # 10. Convert Kelly Fraction to Contract Sizing with Portfolio Guardrails
         max_capital_to_risk = total_equity * self.max_portfolio_risk_pct
         kelly_capital = total_equity * Decimal(str(round(tapered_kelly, 6)))
         allocated_capital = min(max_capital_to_risk, kelly_capital)
 
-        contracts = int(allocated_capital / chosen_ask)
+        unit_cost = chosen_ask + self.fee_per_contract
+        contracts = int(allocated_capital / unit_cost) if unit_cost > 0 else 0
         contracts = max(1, min(max_position_size, contracts))
 
-        # Build informative rationale with VPIN taper visibility
+        # Build informative rationale with VPIN taper and fee visibility
         taper_note = ""
         if vpin_taper < 1.0:
             taper_note = f" | VPIN_taper={vpin_taper:.0%} (VPIN={vpin:.3f})"
 
         rationale = (
             f"Stage 2 Optimal EV: {chosen_side.value.upper()} | "
-            f"AI_P={chosen_p:.1%} vs MktPrice=${chosen_ask:.2f} | "
-            f"EV=+${chosen_ev:.3f}/ct | Edge=+{chosen_edge:.1%} | "
+            f"AI_P={chosen_p:.1%} vs MktPrice=${chosen_ask:.2f} (Fee=${self.fee_per_contract:.2f}) | "
+            f"Net EV=+${chosen_ev_net:.3f}/ct | Net Edge=+{chosen_edge:.1%} | "
             f"Kelly={scaled_kelly:.1%}→{tapered_kelly:.1%}{taper_note}"
         )
 
@@ -242,7 +258,9 @@ class StatisticalEVEngine:
             recommended_side=chosen_side,
             ai_prob=chosen_p,
             market_price=chosen_ask,
-            expected_value=chosen_ev,
+            expected_value=chosen_ev_gross,
+            net_expected_value=chosen_ev_net,
+            fee_per_contract=self.fee_per_contract,
             statistical_edge=chosen_edge,
             kelly_fraction=tapered_kelly,
             recommended_contracts=contracts,

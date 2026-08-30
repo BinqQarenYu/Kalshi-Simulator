@@ -62,8 +62,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--capital", "-c",
         type=str,
-        default="10000",
-        help="Starting virtual capital in USD for simulation (default: 10000).",
+        default="100",
+        help="Starting virtual capital in USD for simulation (default: 100).",
     )
     parser.add_argument(
         "--dry-run",

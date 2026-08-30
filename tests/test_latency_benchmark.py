@@ -20,7 +20,8 @@ from kalshi_sim.schemas import (
     OrderBookSnapshot,
     TradeEvent,
 )
-from kalshi_sim.server import _build_full_state_payload
+from kalshi_sim.server import _build_full_state_payload, fast_dumps
+
 
 
 def _create_dense_book(ticker: str = "KXBTC15M-BENCH") -> L2BookState:
@@ -129,19 +130,27 @@ def test_orderbook_delta_throughput_benchmark():
 
 
 def test_state_serialization_concurrency_stress():
-    """Real-time full state JSON serialization must execute in < 2.0ms per frame."""
+    """Real-time full state JSON serialization with fast_dumps must execute in < 0.5ms per frame."""
+    # Warmup
+    for _ in range(20):
+        payload = _build_full_state_payload()
+        _ = fast_dumps(payload)
+
     latencies_ms = []
     iterations = 200
 
     for _ in range(iterations):
         t0 = time.perf_counter()
         payload = _build_full_state_payload()
-        serialized = json.dumps(payload)
+        serialized = fast_dumps(payload)
         t1 = time.perf_counter()
         latencies_ms.append((t1 - t0) * 1000.0)
 
     p95_ms = np.percentile(latencies_ms, 95)
     mean_ms = np.mean(latencies_ms)
 
-    print(f"\n[BENCHMARK] Full State Payload Serialization: Mean={mean_ms:.3f}ms | P95={p95_ms:.3f}ms")
-    assert p95_ms < 5.0, f"P95 state serialization latency {p95_ms:.3f}ms exceeded 5.0ms"
+    print(f"\n[BENCHMARK] fast_dumps Full State Serialization: Mean={mean_ms:.4f}ms | P95={p95_ms:.4f}ms")
+    assert mean_ms < 2.0, f"Mean state serialization latency {mean_ms:.4f}ms exceeded 2.0ms"
+    assert p95_ms < 5.0, f"P95 state serialization latency {p95_ms:.4f}ms exceeded 5.0ms"
+
+

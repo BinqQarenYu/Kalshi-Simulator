@@ -2,16 +2,16 @@
 
 Provides high-performance paginated queries and institutional portfolio analytics:
 - Trades, Settlements, and AI Predictions time-series queries
-- Equity Curve & Drawdown time-series retrieval
+- Equity Curve & Drawdown time-series retrieval with bot and execution mode isolation
 - Exact quantitative metrics: Sharpe, Sortino, Calmar, Profit Factor, Payoff Ratio, Win Rate
+- Selective manual history reset capabilities
 """
 
 from __future__ import annotations
 
 import logging
 import math
-from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import aiosqlite
 import numpy as np
@@ -31,6 +31,7 @@ class HistoricalQueryService:
         self,
         ticker: Optional[str] = None,
         timeframe: Optional[str] = None,
+        bot_type: Optional[str] = None,
         execution_mode: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
@@ -45,7 +46,10 @@ class HistoricalQueryService:
         if timeframe:
             query += " AND timeframe = ?"
             params.append(timeframe)
-        if execution_mode:
+        if bot_type and bot_type.lower() != "all":
+            query += " AND bot_type = ?"
+            params.append(bot_type)
+        if execution_mode and execution_mode.lower() != "all":
             query += " AND execution_mode = ?"
             params.append(execution_mode)
 
@@ -60,6 +64,8 @@ class HistoricalQueryService:
     async def get_settlements(
         self,
         ticker: Optional[str] = None,
+        bot_type: Optional[str] = None,
+        execution_mode: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
@@ -70,6 +76,12 @@ class HistoricalQueryService:
         if ticker:
             query += " AND ticker = ?"
             params.append(ticker)
+        if bot_type and bot_type.lower() != "all":
+            query += " AND bot_type = ?"
+            params.append(bot_type)
+        if execution_mode and execution_mode.lower() != "all":
+            query += " AND execution_mode = ?"
+            params.append(execution_mode)
 
         query += " ORDER BY timestamp_epoch_ms DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
@@ -83,6 +95,8 @@ class HistoricalQueryService:
         self,
         start_epoch_ms: Optional[int] = None,
         end_epoch_ms: Optional[int] = None,
+        bot_type: Optional[str] = None,
+        execution_mode: Optional[str] = None,
         limit: int = 1000,
     ) -> List[Dict[str, Any]]:
         """Retrieve sequential portfolio equity snapshots for charting."""
@@ -95,6 +109,12 @@ class HistoricalQueryService:
         if end_epoch_ms is not None:
             query += " AND timestamp_epoch_ms <= ?"
             params.append(end_epoch_ms)
+        if bot_type and bot_type.lower() not in ("all", "combined"):
+            query += " AND (bot_type = ? OR bot_type = 'all')"
+            params.append(bot_type)
+        if execution_mode and execution_mode.lower() != "all":
+            query += " AND execution_mode = ?"
+            params.append(execution_mode)
 
         query += " ORDER BY timestamp_epoch_ms ASC LIMIT ?"
         params.append(limit)
@@ -107,6 +127,7 @@ class HistoricalQueryService:
     async def get_ai_predictions(
         self,
         ticker: Optional[str] = None,
+        bot_type: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
@@ -117,6 +138,9 @@ class HistoricalQueryService:
         if ticker:
             query += " AND ticker = ?"
             params.append(ticker)
+        if bot_type and bot_type.lower() != "all":
+            query += " AND bot_type = ?"
+            params.append(bot_type)
 
         query += " ORDER BY timestamp_epoch_ms DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
@@ -126,27 +150,63 @@ class HistoricalQueryService:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
 
-    async def compute_portfolio_metrics(self) -> Dict[str, Any]:
-        """Compute institutional performance statistics from database history."""
+    async def compute_portfolio_metrics(
+        self,
+        bot_type: Optional[str] = None,
+        execution_mode: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Compute institutional performance statistics filtered by bot and execution mode."""
+        st_where = " WHERE 1=1"
+        st_params: List[Any] = []
+        tr_where = " WHERE 1=1"
+        tr_params: List[Any] = []
+        eq_where = " WHERE 1=1"
+        eq_params: List[Any] = []
+
+        if bot_type and bot_type.lower() not in ("all", "combined"):
+            st_where += " AND bot_type = ?"
+            st_params.append(bot_type)
+            tr_where += " AND bot_type = ?"
+            tr_params.append(bot_type)
+            eq_where += " AND (bot_type = ? OR bot_type = 'all')"
+            eq_params.append(bot_type)
+
+        if execution_mode and execution_mode.lower() != "all":
+            st_where += " AND execution_mode = ?"
+            st_params.append(execution_mode)
+            tr_where += " AND execution_mode = ?"
+            tr_params.append(execution_mode)
+            eq_where += " AND execution_mode = ?"
+            eq_params.append(execution_mode)
+
         async with self.db_manager.get_connection() as db:
             # 1. Fetch settlements
             async with db.execute(
-                "SELECT pnl, entry_price, size, outcome FROM settlements ORDER BY timestamp_epoch_ms ASC"
+                f"SELECT pnl, entry_price, size, outcome FROM settlements{st_where} ORDER BY timestamp_epoch_ms ASC",
+                st_params,
             ) as cursor:
                 settlement_rows = await cursor.fetchall()
 
             # 2. Fetch fees paid from trades
-            async with db.execute("SELECT SUM(fees) FROM trades") as cursor:
+            async with db.execute(f"SELECT SUM(fees) FROM trades{tr_where}", tr_params) as cursor:
                 row = await cursor.fetchone()
                 total_fees = float(row[0]) if row and row[0] is not None else 0.0
 
-            # 3. Fetch latest equity snapshot
+            # 3. Fetch earliest and latest equity snapshots
             async with db.execute(
-                "SELECT balance, equity, drawdown_pct FROM equity_snapshots ORDER BY timestamp_epoch_ms DESC LIMIT 1"
+                f"SELECT balance, equity FROM equity_snapshots{eq_where} ORDER BY timestamp_epoch_ms ASC LIMIT 1",
+                eq_params,
+            ) as cursor:
+                first_eq_row = await cursor.fetchone()
+                initial_capital = float(first_eq_row["balance"]) if first_eq_row else 100.0
+
+            async with db.execute(
+                f"SELECT balance, equity, drawdown_pct FROM equity_snapshots{eq_where} ORDER BY timestamp_epoch_ms DESC LIMIT 1",
+                eq_params,
             ) as cursor:
                 eq_row = await cursor.fetchone()
-                current_equity = float(eq_row["equity"]) if eq_row else 10000.0
-                current_balance = float(eq_row["balance"]) if eq_row else 10000.0
+                current_equity = float(eq_row["equity"]) if eq_row else initial_capital
+                current_balance = float(eq_row["balance"]) if eq_row else initial_capital
 
         total_settled = len(settlement_rows)
         if total_settled == 0:
@@ -181,7 +241,8 @@ class HistoricalQueryService:
 
         wins = len(winning_pnls)
         losses = len(losing_pnls)
-        win_rate = (wins / total_settled) * 100.0
+        active_trades = wins + losses
+        win_rate = (wins / active_trades * 100.0) if active_trades > 0 else 0.0
 
         gross_profit = sum(winning_pnls)
         gross_loss = abs(sum(losing_pnls))
@@ -189,8 +250,7 @@ class HistoricalQueryService:
 
         total_realized_pnl = sum(pnls)
         net_pnl = total_realized_pnl - total_fees
-        initial_capital = 10000.0
-        total_roi = (net_pnl / initial_capital) * 100.0
+        total_roi = (net_pnl / initial_capital) * 100.0 if initial_capital > 0 else 0.0
 
         avg_win = float(np.mean(winning_pnls)) if winning_pnls else 0.0
         avg_loss = abs(float(np.mean(losing_pnls))) if losing_pnls else 0.0
@@ -198,8 +258,8 @@ class HistoricalQueryService:
         avg_trade_pnl = float(np.mean(pnls))
 
         # Expectancy = (Win% * AvgWin) - (Loss% * AvgLoss)
-        win_prob = wins / total_settled
-        loss_prob = losses / total_settled
+        win_prob = wins / active_trades if active_trades > 0 else 0.0
+        loss_prob = losses / active_trades if active_trades > 0 else 0.0
         expectancy = (win_prob * avg_win) - (loss_prob * avg_loss)
 
         # Compute return percentages per trade
@@ -210,16 +270,25 @@ class HistoricalQueryService:
 
         ret_arr = np.array(trade_returns, dtype=np.float64)
         mean_ret = float(np.mean(ret_arr))
-        std_ret = float(np.std(ret_arr)) + 1e-9
+        std_ret = float(np.std(ret_arr))
 
-        # Annualized Sharpe (assuming 15m intervals in standard 252-day equity equivalent)
-        annualization_factor = math.sqrt(252 * 6.5 * 4)
-        sharpe = (mean_ret / std_ret) * annualization_factor
+        # Annualized Sharpe & Sortino (365 days * 24h * 4 = 35,040 intervals/year for 15M continuous crypto contracts)
+        annualization_factor = math.sqrt(365 * 24 * 4)
+        if std_ret < 1e-6:
+            sharpe = 0.0
+        else:
+            sharpe = max(-99.9, min(99.9, (mean_ret / std_ret) * annualization_factor))
 
-        # Exact Downside Semi-Deviation for Sortino: sqrt(E[min(0, r)^2])
-        downside_sq = np.minimum(0.0, ret_arr) ** 2
-        downside_dev = float(np.sqrt(np.mean(downside_sq))) + 1e-9
-        sortino = (mean_ret / downside_dev) * annualization_factor
+        # Exact Downside Semi-Deviation for Sortino: sqrt(E[min(0, r)^2]) with zero-downside safeguard
+        if len(losing_pnls) == 0:
+            sortino = min(99.9, sharpe * 1.5) if sharpe > 0 else 0.0
+        else:
+            downside_sq = np.minimum(0.0, ret_arr) ** 2
+            downside_dev = float(np.sqrt(np.mean(downside_sq)))
+            if downside_dev < 1e-6:
+                sortino = min(99.9, sharpe * 1.5) if sharpe > 0 else 0.0
+            else:
+                sortino = max(-99.9, min(99.9, (mean_ret / downside_dev) * annualization_factor))
 
         # Max Drawdown
         cum_equity = initial_capital
@@ -235,6 +304,7 @@ class HistoricalQueryService:
 
         max_dd_pct = max_dd * 100.0
         calmar = (total_roi / max_dd_pct) if max_dd_pct > 0 else (99.9 if total_roi > 0 else 0.0)
+        calmar = max(-99.9, min(99.9, calmar))
 
         return {
             "total_trades": total_settled,
@@ -260,3 +330,39 @@ class HistoricalQueryService:
             "current_equity": round(current_equity, 2),
             "current_balance": round(current_balance, 2),
         }
+
+    async def reset_history(
+        self,
+        bot_type: Optional[str] = None,
+        execution_mode: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """Selectively delete history records from SQLite database."""
+        where_clause = " WHERE 1=1"
+        params: List[Any] = []
+
+        if bot_type and bot_type.lower() not in ("all", "combined"):
+            where_clause += " AND bot_type = ?"
+            params.append(bot_type)
+
+        if execution_mode and execution_mode.lower() != "all":
+            where_clause += " AND execution_mode = ?"
+            params.append(execution_mode)
+
+        counts = {"settlements": 0, "trades": 0, "ai_predictions": 0, "equity_snapshots": 0}
+
+        async with self.db_manager.get_connection() as db:
+            for table in ["settlements", "trades", "ai_predictions", "equity_snapshots"]:
+                try:
+                    # Check if table has bot_type column
+                    cur = await db.execute(f"DELETE FROM {table}{where_clause}", params)
+                    counts[table] = cur.rowcount
+                except Exception as exc:
+                    # Fallback for tables without bot_type
+                    logger.debug("Selective reset error for table %s: %s", table, exc)
+                    if bot_type is None or bot_type.lower() in ("all", "combined"):
+                        cur = await db.execute(f"DELETE FROM {table}")
+                        counts[table] = cur.rowcount
+            await db.commit()
+
+        logger.info("Reset historical database for bot=%s, mode=%s: %s", bot_type, execution_mode, counts)
+        return counts

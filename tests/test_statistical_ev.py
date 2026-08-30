@@ -24,8 +24,10 @@ def test_positive_ev_yes_trade():
     assert res.has_positive_edge is True
     assert res.recommended_side == OrderSide.YES
     assert res.ai_prob == 0.75
-    assert res.expected_value == Decimal("0.250")  # 0.75 - 0.50 = +$0.25
-    assert res.statistical_edge == 0.25            # +25%
+    assert res.expected_value == Decimal("0.250")      # Gross EV: 0.75 - 0.50 = +$0.25
+    assert res.net_expected_value == Decimal("0.240")  # Net EV: 0.25 - 0.01 = +$0.24
+    assert res.statistical_edge == pytest.approx(0.24, 0.001)  # Net Edge: 24%
+    assert res.fee_per_contract == Decimal("0.01")
     assert res.recommended_contracts > 0
 
 
@@ -35,7 +37,7 @@ def test_odds_inversion_positive_ev_no_trade():
 
     # AI predicts 60% YES, 40% NO. But Market YES Ask is $0.85 (overpriced!), NO Ask is $0.15 (cheap!).
     # E[YES] = 0.60 - 0.85 = -$0.25 (LOSS)
-    # E[NO]  = 0.40 - 0.15 = +$0.25 (PROFIT)
+    # E[NO]  = 0.40 - 0.15 - 0.01 = +$0.24 (PROFIT)
     res = engine.compute_optimal_execution(
         prob_up=0.60,
         prob_down=0.40,
@@ -48,9 +50,11 @@ def test_odds_inversion_positive_ev_no_trade():
     assert res.has_positive_edge is True
     assert res.recommended_side == OrderSide.NO
     assert res.ai_prob == 0.40
-    assert res.expected_value == Decimal("0.250")  # 0.40 - 0.15 = +$0.25
-    assert res.statistical_edge == 0.25
+    assert res.expected_value == Decimal("0.250")      # Gross: 0.40 - 0.15 = +$0.25
+    assert res.net_expected_value == Decimal("0.240")  # Net: 0.25 - 0.01 = +$0.24
+    assert res.statistical_edge == pytest.approx(0.24, 0.001)
     assert res.recommended_contracts > 0
+
 
 
 def test_subthreshold_ev_rejection():
@@ -183,5 +187,32 @@ def test_wait_regime_dominance_rejection():
     assert res.recommended_side is None
     assert res.recommended_contracts == 0
     assert "AI WAIT Regime" in res.rationale
+
+
+def test_exchange_fee_erosion_and_friction_hardening():
+    """Exchange fee erodes small gross edges, rejecting trades where net EV is sub-threshold."""
+    # Engine requires min net EV of $0.02, with $0.015 exchange fee per contract
+    engine = StatisticalEVEngine(
+        min_ev_threshold=Decimal("0.02"),
+        min_edge_pct=0.02,
+        fee_per_contract=Decimal("0.015"),
+    )
+
+    # Gross Edge is +$0.025 (P=0.525 vs Ask=$0.50)
+    # Net Edge after $0.015 fee = 0.525 - 0.50 - 0.015 = +$0.010 (< $0.02 threshold)
+    res = engine.compute_optimal_execution(
+        prob_up=0.525,
+        prob_down=0.475,
+        best_yes_ask=Decimal("0.50"),
+        best_no_ask=Decimal("0.50"),
+        total_equity=Decimal("10000"),
+        max_position_size=50,
+    )
+
+    assert res.has_positive_edge is False
+    assert res.recommended_side is None
+    assert "Sub-threshold Net EV" in res.rationale
+    assert res.net_expected_value == Decimal("0.010")
+
 
 

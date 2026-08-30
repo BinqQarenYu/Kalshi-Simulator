@@ -18,7 +18,7 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 SCHEMA_V1_SQL = """
 -- 1. Schema Migrations Version Registry
@@ -61,12 +61,14 @@ CREATE TABLE IF NOT EXISTS trades (
     fees REAL DEFAULT 0.0,
     vpin REAL,
     kelly_fraction REAL,
+    bot_type TEXT DEFAULT '3_step_domination_bot',
     execution_mode TEXT DEFAULT 'simulated',
     status TEXT DEFAULT 'filled'
 );
 
 CREATE INDEX IF NOT EXISTS idx_trades_ticker_time ON trades (ticker, timestamp_epoch_ms);
 CREATE INDEX IF NOT EXISTS idx_trades_trade_id ON trades (trade_id);
+CREATE INDEX IF NOT EXISTS idx_trades_bot_mode ON trades (bot_type, execution_mode);
 
 -- 4. Settlements Resolution Table
 CREATE TABLE IF NOT EXISTS settlements (
@@ -81,10 +83,13 @@ CREATE TABLE IF NOT EXISTS settlements (
     settlement_price REAL NOT NULL,
     outcome TEXT NOT NULL,
     pnl REAL NOT NULL,
-    balance_after REAL NOT NULL
+    balance_after REAL NOT NULL,
+    bot_type TEXT DEFAULT '3_step_domination_bot',
+    execution_mode TEXT DEFAULT 'simulated'
 );
 
 CREATE INDEX IF NOT EXISTS idx_settlements_ticker_time ON settlements (ticker, timestamp_epoch_ms);
+CREATE INDEX IF NOT EXISTS idx_settlements_bot_mode ON settlements (bot_type, execution_mode);
 
 -- 5. Portfolio Equity Snapshots Table
 CREATE TABLE IF NOT EXISTS equity_snapshots (
@@ -98,10 +103,13 @@ CREATE TABLE IF NOT EXISTS equity_snapshots (
     drawdown_pct REAL DEFAULT 0.0,
     win_rate REAL DEFAULT 0.0,
     total_trades INTEGER DEFAULT 0,
-    open_positions_count INTEGER DEFAULT 0
+    open_positions_count INTEGER DEFAULT 0,
+    bot_type TEXT DEFAULT 'all',
+    execution_mode TEXT DEFAULT 'simulated'
 );
 
 CREATE INDEX IF NOT EXISTS idx_equity_time ON equity_snapshots (timestamp_epoch_ms);
+CREATE INDEX IF NOT EXISTS idx_equity_bot_mode ON equity_snapshots (bot_type, execution_mode);
 
 -- 6. AI Microstructure Predictions Table
 CREATE TABLE IF NOT EXISTS ai_predictions (
@@ -116,7 +124,8 @@ CREATE TABLE IF NOT EXISTS ai_predictions (
     ev_yes REAL NOT NULL,
     ev_no REAL NOT NULL,
     recommended_side TEXT NOT NULL,
-    rationale TEXT
+    rationale TEXT,
+    bot_type TEXT DEFAULT 'onnx_ml_bot'
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_ticker_time ON ai_predictions (ticker, timestamp_epoch_ms);
@@ -175,5 +184,26 @@ class MigrationEngine:
             await db.commit()
             current_version = 1
             logger.info("Successfully applied migration V1.")
+
+        if current_version < 2:
+            logger.info("Applying migration V2 (bot_type and execution_mode multi-bot isolation columns)...")
+            for table, col, col_type in [
+                ("trades", "bot_type", "TEXT DEFAULT '3_step_domination_bot'"),
+                ("settlements", "bot_type", "TEXT DEFAULT '3_step_domination_bot'"),
+                ("settlements", "execution_mode", "TEXT DEFAULT 'simulated'"),
+                ("ai_predictions", "bot_type", "TEXT DEFAULT 'onnx_ml_bot'"),
+                ("equity_snapshots", "bot_type", "TEXT DEFAULT 'all'"),
+                ("equity_snapshots", "execution_mode", "TEXT DEFAULT 'simulated'"),
+            ]:
+                try:
+                    await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                except Exception as exc:
+                    logger.debug("Column %s in %s may already exist: %s", col, table, exc)
+            await db.execute(
+                "INSERT OR REPLACE INTO schema_migrations (version, description) VALUES (2, 'Multi-bot and mode tagging columns')"
+            )
+            await db.commit()
+            current_version = 2
+            logger.info("Successfully applied migration V2.")
 
         return current_version

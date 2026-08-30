@@ -41,7 +41,7 @@ class Portfolio:
 
     def __init__(
         self,
-        starting_balance: Decimal = Decimal("10000"),
+        starting_balance: Decimal = Decimal("100"),
         max_drawdown_pct: Decimal = Decimal("0.20"),
     ) -> None:
         self._starting_balance = starting_balance
@@ -50,6 +50,7 @@ class Portfolio:
         self._fill_history: list[SimulatedFill] = []
         self._settlement_history: list[SettlementResult] = []
         self._total_trades = 0
+        self._total_fees_paid = Decimal("0")
         self._wins = 0
         self._losses = 0
 
@@ -86,6 +87,11 @@ class Portfolio:
     @property
     def total_trades(self) -> int:
         return self._total_trades
+
+    @property
+    def total_fees_paid(self) -> Decimal:
+        """Cumulative exchange fees paid across all fills."""
+        return self._total_fees_paid
 
     @property
     def circuit_breaker_tripped(self) -> bool:
@@ -148,7 +154,7 @@ class Portfolio:
     def open_position(self, fill: SimulatedFill, timeframe: Timeframe) -> Position:
         """Open or add to a position based on a simulated fill.
 
-        Deducts the fill cost from the cash balance.
+        Deducts the fill cost + exchange fee from the cash balance.
 
         Args:
             fill: The simulated execution fill.
@@ -160,12 +166,14 @@ class Portfolio:
         Raises:
             ValueError: If insufficient balance.
         """
-        if not self.can_afford(fill.cost):
+        total_deduction = fill.cost + fill.fee
+        if not self.can_afford(total_deduction):
             raise ValueError(
-                f"Insufficient balance: need ${fill.cost}, have ${self._balance}"
+                f"Insufficient balance: need ${total_deduction} (cost=${fill.cost} + fee=${fill.fee}), have ${self._balance}"
             )
 
-        self._balance -= fill.cost
+        self._balance -= total_deduction
+        self._total_fees_paid += fill.fee
         self._fill_history.append(fill)
         self._total_trades += 1
 
@@ -337,6 +345,13 @@ class Portfolio:
 
         Returns True if Yes wins based on strike type and settlement price.
         """
+        # If settlement_price is in contract binary payoff range [0.0, 1.0] and strike is asset price (> $100)
+        if settlement_price <= Decimal("1.00") and (
+            (floor_strike is not None and floor_strike > Decimal("100.00"))
+            or (cap_strike is not None and cap_strike > Decimal("100.00"))
+        ):
+            return settlement_price >= Decimal("0.50")
+
         if strike_type == "greater" and floor_strike is not None:
             return settlement_price >= floor_strike
         elif strike_type == "less" and cap_strike is not None:

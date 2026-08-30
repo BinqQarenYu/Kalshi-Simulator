@@ -1,17 +1,30 @@
-# Kalshi BTC Quantitative Trading Simulator & ONNX AI Engine
+# Kalshi BTC Quantitative Trading Simulator & Dual-Bot Arena
 
 [![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-48%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-122%20passed-brightgreen.svg)]()
 [![Throughput](https://img.shields.io/badge/L2%20Throughput-135k%20deltas%2Fs-orange.svg)]()
 [![Inference Latency](https://img.shields.io/badge/ONNX%20Latency-0.38ms-blue.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
-An institutional-grade quantitative trading simulator, market data ingestion pipeline, and real-time execution engine for **Kalshi Bitcoin Binary Prediction Contracts** (`KXBTC5M`, `KXBTC15M`, `KXBTCH`).
+An institutional-grade quantitative trading simulator, market data ingestion pipeline, and real-time execution engine for **Kalshi Bitcoin Binary Prediction Contracts** (`KXBTC15M`, `KXBTC5M`, `KXBTCH`).
 
-The system integrates a **Two-Stage Quantitative Architecture**:
-1. **Stage 1 (Microstructure AI Engine)**: High-frequency Level-2 Order Flow feature extraction and ONNX neural network inference for directional probability estimation.
-2. **Stage 2 (Mathematical Expected Value & Kelly Optimizer)**: Binary digital option payoff mathematics, continuous VPIN toxicity Kelly tapering, and Max Drawdown Circuit Breakers to protect capital.
+---
+
+## 📚 Documentation Index
+
+- [🏛 System Architecture & Infrastructure](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/ARCHITECTURE.md)
+- [🤖 Quantitative Strategy Bots & Playbooks](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/STRATEGY_BOTS.md)
+- [🔌 REST & WebSocket API Reference](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/API_REFERENCE.md)
+- [🚀 Trader Operations & Bankroll Guide](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/TRADING_GUIDE.md)
+- [🛡️ Data Integrity & Truth Enforcement Rules](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/DATA_INTEGRITY.md)
+
+---
+
+The system integrates a **Multi-Model Quantitative Arena**:
+1. **3-Step Domination Bot**: Cycle-aware multi-playbook engine (Early Momentum Breakout, Mid OFI Drift, Late Gamma Snub) with digital option moneyness CDF mathematics.
+2. **ONNX Microstructure Bot**: 28-D order flow feature tensor extraction, deep neural network inference, and statistical expected value maximization.
+3. **Single Source of Truth**: 100% anchored to live Kalshi exchange L2 feeds and real-time Bitcoin Spot Index feeds.
 
 ---
 

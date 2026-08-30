@@ -16,6 +16,8 @@ export interface MarketState {
   best_yes_bid: number;
   best_no_ask: number;
   best_no_bid: number;
+  target_time_str?: string;
+  time_window_str?: string;
   yes_cents_str: string;
   no_cents_str: string;
 }
@@ -58,6 +60,21 @@ export interface AISignals {
   kelly_f_no: number;
   recommended_side: 'yes' | 'no' | 'wait';
   rationale: string;
+  strategy_id?: string;
+  strategy_name?: string;
+  active_playbook?: string;
+  playbook_stage?: string;
+  edge_pct?: number;
+}
+
+export interface StrategyBotInfo {
+  id: string;
+  name: string;
+  description: string;
+  active: boolean;
+  badge: string;
+  icon: string;
+  features: string[];
 }
 
 export interface Position {
@@ -107,6 +124,147 @@ export interface PortfolioState {
   open_orders?: OpenOrder[];
 }
 
+export interface MemoryProfileData {
+  total_hot_ticks: number;
+  total_offloaded_ticks: number;
+  estimated_hot_memory_kb: number;
+  is_pressure_critical: boolean;
+}
+
+export interface WinLossEventReport {
+  report_id: string;
+  cycle_time: string;
+  ticker: string;
+  timeframe: string;
+  strike_price: number;
+  settlement_btc_price: number;
+  bot_side: 'yes' | 'no';
+  contracts: number;
+  entry_price: number;
+  settlement_price: number;
+  outcome: 'win' | 'loss' | 'breakeven';
+  pnl: number;
+  roi_pct: number;
+  ai_confidence: number;
+  ai_rationale: string;
+  vpin_score: number;
+  ev_edge: number;
+  balance_after: number;
+  timestamp_utc: string;
+}
+
+export interface WinLossReportsSummary {
+  total_events: number;
+  wins: number;
+  losses: number;
+  win_rate_pct: number;
+  total_pnl: number;
+  profit_factor: number;
+  avg_pnl_per_cycle: number;
+}
+
+export interface WinLossReportsResponse {
+  summary: WinLossReportsSummary;
+  reports: WinLossEventReport[];
+}
+
+export interface IntegrityCheckItem {
+  name: string;
+  category: 'math' | 'microstructure' | 'latency' | 'truth' | 'connection';
+  status: 'PASS' | 'WARN' | 'FAIL';
+  message: string;
+  metric_value?: string;
+  threshold?: string;
+  timestamp: string;
+}
+
+export interface IntegrityStatus {
+  score: number;
+  status: 'HEALTHY' | 'WARNING' | 'CRITICAL';
+  total_checks: number;
+  passed: number;
+  warnings: number;
+  failed: number;
+  audit_count: number;
+  total_flaws_caught: number;
+  scan_duration_ms: number;
+  timestamp: string;
+  checks: IntegrityCheckItem[];
+}
+
+export interface ComplianceCheckItem {
+  name: string;
+  category: 'cftc_conduct' | 'api_terms' | 'rate_limits' | 'position_limits' | 'security';
+  status: 'PASS' | 'WARN' | 'FAIL';
+  message: string;
+  authority: string;
+  metric_value?: string;
+  rule_reference?: string;
+  timestamp: string;
+}
+
+export interface ComplianceViolationItem {
+  timestamp: string;
+  rule_name: string;
+  authority: string;
+  description: string;
+}
+
+export interface ComplianceStatus {
+  score: number;
+  status: 'COMPLIANT' | 'WARNING' | 'NON_COMPLIANT';
+  total_checks: number;
+  passed: number;
+  warnings: number;
+  failed: number;
+  pre_trade_checks_total: number;
+  pre_trade_rejections: number;
+  total_api_calls: number;
+  rate_limit_violations: number;
+  recent_violations_count: number;
+  recent_violations: ComplianceViolationItem[];
+  timestamp: string;
+  checks: ComplianceCheckItem[];
+}
+
+export interface LegalDoItem {
+  title: string;
+  authority: string;
+  description: string;
+  app_enforcement: string;
+}
+
+export interface LegalDontItem {
+  title: string;
+  authority: string;
+  description: string;
+  consequence: string;
+}
+
+export interface LegalHandbookResponse {
+  dos: LegalDoItem[];
+  donts: LegalDontItem[];
+}
+
+export interface SystemResourceMetrics {
+  process_cpu_pct: number;
+  system_cpu_pct: number;
+  cpu_cores_count: number;
+  process_rss_mb: number;
+  process_vms_mb: number;
+  system_ram_total_mb: number;
+  system_ram_used_pct: number;
+  gc_gen0_collections: number;
+  gc_gen1_collections: number;
+  gc_gen2_collections: number;
+  gc_uncollectable_count: number;
+  memory_status: 'OPTIMAL' | 'ELEVATED' | 'CRITICAL';
+  is_pressure_critical: boolean;
+  active_thread_count: number;
+  uptime_seconds: number;
+  timestamp: string;
+}
+
 export interface DashboardState {
   timestamp: string;
   market: MarketState;
@@ -115,8 +273,15 @@ export interface DashboardState {
   orderbook_ladder: OrderBookLadderRow[];
   ai_signals: AISignals;
   portfolio: PortfolioState;
+  live_portfolio?: LivePortfolioState | null;
+  win_loss_reports?: WinLossEventReport[];
+  integrity_status?: IntegrityStatus;
+  compliance_status?: ComplianceStatus;
+  memory_profile?: MemoryProfileData;
+  system_resources?: SystemResourceMetrics;
   settings: {
     ai_auto_trade: boolean;
+    active_strategy_bot?: string;
     mode: 'mock' | 'live';
     timeframe: string;
   };
@@ -135,8 +300,11 @@ export interface LivePortfolioState {
   balance_dollars: number;
   available_margin: number;
   payout_pending: number;
+  positions_count?: number;
   positions: LivePositionItem[];
   updated_at: string;
+  environment?: string;
+  is_authenticated?: boolean;
 }
 
 export interface ReconciliationReport {
@@ -150,3 +318,18 @@ export interface ReconciliationReport {
   timestamp: string;
 }
 
+export interface OrderResponse {
+  success: boolean;
+  order_id?: string;
+  fill_price?: number;
+  cost?: number;
+  slippage?: number;
+  status?: string;
+  reason?: string;
+  message?: string;
+  error?: string;
+  freeze_trading?: boolean;
+  action_required?: string;
+  live_balance?: number;
+  execution_mode?: string;
+}

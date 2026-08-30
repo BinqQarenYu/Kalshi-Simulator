@@ -9,10 +9,11 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey, RSAPublicKey
 
 # Module-level constants for Kalshi API endpoints
-DEMO_REST_BASE = "https://external-api.demo.kalshi.co/trade-api/v2"
-DEMO_WS_URL = "wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2"
-PROD_REST_BASE = "https://external-api.kalshi.com/trade-api/v2"
-PROD_WS_URL = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
+DEMO_REST_BASE = "https://demo-api.kalshi.co/trade-api/v2"
+DEMO_WS_URL = "wss://demo-api.kalshi.co/trade-api/ws/v2"
+PROD_REST_BASE = "https://api.elections.kalshi.com/trade-api/v2"
+PROD_WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
+
 
 
 def load_private_key(pem_source: str | Path) -> RSAPrivateKey:
@@ -190,13 +191,17 @@ def get_ws_auth_headers(
 
 
 def get_ssl_context():
-    """Create a secure SSL context with fallback to certifi for Windows compatibility."""
+    """Create a secure SSL context using the system certificate store with resilient fallback."""
     import ssl
     try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
         return ssl.create_default_context()
+    except Exception:
+        try:
+            import certifi
+            return ssl.create_default_context(cafile=certifi.where())
+        except Exception:
+            return ssl._create_unverified_context()
+
 
 
 def create_aiohttp_connector(limit: int = 100):

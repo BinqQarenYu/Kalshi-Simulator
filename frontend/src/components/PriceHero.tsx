@@ -6,7 +6,7 @@ interface PriceHeroProps {
   market: MarketState;
 }
 
-export const PriceHero: React.FC<PriceHeroProps> = ({ market }) => {
+export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market }) => {
   const [viewMode, setViewMode] = useState<'$' | '%'>('$');
 
   const isUp = market.diff >= 0;
@@ -25,7 +25,7 @@ export const PriceHero: React.FC<PriceHeroProps> = ({ market }) => {
             <div className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
               {market.target_strike_str}
             </div>
-            <div className="text-xs text-[#8b949e] font-medium">10:00am ET</div>
+            <div className="text-xs text-[#8b949e] font-medium">{market.target_time_str || 'Expiry Target'}</div>
           </div>
 
           {/* NOW Spot BTC Price */}
@@ -39,7 +39,7 @@ export const PriceHero: React.FC<PriceHeroProps> = ({ market }) => {
             </div>
             <div className={`text-xs font-semibold flex items-center gap-1 ${deltaColor}`}>
               <span>{isUp ? '+' : ''}${market.diff.toFixed(2)}</span>
-              <span>({isUp ? '+' : ''}{market.diff_pct.toFixed(2)}%)</span>
+              <span>({isUp ? '+' : ''}{Math.abs(market.diff_pct) < 0.1 ? market.diff_pct.toFixed(3) : market.diff_pct.toFixed(2)}%)</span>
             </div>
           </div>
         </div>
@@ -71,7 +71,7 @@ export const PriceHero: React.FC<PriceHeroProps> = ({ market }) => {
             Kalshi Sim
           </span>
 
-          {/* Expiry Countdown Timer Badge (matching the image) */}
+          {/* Expiry Countdown Timer Badge */}
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f59e0b]/10 border border-[#f59e0b]/30 shadow-inner">
             <span className="text-xl sm:text-2xl font-mono font-extrabold text-[#f59e0b] tracking-wider">
               {market.expiry_countdown_str}
@@ -82,4 +82,4 @@ export const PriceHero: React.FC<PriceHeroProps> = ({ market }) => {
       </div>
     </div>
   );
-};
+});

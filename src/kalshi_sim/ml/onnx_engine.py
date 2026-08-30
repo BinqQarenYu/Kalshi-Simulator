@@ -186,11 +186,11 @@ class KalshiONNXEngine:
             signal = "WAIT"
             confidence = wait_p
             veto_reason = f"VPIN Toxicity Breached ({vpin_score:.3f} > {VPIN_OVERRIDE_THRESHOLD})"
-        elif rel_long >= 0.55 and long_p >= 0.20:
+        elif rel_long >= 0.55 and (long_p >= 0.10 or rel_long >= 0.60):
             signal = "LONG"
             confidence = rel_long
             veto_reason = ""
-        elif rel_short >= 0.55 and short_p >= 0.20:
+        elif rel_short >= 0.55 and (short_p >= 0.10 or rel_short >= 0.60):
             signal = "SHORT"
             confidence = rel_short
             veto_reason = ""
@@ -209,6 +209,8 @@ class KalshiONNXEngine:
             "prob_long": round(long_p, 4),
             "prob_short": round(short_p, 4),
             "prob_wait": round(wait_p, 4),
+            "rel_long": round(rel_long, 4),
+            "rel_short": round(rel_short, 4),
             "vpin_score": round(vpin_score, 4),
             "vpin_veto": vpin_veto,
             "veto_reason": veto_reason,

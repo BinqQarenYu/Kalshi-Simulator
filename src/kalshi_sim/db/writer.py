@@ -41,6 +41,7 @@ class DatabaseWriter:
         self.db_manager = db_manager or get_db()
         self.batch_size = batch_size
         self.flush_interval_seconds = flush_interval_seconds
+        self.max_queue_size = max_queue_size
         self.queue: asyncio.Queue[QueuedRecord] = asyncio.Queue(maxsize=max_queue_size)
         self._worker_task: Optional[asyncio.Task] = None
         self._running = False
@@ -50,6 +51,11 @@ class DatabaseWriter:
         if self._running:
             return
         await self.db_manager.init_db()
+        # Ensure queue is bound to currently running event loop
+        try:
+            self.queue = asyncio.Queue(maxsize=self.max_queue_size)
+        except Exception:
+            pass
         self._running = True
         self._worker_task = asyncio.create_task(self._worker_loop(), name="db_writer_worker")
         logger.info("DatabaseWriter started background ingestion worker.")
@@ -176,6 +182,7 @@ class DatabaseWriter:
         fees: float = 0.0,
         vpin: Optional[float] = None,
         kelly_fraction: Optional[float] = None,
+        bot_type: str = "3_step_domination_bot",
         execution_mode: str = "simulated",
         status: str = "filled",
         timeframe: str = "15m",
@@ -196,6 +203,7 @@ class DatabaseWriter:
             "fees": fees,
             "vpin": vpin,
             "kelly_fraction": kelly_fraction,
+            "bot_type": bot_type,
             "execution_mode": execution_mode,
             "status": status,
         }
@@ -215,6 +223,8 @@ class DatabaseWriter:
         outcome: str,
         pnl: float,
         balance_after: float,
+        bot_type: str = "3_step_domination_bot",
+        execution_mode: str = "simulated",
         timestamp: Optional[datetime] = None,
     ) -> None:
         """Enqueue a settled position outcome record."""
@@ -231,6 +241,8 @@ class DatabaseWriter:
             "outcome": outcome,
             "pnl": pnl,
             "balance_after": balance_after,
+            "bot_type": bot_type,
+            "execution_mode": execution_mode,
         }
         try:
             self.queue.put_nowait(QueuedRecord(table="settlements", data=record))
@@ -247,6 +259,8 @@ class DatabaseWriter:
         win_rate: float = 0.0,
         total_trades: int = 0,
         open_positions_count: int = 0,
+        bot_type: str = "all",
+        execution_mode: str = "simulated",
         timestamp: Optional[datetime] = None,
     ) -> None:
         """Enqueue a portfolio equity state snapshot."""
@@ -262,6 +276,8 @@ class DatabaseWriter:
             "win_rate": win_rate,
             "total_trades": total_trades,
             "open_positions_count": open_positions_count,
+            "bot_type": bot_type,
+            "execution_mode": execution_mode,
         }
         try:
             self.queue.put_nowait(QueuedRecord(table="equity_snapshots", data=record))
@@ -279,6 +295,7 @@ class DatabaseWriter:
         ev_no: float,
         recommended_side: str,
         rationale: Optional[str] = None,
+        bot_type: str = "onnx_ml_bot",
         timestamp: Optional[datetime] = None,
     ) -> None:
         """Enqueue an AI prediction and Stage 2 EV decision log."""
@@ -295,6 +312,7 @@ class DatabaseWriter:
             "ev_no": ev_no,
             "recommended_side": recommended_side,
             "rationale": rationale,
+            "bot_type": bot_type,
         }
         try:
             self.queue.put_nowait(QueuedRecord(table="ai_predictions", data=record))

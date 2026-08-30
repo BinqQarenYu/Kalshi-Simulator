@@ -37,8 +37,10 @@ class OrderSimulator:
     No real orders are placed — fills are computed locally from book state.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, fee_per_contract: Decimal = Decimal("0.01")) -> None:
+        self.fee_per_contract = fee_per_contract
         self._resting_orders: dict[str, list[SimulatedOrder]] = {}
+
 
     def place_resting_limit_order(
         self,
@@ -125,6 +127,7 @@ class OrderSimulator:
 
             if is_filled:
                 cost = fill_price * ord.size
+                fee = self.fee_per_contract * ord.size
                 ord.status = "filled"
                 fill = SimulatedFill(
                     order_id=ord.order_id,
@@ -133,13 +136,14 @@ class OrderSimulator:
                     size=ord.size,
                     fill_price=fill_price,
                     slippage=Decimal("0"),
+                    fee=fee,
                     cost=cost,
                     timestamp=now,
                 )
                 filled.append((ord, fill))
                 logger.info(
-                    "RESTING ORDER MATCHED & FILLED: %s %s %d @ $%s (cost=$%s) [ID: %s]",
-                    ord.side.value.upper(), ord.ticker, ord.size, fill_price, cost, ord.order_id,
+                    "RESTING ORDER MATCHED & FILLED: %s %s %d @ $%s (fee=$%s, cost=$%s) [ID: %s]",
+                    ord.side.value.upper(), ord.ticker, ord.size, fill_price, fee, cost, ord.order_id,
                 )
             else:
                 remaining.append(ord)
@@ -219,6 +223,8 @@ class OrderSimulator:
             status="filled",
         )
 
+        fee = self.fee_per_contract * total_filled
+
         fill = SimulatedFill(
             order_id=order_id,
             ticker=book.market_ticker,
@@ -226,17 +232,19 @@ class OrderSimulator:
             size=total_filled,
             fill_price=vwap_price,
             slippage=slippage,
+            fee=fee,
             cost=cost,
             timestamp=now,
         )
 
         logger.info(
-            "SIM FILL: %s %s %d @ $%s (slippage=$%s, cost=$%s) [%s]",
+            "SIM FILL: %s %s %d @ $%s (fee=$%s, slippage=$%s, cost=$%s) [%s]",
             side.value.upper(), book.market_ticker, total_filled,
-            vwap_price, slippage, cost, reasoning[:60],
+            vwap_price, fee, slippage, cost, reasoning[:60],
         )
 
         return order, fill
+
 
     def simulate_limit_order(
         self,
@@ -303,6 +311,8 @@ class OrderSimulator:
             status="filled",
         )
 
+        fee = self.fee_per_contract * size
+
         fill = SimulatedFill(
             order_id=order_id,
             ticker=book.market_ticker,
@@ -310,14 +320,15 @@ class OrderSimulator:
             size=size,
             fill_price=limit_price,
             slippage=Decimal("0"),
+            fee=fee,
             cost=cost,
             timestamp=now,
         )
 
         logger.info(
-            "SIM LIMIT FILL: %s %s %d @ $%s (cost=$%s) [%s]",
+            "SIM LIMIT FILL: %s %s %d @ $%s (fee=$%s, cost=$%s) [%s]",
             side.value.upper(), book.market_ticker, size,
-            limit_price, cost, reasoning[:60],
+            limit_price, fee, cost, reasoning[:60],
         )
 
         return order, fill

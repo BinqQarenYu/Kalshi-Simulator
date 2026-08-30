@@ -5,16 +5,19 @@ import { ArrowDownUp } from 'lucide-react';
 interface ChanceBannerProps {
   market: MarketState;
   activeTab: 'trade_up' | 'trade_down' | 'graph' | 'orderbook' | 'ai';
+  tradingMode?: 'paper' | 'live';
   onSelectTab: (tab: 'trade_up' | 'trade_down' | 'graph' | 'orderbook' | 'ai') => void;
   onQuickTrade: (side: 'yes' | 'no') => void;
 }
 
-export const ChanceBanner: React.FC<ChanceBannerProps> = ({
+export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
   market,
   activeTab,
+  tradingMode = 'paper',
   onSelectTab,
   onQuickTrade,
 }) => {
+  const isLive = tradingMode === 'live';
   return (
     <div className="bg-[#111620] border-b border-[#21262d] px-4 py-3 sm:px-6">
       {/* Probability & Quick Action Pills Banner */}
@@ -97,18 +100,20 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = ({
         >
           Level-2 Book
         </button>
-        <button
-          onClick={() => onSelectTab('ai')}
-          className={`pb-1 border-b-2 transition-all flex items-center gap-1 ${
-            activeTab === 'ai'
-              ? 'border-[#3b82f6] text-[#3b82f6]'
-              : 'border-transparent text-[#8b949e] hover:text-white'
-          }`}
-        >
-          <span>AI Microstructure</span>
-          <span className="h-1.5 w-1.5 rounded-full bg-[#3b82f6] animate-pulse" />
-        </button>
+        {!isLive && (
+          <button
+            onClick={() => onSelectTab('ai')}
+            className={`pb-1 border-b-2 flex items-center gap-1.5 transition-all ${
+              activeTab === 'ai'
+                ? 'border-[#3b82f6] text-[#3b82f6]'
+                : 'border-transparent text-[#8b949e] hover:text-white'
+            }`}
+          >
+            <span>AI Microstructure</span>
+            <span className="h-1.5 w-1.5 rounded-full bg-[#3b82f6] animate-pulse" />
+          </button>
+        )}
       </div>
     </div>
   );
-};
+});

@@ -19,11 +19,15 @@ build/
 models/
 
 # Database and data store
+*.db
+*.db-wal
+*.db-shm
 data/*.jsonl
 data/*.db
 data/*.db-wal
 data/*.db-shm
 data/*.csv
+scratch/
 
 # Node & Frontend
 node_modules/

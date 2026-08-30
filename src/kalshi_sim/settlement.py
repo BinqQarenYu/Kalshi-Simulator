@@ -63,36 +63,39 @@ def settle_position(
     ticker: str,
     market_info: MarketInfo,
     last_ticker_update: TickerUpdate | None,
+    btc_settle_price: Decimal | None = None,
 ) -> SettlementResult | None:
-    """Settle an individual position using CF Benchmarks RTI proxy price.
-
-    Uses the last traded price from ticker updates as a proxy for the index settlement
-    price and delegates payout computation to the portfolio.
+    """Settle an individual position using CF Benchmarks RTI proxy price or live Spot index.
 
     Args:
         portfolio: Virtual portfolio managing open positions and balance.
         ticker: Market ticker to settle.
         market_info: Market metadata containing strike thresholds and type.
         last_ticker_update: Most recent TickerUpdate for the market, or None.
+        btc_settle_price: Optional real-time BTC Spot index price at settlement.
 
     Returns:
         SettlementResult if settlement succeeded, or None if price data was missing
         or position could not be settled.
     """
-    if last_ticker_update is None or last_ticker_update.last_price is None:
+    if btc_settle_price is not None:
+        settlement_price = btc_settle_price
+    elif last_ticker_update is not None and last_ticker_update.last_price is not None:
+        settlement_price = last_ticker_update.last_price
+    else:
         logger.warning(
-            "Cannot settle position %s: missing ticker update or last_price",
+            "Cannot settle position %s: missing ticker update, price or spot index",
             ticker,
         )
         return None
 
-    settlement_price = last_ticker_update.last_price
+    floor_strike = market_info.floor_strike if market_info.floor_strike is not None else market_info.target_strike
     result = portfolio.settle_position(
         ticker=ticker,
         settlement_price=settlement_price,
-        floor_strike=market_info.floor_strike,
+        floor_strike=floor_strike,
         cap_strike=market_info.cap_strike,
-        strike_type=market_info.strike_type,
+        strike_type=market_info.strike_type or "greater",
     )
     return result
 
