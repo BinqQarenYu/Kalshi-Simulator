@@ -137,8 +137,8 @@ class KalshiLiveOrderClient:
             Dict containing order response and fill details, or None on failure.
         """
         side_val = side.value if hasattr(side, "value") else str(side).lower()
-        endpoint = "/trade-api/v2/portfolio/orders"
-        url = f"{self.base_url}/portfolio/orders"
+        endpoint = "/trade-api/v2/portfolio/events/orders"
+        url = f"{self.base_url}/portfolio/events/orders"
 
         order_uuid = client_order_id or str(uuid.uuid4())
         
@@ -157,6 +157,8 @@ class KalshiLiveOrderClient:
                 v2_price = Decimal("0.35")
 
         is_limit = order_type.lower() == "limit"
+        # Auto-detect shard: Shard 2 is Crypto (KXBTC*), Shard 0 is default
+        exchange_shard = 2 if ticker.startswith("KXBTC") else 0
         payload: Dict[str, Any] = {
             "ticker": ticker,
             "client_order_id": order_uuid,
@@ -166,6 +168,7 @@ class KalshiLiveOrderClient:
             "time_in_force": "good_till_canceled" if is_limit else "immediate_or_cancel",
             "self_trade_prevention_type": "taker_at_cross",
             "post_only": bool(resting_only and is_limit),
+            "exchange_index": exchange_shard,
         }
 
         headers = get_auth_headers(self.api_key_id, self.private_key, "POST", endpoint)
@@ -183,10 +186,10 @@ class KalshiLiveOrderClient:
                     return None
                 order_data = await resp.json()
                 logger.info(
-                    "KALSHI V2 ORDER PLACED: %s %s %d %s | ID: %s | Status: %s",
+                    "[KALSHI LIVE PRODUCTION EXCHANGE] ORDER EXECUTED: %s %s %d %s | ID: %s | Fills: %s",
                     action.upper(), side_val.upper(), count, ticker,
                     order_data.get("order_id", order_uuid),
-                    order_data.get("status", "executed"),
+                    order_data.get("fill_count", "0.00"),
                 )
                 return order_data
         except Exception as exc:
@@ -195,14 +198,14 @@ class KalshiLiveOrderClient:
 
     async def cancel_order(self, order_id: str, ticker: Optional[str] = None) -> bool:
         """Cancel a resting order on Kalshi using V2 Trade API."""
-        endpoint = f"/trade-api/v2/portfolio/orders/{order_id}"
+        endpoint = f"/trade-api/v2/portfolio/events/orders/{order_id}"
         query_suffix = f"?market_ticker={ticker}" if ticker else ""
-        url = f"{self.base_url}/portfolio/orders/{order_id}{query_suffix}"
+        url = f"{self.base_url}/portfolio/events/orders/{order_id}{query_suffix}"
         headers = get_auth_headers(self.api_key_id, self.private_key, "DELETE", endpoint)
 
         session = await self._get_session()
         async with session.delete(url, headers=headers) as resp:
-            if resp.status == 200:
+            if resp.status in (200, 204):
                 logger.info("Successfully cancelled order: %s", order_id)
                 return True
             err_text = await resp.text()
