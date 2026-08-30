@@ -78,14 +78,19 @@ def settle_position(
         SettlementResult if settlement succeeded, or None if price data was missing
         or position could not be settled.
     """
-    if btc_settle_price is not None:
+    if btc_settle_price is not None and btc_settle_price > Decimal("100.00"):
         settlement_price = btc_settle_price
-    elif last_ticker_update is not None and last_ticker_update.last_price is not None:
+    elif (
+        last_ticker_update is not None
+        and last_ticker_update.last_price is not None
+        and last_ticker_update.last_price > Decimal("100.00")
+    ):
         settlement_price = last_ticker_update.last_price
     else:
         logger.warning(
-            "Cannot settle position %s: missing ticker update, price or spot index",
+            "Cannot settle position %s: invalid or missing underlying Bitcoin Spot index price (got %s)",
             ticker,
+            btc_settle_price or (last_ticker_update.last_price if last_ticker_update else None),
         )
         return None
 

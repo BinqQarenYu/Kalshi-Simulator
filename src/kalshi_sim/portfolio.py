@@ -341,17 +341,10 @@ class Portfolio:
         cap_strike: Decimal | None,
         strike_type: str | None,
     ) -> bool:
-        """Determine if the 'Yes' outcome wins.
+        """Determine if the 'Yes' outcome wins against the institutional Spot Index.
 
-        Returns True if Yes wins based on strike type and settlement price.
+        Returns True if Yes wins (Spot >= Strike for 'greater').
         """
-        # If settlement_price is in contract binary payoff range [0.0, 1.0] and strike is asset price (> $100)
-        if settlement_price <= Decimal("1.00") and (
-            (floor_strike is not None and floor_strike > Decimal("100.00"))
-            or (cap_strike is not None and cap_strike > Decimal("100.00"))
-        ):
-            return settlement_price >= Decimal("0.50")
-
         if strike_type == "greater" and floor_strike is not None:
             return settlement_price >= floor_strike
         elif strike_type == "less" and cap_strike is not None:

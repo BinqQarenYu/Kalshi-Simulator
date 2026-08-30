@@ -612,44 +612,52 @@ class SimulationAgent:
                     )
                     if live_order:
                         order_id = live_order.get("order_id", "live_ord")
-                        fill_count = live_order.get("fill_count", str(live_count))
-                        avg_price = float(live_order.get("average_fill_price", "0.50"))
-                        fee = float(live_order.get("average_fee_paid", "0.0007"))
-                        cost = avg_price * float(fill_count) + fee
+                        fill_count_str = live_order.get("fill_count", "0.00")
+                        actual_fills = int(float(fill_count_str))
+                        
+                        if actual_fills > 0:
+                            avg_price = float(live_order.get("average_fill_price", "0.50"))
+                            fee = float(live_order.get("average_fee_paid", "0.0007"))
+                            cost = avg_price * actual_fills + fee
 
-                        self._db_writer.enqueue_trade(
-                            trade_id=f"live_{order_id}",
-                            ticker=ticker,
-                            side=live_side,
-                            size=int(float(fill_count)),
-                            price=avg_price,
-                            gross_value=cost,
-                            timeframe=timeframe.value,
-                            bot_type=b_type,
-                            execution_mode="live",
-                            status="filled",
-                        )
-                        logger.info(
-                            "[KALSHI LIVE PRODUCTION EXCHANGE] Order Executed: %s | Fills: %s | Ticker: %s | Side: %s | Count: %d | Cost: $%.4f",
-                            order_id, fill_count, ticker, live_side.upper(), live_count, cost,
-                        )
-                        if self._telemetry_alerts is not None:
-                            try:
-                                asyncio.create_task(
-                                    self._telemetry_alerts.send_order_alert(
-                                        ticker=ticker,
-                                        side=live_side,
-                                        contracts=int(float(fill_count)),
-                                        price=Decimal(str(avg_price)),
-                                        cost=Decimal(str(cost)),
-                                        fee=Decimal(str(fee)),
-                                        ai_prob=float(snapshot.win_rate or 0.70),
-                                        vpin=0.15,
-                                        execution_mode="live",
+                            self._db_writer.enqueue_trade(
+                                trade_id=f"live_{order_id}",
+                                ticker=ticker,
+                                side=live_side,
+                                size=actual_fills,
+                                price=avg_price,
+                                gross_value=cost,
+                                timeframe=timeframe.value,
+                                bot_type=b_type,
+                                execution_mode="live",
+                                status="filled",
+                            )
+                            logger.info(
+                                "[KALSHI LIVE PRODUCTION EXCHANGE] Order FILLED: %s | Fills: %d | Ticker: %s | Side: %s | Cost: $%.4f",
+                                order_id, actual_fills, ticker, live_side.upper(), cost,
+                            )
+                            if self._telemetry_alerts is not None:
+                                try:
+                                    asyncio.create_task(
+                                        self._telemetry_alerts.send_order_alert(
+                                            ticker=ticker,
+                                            side=live_side,
+                                            contracts=actual_fills,
+                                            price=Decimal(str(avg_price)),
+                                            cost=Decimal(str(cost)),
+                                            fee=Decimal(str(fee)),
+                                            ai_prob=float(snapshot.win_rate or 0.70),
+                                            vpin=0.15,
+                                            execution_mode="live",
+                                        )
                                     )
-                                )
-                            except Exception as exc:
-                                logger.debug("Failed to dispatch live order telemetry: %s", exc)
+                                except Exception as exc:
+                                    logger.debug("Failed to dispatch live order telemetry: %s", exc)
+                        else:
+                            logger.info(
+                                "[KALSHI LIVE PRODUCTION EXCHANGE] IOC Order %s had 0 fills (unmatched in orderbook). No position opened.",
+                                order_id,
+                            )
                 except Exception as exc:
                     logger.error("Failed to send order to Kalshi Live Production exchange: %s", exc)
             return
