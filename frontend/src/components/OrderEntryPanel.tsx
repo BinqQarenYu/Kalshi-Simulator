@@ -257,7 +257,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
           <div className="flex items-center justify-between text-xs font-semibold text-[#8b949e] mb-1">
             <div className="flex items-center gap-1">
               <label htmlFor="limit-price-input">Limit price</label>
-              <HelpCircle className="h-3 w-3 text-[#8b949e]" />
+            <HelpCircle className="h-3 w-3 text-[#8b949e]" aria-hidden="true" />
             </div>
             <span className="text-[11px] text-gray-400">
               Ask: <strong className="text-white">{market.yes_cents_str}</strong> · Bid: <strong className="text-white">{((market.best_yes_bid ?? 0.5) * 100).toFixed(1)}¢</strong>
@@ -283,41 +283,45 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
           <div className="flex items-center justify-end gap-1.5 mt-1">
             <button
               type="button"
+              aria-label="Decrease limit price by 1 cent"
               onClick={() => {
                 soundFX.playClickSound();
                 setLimitPriceCents((prev) => Math.max(0.1, parseFloat((prev - 1.0).toFixed(1))));
               }}
-              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400"
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#00d084]"
             >
               -1¢
             </button>
             <button
               type="button"
+              aria-label="Decrease limit price by 0.1 cents"
               onClick={() => {
                 soundFX.playClickSound();
                 setLimitPriceCents((prev) => Math.max(0.1, parseFloat((prev - 0.1).toFixed(1))));
               }}
-              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400"
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#00d084]"
             >
               -0.1¢
             </button>
             <button
               type="button"
+              aria-label="Increase limit price by 0.1 cents"
               onClick={() => {
                 soundFX.playClickSound();
                 setLimitPriceCents((prev) => Math.min(99.9, parseFloat((prev + 0.1).toFixed(1))));
               }}
-              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400"
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#00d084]"
             >
               +0.1¢
             </button>
             <button
               type="button"
+              aria-label="Increase limit price by 1 cent"
               onClick={() => {
                 soundFX.playClickSound();
                 setLimitPriceCents((prev) => Math.min(99.9, parseFloat((prev + 1.0).toFixed(1))));
               }}
-              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400"
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#00d084]"
             >
               +1¢
             </button>
@@ -328,20 +332,18 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       {/* Submit as Resting Order Only Toggle */}
       {orderType === 'LIMIT' && (
         <div className="flex items-center justify-between text-xs text-gray-300 py-1">
-          <label htmlFor="resting-only-switch" className="cursor-pointer select-none">
-            Submit as resting order only
-          </label>
+          <span id="resting-only-label">Submit as resting order only</span>
           <button
             id="resting-only-switch"
             type="button"
             role="switch"
             aria-checked={restingOnly}
-            aria-label="Submit as resting order only"
+            aria-labelledby="resting-only-label"
             onClick={() => {
               soundFX.playClickSound();
               setRestingOnly(!restingOnly);
             }}
-            className={`w-9 h-5 flex items-center rounded-full p-1 transition-colors focus-visible:ring-2 focus-visible:ring-[#00d084] focus-visible:outline-none ${
+            className={`w-9 h-5 flex items-center rounded-full p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
               restingOnly ? 'bg-[#00d084]' : 'bg-[#30363d]'
             }`}
           >
