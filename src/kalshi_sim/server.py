@@ -35,6 +35,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import uvicorn
 
+from kalshi_sim.agent_token_manager import get_agent_token_manager, AgentTokenManager
 from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, async_validate_credentials, create_aiohttp_connector, load_private_key
 from kalshi_sim.data_memory_manager import MarketDataMemoryManager, MemoryProfile
@@ -152,6 +153,9 @@ class ServerState:
 
         # Agent_Guardrails Risk & Self-Preservation Guardian
         self.guardrails_agent = AgentGuardrails()
+
+        # AgentTokenManager Token & Gemini Credit Guardian
+        self.token_manager = get_agent_token_manager()
 
         # Telemetry & Instant Alert Webhook Dispatcher (Phase 3.3)
         self.telemetry_alerts = TelemetryAlertDispatcher()
@@ -3126,6 +3130,49 @@ async def trigger_manual_gc_endpoint(generation: int = 1) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# AgentTokenManager (Agent Token & Gemini Credit Guardian) Endpoints
+# ---------------------------------------------------------------------------
+
+class TokenConfigUpdate(BaseModel):
+    daily_token_budget: Optional[int] = None
+    daily_credit_budget: Optional[float] = None
+    tpm_limit: Optional[int] = None
+    rpm_limit: Optional[int] = None
+    min_market_price_delta: Optional[float] = None
+
+
+@app.get("/api/agent-management/status")
+async def get_agent_management_status() -> dict[str, Any]:
+    """Retrieve live Agent Token & Gemini Credit Management telemetry."""
+    return state.token_manager.get_status_report()
+
+
+@app.post("/api/agent-management/config")
+async def update_agent_management_config(req: TokenConfigUpdate) -> dict[str, Any]:
+    """Update Agent Token & Gemini Credit budget limits and thresholds."""
+    if req.daily_token_budget is not None:
+        state.token_manager.daily_token_budget = req.daily_token_budget
+    if req.daily_credit_budget is not None:
+        state.token_manager.daily_credit_budget = req.daily_credit_budget
+    if req.tpm_limit is not None:
+        state.token_manager.tpm_limit = req.tpm_limit
+    if req.rpm_limit is not None:
+        state.token_manager.rpm_limit = req.rpm_limit
+    if req.min_market_price_delta is not None:
+        state.token_manager.min_market_price_delta = req.min_market_price_delta
+    state.is_dirty = True
+    return {"success": True, "status": state.token_manager.get_status_report()}
+
+
+@app.post("/api/agent-management/reset-usage")
+async def reset_agent_management_usage() -> dict[str, Any]:
+    """Reset Agent Token & Gemini Credit consumption counters and SHA256 cache."""
+    state.token_manager.reset_usage_counters()
+    state.is_dirty = True
+    return {"success": True, "message": "Agent token usage counters and cache reset.", "status": state.token_manager.get_status_report()}
+
+
+# ---------------------------------------------------------------------------
 # WebSocket Broadcast Logic
 # ---------------------------------------------------------------------------
 
@@ -3327,6 +3374,7 @@ def _build_full_state_payload() -> dict[str, Any]:
         "integrity_status": state.integrity_agent.get_latest_status(),
         "compliance_status": state.law_order_agent.get_compliance_status(),
         "guardrails_status": state.guardrails_agent.get_status(),
+        "agent_token_management": state.token_manager.get_status_report(),
     }
 
 
