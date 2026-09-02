@@ -435,7 +435,10 @@ class IngestionAgent:
                 stale = self._orderbook.get_stale_tickers()
                 if stale:
                     logger.warning("Stale books detected: %s", stale)
-                    # TODO: trigger re-subscription for stale tickers
+                    await self._ws_client.subscribe(
+                        channels=["orderbook_delta", "ticker", "trade"],
+                        market_tickers=stale,
+                    )
 
                 # Dynamically update WebSocket subscriptions for new tickers
                 new_tickers = self._active_tickers - old_tickers
