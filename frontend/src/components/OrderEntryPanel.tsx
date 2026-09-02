@@ -328,14 +328,20 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       {/* Submit as Resting Order Only Toggle */}
       {orderType === 'LIMIT' && (
         <div className="flex items-center justify-between text-xs text-gray-300 py-1">
-          <span>Submit as resting order only</span>
+          <label htmlFor="resting-only-switch" className="cursor-pointer select-none">
+            Submit as resting order only
+          </label>
           <button
+            id="resting-only-switch"
             type="button"
+            role="switch"
+            aria-checked={restingOnly}
+            aria-label="Submit as resting order only"
             onClick={() => {
               soundFX.playClickSound();
               setRestingOnly(!restingOnly);
             }}
-            className={`w-9 h-5 flex items-center rounded-full p-1 transition-colors ${
+            className={`w-9 h-5 flex items-center rounded-full p-1 transition-colors focus-visible:ring-2 focus-visible:ring-[#00d084] focus-visible:outline-none ${
               restingOnly ? 'bg-[#00d084]' : 'bg-[#30363d]'
             }`}
           >
