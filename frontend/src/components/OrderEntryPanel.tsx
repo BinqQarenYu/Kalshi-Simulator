@@ -334,6 +334,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
         <div className="flex items-center justify-between text-xs text-gray-300 py-1">
           <span id="resting-only-label">Submit as resting order only</span>
           <button
+            id="resting-only-switch"
             type="button"
             role="switch"
             aria-checked={restingOnly}
