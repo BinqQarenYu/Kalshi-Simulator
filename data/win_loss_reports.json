@@ -1,5 +1,28 @@
 [
   {
+    "report_id": "WLR-260902052525-532",
+    "cycle_time": "September 02, 1:15 - 1:30 AM ET",
+    "ticker": "KXBTC15M-T78650",
+    "timeframe": "15m",
+    "strike_price": 78656.27,
+    "settlement_btc_price": 77453.12,
+    "bot_side": "yes",
+    "contracts": 10,
+    "entry_price": 0.68,
+    "settlement_price": 0.0,
+    "outcome": "loss",
+    "pnl": -6.8,
+    "roi_pct": -100.0,
+    "ai_confidence": 0.15,
+    "ai_rationale": "AI WAIT Regime: P(WAIT)=70.0% dominates directional signals [P(UP)=15.0%, P(DOWN)=15.0%]",
+    "vpin_score": 0.5,
+    "ev_edge": 0.0,
+    "balance_after": 91.8,
+    "bot_type": "3_step_domination_bot",
+    "execution_mode": "mock",
+    "timestamp_utc": "2026-09-02T05:25:25.804138+00:00"
+  },
+  {
     "report_id": "WLR-260830201328-424",
     "cycle_time": "August 30, 4:00 - 4:15 PM ET",
     "ticker": "KXBTC15M-T78650",
