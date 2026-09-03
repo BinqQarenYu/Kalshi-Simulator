@@ -135,7 +135,9 @@ export const Header: React.FC<HeaderProps> = ({
                       soundFX.playClickSound();
                       onSelectTimeframe(tf);
                     }}
-                    className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all ${
+                    aria-label={`Switch timeframe to ${tf === '15m' ? '15 minute' : tf === '5m' ? '5 minute' : '1 hour'}`}
+                    aria-pressed={timeframe === tf}
+                    className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
                       timeframe === tf
                         ? 'bg-[#f7931a] text-black shadow-sm font-bold'
                         : 'text-[#8b949e] hover:text-white'
@@ -393,14 +395,15 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Audio SoundFX Toggle Button */}
           <button
             onClick={handleToggleSound}
-            className={`p-2 rounded-xl border transition-all ${
+            aria-label={isMuted ? 'Unmute sound effects' : 'Mute sound effects'}
+            className={`p-2 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
               isMuted
                 ? 'bg-[#161b22] border-[#30363d] text-[#8b949e] hover:text-white'
                 : 'bg-[#f7931a]/15 border-[#f7931a]/40 text-[#f7931a]'
             }`}
             title={isMuted ? 'Unmute Sound Effects' : 'Mute Sound Effects'}
           >
-            {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            {isMuted ? <VolumeX className="h-4 w-4" aria-hidden="true" /> : <Volume2 className="h-4 w-4" aria-hidden="true" />}
           </button>
 
           {/* Connection Status Indicator */}
