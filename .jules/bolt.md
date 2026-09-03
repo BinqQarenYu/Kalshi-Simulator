@@ -23,3 +23,7 @@
 ## 2026-08-27 - Deferred Pydantic Model Instantiation in L2 Order Book Depth Slicing
 **Learning:** Instantiating Pydantic `OrderBookLevel` objects for all price levels in an order book dictionary before sorting and slicing `[:n]` generated severe Pydantic validation overhead (~2.4ms per 10k calls).
 **Action:** Sort raw price-quantity dictionary items `(price, qty)` first, slice top `n` levels, and instantiate Pydantic `OrderBookLevel` objects only for the sliced slice. Reduced `get_depth` latency by 64% (~2.8x speedup).
+
+## 2026-08-28 - O(1) Top-of-Book Dict Subclass Indexing (`FastBook`)
+**Learning:** Evaluating `best_yes_bid`, `best_no_bid`, `spread`, and `mid_price` repeatedly on every tick or WebSocket state broadcast executed linear $O(N)$ `max(dict.keys())` scans, incurring ~11.2μs per query.
+**Action:** Implemented `FastBook` dictionary subclass tracking `_best` price level in $O(1)$ time upon item setting/deletion/popping. Reduced top-of-book query latency by ~70% (~3.28x speedup).

@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -249,6 +249,52 @@ class TradeEvent(BaseModel):
 # Internal — Reconstructed L2 Book State
 # ---------------------------------------------------------------------------
 
+class FastBook(dict):
+    """Dictionary subclass that tracks top-of-book max price level in O(1) time.
+
+    Performance Optimization:
+    Maintains `_best` price level in O(1) time upon item setting, deletion, popping,
+    clearing, or updating, eliminating repeated O(N) linear scans with max(keys())
+    for high-frequency top-of-book / spread / mid-price queries.
+    """
+    __slots__ = ("_best",)
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._best: Decimal | None = max(self.keys()) if self else None
+
+    @property
+    def best_bid(self) -> Decimal | None:
+        if self._best is None and self:
+            self._best = max(self.keys())
+        return self._best
+
+    def __setitem__(self, key: Decimal, value: Decimal) -> None:
+        super().__setitem__(key, value)
+        if self._best is None or key > self._best:
+            self._best = key
+
+    def __delitem__(self, key: Decimal) -> None:
+        super().__delitem__(key)
+        if self._best == key:
+            self._best = None
+
+    def pop(self, key: Decimal, default: Any = ...) -> Any:
+        existed = key in self
+        res = super().pop(key, default) if default is not ... else super().pop(key)
+        if existed and self._best == key:
+            self._best = None
+        return res
+
+    def clear(self) -> None:
+        super().clear()
+        self._best = None
+
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        super().update(*args, **kwargs)
+        self._best = max(self.keys()) if self else None
+
+
 class L2BookState:
     """In-memory reconstructed L2 order book for a single market.
 
@@ -258,8 +304,8 @@ class L2BookState:
     __slots__ = (
         "market_ticker",
         "last_seq",
-        "yes_book",
-        "no_book",
+        "_yes_book",
+        "_no_book",
         "last_update",
         "_stale",
     )
@@ -267,24 +313,36 @@ class L2BookState:
     def __init__(self, market_ticker: str) -> None:
         self.market_ticker = market_ticker
         self.last_seq: int = -1
-        self.yes_book: dict[Decimal, Decimal] = {}  # price → qty
-        self.no_book: dict[Decimal, Decimal] = {}
+        self._yes_book: FastBook = FastBook()
+        self._no_book: FastBook = FastBook()
         self.last_update: datetime = datetime.now(timezone.utc)
         self._stale: bool = True
 
     # -- Properties ----------------------------------------------------------
 
     @property
+    def yes_book(self) -> FastBook:
+        return self._yes_book
+
+    @yes_book.setter
+    def yes_book(self, value: dict[Decimal, Decimal]) -> None:
+        self._yes_book = value if isinstance(value, FastBook) else FastBook(value)
+
+    @property
+    def no_book(self) -> FastBook:
+        return self._no_book
+
+    @no_book.setter
+    def no_book(self, value: dict[Decimal, Decimal]) -> None:
+        self._no_book = value if isinstance(value, FastBook) else FastBook(value)
+
+    @property
     def best_yes_bid(self) -> Decimal | None:
-        if not self.yes_book:
-            return None
-        return max(self.yes_book.keys())
+        return self._yes_book.best_bid
 
     @property
     def best_no_bid(self) -> Decimal | None:
-        if not self.no_book:
-            return None
-        return max(self.no_book.keys())
+        return self._no_book.best_bid
 
     @property
     def best_yes_ask(self) -> Decimal | None:
@@ -332,8 +390,8 @@ class L2BookState:
         constructing OrderBookLevel Pydantic instances. This avoids instantiating
         and validating Pydantic models for non-top-n price levels (~2.8x speedup).
         """
-        top_yes = sorted(self.yes_book.items(), key=lambda item: item[0], reverse=True)[:n]
-        top_no = sorted(self.no_book.items(), key=lambda item: item[0], reverse=True)[:n]
+        top_yes = sorted(self._yes_book.items(), key=lambda item: item[0], reverse=True)[:n]
+        top_no = sorted(self._no_book.items(), key=lambda item: item[0], reverse=True)[:n]
         bids = [OrderBookLevel(price=p, quantity=q) for p, q in top_yes]
         asks = [OrderBookLevel(price=p, quantity=q) for p, q in top_no]
         return bids, asks

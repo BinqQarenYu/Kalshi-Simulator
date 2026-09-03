@@ -69,8 +69,14 @@ class OHLCVAggregator:
         if price is None:
             return
 
-        price_dec = Decimal(str(price))
-        vol_dec = Decimal(str(volume)) if volume is not None else Decimal("0")
+        # Performance Optimization: Avoid string conversion when price or volume is already Decimal
+        price_dec = price if isinstance(price, Decimal) else Decimal(str(price))
+        if isinstance(volume, Decimal):
+            vol_dec = volume
+        elif volume is None:
+            vol_dec = Decimal("0")
+        else:
+            vol_dec = Decimal(str(volume))
 
         # Determine UNIX epoch seconds
         if timestamp is None:
