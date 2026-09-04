@@ -140,7 +140,8 @@ export const IntegrityModal: React.FC<IntegrityModalProps> = ({
             </button>
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-200 p-1.5 hover:bg-slate-800 rounded-lg transition-colors"
+              aria-label="Close integrity modal"
+              className="text-slate-400 hover:text-slate-200 p-1.5 hover:bg-slate-800 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500"
             >
               ✕
             </button>

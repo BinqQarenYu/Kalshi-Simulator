@@ -393,7 +393,9 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Audio SoundFX Toggle Button */}
           <button
             onClick={handleToggleSound}
-            className={`p-2 rounded-xl border transition-all ${
+            aria-label="Sound effects"
+            aria-pressed={!isMuted}
+            className={`p-2 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
               isMuted
                 ? 'bg-[#161b22] border-[#30363d] text-[#8b949e] hover:text-white'
                 : 'bg-[#f7931a]/15 border-[#f7931a]/40 text-[#f7931a]'
