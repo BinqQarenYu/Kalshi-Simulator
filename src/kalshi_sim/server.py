@@ -2928,13 +2928,23 @@ async def reset_portfolio(req: ResetRequest) -> dict[str, Any]:
 @app.post("/api/circuit-breaker/reset")
 async def reset_circuit_breaker() -> dict[str, Any]:
     """Manually reset the drawdown circuit breaker to resume trading."""
+    if state.execution_mode == "live" and state.live_account:
+        cur_bal = Decimal(str(state.live_account.get("balance_dollars", "20.00")))
+    elif state.sim_agent:
+        cur_bal = state.sim_agent._portfolio.balance
+    else:
+        cur_bal = state.starting_capital
+
     if state.sim_agent:
-        if hasattr(state.sim_agent, "_portfolio_domination"):
-            state.sim_agent._portfolio_domination.reset_circuit_breaker()
-        if hasattr(state.sim_agent, "_portfolio_onnx"):
-            state.sim_agent._portfolio_onnx.reset_circuit_breaker()
-        return {"success": True, "message": "Circuit breaker reset. Trading resumed."}
-    return {"success": False, "message": "No active simulation agent."}
+        for attr in ["_portfolio_domination", "_portfolio_onnx", "_portfolio_macro_trend", "_portfolio_dominion2", "_portfolio"]:
+            if hasattr(state.sim_agent, attr):
+                getattr(state.sim_agent, attr).reset_circuit_breaker()
+
+    if state.guardrails_agent:
+        state.guardrails_agent.reset_circuit_breaker(cur_bal)
+
+    state.is_dirty = True
+    return {"success": True, "message": f"Circuit breaker reset. Re-anchored to ${cur_bal:.2f}. Trading resumed."}
 
 
 @app.post("/api/bot/kill-switch")
@@ -4017,10 +4027,15 @@ async def get_guardrails_status_endpoint() -> dict[str, Any]:
 @app.post("/api/guardrails/reset-circuit-breaker")
 async def reset_guardrails_circuit_breaker_endpoint() -> dict[str, Any]:
     """Manually reset the guardrail circuit breaker and re-anchor peak equity."""
-    p_balance = state.sim_agent._portfolio.balance if state.sim_agent else state.starting_capital
+    if state.execution_mode == "live" and state.live_account:
+        p_balance = Decimal(str(state.live_account.get("balance_dollars", "20.00")))
+    elif state.sim_agent:
+        p_balance = state.sim_agent._portfolio.balance
+    else:
+        p_balance = state.starting_capital
     state.guardrails_agent.reset_circuit_breaker(p_balance)
     state.is_dirty = True
-    return {"success": True, "message": "Guardrails circuit breaker reset.", "status": state.guardrails_agent.get_status()}
+    return {"success": True, "message": f"Guardrails circuit breaker reset to ${p_balance:.2f}.", "status": state.guardrails_agent.get_status()}
 
 
 # ---------------------------------------------------------------------------
