@@ -86,6 +86,13 @@ export interface BtcOrderflowSummary {
   recent_trades_buffer?: number;
 }
 
+export type StrategyBotId =
+  | 'macro_onnx'
+  | 'macro_trend_dominion'
+  | 'dominion_2_bot'
+  | '3_step_domination_bot'
+  | 'onnx_microstructure_bot';
+
 export interface StrategyBotInfo {
   id: string;
   name: string;

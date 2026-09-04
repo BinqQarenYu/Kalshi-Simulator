@@ -85,11 +85,13 @@ class MacroTrendExitDecision:
 class MacroTrendDominionBot:
     """Macro Trend Dominion Quantitative Strategy Bot."""
 
-    STRATEGY_ID = "macro_trend_dominion"
-    STRATEGY_NAME = "Macro Trend Dominion"
+    STRATEGY_ID = "macro_onnx"
+    STRATEGY_NAME = "Macro ONNX Bot"
 
     def __init__(
         self,
+        strategy_id: str = "macro_onnx",
+        strategy_name: str = "Macro ONNX Bot",
         min_edge_pct: float = 0.06,  # 6.0% minimum statistical edge
         min_ev_dollars: Decimal = Decimal("0.02"),
         vpin_toxic_threshold: float = 0.60,
@@ -109,6 +111,8 @@ class MacroTrendDominionBot:
         max_spot_history_seconds: float = 7200.0,  # 2 hours rolling buffer
         onnx_orderflow_weight: float = 0.35,  # 35% weight for ONNX Bitcoin microstructure orderflow
     ) -> None:
+        self.strategy_id = strategy_id
+        self.strategy_name = strategy_name
         self.min_edge_pct = min_edge_pct
         self.min_ev_dollars = min_ev_dollars
         self.vpin_toxic_threshold = vpin_toxic_threshold
@@ -689,7 +693,7 @@ class MacroTrendDominionBot:
                         )
 
                 # 3. Extreme Orderflow Uncertainty Veto
-                if onnx_prob_wait >= 0.70 and abs(spot_diff) < 50.0:
+                if onnx_prob_wait >= 0.70 and abs(spot_diff) < self.chop_spot_diff:
                     return self._build_wait_decision(
                         time_to_expiry_s=time_to_expiry_s,
                         spot_diff=spot_diff,
@@ -704,7 +708,7 @@ class MacroTrendDominionBot:
                         onnx_prob_wait=onnx_prob_wait,
                         rationale=(
                             f"ONNX Neutral Orderflow Veto: P(WAIT)={onnx_prob_wait*100:.1f}% dominates in chop zone "
-                            f"(|Diff|=${abs(spot_diff):.1f} < $50). Suppressing trade to avoid coin-toss flip."
+                            f"(|Diff|=${abs(spot_diff):.1f} < ${self.chop_spot_diff:.0f}). Suppressing trade to avoid coin-toss flip."
                         ),
                     )
 
@@ -776,8 +780,8 @@ class MacroTrendDominionBot:
         rec_contracts = min(effective_max_size, ev_res.recommended_contracts)
 
         return MacroTrendDecision(
-            strategy_id=self.STRATEGY_ID,
-            strategy_name=self.STRATEGY_NAME,
+            strategy_id=self.strategy_id,
+            strategy_name=self.strategy_name,
             active_playbook=playbook_title,
             playbook_stage=stage,
             macro_regime=macro_regime,
@@ -825,8 +829,8 @@ class MacroTrendDominionBot:
     ) -> MacroTrendDecision:
         """Construct default wait decision."""
         return MacroTrendDecision(
-            strategy_id=self.STRATEGY_ID,
-            strategy_name=self.STRATEGY_NAME,
+            strategy_id=self.strategy_id,
+            strategy_name=self.strategy_name,
             active_playbook="Awaiting Macro Setup",
             playbook_stage="none",
             macro_regime=macro_regime,

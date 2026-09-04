@@ -37,17 +37,17 @@ class AIWorker:
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None
         self._last_compute_duration_ms: float = 0.0
-        self.active_strategy_bot: str = "macro_trend_dominion"  # Default: Macro Trend Dominion
-        self._macro_trend_bot = MacroTrendDominionBot()
+        self.active_strategy_bot: str = "macro_onnx"  # Default: Macro ONNX Bot
+        self._macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_onnx", strategy_name="Macro ONNX Bot")
         self._domination_bot = ThreeStepDominationBot()
         self._dominion2_bot = Dominion2Bot()
 
         # Thread-safe in-memory cached AI signals
         self._cached_signals: dict[str, Any] = {
-            "strategy_id": "3_step_domination_bot",
-            "strategy_name": "3-Step Domination Bot",
-            "active_playbook": "Playbook 1: Early Momentum Breakout",
-            "playbook_stage": "breakout",
+            "strategy_id": "macro_onnx",
+            "strategy_name": "Macro ONNX Bot",
+            "active_playbook": "Playbook 1: Macro Trend Breakout",
+            "playbook_stage": "trend_expansion",
             "p_up": 0.50,
             "p_down": 0.50,
             "p_wait": 0.00,
@@ -60,7 +60,7 @@ class AIWorker:
             "kelly_f_yes": 0.00,
             "kelly_f_no": 0.00,
             "recommended_side": "wait",
-            "rationale": "3-Step Domination Bot (Cycle-Aware Quantitative Playbook Engine) initialized.",
+            "rationale": "Macro ONNX Bot (Multi-Scale Macro Trend + Continuous BTC L2 Orderflow) initialized.",
             "compute_latency_ms": 0.0,
         }
 
@@ -69,8 +69,11 @@ class AIWorker:
         self._sim_agent = sim_agent
 
     def set_active_strategy(self, strategy_id: str) -> None:
-        """Switch active strategy bot ('macro_trend_dominion', '3_step_domination_bot', 'dominion_2_bot', or 'onnx_microstructure_bot')."""
-        if strategy_id in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
+        """Switch active strategy bot ('macro_onnx', 'macro_trend_dominion', '3_step_domination_bot', 'dominion_2_bot', or 'onnx_microstructure_bot')."""
+        if strategy_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+            self.active_strategy_bot = "macro_onnx"
+            logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
+        elif strategy_id in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
             self.active_strategy_bot = "macro_trend_dominion"
             logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
         elif strategy_id in ("dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot", "dominion2", "dominion_v2"):
@@ -126,8 +129,15 @@ class AIWorker:
                         trades = self._sim_agent._recent_trades.get(ticker, []) if hasattr(self._sim_agent, "_recent_trades") else []
                         equity = self._sim_agent._portfolio.equity if (hasattr(self._sim_agent, "_portfolio") and self._sim_agent._portfolio) else Decimal("100.00")
 
-                        # 0. Strategy: Macro Trend Dominion
-                        if self.active_strategy_bot in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
+                        # 0. Strategy: Macro ONNX & Macro Trend Dominion
+                        if self.active_strategy_bot in (
+                            "macro_onnx",
+                            "macro_onnx_bot",
+                            "macro_trend_onnx_fusion",
+                            "macro_trend_dominion",
+                            "macro_trend",
+                            "macro_trend_dominion_bot",
+                        ):
                             vpin_val = 0.15
                             onnx_res = None
                             try:

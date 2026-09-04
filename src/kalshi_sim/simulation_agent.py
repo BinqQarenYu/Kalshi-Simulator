@@ -97,10 +97,10 @@ class SimulationAgent:
         self._exec_logger = ExecutionLogger(data_dir=data_dir)
         self._onnx_engine = KalshiONNXEngine(model_path=model_path)
         self._ev_engine = StatisticalEVEngine()
-        self._macro_trend_bot = MacroTrendDominionBot()
+        self._macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_onnx", strategy_name="Macro ONNX Bot")
         self._dominion2_bot = Dominion2Bot()
         self._domination_bot = ThreeStepDominationBot()
-        self.active_strategy_bot: str = "macro_trend_dominion"
+        self.active_strategy_bot: str = "macro_onnx"
         self.execution_mode: str = "simulated"
         self._db_writer = db_writer or get_db_writer()
 
@@ -123,7 +123,14 @@ class SimulationAgent:
     @property
     def portfolio(self) -> Portfolio:
         """Access the active simulated portfolio based on active_strategy_bot."""
-        if self.active_strategy_bot in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
+        if self.active_strategy_bot in (
+            "macro_onnx",
+            "macro_onnx_bot",
+            "macro_trend_onnx_fusion",
+            "macro_trend_dominion",
+            "macro_trend",
+            "macro_trend_dominion_bot",
+        ):
             return self._portfolio_macro_trend
         elif self.active_strategy_bot in ("dominion_2_bot", "dominion2", "dominion_v2"):
             return self._portfolio_dominion2
@@ -208,8 +215,11 @@ class SimulationAgent:
             self._evaluating_tickers.discard(ticker)
 
     def set_active_strategy(self, strategy_id: str) -> None:
-        """Switch active strategy bot ('macro_trend_dominion', '3_step_domination_bot', 'dominion_2_bot', or 'onnx_microstructure_bot')."""
-        if strategy_id in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
+        """Switch active strategy bot ('macro_onnx', 'macro_trend_dominion', '3_step_domination_bot', 'dominion_2_bot', or 'onnx_microstructure_bot')."""
+        if strategy_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+            self.active_strategy_bot = "macro_onnx"
+            logger.info("SimulationAgent active strategy switched to: %s", self.active_strategy_bot)
+        elif strategy_id in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
             self.active_strategy_bot = "macro_trend_dominion"
             logger.info("SimulationAgent active strategy switched to: %s", self.active_strategy_bot)
         elif strategy_id in ("dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot", "dominion2", "dominion_v2"):
@@ -248,9 +258,16 @@ class SimulationAgent:
             return
 
         # ===================================================================
-        # BOT: Macro Trend Dominion (Evaluated against _portfolio_macro_trend)
+        # BOT: Macro ONNX & Macro Trend Dominion (Evaluated against _portfolio_macro_trend)
         # ===================================================================
-        if not is_live or self.active_strategy_bot in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
+        if not is_live or self.active_strategy_bot in (
+            "macro_onnx",
+            "macro_onnx_bot",
+            "macro_trend_onnx_fusion",
+            "macro_trend_dominion",
+            "macro_trend",
+            "macro_trend_dominion_bot",
+        ):
             if (
                 not self._portfolio_macro_trend.circuit_breaker_tripped
                 and len(self._portfolio_macro_trend.open_positions) < MAX_CONCURRENT_POSITIONS
@@ -310,9 +327,12 @@ class SimulationAgent:
 
                         if macro_dec.recommended_side in ("yes", "no") and macro_dec.recommended_contracts > 0:
                             m_side = OrderSide.YES if macro_dec.recommended_side == "yes" else OrderSide.NO
+                            is_macro_onnx = self.active_strategy_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion")
+                            bot_label = "LIVE MACRO ONNX" if (is_live and is_macro_onnx) else ("LIVE MACRO TREND" if is_live else ("MACRO ONNX BOT" if is_macro_onnx else "MACRO TREND DOMINION"))
+                            bot_tag = "macro_onnx" if is_macro_onnx else "macro_trend_dominion"
                             logger.info(
                                 "[%s] %-18s | %-3s (%s) | ONNX BTC: %s(%.1f%%) [L:%.2f S:%.2f] | Regime: %s (1h: %+.2f%%) | Edge=%+.1f%% | EV=+%s/ct | Size=%d ct",
-                                "LIVE MACRO TREND" if is_live else "MACRO TREND DOMINION",
+                                bot_label,
                                 ticker,
                                 macro_dec.recommended_side.upper(),
                                 macro_dec.active_playbook,
@@ -334,10 +354,10 @@ class SimulationAgent:
                                 timeframe=timeframe,
                                 reasoning=macro_dec.rationale,
                                 portfolio=self._portfolio_macro_trend,
-                                bot_type="macro_trend_dominion",
+                                bot_type=bot_tag,
                             )
                     except Exception as exc:
-                        logger.debug("Macro Trend Dominion bot evaluation error: %s", exc)
+                        logger.debug("Macro ONNX / Trend bot evaluation error: %s", exc)
 
         # ===================================================================
         # BOT 0: Dominion 2 Bot (Evaluated against _portfolio_dominion2)
@@ -639,6 +659,7 @@ class SimulationAgent:
                 history.pop(0)
 
         if update.yes_bid is not None:
+            self._portfolio_macro_trend.mark_to_market(update.market_ticker, update.yes_bid)
             self._portfolio_domination.mark_to_market(update.market_ticker, update.yes_bid)
             self._portfolio_onnx.mark_to_market(update.market_ticker, update.yes_bid)
             if hasattr(self, "_portfolio_dominion2") and self._portfolio_dominion2 is not None:
@@ -656,8 +677,9 @@ class SimulationAgent:
             except Exception:
                 pass
 
+        active_macro_tag = "macro_onnx" if self.active_strategy_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion") else "macro_trend_dominion"
         portfolios_to_settle = [
-            (self._portfolio_macro_trend, "macro_trend_dominion"),
+            (self._portfolio_macro_trend, active_macro_tag),
             (self._portfolio_domination, "3_step_domination_bot"),
             (self._portfolio_onnx, "onnx_microstructure_bot"),
         ]

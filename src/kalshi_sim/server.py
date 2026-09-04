@@ -153,8 +153,8 @@ class ServerState:
         self.integrity_task: asyncio.Task | None = None
         self.ai_worker_task: asyncio.Task | None = None
         self.ai_auto_trade: bool = True
-        self.active_strategy_bot: str = "macro_trend_dominion"
-        self.mode: Literal["mock", "live"] = os.environ.get("KALSHI_MODE", "live").lower() if os.environ.get("KALSHI_MODE", "live").lower() in ("mock", "live") else "live"
+        self.active_strategy_bot: str = "macro_onnx"
+        self.mode: Literal["mock", "live"] = "live"
         self.market_expiry_seconds: int = 900
         self.is_dirty: bool = True
         self._last_broadcast: float = 0.0
@@ -2725,12 +2725,21 @@ TIMEFRAME_CONFIGS: dict[Timeframe, dict[str, Any]] = {
 async def update_settings(req: SettingsRequest) -> dict[str, Any]:
     if req.ai_auto_trade is not None:
         state.ai_auto_trade = req.ai_auto_trade
-    if req.active_strategy_bot is not None and req.active_strategy_bot in ("macro_trend_dominion", "macro_trend", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
-        state.active_strategy_bot = req.active_strategy_bot
-        if state.ai_worker:
-            state.ai_worker.set_active_strategy(req.active_strategy_bot)
-        if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):
-            state.sim_agent.set_active_strategy(req.active_strategy_bot)
+    if req.active_strategy_bot is not None:
+        cand_bot = req.active_strategy_bot
+        if cand_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+            cand_bot = "macro_onnx"
+        elif cand_bot in ("macro_trend", "macro_trend_dominion_bot"):
+            cand_bot = "macro_trend_dominion"
+        elif cand_bot in ("dominion2", "dominion_v2"):
+            cand_bot = "dominion_2_bot"
+
+        if cand_bot in ("macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
+            state.active_strategy_bot = cand_bot
+            if state.ai_worker:
+                state.ai_worker.set_active_strategy(cand_bot)
+            if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):
+                state.sim_agent.set_active_strategy(cand_bot)
     if req.mode is not None:
         if req.mode != state.mode:
             await stop_current_feed()
@@ -2777,6 +2786,23 @@ async def get_bot_strategies() -> dict[str, Any]:
     return {
         "active_strategy": state.active_strategy_bot,
         "strategies": [
+            {
+                "id": "macro_onnx",
+                "name": "Macro ONNX Bot",
+                "description": "Multi-Scale Macro Trend Following fused with QuoLas Nano Microscope ONNX Bitcoin Orderflow Inference (1h & 15m Trend Alignment + Continuous BTC L2 Microstructure)",
+                "active": state.active_strategy_bot == "macro_onnx",
+                "badge": "AI Neural + Macro Trend (Champion)",
+                "icon": "Cpu",
+                "features": [
+                    "Multi-Scale Macro Trend Alignment (1h & 15m)",
+                    "Continuous Binance BTC L2 Microstructure Stream",
+                    "65/35 Bayesian Orderflow Fusion",
+                    "Hard Orderflow Contradiction Veto",
+                    "Uncertainty Trap Avoidance ($40 Gate)",
+                    "$0.62 / $0.68 Dynamic Price Caps",
+                    "Micro-Bankroll Sizing (1 ct flat)",
+                ],
+            },
             {
                 "id": "macro_trend_dominion",
                 "name": "Macro Trend Dominion",
@@ -2849,9 +2875,14 @@ async def get_bot_strategies() -> dict[str, Any]:
 async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
     """Switch active strategy bot."""
     strat_id = req.strategy_id
-    if strat_id in ("macro_trend", "macro_trend_dominion_bot"):
+    if strat_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+        strat_id = "macro_onnx"
+    elif strat_id in ("macro_trend", "macro_trend_dominion_bot"):
         strat_id = "macro_trend_dominion"
-    if strat_id not in ("macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
+    elif strat_id in ("dominion2", "dominion_v2"):
+        strat_id = "dominion_2_bot"
+
+    if strat_id not in ("macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
         raise HTTPException(status_code=400, detail=f"Invalid strategy_id: {req.strategy_id}")
 
     state.active_strategy_bot = strat_id
@@ -3370,7 +3401,7 @@ async def get_win_loss_reports_endpoint(
         await sync_live_settlements()
 
     all_reports = state.win_loss_reports
-    macro_reports = [r for r in all_reports if r.get("bot_type") in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot")]
+    macro_reports = [r for r in all_reports if r.get("bot_type") in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot")]
     dom_reports = [r for r in all_reports if r.get("bot_type") in ("3_step_domination_bot", "domination_bot", "domination")]
     onnx_reports = [r for r in all_reports if r.get("bot_type") in ("onnx_ml_bot", "onnx_microstructure_bot", "onnx")]
     live_reports = [
@@ -3891,7 +3922,7 @@ async def export_executive_summary_json() -> Response:
     )
 
     all_reports = state.win_loss_reports
-    macro_reports = [r for r in all_reports if r.get("bot_type") in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot")]
+    macro_reports = [r for r in all_reports if r.get("bot_type") in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot")]
     dom2_reports = [r for r in all_reports if r.get("bot_type") in ("dominion_2_bot", "dominion2", "dominion_v2")]
     dom_reports = [r for r in all_reports if r.get("bot_type") in ("3_step_domination_bot", "domination_bot", "domination")]
     onnx_reports = [r for r in all_reports if r.get("bot_type") in ("onnx_ml_bot", "onnx_microstructure_bot", "onnx")]

@@ -171,7 +171,7 @@ interface ForwardValidationStatus {
   timestamp: string;
 }
 
-type SystemFilter = 'all' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot' | 'live';
+type SystemFilter = 'all' | 'macro_onnx' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot' | 'live';
 type SubTabType = '15m_reports' | 'journal' | 'settlements' | 'ai' | 'validation';
 
 function formatETTime(val: string | number | null | undefined): string {
@@ -233,7 +233,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
 
   // Filter & Pagination States
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [botFilter, setBotFilter] = useState<'all' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot' | 'live'>('all');
+  const [botFilter, setBotFilter] = useState<'all' | 'macro_onnx' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot' | 'live'>('all');
   const [sideFilter, setSideFilter] = useState<'all' | 'yes' | 'no'>('all');
   const [outcomeFilter, setOutcomeFilter] = useState<'all' | 'win' | 'loss' | 'flat'>('all');
   const [page, setPage] = useState<number>(1);
@@ -243,7 +243,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
 
   // Test Bot Trigger State
   const [isTestingBot, setIsTestingBot] = useState<boolean>(false);
-  const [testBotType, setTestBotType] = useState<'both' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot'>('both');
+  const [testBotType, setTestBotType] = useState<'both' | 'macro_onnx' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot'>('both');
   const [testResultMsg, setTestResultMsg] = useState<string | null>(null);
 
   // Reset Confirmation Modal State
@@ -280,7 +280,10 @@ export const HistoricalAnalyticsTab: React.FC = () => {
       let botParam = '';
       let modeParam = '';
 
-      if (selectedSystem === 'macro_trend_dominion') {
+      if (selectedSystem === 'macro_onnx') {
+        botParam = 'macro_onnx';
+        modeParam = '';
+      } else if (selectedSystem === 'macro_trend_dominion') {
         botParam = 'macro_trend_dominion';
         modeParam = 'simulated';
       } else if (selectedSystem === 'dominion_2_bot') {
@@ -332,6 +335,13 @@ export const HistoricalAnalyticsTab: React.FC = () => {
           sublabel: 'Aggregated Portfolio Overview',
           icon: 'layers',
           metrics: mAll,
+        },
+        {
+          key: 'macro_onnx',
+          label: 'Macro ONNX Bot',
+          sublabel: 'Macro Trend + BTC Orderflow AI (Champion)',
+          icon: 'cpu',
+          metrics: mMacro,
         },
         {
           key: 'macro_trend_dominion',
@@ -480,7 +490,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
   };
 
   // 3. RUN BOT TEST Handler
-  const handleRunBotTest = async (overrideType?: 'both' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot') => {
+  const handleRunBotTest = async (overrideType?: 'both' | 'macro_onnx' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot') => {
     const targetType = overrideType || testBotType;
     setIsTestingBot(true);
     setTestResultMsg(null);
@@ -626,10 +636,18 @@ export const HistoricalAnalyticsTab: React.FC = () => {
   }, [equityCurve, dimensions, selectedSystem]);
 
   // Helper to identify bot types
+  const isMacroOnnxBot = (r: WinLossEventReport) =>
+    r.bot_type === 'macro_onnx' ||
+    r.bot_type === 'macro_onnx_bot' ||
+    r.bot_type === 'macro_trend_onnx_fusion' ||
+    (r.ai_rationale?.toLowerCase().includes('macro') && r.ai_rationale?.toLowerCase().includes('onnx'));
+
   const isMacroBot = (r: WinLossEventReport) =>
-    r.bot_type === 'macro_trend_dominion' ||
-    r.bot_type === 'macro_trend' ||
-    r.ai_rationale?.toLowerCase().includes('macro trend');
+    !isMacroOnnxBot(r) && (
+      r.bot_type === 'macro_trend_dominion' ||
+      r.bot_type === 'macro_trend' ||
+      r.ai_rationale?.toLowerCase().includes('macro trend')
+    );
 
   const isDom2Bot = (r: WinLossEventReport) =>
     r.bot_type === 'dominion_2_bot' ||
@@ -662,6 +680,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
       return false;
     }
     if (botFilter !== 'all') {
+      if (botFilter === 'macro_onnx' && !isMacroOnnxBot(r)) return false;
       if (botFilter === 'macro_trend_dominion' && !isMacroBot(r)) return false;
       if (botFilter === 'dominion_2_bot' && !isDom2Bot(r)) return false;
       if (botFilter === '3_step_domination_bot' && !isDomBot(r)) return false;
@@ -823,6 +842,18 @@ export const HistoricalAnalyticsTab: React.FC = () => {
                 title="Run test trade for Both Domination and ONNX ML bots"
               >
                 🚀 Both
+              </button>
+              <button
+                onClick={() => {
+                  setTestBotType('macro_onnx');
+                  handleRunBotTest('macro_onnx');
+                }}
+                className={`px-2 py-1 text-[10px] font-bold rounded-md transition ${
+                  testBotType === 'macro_onnx' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Run test trade for Macro ONNX Bot (Champion)"
+              >
+                🧠 Macro ONNX
               </button>
               <button
                 onClick={() => {
@@ -1128,6 +1159,18 @@ export const HistoricalAnalyticsTab: React.FC = () => {
           >
             <Layers className="w-3.5 h-3.5 text-blue-400" />
             All Combined
+          </button>
+
+          <button
+            onClick={() => setSelectedSystem('macro_onnx')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
+              selectedSystem === 'macro_onnx'
+                ? 'bg-purple-500/20 text-purple-300 shadow-sm border border-purple-500/40'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Cpu className="w-3.5 h-3.5 text-purple-400" />
+            Macro ONNX Bot (Champ)
           </button>
 
           <button
@@ -1521,10 +1564,11 @@ export const HistoricalAnalyticsTab: React.FC = () => {
                 <span className="text-[10px] text-slate-500 px-1 font-semibold uppercase">Bot:</span>
                 {[
                   { id: 'all', label: 'All Bots' },
+                  { id: 'macro_onnx', label: '🧠 Macro ONNX' },
                   { id: 'macro_trend_dominion', label: '📈 Macro Trend' },
                   { id: 'dominion_2_bot', label: '👑 Dominion 2' },
                   { id: '3_step_domination_bot', label: '⚡ Domination' },
-                  { id: 'onnx_ml_bot', label: '🧠 ONNX ML' },
+                  { id: 'onnx_ml_bot', label: '🔬 ONNX ML' },
                   { id: 'live', label: '🔴 Live' },
                 ].map((b) => (
                   <button
