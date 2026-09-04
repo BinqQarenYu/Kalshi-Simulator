@@ -115,6 +115,8 @@ class HistoricalQueryService:
         if execution_mode and execution_mode.lower() != "all":
             query += " AND execution_mode = ?"
             params.append(execution_mode)
+            if execution_mode.lower() == "live":
+                query += " AND equity <= 50.0"
 
         query += " ORDER BY timestamp_epoch_ms ASC LIMIT ?"
         params.append(limit)
@@ -198,7 +200,10 @@ class HistoricalQueryService:
                 eq_params,
             ) as cursor:
                 first_eq_row = await cursor.fetchone()
-                initial_capital = float(first_eq_row["balance"]) if first_eq_row else 100.0
+                if execution_mode == "live":
+                    initial_capital = float(first_eq_row["balance"]) if (first_eq_row and float(first_eq_row["balance"]) < 50.0) else 25.0
+                else:
+                    initial_capital = float(first_eq_row["balance"]) if first_eq_row else 100.0
 
             async with db.execute(
                 f"SELECT balance, equity, drawdown_pct FROM equity_snapshots{eq_where} ORDER BY timestamp_epoch_ms DESC LIMIT 1",
@@ -207,6 +212,11 @@ class HistoricalQueryService:
                 eq_row = await cursor.fetchone()
                 current_equity = float(eq_row["equity"]) if eq_row else initial_capital
                 current_balance = float(eq_row["balance"]) if eq_row else initial_capital
+                if execution_mode == "live" and (current_equity > 50.0 or current_balance > 50.0):
+                    # Sanitize against any legacy mock simulation pollution
+                    realized_pnl_so_far = sum(float(r["pnl"]) for r in settlement_rows)
+                    current_equity = round(initial_capital + realized_pnl_so_far, 2)
+                    current_balance = round(initial_capital + realized_pnl_so_far, 2)
 
         total_settled = len(settlement_rows)
         if total_settled == 0:
@@ -366,3 +376,51 @@ class HistoricalQueryService:
 
         logger.info("Reset historical database for bot=%s, mode=%s: %s", bot_type, execution_mode, counts)
         return counts
+
+    async def delete_trade(self, trade_id_or_id: str | int) -> bool:
+        """Delete a single trade by primary key ID or trade_id."""
+        async with self.db_manager.get_connection() as db:
+            if isinstance(trade_id_or_id, int) or (isinstance(trade_id_or_id, str) and trade_id_or_id.isdigit()):
+                cur = await db.execute("DELETE FROM trades WHERE id = ? OR trade_id = ?", [int(trade_id_or_id), str(trade_id_or_id)])
+            else:
+                cur = await db.execute("DELETE FROM trades WHERE trade_id = ?", [str(trade_id_or_id)])
+            await db.commit()
+            return cur.rowcount > 0
+
+    async def delete_settlement(self, settlement_id_or_id: str | int) -> bool:
+        """Delete a single settlement by primary key ID or settlement_id."""
+        async with self.db_manager.get_connection() as db:
+            if isinstance(settlement_id_or_id, int) or (isinstance(settlement_id_or_id, str) and settlement_id_or_id.isdigit()):
+                cur = await db.execute("DELETE FROM settlements WHERE id = ? OR settlement_id = ?", [int(settlement_id_or_id), str(settlement_id_or_id)])
+            else:
+                cur = await db.execute("DELETE FROM settlements WHERE settlement_id = ?", [str(settlement_id_or_id)])
+            await db.commit()
+            return cur.rowcount > 0
+
+    async def delete_ai_prediction(self, prediction_id: int | str) -> bool:
+        """Delete an AI prediction record by primary key ID."""
+        async with self.db_manager.get_connection() as db:
+            cur = await db.execute("DELETE FROM ai_predictions WHERE id = ?", [int(prediction_id)])
+            await db.commit()
+            return cur.rowcount > 0
+
+    async def delete_batch(self, table: str, ids: List[Any]) -> int:
+        """Batch delete records from a specified historical table given a list of IDs."""
+        valid_tables = {"trades", "settlements", "ai_predictions", "equity_snapshots"}
+        if table not in valid_tables or not ids:
+            return 0
+
+        placeholders = ",".join("?" for _ in ids)
+        id_col = "trade_id" if table == "trades" and any(isinstance(x, str) and not x.isdigit() for x in ids) else "id"
+
+        async with self.db_manager.get_connection() as db:
+            # Handle mixed string trade_id or int id
+            if table == "trades":
+                cur = await db.execute(f"DELETE FROM trades WHERE id IN ({placeholders}) OR trade_id IN ({placeholders})", ids + ids)
+            elif table == "settlements":
+                cur = await db.execute(f"DELETE FROM settlements WHERE id IN ({placeholders}) OR settlement_id IN ({placeholders})", ids + ids)
+            else:
+                cur = await db.execute(f"DELETE FROM {table} WHERE id IN ({placeholders})", ids)
+            await db.commit()
+            return cur.rowcount
+

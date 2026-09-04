@@ -65,7 +65,33 @@ export interface AISignals {
   active_playbook?: string;
   playbook_stage?: string;
   edge_pct?: number;
+  onnx_signal?: string;
+  onnx_confidence?: number;
+  onnx_prob_long?: number;
+  onnx_prob_short?: number;
+  onnx_prob_wait?: number;
 }
+
+export interface BtcOrderflowSummary {
+  spot_price: number;
+  best_bid: number;
+  best_ask: number;
+  spread_bps: number;
+  cvd_btc: number;
+  ofi_l1: number;
+  connected: boolean;
+  source: string;
+  ticks_count: number;
+  trades_count: number;
+  recent_trades_buffer?: number;
+}
+
+export type StrategyBotId =
+  | 'macro_onnx'
+  | 'macro_trend_dominion'
+  | 'dominion_2_bot'
+  | '3_step_domination_bot'
+  | 'onnx_microstructure_bot';
 
 export interface StrategyBotInfo {
   id: string;
@@ -142,7 +168,7 @@ export interface WinLossEventReport {
   contracts: number;
   entry_price: number;
   settlement_price: number;
-  outcome: 'win' | 'loss' | 'breakeven';
+  outcome: 'win' | 'loss' | 'breakeven' | 'flat';
   pnl: number;
   roi_pct: number;
   ai_confidence: number;
@@ -150,6 +176,8 @@ export interface WinLossEventReport {
   vpin_score: number;
   ev_edge: number;
   balance_after: number;
+  bot_type?: string;
+  execution_mode?: string;
   timestamp_utc: string;
 }
 
@@ -165,6 +193,9 @@ export interface WinLossReportsSummary {
 
 export interface WinLossReportsResponse {
   summary: WinLossReportsSummary;
+  domination_summary?: WinLossReportsSummary;
+  onnx_summary?: WinLossReportsSummary;
+  live_summary?: WinLossReportsSummary;
   reports: WinLossEventReport[];
 }
 
@@ -285,6 +316,7 @@ export interface DashboardState {
     mode: 'mock' | 'live';
     timeframe: string;
   };
+  btc_orderflow?: BtcOrderflowSummary;
 }
 
 export interface LivePositionItem {

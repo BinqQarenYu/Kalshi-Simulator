@@ -69,6 +69,43 @@ class TestKalshiSimulation(unittest.TestCase):
         self.assertIsNone(res)
         self.assertTrue(book.is_stale)
 
+    def test_orderbook_multimarket_interleaved_seq(self):
+        """Verify that when enforce_consecutive_seq=False, interleaved multi-market sequence numbers are accepted."""
+        obm = OrderBookManager(enforce_consecutive_seq=False)
+        snapshot = OrderBookSnapshot(
+            market_ticker="KXBTC15M-TEST",
+            seq=100,
+            yes_levels=[OrderBookLevel(price=Decimal("0.48"), quantity=Decimal("100"))],
+            no_levels=[OrderBookLevel(price=Decimal("0.51"), quantity=Decimal("100"))],
+        )
+        book = obm.apply_snapshot(snapshot)
+        self.assertFalse(book.is_stale)
+
+        # Delta arriving with seq=105 (interleaved with other markets)
+        delta = OrderBookDelta(
+            market_ticker="KXBTC15M-TEST",
+            seq=105,
+            side="yes",
+            price=Decimal("0.48"),
+            delta=Decimal("-20"),
+        )
+        res = obm.apply_delta(delta)
+        self.assertIsNotNone(res)
+        self.assertFalse(book.is_stale)
+        self.assertEqual(res.yes_book[Decimal("0.48")], Decimal("80"))
+        self.assertEqual(res.last_seq, 105)
+
+        # Delta with older seq=102 should be ignored without corrupting state
+        old_delta = OrderBookDelta(
+            market_ticker="KXBTC15M-TEST",
+            seq=102,
+            side="yes",
+            price=Decimal("0.48"),
+            delta=Decimal("50"),
+        )
+        res_old = obm.apply_delta(old_delta)
+        self.assertEqual(res_old.yes_book[Decimal("0.48")], Decimal("80"))
+
     def test_portfolio_ledger_and_settlement_yes_win(self):
         port = Portfolio(starting_balance=Decimal("10000"))
         fill = SimulatedFill(

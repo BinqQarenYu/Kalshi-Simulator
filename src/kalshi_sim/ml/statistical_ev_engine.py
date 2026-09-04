@@ -32,6 +32,16 @@ class ExpectedValueResult:
     recommended_contracts: int
     rationale: str
 
+    @property
+    def has_positive_ev(self) -> bool:
+        """True if net expected value after fees is strictly positive."""
+        return self.net_expected_value > Decimal("0.00")
+
+    @property
+    def fraction_to_risk(self) -> float:
+        """Alias for kelly_fraction."""
+        return self.kelly_fraction
+
 
 class StatisticalEVEngine:
     """Evaluates binary option pricing asymmetry and computes optimal EV executions."""
@@ -47,18 +57,6 @@ class StatisticalEVEngine:
         vpin_warn_threshold: float = 0.50,
         vpin_toxic_threshold: float = 0.60,
     ) -> None:
-        """Initialize the Stage 2 Mathematical Optimizer.
-
-        Args:
-            min_ev_threshold: Minimum positive expected dollar return per contract after fees (e.g. $0.02).
-            min_edge_pct: Minimum statistical edge over market price (e.g. 0.02 = 2%).
-            fee_per_contract: Real exchange taker fee per contract (e.g. $0.01 on Kalshi).
-            fractional_kelly: Kelly scaling factor (0.25 = Quarter-Kelly for risk preservation).
-            max_portfolio_risk_pct: Maximum fraction of total equity to allocate per trade.
-            vpin_safe_threshold: VPIN below this is considered fully safe (no taper applied).
-            vpin_warn_threshold: VPIN above this begins linear taper down toward zero.
-            vpin_toxic_threshold: VPIN above this completely freezes new position sizing.
-        """
         self.min_ev_threshold = min_ev_threshold
         self.min_edge_pct = min_edge_pct
         self.fee_per_contract = fee_per_contract
@@ -67,6 +65,72 @@ class StatisticalEVEngine:
         self.vpin_safe_threshold = vpin_safe_threshold
         self.vpin_warn_threshold = vpin_warn_threshold
         self.vpin_toxic_threshold = vpin_toxic_threshold
+
+    def calculate_ev(
+        self,
+        prob_win: float,
+        market_ask: Decimal,
+        side: Optional[OrderSide] = None,
+    ) -> ExpectedValueResult:
+        """Calculate the expected value and edge for a single contract side."""
+        p_dec = Decimal(str(round(prob_win, 4)))
+        gross_ev = p_dec * (Decimal("1.00") - market_ask) - (Decimal("1.00") - p_dec) * market_ask
+        net_ev = gross_ev - self.fee_per_contract
+        edge = prob_win - float(market_ask) - float(self.fee_per_contract)
+        has_pos = net_ev >= self.min_ev_threshold and edge >= self.min_edge_pct
+
+        return ExpectedValueResult(
+            has_positive_edge=has_pos,
+            recommended_side=side,
+            ai_prob=prob_win,
+            market_price=market_ask,
+            expected_value=gross_ev,
+            net_expected_value=net_ev,
+            fee_per_contract=self.fee_per_contract,
+            statistical_edge=edge,
+            kelly_fraction=0.0,
+            recommended_contracts=0,
+            rationale=f"Single-side EV: P={prob_win:.1%}, Ask=${market_ask:.2f}, Net EV=${net_ev:.3f}, Edge={edge:.1%}",
+        )
+
+    def calculate_quarter_kelly_size(
+        self,
+        ev_result: ExpectedValueResult,
+        bankroll: Decimal,
+        ask_price: Decimal,
+        max_contracts: int = 10,
+        fractional_multiplier: float = 0.25,
+    ) -> ExpectedValueResult:
+        """Calculate Quarter-Kelly contract sizing for a given EV result."""
+        if not ev_result.has_positive_edge or ev_result.net_expected_value <= Decimal("0"):
+            return ev_result
+
+        effective_cost = float(ask_price + self.fee_per_contract)
+        b = max(0.01, (1.0 - effective_cost) / effective_cost)
+        full_kelly = max(0.0, (ev_result.ai_prob * b - (1.0 - ev_result.ai_prob)) / b)
+        scaled_kelly = max(0.0, full_kelly * fractional_multiplier)
+
+        max_capital = bankroll * self.max_portfolio_risk_pct
+        kelly_capital = bankroll * Decimal(str(round(scaled_kelly, 6)))
+        allocated_capital = min(max_capital, kelly_capital)
+
+        unit_cost = ask_price + self.fee_per_contract
+        contracts = int(allocated_capital / unit_cost) if unit_cost > 0 else 0
+        contracts = max(1, min(max_contracts, contracts))
+
+        return ExpectedValueResult(
+            has_positive_edge=True,
+            recommended_side=ev_result.recommended_side,
+            ai_prob=ev_result.ai_prob,
+            market_price=ask_price,
+            expected_value=ev_result.expected_value,
+            net_expected_value=ev_result.net_expected_value,
+            fee_per_contract=self.fee_per_contract,
+            statistical_edge=ev_result.statistical_edge,
+            kelly_fraction=scaled_kelly,
+            recommended_contracts=contracts,
+            rationale=f"{ev_result.rationale} | Kelly={scaled_kelly:.1%} → {contracts} contracts",
+        )
 
 
     def _compute_vpin_taper(self, vpin: float) -> float:
@@ -182,7 +246,23 @@ class StatisticalEVEngine:
             chosen_p = p_no
             chosen_ask = no_ask
 
-        # 6. Check Minimum Net EV & Net Edge Safety Thresholds (Friction Hardening)
+        # 6. Price Corridor Check (Block asymmetric 98c tail blowups and <6c fee drag)
+        if chosen_ask > Decimal("0.90") or chosen_ask < Decimal("0.06"):
+            return ExpectedValueResult(
+                has_positive_edge=False,
+                recommended_side=None,
+                ai_prob=chosen_p,
+                market_price=chosen_ask,
+                expected_value=chosen_ev_gross,
+                net_expected_value=chosen_ev_net,
+                fee_per_contract=self.fee_per_contract,
+                statistical_edge=chosen_edge,
+                kelly_fraction=0.0,
+                recommended_contracts=0,
+                rationale=f"Price Corridor Filter: Market price ${chosen_ask:.2f} outside safe $0.06 - $0.90 corridor (prevents tail risk & fee drag).",
+            )
+
+        # 7. Check Minimum Net EV & Net Edge Safety Thresholds (Friction Hardening)
         if chosen_ev_net < self.min_ev_threshold or chosen_edge < self.min_edge_pct:
             return ExpectedValueResult(
                 has_positive_edge=False,

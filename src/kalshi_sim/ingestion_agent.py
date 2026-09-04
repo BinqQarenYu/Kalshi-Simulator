@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import sys
+import time
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -78,7 +79,7 @@ class IngestionAgent:
 
         # Components
         self._ws_client = KalshiWSClient(api_key_id, self._private_key, ws_url=self._ws_url)
-        self._orderbook = orderbook or OrderBookManager()
+        self._orderbook = orderbook or OrderBookManager(enforce_consecutive_seq=False)
         self._tick_writer = tick_writer or TickWriter(
             data_dir=data_dir,
             timeframe="_".join(tf.value for tf in timeframes),
@@ -109,6 +110,8 @@ class IngestionAgent:
 
         # State
         self._active_tickers: set[str] = set()
+        self._resub_cooldown: dict[str, float] = {}
+        self._is_refreshing: bool = False
         self._shutdown_event = asyncio.Event()
         self._tasks: list[asyncio.Task] = []
 
@@ -316,11 +319,12 @@ class IngestionAgent:
         await self._tick_writer.write(delta)
 
         if book is None:
-            # Sequence gap — need to re-subscribe for a fresh snapshot
+            # Sequence gap — immediately re-subscribe for a fresh snapshot
             ticker = delta.market_ticker
-            logger.debug(
-                "[SEQ GAP] %s — will re-subscribe for fresh snapshot", ticker
+            logger.warning(
+                "[SEQ GAP] %s detected sequence gap — re-subscribing for fresh snapshot", ticker
             )
+            asyncio.create_task(self._resubscribe_single_ticker(ticker))
             return
 
         if self._sim_agent is not None:
@@ -380,6 +384,9 @@ class IngestionAgent:
 
     async def trigger_refresh(self) -> None:
         """Trigger an instantaneous market discovery & re-subscription cycle."""
+        if self._is_refreshing:
+            return
+        self._is_refreshing = True
         try:
             old_tickers = set(self._active_tickers)
             await self._refresh_markets()
@@ -389,9 +396,11 @@ class IngestionAgent:
                     channels=["orderbook_delta", "ticker", "trade"],
                     market_tickers=list(new_tickers),
                 )
-                logger.info("[INSTANT ROLL] Subscribed to %d new tickers immediately", len(new_tickers))
+                logger.info("[INSTANT ROLL] Subscribed to %d new tickers immediately: %s", len(new_tickers), new_tickers)
         except Exception as exc:
             logger.error("Error in trigger_refresh: %s", exc)
+        finally:
+            self._is_refreshing = False
 
     async def _refresh_markets(self) -> None:
         """Scan REST API for current active BTC markets."""
@@ -434,8 +443,9 @@ class IngestionAgent:
                 # Handle stale books (sequence gaps)
                 stale = self._orderbook.get_stale_tickers()
                 if stale:
-                    logger.warning("Stale books detected: %s", stale)
-                    # TODO: trigger re-subscription for stale tickers
+                    logger.warning("Stale books detected, triggering re-subscription: %s", stale)
+                    for ticker in stale:
+                        asyncio.create_task(self._resubscribe_single_ticker(ticker))
 
                 # Dynamically update WebSocket subscriptions for new tickers
                 new_tickers = self._active_tickers - old_tickers
@@ -446,6 +456,43 @@ class IngestionAgent:
                     )
             except Exception as exc:
                 logger.error("Market refresh error: %s", exc)
+
+    async def _resubscribe_single_ticker(self, ticker: str) -> None:
+        """Re-subscribe or fetch a fresh snapshot for a ticker after a sequence gap or stale status."""
+        now = time.monotonic()
+        if now - self._resub_cooldown.get(ticker, 0.0) < 5.0:
+            return
+        self._resub_cooldown[ticker] = now
+
+        try:
+            if self._ws_client.is_connected:
+                await self._ws_client.subscribe(
+                    channels=["orderbook_delta"],
+                    market_tickers=[ticker],
+                )
+                logger.info("[RE-SUB] Sent WS subscription for fresh snapshot of %s", ticker)
+            else:
+                # If WS is not connected, resync via REST
+                endpoint_path = f"/trade-api/v2/markets/{ticker}/orderbook"
+                url = f"{self._rest_base}/markets/{ticker}/orderbook"
+                headers = get_auth_headers(self._api_key_id, self._private_key, "GET", endpoint_path)
+                connector = create_aiohttp_connector(limit=5)
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            ob_fp = data.get("orderbook_fp") or data.get("orderbook") or {}
+                            yes_raw = ob_fp.get("yes_dollars") or ob_fp.get("yes") or []
+                            no_raw = ob_fp.get("no_dollars") or ob_fp.get("no") or []
+                            snapshot_payload = {
+                                "market_ticker": ticker,
+                                "yes_dollars_fp": yes_raw,
+                                "no_dollars_fp": no_raw,
+                            }
+                            await self._handle_snapshot(snapshot_payload, 1)
+                            logger.info("[REST RESYNC] Resynchronized orderbook snapshot for %s via REST", ticker)
+        except Exception as exc:
+            logger.error("Failed to re-subscribe / resync ticker %s: %s", ticker, exc)
 
     # -- Shutdown ------------------------------------------------------------
 

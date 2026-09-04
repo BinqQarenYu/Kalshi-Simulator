@@ -14,6 +14,8 @@ from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional
 
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
+from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
+from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.schemas import OrderSide
 
@@ -35,15 +37,17 @@ class AIWorker:
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None
         self._last_compute_duration_ms: float = 0.0
-        self.active_strategy_bot: str = "3_step_domination_bot"  # Default to 3-step domination bot
+        self.active_strategy_bot: str = "3_step_domination_bot"  # Default: 3-Step Domination Bot
+        self._macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_trend_dominion", strategy_name="Macro Trend Dominion")
         self._domination_bot = ThreeStepDominationBot()
+        self._dominion2_bot = Dominion2Bot()
 
         # Thread-safe in-memory cached AI signals
         self._cached_signals: dict[str, Any] = {
             "strategy_id": "3_step_domination_bot",
             "strategy_name": "3-Step Domination Bot",
-            "active_playbook": "Playbook 3: Late-Cycle Gamma Snub",
-            "playbook_stage": "gamma_snub",
+            "active_playbook": "Playbook 1: Early Momentum",
+            "playbook_stage": "early_momentum",
             "p_up": 0.50,
             "p_down": 0.50,
             "p_wait": 0.00,
@@ -56,7 +60,7 @@ class AIWorker:
             "kelly_f_yes": 0.00,
             "kelly_f_no": 0.00,
             "recommended_side": "wait",
-            "rationale": "3-Step Domination Bot initialized and scanning cycle windows.",
+            "rationale": "3-Step Domination Bot (Playbook 1: Early Momentum, Playbook 2: Mid OFI Drift, Playbook 3: Gamma Snub) initialized.",
             "compute_latency_ms": 0.0,
         }
 
@@ -65,8 +69,17 @@ class AIWorker:
         self._sim_agent = sim_agent
 
     def set_active_strategy(self, strategy_id: str) -> None:
-        """Switch active strategy bot ('3_step_domination_bot' or 'onnx_microstructure_bot')."""
-        if strategy_id in ("3_step_domination_bot", "onnx_microstructure_bot"):
+        """Switch active strategy bot ('macro_onnx', 'macro_trend_dominion', '3_step_domination_bot', 'dominion_2_bot', or 'onnx_microstructure_bot')."""
+        if strategy_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+            self.active_strategy_bot = "macro_onnx"
+            logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
+        elif strategy_id in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
+            self.active_strategy_bot = "macro_trend_dominion"
+            logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
+        elif strategy_id in ("dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot", "dominion2", "dominion_v2"):
+            # Normalize alias
+            if strategy_id in ("dominion2", "dominion_v2"):
+                strategy_id = "dominion_2_bot"
             self.active_strategy_bot = strategy_id
             logger.info("AIWorker active strategy bot switched to: %s", strategy_id)
 
@@ -116,8 +129,119 @@ class AIWorker:
                         trades = self._sim_agent._recent_trades.get(ticker, []) if hasattr(self._sim_agent, "_recent_trades") else []
                         equity = self._sim_agent._portfolio.equity if (hasattr(self._sim_agent, "_portfolio") and self._sim_agent._portfolio) else Decimal("100.00")
 
-                        # 1. Strategy: 3-Step Domination Bot
-                        if self.active_strategy_bot == "3_step_domination_bot":
+                        # 0. Strategy: Macro ONNX & Macro Trend Dominion
+                        if self.active_strategy_bot in (
+                            "macro_onnx",
+                            "macro_onnx_bot",
+                            "macro_trend_onnx_fusion",
+                            "macro_trend_dominion",
+                            "macro_trend",
+                            "macro_trend_dominion_bot",
+                        ):
+                            vpin_val = 0.15
+                            onnx_res = None
+                            try:
+                                if hasattr(self._sim_agent, "_btc_orderflow_feed"):
+                                    btc_book, btc_trades = self._sim_agent._btc_orderflow_feed.get_btc_l2_state()
+                                    onnx_res = self._sim_agent._onnx_engine.process_orderbook_tick(btc_book, latest_trades=btc_trades)
+                                else:
+                                    onnx_res = self._sim_agent._onnx_engine.process_orderbook_tick(book, latest_trades=trades)
+                                vpin_val = float(onnx_res.get("vpin_score", 0.15))
+                            except Exception:
+                                try:
+                                    vpin_val = float(self._sim_agent._onnx_engine.extractor.compute_vpin())
+                                except Exception:
+                                    pass
+
+                            m_dec = self._macro_trend_bot.evaluate(
+                                book=book,
+                                spot_price=spot_price,
+                                target_strike=target_strike,
+                                time_to_expiry_s=time_to_expiry_s,
+                                recent_trades=trades,
+                                total_equity=equity,
+                                max_position_size=1,
+                                estimated_vpin=vpin_val,
+                                onnx_result=onnx_res,
+                            )
+
+                            compute_duration = (asyncio.get_event_loop().time() - start_t) * 1000.0
+                            self._last_compute_duration_ms = compute_duration
+
+                            self._cached_signals = {
+                                "strategy_id": m_dec.strategy_id,
+                                "strategy_name": m_dec.strategy_name,
+                                "active_playbook": m_dec.active_playbook,
+                                "playbook_stage": m_dec.playbook_stage,
+                                "macro_regime": m_dec.macro_regime,
+                                "trend_1h_pct": m_dec.trend_1h_pct,
+                                "trend_15m_pct": m_dec.trend_15m_pct,
+                                "p_up": m_dec.p_up,
+                                "p_down": m_dec.p_down,
+                                "p_wait": m_dec.p_wait,
+                                "onnx_signal": m_dec.onnx_signal,
+                                "onnx_confidence": m_dec.onnx_confidence,
+                                "onnx_prob_long": m_dec.onnx_prob_long,
+                                "onnx_prob_short": m_dec.onnx_prob_short,
+                                "onnx_prob_wait": m_dec.onnx_prob_wait,
+                                "vpin": m_dec.vpin,
+                                "vpin_is_safe": m_dec.vpin_is_safe,
+                                "ev_yes": m_dec.ev_yes,
+                                "ev_no": m_dec.ev_no,
+                                "edge_yes": m_dec.edge_yes,
+                                "edge_no": m_dec.edge_no,
+                                "kelly_f_yes": m_dec.kelly_f_yes,
+                                "kelly_f_no": m_dec.kelly_f_no,
+                                "recommended_side": m_dec.recommended_side,
+                                "rationale": m_dec.rationale,
+                                "compute_latency_ms": round(compute_duration, 2),
+                            }
+
+                        # 1. Strategy: Dominion 2 Bot (Anti-Pin Scalper)
+                        elif self.active_strategy_bot == "dominion_2_bot":
+                            vpin_val = 0.15
+                            try:
+                                vpin_val = float(self._sim_agent._onnx_engine.extractor.compute_vpin())
+                            except Exception:
+                                pass
+
+                            dec2 = self._dominion2_bot.evaluate(
+                                book=book,
+                                spot_price=spot_price,
+                                target_strike=target_strike,
+                                time_to_expiry_s=time_to_expiry_s,
+                                recent_trades=trades,
+                                total_equity=equity,
+                                max_position_size=4,
+                                estimated_vpin=vpin_val,
+                            )
+
+                            compute_duration = (asyncio.get_event_loop().time() - start_t) * 1000.0
+                            self._last_compute_duration_ms = compute_duration
+
+                            self._cached_signals = {
+                                "strategy_id": dec2.strategy_id,
+                                "strategy_name": dec2.strategy_name,
+                                "active_playbook": dec2.active_playbook,
+                                "playbook_stage": dec2.playbook_stage,
+                                "p_up": dec2.p_up,
+                                "p_down": dec2.p_down,
+                                "p_wait": dec2.p_wait,
+                                "vpin": dec2.vpin,
+                                "vpin_is_safe": dec2.vpin_is_safe,
+                                "ev_yes": dec2.ev_yes,
+                                "ev_no": dec2.ev_no,
+                                "edge_yes": dec2.edge_yes,
+                                "edge_no": dec2.edge_no,
+                                "kelly_f_yes": dec2.kelly_f_yes,
+                                "kelly_f_no": dec2.kelly_f_no,
+                                "recommended_side": dec2.recommended_side,
+                                "rationale": dec2.rationale,
+                                "compute_latency_ms": round(compute_duration, 2),
+                            }
+
+                        # 2. Strategy: 3-Step Domination Bot
+                        elif self.active_strategy_bot == "3_step_domination_bot":
                             # Extract VPIN from onnx_engine feature extractor if available
                             vpin_val = 0.15
                             try:
@@ -160,7 +284,7 @@ class AIWorker:
                                 "compute_latency_ms": round(compute_duration, 2),
                             }
 
-                        # 2. Strategy: ONNX Microstructure Bot
+                        # 3. Strategy: ONNX Microstructure Bot
                         else:
                             onnx_res = self._sim_agent._onnx_engine.process_orderbook_tick(book, latest_trades=trades)
                             prob_long = onnx_res.get("prob_long", 0.33)

@@ -142,7 +142,7 @@ class KalshiWSClient:
         self,
         channels: list[str],
         market_tickers: list[str],
-        use_yes_price: bool = True,
+        use_yes_price: bool = False,
     ) -> dict[str, int]:
         """Subscribe to channels for the given tickers.
 
