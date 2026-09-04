@@ -100,7 +100,7 @@ class SimulationAgent:
         self._macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_onnx", strategy_name="Macro ONNX Bot")
         self._dominion2_bot = Dominion2Bot()
         self._domination_bot = ThreeStepDominationBot()
-        self.active_strategy_bot: str = "macro_onnx"
+        self.active_strategy_bot: str = "3_step_domination_bot"
         self.execution_mode: str = "simulated"
         self._db_writer = db_writer or get_db_writer()
 
@@ -716,6 +716,31 @@ class SimulationAgent:
                     balance_after=p_inst.balance,
                     cycle_id=result.ticker,
                 )
+                try:
+                    from kalshi_sim.server import record_win_loss_event_report
+                    strike_val = market_info.floor_strike if market_info.floor_strike is not None else (market_info.target_strike if market_info.target_strike is not None else Decimal("0.0"))
+                    settle_spot = spot_dec if spot_dec is not None else strike_val
+                    record_win_loss_event_report(
+                        ticker=result.ticker,
+                        side=result.side.value,
+                        contracts=result.size,
+                        entry_price=result.entry_price,
+                        settlement_btc_price=settle_spot,
+                        strike_price=strike_val,
+                        timeframe="15m",
+                        ai_confidence=0.82,
+                        ai_rationale=f"Natural 15M Expiration Settlement for {b_type} | BTC: ${float(settle_spot):,.2f} vs Strike: ${float(strike_val):,.2f}",
+                        vpin_score=0.15,
+                        ev_edge=0.10,
+                        bot_type=b_type,
+                        execution_mode="simulated",
+                        custom_outcome=result.outcome,
+                        custom_pnl=result.pnl,
+                        balance_after=p_inst.balance,
+                    )
+                except Exception as rep_err:
+                    logger.debug("Failed to record win-loss report on settlement: %s", rep_err)
+
                 logger.info(
                     "[SETTLED] [%-20s] %-18s | %-3s %s %d contracts | P&L=%+$7.2f | Balance=$%.2f",
                     b_type,
@@ -998,11 +1023,26 @@ class SimulationAgent:
                     logger.error("Failed to send order to Kalshi Live Production exchange: %s. Cooldown enforced.", exc)
             return
 
-        # ------------------------------------------------------------------
-        # PAPER TRADING MODE: Active ONLY in mock/testing simulation regimes
-        # ------------------------------------------------------------------
+        # Micro-bankroll protection & realism: cap simulated size to live risk limits (1-4 contracts)
+        sim_size = max(1, min(affordable_size, 4))
+
+        # Calculate recent spot velocity for adverse selection modeling
+        velocity = 0.0
+        if hasattr(self, "_mid_price_history"):
+            try:
+                hist = self._mid_price_history.get(ticker, [])
+                if len(hist) >= 2:
+                    velocity = float(hist[-1] - hist[0]) * 100.0
+            except Exception:
+                pass
+
         result = self._simulator.simulate_market_order(
-            book, side, affordable_size, timeframe, reasoning
+            book=book,
+            side=side,
+            size=sim_size,
+            timeframe=timeframe,
+            reasoning=reasoning,
+            spot_velocity=velocity,
         )
         if result is None:
             return

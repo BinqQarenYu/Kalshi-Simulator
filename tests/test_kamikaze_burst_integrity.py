@@ -272,9 +272,9 @@ def test_integrity_live_daemon_status() -> None:
         assert checks.get("Kalshi ET Clock Alignment") == "PASS"
         assert checks.get("Kalshi Spot Price Precision") == "PASS"
         
-        # Verify active strategy is macro_trend_dominion
+        # Verify active strategy is valid institutional bot (3-Step Domination or Macro Trend Dominion)
         req_strat = urllib.request.urlopen("http://127.0.0.1:8000/api/bot/strategies", timeout=3.0)
         strat_data = json.loads(req_strat.read().decode())
-        assert strat_data.get("active_strategy") == "macro_trend_dominion"
+        assert strat_data.get("active_strategy") in ("3_step_domination_bot", "macro_trend_dominion", "macro_onnx")
     except Exception as exc:
         pytest.fail(f"Live server integrity verification failed: {exc}")

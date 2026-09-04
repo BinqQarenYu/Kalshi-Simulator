@@ -159,6 +159,8 @@ export function App() {
         timeframe={data.settings.timeframe}
         mode={data.settings.mode}
         tradingMode={tradingMode}
+        activeStrategyBot={data.settings?.active_strategy_bot || '3_step_domination_bot'}
+        onSelectStrategy={selectStrategyBot}
         mainView={mainView}
         onSelectMainView={(v) => setMainView(v)}
         isKillSwitchTripped={isKillSwitchTripped}
@@ -365,7 +367,7 @@ export function App() {
               {/* Market Chance Banner & Tab Selector */}
               <ChanceBanner
                 market={data.market}
-                activeTab={isLive && activeTab === 'ai' ? 'orderbook' : activeTab}
+                activeTab={activeTab}
                 tradingMode={tradingMode}
                 onSelectTab={(tab) => {
                   soundFX.playClickSound();
@@ -380,12 +382,12 @@ export function App() {
                   ladder={data.orderbook_ladder}
                   onSelectPrice={handleSelectPrice}
                 />
-              ) : activeTab === 'ai' && !isLive ? (
+              ) : activeTab === 'ai' ? (
                 <div className="p-4">
                   <AIMicrostructureCard 
                     signals={data.ai_signals} 
                     onSelectStrategy={selectStrategyBot}
-                    onTestBot={handleTestBot}
+                    onTestBot={!isLive ? handleTestBot : undefined}
                     onOpenReports={() => setIsReportsOpen(true)}
                   />
                 </div>
@@ -419,16 +421,24 @@ export function App() {
               onPlaceOrder={handlePlaceOrderIntercept}
             />
 
-            {/* In Live Trading: Show LiveGuardrailsCard (hide bot card and test cards) */}
+            {/* In Live Trading: Show Pre-Trade Guardrails AND Active AI Trading Brain */}
             {isLive ? (
-              <LiveGuardrailsCard
-                livePortfolio={data.live_portfolio}
-                integrityStatus={data.integrity_status}
-                complianceStatus={data.compliance_status}
-                isKillSwitchTripped={isKillSwitchTripped}
-                onKillSwitch={handleKillSwitch}
-                onResumeTrading={handleResumeTrading}
-              />
+              <>
+                <LiveGuardrailsCard
+                  livePortfolio={data.live_portfolio}
+                  integrityStatus={data.integrity_status}
+                  complianceStatus={data.compliance_status}
+                  isKillSwitchTripped={isKillSwitchTripped}
+                  onKillSwitch={handleKillSwitch}
+                  onResumeTrading={handleResumeTrading}
+                />
+                <AIMicrostructureCard 
+                  signals={data.ai_signals} 
+                  onSelectStrategy={selectStrategyBot}
+                  onTestBot={undefined}
+                  onOpenReports={() => setIsReportsOpen(true)}
+                />
+              </>
             ) : (
               /* In Paper Trading: Show AI Microstructure & ONNX Inferences */
               <AIMicrostructureCard 

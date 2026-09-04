@@ -304,7 +304,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
       if (modeParam) queryParams.append('execution_mode', modeParam);
       const qs = queryParams.toString() ? `?${queryParams.toString()}` : '';
 
-      const [mRes, eqRes, trRes, stRes, aiRes, valRes, wlRes, mAll, mMacro, mDom2, mDom, mOnnx, mLive] = await Promise.all([
+      const [mRes, eqRes, trRes, stRes, aiRes, valRes, wlRes, mAll, mMacroOnnx, mMacro, mDom2, mDom, mOnnx, mLive] = await Promise.all([
         fetch(`/api/history/metrics${qs}`).then((r) => r.json()).catch(() => null),
         fetch(`/api/history/equity-curve${qs ? `${qs}&limit=1000` : '?limit=1000'}`).then((r) => r.json()).catch(() => []),
         fetch(`/api/history/trades${qs ? `${qs}&limit=500` : '?limit=500'}`).then((r) => r.json()).catch(() => []),
@@ -313,6 +313,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
         fetch(`/api/bot/forward-validation-status${qs}`).then((r) => r.json()).catch(() => null),
         fetch(`/api/reports/full${qs ? `?${queryParams.toString()}` : ''}`).then((r) => r.json()).catch(() => null),
         fetch('/api/history/metrics?bot_type=all').then((r) => r.json()).catch(() => null),
+        fetch('/api/history/metrics?bot_type=macro_onnx').then((r) => r.json()).catch(() => null),
         fetch('/api/history/metrics?bot_type=macro_trend_dominion&execution_mode=simulated').then((r) => r.json()).catch(() => null),
         fetch('/api/history/metrics?bot_type=dominion_2_bot&execution_mode=simulated').then((r) => r.json()).catch(() => null),
         fetch('/api/history/metrics?bot_type=3_step_domination_bot&execution_mode=simulated').then((r) => r.json()).catch(() => null),
@@ -338,10 +339,10 @@ export const HistoricalAnalyticsTab: React.FC = () => {
         },
         {
           key: 'macro_onnx',
-          label: 'Macro ONNX Bot',
-          sublabel: 'Macro Trend + BTC Orderflow AI (Champion)',
+          label: 'Macro ONNX Bot (Champion)',
+          sublabel: 'Macro Trend + 15M Retrained ONNX (84.6% WR, PF 6.99)',
           icon: 'cpu',
-          metrics: mMacro,
+          metrics: mMacroOnnx || mMacro,
         },
         {
           key: 'macro_trend_dominion',
@@ -1843,13 +1844,33 @@ export const HistoricalAnalyticsTab: React.FC = () => {
 
                           {/* Bot Badge */}
                           <td className="py-3 px-3 whitespace-nowrap">
-                            {onnx ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                            {isMacroOnnxBot(report) ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
                                 <Cpu className="w-3 h-3 text-purple-400" />
+                                Macro ONNX
+                              </span>
+                            ) : isMacroBot(report) ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                                <TrendingUp className="w-3 h-3 text-cyan-400" />
+                                Macro Trend
+                              </span>
+                            ) : isDom2Bot(report) ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                <Crown className="w-3 h-3 text-emerald-400" />
+                                Dominion 2
+                              </span>
+                            ) : isDomBot(report) ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                <Zap className="w-3 h-3 text-amber-400" />
+                                3-Step Dom
+                              </span>
+                            ) : isOnnxBot(report) ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                                <Cpu className="w-3 h-3 text-blue-400" />
                                 ONNX ML
                               </span>
                             ) : live ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
                                 <Radio className="w-3 h-3 text-rose-400" />
                                 Live Real
                               </span>

@@ -37,17 +37,17 @@ class AIWorker:
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None
         self._last_compute_duration_ms: float = 0.0
-        self.active_strategy_bot: str = "macro_onnx"  # Default: Macro ONNX Bot
-        self._macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_onnx", strategy_name="Macro ONNX Bot")
+        self.active_strategy_bot: str = "3_step_domination_bot"  # Default: 3-Step Domination Bot
+        self._macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_trend_dominion", strategy_name="Macro Trend Dominion")
         self._domination_bot = ThreeStepDominationBot()
         self._dominion2_bot = Dominion2Bot()
 
         # Thread-safe in-memory cached AI signals
         self._cached_signals: dict[str, Any] = {
-            "strategy_id": "macro_onnx",
-            "strategy_name": "Macro ONNX Bot",
-            "active_playbook": "Playbook 1: Macro Trend Breakout",
-            "playbook_stage": "trend_expansion",
+            "strategy_id": "3_step_domination_bot",
+            "strategy_name": "3-Step Domination Bot",
+            "active_playbook": "Playbook 1: Early Momentum",
+            "playbook_stage": "early_momentum",
             "p_up": 0.50,
             "p_down": 0.50,
             "p_wait": 0.00,
@@ -60,7 +60,7 @@ class AIWorker:
             "kelly_f_yes": 0.00,
             "kelly_f_no": 0.00,
             "recommended_side": "wait",
-            "rationale": "Macro ONNX Bot (Multi-Scale Macro Trend + Continuous BTC L2 Orderflow) initialized.",
+            "rationale": "3-Step Domination Bot (Playbook 1: Early Momentum, Playbook 2: Mid OFI Drift, Playbook 3: Gamma Snub) initialized.",
             "compute_latency_ms": 0.0,
         }
 

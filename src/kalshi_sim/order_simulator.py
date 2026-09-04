@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import datetime, timezone
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, ROUND_UP
 
 from kalshi_sim.schemas import (
     L2BookState,
@@ -18,6 +18,7 @@ from kalshi_sim.schemas import (
     SimulatedFill,
     SimulatedOrder,
     Timeframe,
+    TradeEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,27 @@ class OrderSimulator:
     def __init__(self, fee_per_contract: Decimal = Decimal("0.01")) -> None:
         self.fee_per_contract = fee_per_contract
         self._resting_orders: dict[str, list[SimulatedOrder]] = {}
+
+    @staticmethod
+    def calculate_kalshi_taker_fee(price: Decimal, contracts: int) -> Decimal:
+        """Calculate realistic Kalshi member taker transaction fee.
+
+        Kalshi taker fee formula:
+            fee_cents = ceil(0.07 * contracts * P * (1 - P) * 100)
+        Subject to:
+            min: $0.01 per contract (1 cent floor)
+            max: $0.02 per contract (2 cents cap)
+        """
+        if contracts <= 0:
+            return Decimal("0.00")
+        c_dec = Decimal(str(contracts))
+        p = max(Decimal("0.01"), min(Decimal("0.99"), price))
+        raw_cents = Decimal("7.0") * c_dec * p * (Decimal("1.00") - p)
+        fee_cents = raw_cents.quantize(Decimal("1"), rounding=ROUND_UP)
+        fee = fee_cents / Decimal("100")
+        min_fee = Decimal("0.01") * c_dec
+        max_fee = Decimal("0.02") * c_dec
+        return max(min_fee, min(max_fee, fee))
 
 
     def place_resting_limit_order(
@@ -98,8 +120,9 @@ class OrderSimulator:
     def process_resting_orders(
         self,
         book: L2BookState,
+        latest_trades: list[TradeEvent] | None = None,
     ) -> list[tuple[SimulatedOrder, SimulatedFill]]:
-        """Evaluate and match resting orders against new book state."""
+        """Evaluate and match resting orders against new book state and public trade tape."""
         orders = self._resting_orders.get(book.market_ticker, [])
         if not orders:
             return []
@@ -114,20 +137,35 @@ class OrderSimulator:
 
             if ord.side == OrderSide.YES:
                 best_ask = book.best_yes_ask
+                # 1. Price touch / cross (market crossed limit)
                 if best_ask is not None and ord.limit_price is not None and ord.limit_price >= best_ask:
                     is_filled = True
                     fill_price = min(ord.limit_price, best_ask)
+                # 2. Passive queue execution: trade occurred at or below our bid on the public tape
+                elif latest_trades and ord.limit_price is not None:
+                    for tr in latest_trades:
+                        if tr.market_ticker == ord.ticker and tr.yes_price is not None:
+                            if tr.yes_price <= ord.limit_price:
+                                is_filled = True
+                                fill_price = ord.limit_price
+                                break
             else:
-                best_no_bid = book.best_no_bid
-                if best_no_bid is not None:
-                    best_no_ask = Decimal("1") - book.best_yes_bid if book.best_yes_bid else None
-                    if best_no_ask is not None and ord.limit_price is not None and ord.limit_price >= best_no_ask:
-                        is_filled = True
-                        fill_price = min(ord.limit_price, best_no_ask)
+                best_no_ask = Decimal("1") - book.best_yes_bid if book.best_yes_bid else None
+                if best_no_ask is not None and ord.limit_price is not None and ord.limit_price >= best_no_ask:
+                    is_filled = True
+                    fill_price = min(ord.limit_price, best_no_ask)
+                elif latest_trades and ord.limit_price is not None:
+                    for tr in latest_trades:
+                        if tr.market_ticker == ord.ticker and tr.no_price is not None:
+                            if tr.no_price <= ord.limit_price:
+                                is_filled = True
+                                fill_price = ord.limit_price
+                                break
 
             if is_filled:
                 cost = fill_price * ord.size
-                fee = self.fee_per_contract * ord.size
+                # Resting maker orders provide liquidity — Kalshi charges $0.00 maker fees
+                fee = Decimal("0.00")
                 ord.status = "filled"
                 fill = SimulatedFill(
                     order_id=ord.order_id,
@@ -142,8 +180,8 @@ class OrderSimulator:
                 )
                 filled.append((ord, fill))
                 logger.info(
-                    "RESTING ORDER MATCHED & FILLED: %s %s %d @ $%s (fee=$%s, cost=$%s) [ID: %s]",
-                    ord.side.value.upper(), ord.ticker, ord.size, fill_price, fee, cost, ord.order_id,
+                    "RESTING MAKER ORDER MATCHED & FILLED: %s %s %d @ $%s (maker_fee=$0.00, cost=$%s) [ID: %s]",
+                    ord.side.value.upper(), ord.ticker, ord.size, fill_price, cost, ord.order_id,
                 )
             else:
                 remaining.append(ord)
@@ -158,11 +196,12 @@ class OrderSimulator:
         size: int,
         timeframe: Timeframe,
         reasoning: str = "",
+        spot_velocity: float = 0.0,
     ) -> tuple[SimulatedOrder, SimulatedFill] | None:
         """Simulate a market order by walking the order book depth.
 
         For a Yes buy: we consume No side liquidity (buying yes = selling no).
-        The fill price is the VWAP across consumed levels.
+        The fill price is the VWAP across consumed levels with realistic adverse selection.
 
         Args:
             book: Current L2 order book state.
@@ -170,6 +209,7 @@ class OrderSimulator:
             size: Number of contracts to fill.
             timeframe: Determines slippage multiplier.
             reasoning: Strategy rationale for the trade log.
+            spot_velocity: Rolling 10s spot price change in dollars (for adverse selection).
 
         Returns:
             Tuple of (SimulatedOrder, SimulatedFill), or None if book
@@ -196,9 +236,9 @@ class OrderSimulator:
             )
             return None
 
-        # Walk the book to compute VWAP
+        # Walk the book to compute VWAP with depth exhaustion
         vwap_price, total_filled, slippage = self._walk_book(
-            consume_book, size, side, timeframe
+            consume_book, size, side, timeframe, spot_velocity=spot_velocity
         )
 
         if total_filled == 0:
@@ -207,6 +247,12 @@ class OrderSimulator:
                 side.value, "market", size, book.market_ticker,
             )
             return None
+
+        if total_filled < size:
+            logger.info(
+                "[PARTIAL IOC FILL] Requested %d contracts, only %d available in L2 book on %s",
+                size, total_filled, book.market_ticker,
+            )
 
         # Compute cost: price per contract × number of contracts
         cost = vwap_price * total_filled
@@ -223,7 +269,8 @@ class OrderSimulator:
             status="filled",
         )
 
-        fee = self.fee_per_contract * total_filled
+        # Exact Kalshi Taker Fee Schedule
+        fee = self.calculate_kalshi_taker_fee(vwap_price, total_filled)
 
         fill = SimulatedFill(
             order_id=order_id,
@@ -311,7 +358,8 @@ class OrderSimulator:
             status="filled",
         )
 
-        fee = self.fee_per_contract * size
+        # Marketable limit orders cross the spread and pay taker fees
+        fee = self.calculate_kalshi_taker_fee(limit_price, size)
 
         fill = SimulatedFill(
             order_id=order_id,
@@ -339,8 +387,9 @@ class OrderSimulator:
         size: int,
         order_side: OrderSide,
         timeframe: Timeframe,
+        spot_velocity: float = 0.0,
     ) -> tuple[Decimal, int, Decimal]:
-        """Walk the order book to compute fill price with slippage.
+        """Walk the order book to compute fill price with realistic depth and slippage.
 
         For Yes buys: we consume the No book. The best price for a Yes buyer
         is the *highest* No bid (cheapest Yes ask = 1 - highest_no_bid).
@@ -352,6 +401,7 @@ class OrderSimulator:
             size: Contracts to fill.
             order_side: Which side we're buying.
             timeframe: For slippage multiplier.
+            spot_velocity: Rolling spot velocity in dollars (adverse selection drift).
 
         Returns:
             Tuple of (vwap_price, total_filled, total_slippage).
@@ -383,6 +433,8 @@ class OrderSimulator:
                 first_price = fill_price
 
             fill_qty = min(remaining, int(qty))
+            if fill_qty <= 0:
+                continue
             total_cost += fill_price * fill_qty
             total_filled += fill_qty
             remaining -= fill_qty
@@ -402,15 +454,24 @@ class OrderSimulator:
             Decimal("0.0001"), rounding=ROUND_HALF_UP
         )
 
-        # Adjust VWAP by slippage
-        final_vwap = (vwap + adjusted_slippage).quantize(
+        # Realistic adverse selection / latency price drift:
+        # If market momentum is running strongly in trade direction,
+        # by the time the order arrives (75-150ms), price has drifted adversely
+        adverse_penalty = Decimal("0.0")
+        if order_side == OrderSide.YES and spot_velocity > 15.0:
+            adverse_penalty = Decimal("0.01")
+        elif order_side == OrderSide.NO and spot_velocity < -15.0:
+            adverse_penalty = Decimal("0.01")
+
+        final_vwap = (vwap + adjusted_slippage + adverse_penalty).quantize(
             Decimal("0.0001"), rounding=ROUND_HALF_UP
         )
 
-        # Cap at $1.00 (binary option max)
-        final_vwap = min(final_vwap, Decimal("1.00"))
+        # Bound strictly between $0.01 and $0.99 for binary options
+        final_vwap = max(Decimal("0.01"), min(Decimal("0.99"), final_vwap))
+        total_slippage = abs(final_vwap - (first_price or final_vwap))
 
-        return final_vwap, total_filled, adjusted_slippage
+        return final_vwap, total_filled, total_slippage
 
     @staticmethod
     def compute_slippage(entry_price: Decimal, fair_mid: Decimal) -> Decimal:

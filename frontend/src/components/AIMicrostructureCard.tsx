@@ -40,7 +40,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const activeStrategy = signals.strategy_id || 'macro_onnx';
+  const activeStrategy = signals.strategy_id || '3_step_domination_bot';
   const isMacroOnnx = activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion';
   const isMacroTrend = !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend');
   const isDominion2 = activeStrategy === 'dominion_2_bot';
@@ -333,7 +333,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             </button>
           )}
           <span className="text-[10px] font-mono text-gray-500 hidden sm:inline">
-            {isDominion2 ? 'dominion_2_bot.py' : is3StepBot ? '3_step_domination.py' : 'nano_microscope.onnx'}
+            {isMacroOnnx ? 'nano_microscope_overhauled.onnx' : isMacroTrend ? 'macro_trend_dominion.py' : isDominion2 ? 'dominion_2_bot.py' : is3StepBot ? '3_step_domination.py' : 'nano_microscope.onnx'}
           </span>
         </div>
       </div>
@@ -355,10 +355,10 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
       <div className="flex flex-col gap-2">
         <div className="flex justify-between items-center text-xs">
           <span className="text-[#8b949e] font-semibold">
-            {is3StepBot ? 'Digital Option Moneyness Probability' : 'Directional Microstructure Inference'}
+            {isMacroOnnx ? 'Macro Trend + 15M ONNX Directional Inference' : is3StepBot ? 'Digital Option Moneyness Probability' : 'Directional Microstructure Inference'}
           </span>
           <span className="text-[11px] font-mono text-gray-400">
-            {is3StepBot ? 'Phi(z) Normal CDF' : '28-D Feature Tensor'}
+            {isMacroOnnx ? 'Macro Trend + 28-D ONNX' : is3StepBot ? 'Phi(z) Normal CDF' : '28-D Feature Tensor'}
           </span>
         </div>
 
@@ -514,7 +514,13 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             onClick={handleTestBot}
             disabled={isTesting}
             className={`w-full py-2.5 px-4 text-white font-bold text-xs rounded-xl shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${
-              is3StepBot
+              isMacroOnnx
+                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/25'
+                : isMacroTrend
+                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-cyan-500/20'
+                : isDominion2
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/20'
+                : is3StepBot
                 ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-500/20'
                 : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-500/20'
             }`}
@@ -523,12 +529,12 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             {isTesting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin text-white" />
-                <span>Running {is3StepBot ? '3-Step Playbook' : 'ONNX AI'} Evaluation...</span>
+                <span>Running {isMacroOnnx ? 'Macro ONNX (84.6% WR)' : isMacroTrend ? 'Macro Trend' : isDominion2 ? 'Dominion 2' : is3StepBot ? '3-Step Playbook' : 'ONNX AI'} Evaluation...</span>
               </>
             ) : (
               <>
                 <Play className="h-3.5 w-3.5 fill-current text-white/90" />
-                <span>🧪 Test {is3StepBot ? '3-Step Domination Bot' : 'ONNX Bot'} (15M Trade Event)</span>
+                <span>🧪 Test {isMacroOnnx ? 'Macro ONNX Bot (84.6% WR)' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2' : is3StepBot ? '3-Step Domination' : 'ONNX Bot'} (15M Event)</span>
               </>
             )}
           </button>

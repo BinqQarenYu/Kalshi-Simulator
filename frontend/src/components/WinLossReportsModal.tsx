@@ -51,6 +51,36 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
   const isLiveReport = (r: WinLossEventReport) =>
     (r.execution_mode === 'live' || r.bot_type === 'live') && (r.ticker.includes('SEP01') || r.timestamp_utc?.startsWith('2026-09-01'));
 
+  const isMacroOnnxBot = (r: WinLossEventReport) =>
+    r.bot_type === 'macro_onnx' ||
+    r.bot_type === 'macro_onnx_bot' ||
+    r.bot_type === 'macro_trend_onnx_fusion' ||
+    (r.ai_rationale?.toLowerCase().includes('macro') && r.ai_rationale?.toLowerCase().includes('onnx'));
+
+  const isMacroBot = (r: WinLossEventReport) =>
+    !isMacroOnnxBot(r) && (
+      r.bot_type === 'macro_trend_dominion' ||
+      r.bot_type === 'macro_trend' ||
+      r.ai_rationale?.toLowerCase().includes('macro trend')
+    );
+
+  const isDom2Bot = (r: WinLossEventReport) =>
+    r.bot_type === 'dominion_2_bot' ||
+    r.bot_type === 'dominion2' ||
+    r.bot_type === 'dominion_v2' ||
+    r.ai_rationale?.toLowerCase().includes('dominion 2');
+
+  const isDomBot = (r: WinLossEventReport) =>
+    r.bot_type === '3_step_domination_bot' ||
+    r.bot_type === 'domination' ||
+    (!r.bot_type && r.ai_rationale?.toLowerCase().includes('domination') && !r.ai_rationale?.toLowerCase().includes('dominion 2')) ||
+    (!r.bot_type && !r.ai_rationale?.toLowerCase().includes('dominion 2'));
+
+  const isOnnxBot = (r: WinLossEventReport) =>
+    r.bot_type === 'onnx_ml_bot' ||
+    r.bot_type === 'onnx' ||
+    (r.ai_rationale?.toLowerCase().includes('onnx') && !isMacroOnnxBot(r));
+
   const liveReports = reports.filter(isLiveReport);
   const paperReports = reports.filter((r) => !isLiveReport(r));
 
@@ -333,14 +363,14 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
               <button
                 onClick={handleRunBotTest}
                 disabled={isTesting}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-500/20 transition-all active:scale-95 disabled:opacity-50"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl shadow-lg shadow-purple-500/25 transition-all active:scale-95 disabled:opacity-50"
               >
                 {isTesting ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <Play className="h-3.5 w-3.5 fill-current" />
                 )}
-                <span>{isTesting ? 'Running Bot Test...' : '🧪 Test Bot (15M)'}</span>
+                <span>{isTesting ? 'Running Bot Test...' : '🧪 Test Macro ONNX (15M)'}</span>
               </button>
             )}
 
@@ -434,8 +464,29 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
                               </span>
                             )}
                           </div>
-                          <div className="text-[10px] text-gray-500 font-mono mt-0.5">
-                            {report.report_id}
+                          <div className="text-[10px] text-gray-500 font-mono mt-0.5 flex items-center gap-1.5">
+                            <span>{report.report_id}</span>
+                            {isMacroOnnxBot(report) ? (
+                              <span className="inline-flex items-center px-1.5 py-0.2 text-[8px] font-bold uppercase rounded bg-purple-500/20 border border-purple-500/40 text-purple-300">
+                                🧠 Macro ONNX
+                              </span>
+                            ) : isMacroBot(report) ? (
+                              <span className="inline-flex items-center px-1.5 py-0.2 text-[8px] font-bold uppercase rounded bg-cyan-500/20 border border-cyan-500/40 text-cyan-300">
+                                📈 Macro Trend
+                              </span>
+                            ) : isDom2Bot(report) ? (
+                              <span className="inline-flex items-center px-1.5 py-0.2 text-[8px] font-bold uppercase rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-300">
+                                👑 Dominion 2
+                              </span>
+                            ) : isDomBot(report) ? (
+                              <span className="inline-flex items-center px-1.5 py-0.2 text-[8px] font-bold uppercase rounded bg-amber-500/20 border border-amber-500/40 text-amber-300">
+                                ⚡ 3-Step Dom
+                              </span>
+                            ) : isOnnxBot(report) ? (
+                              <span className="inline-flex items-center px-1.5 py-0.2 text-[8px] font-bold uppercase rounded bg-blue-500/20 border border-blue-500/40 text-blue-300">
+                                🔬 ONNX ML
+                              </span>
+                            ) : null}
                           </div>
                         </td>
 
