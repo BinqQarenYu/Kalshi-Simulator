@@ -182,7 +182,7 @@ Clone the repository and install dependencies:
 
 ```powershell
 # Clone repository
-git clone https://github.com/deadynietzer/Kalshi-Simulator.git
+git clone https://github.com/BinqQarenYu/Kalshi-Simulator.git
 cd "Kalshi Simulator"
 
 # Create virtual environment (optional but recommended)

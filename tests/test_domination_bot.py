@@ -8,16 +8,16 @@ from kalshi_sim.schemas import L2BookState, OrderBookLevel, OrderSide
 
 
 def test_domination_bot_playbook3_late_gamma_snub() -> None:
-    bot = ThreeStepDominationBot(min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"))
+    bot = ThreeStepDominationBot(min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"), min_spot_diff=35.0)
 
     book = L2BookState(market_ticker="KXBTC15M-T78650")
     book.yes_book = {Decimal("0.75"): Decimal("100"), Decimal("0.72"): Decimal("200")}
     book.no_book = {Decimal("0.25"): Decimal("100"), Decimal("0.28"): Decimal("200")}
 
-    # T = 120s (2 minutes left), spot is +$30 above strike ($78680 vs $78650)
+    # T = 120s (2 minutes left), spot is +$100 above strike ($78750 vs $78650) -> deep ITM harvest
     decision = bot.evaluate(
         book=book,
-        spot_price=78680.0,
+        spot_price=78750.0,
         target_strike=78650.0,
         time_to_expiry_s=120.0,
         total_equity=Decimal("100.00"),
@@ -34,17 +34,38 @@ def test_domination_bot_playbook3_late_gamma_snub() -> None:
     assert decision.recommended_contracts > 0
 
 
+def test_domination_bot_price_cap_veto() -> None:
+    bot = ThreeStepDominationBot(max_entry_price=0.62)
+
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.85"): Decimal("100")}
+    book.no_book = {Decimal("0.15"): Decimal("100")}
+
+    # Expensive entry ($0.85 > $0.72) must be vetoed
+    decision = bot.evaluate(
+        book=book,
+        spot_price=78750.0,
+        target_strike=78650.0,
+        time_to_expiry_s=120.0,
+        total_equity=Decimal("100.00"),
+        max_position_size=10,
+    )
+
+    assert decision.recommended_side == "wait"
+    assert "Price Cap Veto" in decision.rationale
+
+
 def test_domination_bot_playbook2_mid_cycle_ofi_drift() -> None:
-    bot = ThreeStepDominationBot(min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"))
+    bot = ThreeStepDominationBot(min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"), min_spot_diff=35.0)
 
     book = L2BookState(market_ticker="KXBTC15M-T78650")
     book.yes_book = {Decimal("0.55"): Decimal("300")}
     book.no_book = {Decimal("0.45"): Decimal("100")}
 
-    # T = 420s (7 minutes left), spot is +$15 above strike
+    # T = 420s (7 minutes left), spot is +$45 above strike
     decision = bot.evaluate(
         book=book,
-        spot_price=78665.0,
+        spot_price=78695.0,
         target_strike=78650.0,
         time_to_expiry_s=420.0,
         total_equity=Decimal("100.00"),

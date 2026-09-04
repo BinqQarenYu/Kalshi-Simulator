@@ -41,7 +41,9 @@ export function App() {
   } = useKalshiWebSocket();
 
   const [mainView, setMainView] = useState<'trading' | 'analytics'>('trading');
-  const [tradingMode, setTradingMode] = useState<'paper' | 'live'>('paper');
+  const [tradingMode, setTradingMode] = useState<'paper' | 'live'>(
+    data.settings?.mode === 'live' ? 'live' : 'paper'
+  );
   const [activeTab, setActiveTab] = useState<'trade_up' | 'trade_down' | 'graph' | 'orderbook' | 'ai'>('orderbook');
   const [isReportsOpen, setIsReportsOpen] = useState<boolean>(false);
   const [isIntegrityOpen, setIsIntegrityOpen] = useState<boolean>(false);
@@ -49,14 +51,22 @@ export function App() {
   const [isSystemResourcesOpen, setIsSystemResourcesOpen] = useState<boolean>(false);
   const [isLoadingAudit, setIsLoadingAudit] = useState<boolean>(false);
 
+  // Synchronize trading mode when backend reports live mode
+  useEffect(() => {
+    if (data.settings?.mode) {
+      setTradingMode(data.settings.mode === 'live' ? 'live' : 'paper');
+    }
+  }, [data.settings?.mode]);
+
   const isLive = tradingMode === 'live';
-  const isKillSwitchTripped = data.portfolio.circuit_breaker_tripped ?? false;
+  const isKillSwitchTripped = data.portfolio?.circuit_breaker_tripped ?? false;
 
   // Track settlements to trigger win/loss audio chimes automatically
-  const prevSettlementsCount = useRef<number>(data.portfolio.settlements.length);
+  const prevSettlementsCount = useRef<number>((data.portfolio?.settlements || []).length);
   useEffect(() => {
-    if (data.portfolio.settlements.length > prevSettlementsCount.current) {
-      const latest = data.portfolio.settlements[0];
+    const count = (data.portfolio?.settlements || []).length;
+    if (count > prevSettlementsCount.current) {
+      const latest = (data.portfolio?.settlements || [])[0];
       if (latest) {
         if (latest.outcome === 'win') {
           soundFX.playWinSound();
@@ -65,8 +75,8 @@ export function App() {
         }
       }
     }
-    prevSettlementsCount.current = data.portfolio.settlements.length;
-  }, [data.portfolio.settlements]);
+    prevSettlementsCount.current = count;
+  }, [data.portfolio?.settlements]);
 
   const handlePlaceOrderIntercept = async (
     side: 'yes' | 'no',
@@ -149,12 +159,14 @@ export function App() {
         timeframe={data.settings.timeframe}
         mode={data.settings.mode}
         tradingMode={tradingMode}
+        activeStrategyBot={data.settings?.active_strategy_bot || '3_step_domination_bot'}
+        onSelectStrategy={selectStrategyBot}
         mainView={mainView}
         onSelectMainView={(v) => setMainView(v)}
         isKillSwitchTripped={isKillSwitchTripped}
         livePortfolio={data.live_portfolio}
         memoryProfile={data.memory_profile}
-        reportsCount={data.win_loss_reports?.length || 0}
+        reportsCount={Array.isArray(data.win_loss_reports) ? data.win_loss_reports.length : 0}
         integrityStatus={data.integrity_status}
         complianceStatus={data.compliance_status}
         systemResources={data.system_resources}
@@ -288,23 +300,42 @@ export function App() {
           </button>
         </div>
 
-        {/* Quick 15M Win/Loss Reports button on banner (shown in Paper mode) */}
-        {!isLive && (
-          <button
-            onClick={() => {
-              soundFX.playClickSound();
-              setIsReportsOpen(true);
-            }}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-[#161b22] hover:bg-[#21262d] border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 text-xs font-bold rounded-xl transition-all shadow-sm"
-          >
-            <span>🏆 15M Event Win/Loss Reports</span>
-            {data.win_loss_reports && data.win_loss_reports.length > 0 && (
-              <span className="px-1.5 py-0.2 text-[10px] font-mono bg-emerald-500/20 border border-emerald-500/40 rounded-full">
-                {data.win_loss_reports.length}
+        {/* Quick 15M Win/Loss Reports button on banner (Active in both Paper & Live modes) */}
+        <button
+          onClick={() => {
+            soundFX.playClickSound();
+            setIsReportsOpen(true);
+          }}
+          className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all shadow-sm font-bold text-xs ${
+            isLive
+              ? 'bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/40 text-rose-400 hover:text-rose-300 shadow-rose-500/10'
+              : 'bg-[#161b22] hover:bg-[#21262d] border border-emerald-500/30 text-emerald-400 hover:text-emerald-300'
+          }`}
+        >
+          {isLive ? (
+            <>
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
               </span>
-            )}
-          </button>
-        )}
+              <span>🔴 Live Event Reports</span>
+              {Array.isArray(data.win_loss_reports) && (
+                <span className="px-1.5 py-0.2 text-[10px] font-mono bg-rose-500/20 border border-rose-500/40 rounded-full text-rose-300">
+                  {data.win_loss_reports.filter((r) => r.execution_mode === 'live').length}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <span>🏆 15M Event Win/Loss Reports</span>
+              {Array.isArray(data.win_loss_reports) && data.win_loss_reports.length > 0 && (
+                <span className="px-1.5 py-0.2 text-[10px] font-mono bg-emerald-500/20 border border-emerald-500/40 rounded-full">
+                  {data.win_loss_reports.length}
+                </span>
+              )}
+            </>
+          )}
+        </button>
       </div>
 
       {mainView === 'analytics' ? (
@@ -336,7 +367,7 @@ export function App() {
               {/* Market Chance Banner & Tab Selector */}
               <ChanceBanner
                 market={data.market}
-                activeTab={isLive && activeTab === 'ai' ? 'orderbook' : activeTab}
+                activeTab={activeTab}
                 tradingMode={tradingMode}
                 onSelectTab={(tab) => {
                   soundFX.playClickSound();
@@ -351,12 +382,12 @@ export function App() {
                   ladder={data.orderbook_ladder}
                   onSelectPrice={handleSelectPrice}
                 />
-              ) : activeTab === 'ai' && !isLive ? (
+              ) : activeTab === 'ai' ? (
                 <div className="p-4">
                   <AIMicrostructureCard 
                     signals={data.ai_signals} 
                     onSelectStrategy={selectStrategyBot}
-                    onTestBot={handleTestBot}
+                    onTestBot={!isLive ? handleTestBot : undefined}
                     onOpenReports={() => setIsReportsOpen(true)}
                   />
                 </div>
@@ -390,16 +421,24 @@ export function App() {
               onPlaceOrder={handlePlaceOrderIntercept}
             />
 
-            {/* In Live Trading: Show LiveGuardrailsCard (hide bot card and test cards) */}
+            {/* In Live Trading: Show Pre-Trade Guardrails AND Active AI Trading Brain */}
             {isLive ? (
-              <LiveGuardrailsCard
-                livePortfolio={data.live_portfolio}
-                integrityStatus={data.integrity_status}
-                complianceStatus={data.compliance_status}
-                isKillSwitchTripped={isKillSwitchTripped}
-                onKillSwitch={handleKillSwitch}
-                onResumeTrading={handleResumeTrading}
-              />
+              <>
+                <LiveGuardrailsCard
+                  livePortfolio={data.live_portfolio}
+                  integrityStatus={data.integrity_status}
+                  complianceStatus={data.compliance_status}
+                  isKillSwitchTripped={isKillSwitchTripped}
+                  onKillSwitch={handleKillSwitch}
+                  onResumeTrading={handleResumeTrading}
+                />
+                <AIMicrostructureCard 
+                  signals={data.ai_signals} 
+                  onSelectStrategy={selectStrategyBot}
+                  onTestBot={undefined}
+                  onOpenReports={() => setIsReportsOpen(true)}
+                />
+              </>
             ) : (
               /* In Paper Trading: Show AI Microstructure & ONNX Inferences */
               <AIMicrostructureCard 
@@ -419,6 +458,7 @@ export function App() {
         onClose={() => setIsReportsOpen(false)}
         reports={data.win_loss_reports}
         onTestBot={handleTestBot}
+        isLiveMode={isLive}
       />
 
       {/* Agent_integrity_check Suite Modal */}

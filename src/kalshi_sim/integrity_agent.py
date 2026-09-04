@@ -162,7 +162,9 @@ class AgentIntegrityCheck:
             for s in settlements:
                 payout = s.pnl + (s.entry_price * Decimal(str(s.size)))
                 expected_payout = (Decimal("1.00") if s.outcome == "win" else Decimal("0.00")) * Decimal(str(s.size))
-                if abs(payout - expected_payout) > Decimal("0.01"):
+                # Account for realistic Kalshi exchange taker fees (up to $0.02/contract)
+                max_fee_allowance = Decimal("0.025") * Decimal(str(s.size))
+                if abs(payout - expected_payout) > max_fee_allowance:
                     payoff_violations += 1
 
             if payoff_violations == 0:

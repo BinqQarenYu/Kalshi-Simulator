@@ -30,7 +30,7 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
 
           <div className="flex items-baseline gap-2">
             <span className="text-xl sm:text-2xl font-black text-white">
-              {market.market_chance_pct.toFixed(1)}%
+              {(market?.market_chance_pct ?? 0).toFixed(1)}%
             </span>
             <span className="text-xs font-bold text-[#ff4d4d] flex items-center">
               ▼ 45.1
@@ -104,19 +104,19 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
         >
           Level-2 Book
         </button>
-        {!isLive && (
-          <button
-            onClick={() => onSelectTab('ai')}
-            className={`pb-1 border-b-2 flex items-center gap-1.5 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6] ${
-              activeTab === 'ai'
-                ? 'border-[#3b82f6] text-[#3b82f6]'
-                : 'border-transparent text-[#8b949e] hover:text-white'
-            }`}
-          >
-            <span>AI Microstructure</span>
-            <span className="h-1.5 w-1.5 rounded-full bg-[#3b82f6] animate-pulse" />
-          </button>
-        )}
+        <button
+          onClick={() => onSelectTab('ai')}
+          className={`pb-1 border-b-2 flex items-center gap-1.5 transition-all ${
+            activeTab === 'ai'
+              ? 'border-purple-500 text-purple-300 font-bold'
+              : 'border-transparent text-[#8b949e] hover:text-white'
+          }`}
+        >
+          <span>🧠 AI Brain & ONNX</span>
+          <span className="px-1.5 py-0.2 text-[9px] font-mono bg-purple-500/25 text-purple-300 border border-purple-500/40 rounded-full font-bold">
+            Macro ONNX
+          </span>
+        </button>
       </div>
     </div>
   );

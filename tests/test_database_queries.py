@@ -179,3 +179,19 @@ def test_server_history_endpoints() -> None:
         assert "profit_factor" in data
         assert "sharpe_ratio" in data
         assert "sortino_ratio" in data
+
+        # 6. Export endpoints
+        res_trade_csv = client.get("/api/history/trades/export.csv")
+        assert res_trade_csv.status_code == 200
+        assert "text/csv" in res_trade_csv.headers["content-type"]
+
+        res_exec_summary = client.get("/api/reports/executive-summary/export.json")
+        assert res_exec_summary.status_code == 200
+        assert "application/json" in res_exec_summary.headers["content-type"]
+        assert "combined_portfolio_metrics" in res_exec_summary.json()
+
+        # 7. Batch Delete endpoint test
+        res_batch = client.post("/api/history/batch-delete", json={"table": "trades", "ids": [999999]})
+        assert res_batch.status_code == 200
+        assert res_batch.json()["success"] is True
+

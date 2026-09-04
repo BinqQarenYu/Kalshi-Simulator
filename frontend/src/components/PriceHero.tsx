@@ -38,8 +38,8 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market }) => {
               {market.current_btc_price_str}
             </div>
             <div className={`text-xs font-semibold flex items-center gap-1 ${deltaColor}`}>
-              <span>{isUp ? '+' : ''}${market.diff.toFixed(2)}</span>
-              <span>({isUp ? '+' : ''}{Math.abs(market.diff_pct) < 0.1 ? market.diff_pct.toFixed(3) : market.diff_pct.toFixed(2)}%)</span>
+              <span>{isUp ? '+' : ''}${(market?.diff ?? 0).toFixed(2)}</span>
+              <span>({isUp ? '+' : ''}{Math.abs(market?.diff_pct ?? 0) < 0.1 ? (market?.diff_pct ?? 0).toFixed(3) : (market?.diff_pct ?? 0).toFixed(2)}%)</span>
             </div>
           </div>
         </div>

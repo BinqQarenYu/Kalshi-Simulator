@@ -90,3 +90,29 @@ class QuoLasMicroscopeNet(nn.Module):
         if return_logits:
             return logits
         return F.softmax(logits, dim=-1)
+
+
+class ExportableQuoLasNet(nn.Module):
+    """Dual-input wrapper for QuoLasMicroscopeNet to export seamless ONNX graphs.
+
+    Inputs:
+        spatial_input: (B, 15) - 15-level spatial orderbook imbalance
+        toxic_input: (B, 13) - 13-parameter toxic microstructure vector
+    Output:
+        action_logits: (B, 3) - unnormalized directional logits [UP, DOWN, WAIT]
+    """
+
+    def __init__(self, backbone: QuoLasMicroscopeNet) -> None:
+        super().__init__()
+        self.backbone = backbone
+
+    def forward(
+        self,
+        spatial_input: torch.Tensor,
+        toxic_input: torch.Tensor,
+    ) -> torch.Tensor:
+        # Note: Feature extractor orders the 28-D vector as:
+        # [:13] toxic features, [13:28] spatial imbalances.
+        # Concatenate along feature dimension to reconstruct the (B, 28) representation.
+        x = torch.cat([toxic_input, spatial_input], dim=-1)
+        return self.backbone(x, return_logits=True)

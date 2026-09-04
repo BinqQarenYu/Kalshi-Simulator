@@ -16,6 +16,8 @@ interface HeaderProps {
   timeframe: string;
   mode?: 'mock' | 'live';
   tradingMode?: 'paper' | 'live';
+  activeStrategyBot?: string;
+  onSelectStrategy?: (strategyId: string) => Promise<any>;
   mainView?: 'trading' | 'analytics';
   onSelectMainView?: (view: 'trading' | 'analytics') => void;
   isKillSwitchTripped?: boolean;
@@ -46,6 +48,8 @@ export const Header: React.FC<HeaderProps> = ({
   timeframe,
   mode = 'mock',
   tradingMode = 'paper',
+  activeStrategyBot = '3_step_domination_bot',
+  onSelectStrategy,
   mainView = 'trading',
   onSelectMainView,
   isKillSwitchTripped = false,
@@ -231,6 +235,77 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
+        {/* Center/Right: Active Quantitative Strategy Bot Indicator Pill */}
+        <div 
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#161b22] border text-xs shadow-md cursor-default ${
+            activeStrategyBot === '3_step_domination_bot'
+              ? 'border-amber-500/40 shadow-amber-500/10'
+              : activeStrategyBot === 'macro_onnx'
+              ? 'border-purple-500/40 shadow-purple-500/10'
+              : activeStrategyBot === 'macro_trend_dominion'
+              ? 'border-cyan-500/40 shadow-cyan-500/10'
+              : activeStrategyBot === 'dominion_2_bot'
+              ? 'border-emerald-500/40 shadow-emerald-500/10'
+              : 'border-blue-500/40 shadow-blue-500/10'
+          }`}
+          title={`Active Strategy Bot: ${
+            activeStrategyBot === '3_step_domination_bot'
+              ? '3-Step Domination Bot (Playbook 1: Early Momentum, Playbook 2: Mid OFI Drift, Playbook 3: Gamma Snub)'
+              : activeStrategyBot === 'macro_onnx'
+              ? 'Macro ONNX Bot (84.6% Win Rate • Multi-Scale Macro Trend + Retrained ONNX Microstructure)'
+              : activeStrategyBot === 'macro_trend_dominion'
+              ? 'Macro Trend Dominion (1-Hour Trend Following)'
+              : activeStrategyBot === 'dominion_2_bot'
+              ? 'Dominion 2 Bot (Anti-Pin Scalper)'
+              : 'ONNX Microstructure Bot'
+          }`}
+        >
+          <div className={`h-2 w-2 rounded-full animate-ping ${
+            activeStrategyBot === '3_step_domination_bot'
+              ? 'bg-amber-400'
+              : activeStrategyBot === 'macro_onnx'
+              ? 'bg-purple-400'
+              : activeStrategyBot === 'macro_trend_dominion'
+              ? 'bg-cyan-400'
+              : activeStrategyBot === 'dominion_2_bot'
+              ? 'bg-emerald-400'
+              : 'bg-blue-400'
+          }`} />
+          {activeStrategyBot === '3_step_domination_bot' ? (
+            <Zap className="h-3.5 w-3.5 text-amber-400" />
+          ) : activeStrategyBot === 'macro_onnx' ? (
+            <Cpu className="h-3.5 w-3.5 text-purple-400" />
+          ) : activeStrategyBot === 'dominion_2_bot' ? (
+            <Award className="h-3.5 w-3.5 text-emerald-400" />
+          ) : (
+            <Cpu className="h-3.5 w-3.5 text-blue-400" />
+          )}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[#8b949e] font-sans text-[11px] hidden sm:inline">Active Bot:</span>
+            <span className="font-bold text-white text-[11px]">
+              {activeStrategyBot === '3_step_domination_bot'
+                ? '3-Step Domination'
+                : activeStrategyBot === 'macro_onnx'
+                ? 'Macro ONNX'
+                : activeStrategyBot === 'macro_trend_dominion'
+                ? 'Macro Trend'
+                : activeStrategyBot === 'dominion_2_bot'
+                ? 'Dominion 2'
+                : 'ONNX ML'}
+            </span>
+            {activeStrategyBot === '3_step_domination_bot' && (
+              <span className="px-1.5 py-0.2 text-[9px] font-mono bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-full font-extrabold">
+                Playbooks Active
+              </span>
+            )}
+            {activeStrategyBot === 'macro_onnx' && (
+              <span className="px-1.5 py-0.2 text-[9px] font-mono bg-purple-500/30 text-purple-200 border border-purple-500/40 rounded-full font-extrabold">
+                84.6% WR • Champ
+              </span>
+            )}
+          </div>
+        </div>
+
         {/* Right Action Cluster */}
         <div className="flex items-center gap-3">
           {/* In LIVE Mode: Show Emergency Kill Switch & Real Balance prominently */}
@@ -324,7 +399,17 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   onClick={handleRunBotTest}
                   disabled={isTesting}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 active:scale-95 transition-all disabled:opacity-50"
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-xl shadow-md active:scale-95 transition-all disabled:opacity-50 ${
+                    activeStrategyBot === '3_step_domination_bot'
+                      ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-500/20'
+                      : activeStrategyBot === 'macro_onnx'
+                      ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/20'
+                      : activeStrategyBot === 'macro_trend_dominion'
+                      ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 shadow-cyan-500/20'
+                      : activeStrategyBot === 'dominion_2_bot'
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/20'
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-500/20'
+                  }`}
                   title="Test Bot: Execute an immediate AI trade decision on active 15M contract"
                 >
                   {isTesting ? (
@@ -332,7 +417,15 @@ export const Header: React.FC<HeaderProps> = ({
                   ) : (
                     <Play className="h-3 w-3 fill-current" />
                   )}
-                  <span>{isTesting ? 'Testing...' : '🧪 Test Bot'}</span>
+                  <span>
+                    {isTesting
+                      ? 'Testing...'
+                      : activeStrategyBot === '3_step_domination_bot'
+                      ? '⚡ Test 3-Step Bot'
+                      : activeStrategyBot === 'macro_onnx'
+                      ? '🧪 Test Macro ONNX'
+                      : '🧪 Test Bot'}
+                  </span>
                 </button>
               )}
 
@@ -393,7 +486,9 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Audio SoundFX Toggle Button */}
           <button
             onClick={handleToggleSound}
-            className={`p-2 rounded-xl border transition-all ${
+            aria-label="Sound effects"
+            aria-pressed={!isMuted}
+            className={`p-2 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
               isMuted
                 ? 'bg-[#161b22] border-[#30363d] text-[#8b949e] hover:text-white'
                 : 'bg-[#f7931a]/15 border-[#f7931a]/40 text-[#f7931a]'
