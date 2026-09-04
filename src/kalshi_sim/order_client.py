@@ -50,6 +50,8 @@ class KalshiLiveOrderClient:
             self.private_key = load_private_key(private_key_path)
         self.base_url = base_url.rstrip("/")
         self._session: Optional[aiohttp.ClientSession] = None
+        self._primary_exchange_index: int = 0
+        self.shard_balances: Dict[int, Decimal] = {}
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or lazily initialize a connection-pooled aiohttp session."""
@@ -64,7 +66,7 @@ class KalshiLiveOrderClient:
             self._session = None
 
     async def get_balance(self) -> Dict[str, Any]:
-        """Fetch current demo account cash balance and credit line."""
+        """Fetch current demo/live account cash balance and update primary exchange index."""
         endpoint = "/trade-api/v2/portfolio/balance"
         url = f"{self.base_url}/portfolio/balance"
         headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
@@ -77,7 +79,66 @@ class KalshiLiveOrderClient:
                 return {"balance": 0, "status": resp.status, "error": err_text}
             data = await resp.json()
             logger.info("Kalshi Live Account Balance: %s", data)
+            breakdown = data.get("balance_breakdown", [])
+            self.shard_balances = {}
+            for item in breakdown:
+                try:
+                    idx = int(item.get("exchange_index", 0))
+                    self.shard_balances[idx] = Decimal(str(item.get("balance", "0.0")))
+                except (ValueError, TypeError):
+                    pass
+            if breakdown:
+                best_shard = max(breakdown, key=lambda item: Decimal(str(item.get("balance", "0.0"))))
+                self._primary_exchange_index = int(best_shard.get("exchange_index", 0))
             return data
+
+    async def transfer_between_shards(
+        self,
+        source_shard: int,
+        destination_shard: int,
+        amount_dollars: Decimal,
+    ) -> bool:
+        """Transfer collateral between Kalshi exchange matching engines (e.g. Shard 0 -> Shard 2)."""
+        endpoint = "/trade-api/v2/portfolio/intra_exchange_instance_transfer"
+        url = f"{self.base_url}/portfolio/intra_exchange_instance_transfer"
+        # Kalshi intra-exchange transfer API amount is in cent-fractions: $1.00 = 10,000 units
+        amount_units = int(amount_dollars * Decimal("10000"))
+        payload = {
+            "source": "event_contract",
+            "destination": "event_contract",
+            "source_exchange_shard": source_shard,
+            "destination_exchange_shard": destination_shard,
+            "amount": amount_units,
+        }
+        session = await self._get_session()
+        headers = get_auth_headers(self.api_key_id, self.private_key, "POST", endpoint)
+        headers["Content-Type"] = "application/json"
+        try:
+            async with session.post(url, json=payload, headers=headers) as resp:
+                if resp.status in (200, 201):
+                    res_data = await resp.json()
+                    logger.info(
+                        "[SHARD REBALANCE] Successfully transferred $%s from Shard %d to Shard %d (ID: %s)",
+                        amount_dollars, source_shard, destination_shard, res_data.get("transfer_id"),
+                    )
+                    await self.get_balance()
+                    return True
+                else:
+                    err_text = await resp.text()
+                    logger.error("Failed to transfer collateral between shards (HTTP %d): %s", resp.status, err_text)
+                    return False
+        except Exception as exc:
+            logger.error("Error executing collateral transfer between shards: %s", exc)
+            return False
+
+    async def ensure_crypto_collateral(self, min_required: Decimal = Decimal("5.00"), top_up: Decimal = Decimal("15.00")) -> None:
+        """Ensure Shard 2 (Crypto Matching Engine) has sufficient trading collateral."""
+        shard2_bal = self.shard_balances.get(2, Decimal("0.0"))
+        if shard2_bal < min_required:
+            shard0_bal = self.shard_balances.get(0, Decimal("0.0"))
+            if shard0_bal >= top_up:
+                logger.info("Shard 2 balance ($%s) below minimum ($%s). Transferring $%s from Shard 0...", shard2_bal, min_required, top_up)
+                await self.transfer_between_shards(0, 2, top_up)
 
     async def get_positions(self) -> List[Dict[str, Any]]:
         """Fetch all currently open market positions on Kalshi Demo."""
@@ -98,17 +159,54 @@ class KalshiLiveOrderClient:
         """Fetch all resting limit orders currently active on Kalshi Demo."""
         endpoint = "/trade-api/v2/portfolio/orders"
         url = f"{self.base_url}/portfolio/orders"
-        params = {"status": "resting"}
         headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
 
         session = await self._get_session()
-        async with session.get(url, params=params, headers=headers) as resp:
+        async with session.get(url, headers=headers) as resp:
             if resp.status != 200:
                 err_text = await resp.text()
                 logger.error("Failed to fetch open orders (HTTP %d): %s", resp.status, err_text)
                 return []
             data = await resp.json()
             return data.get("orders", [])
+
+    async def get_settlements(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Fetch historical market settlements for the portfolio from Kalshi API."""
+        endpoint = "/trade-api/v2/portfolio/settlements"
+        url = f"{self.base_url}/portfolio/settlements"
+        headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
+
+        session = await self._get_session()
+        try:
+            async with session.get(url, headers=headers, params={"limit": limit}) as resp:
+                if resp.status != 200:
+                    err_text = await resp.text()
+                    logger.error("Failed to fetch settlements (HTTP %d): %s", resp.status, err_text)
+                    return []
+                data = await resp.json()
+                return data.get("settlements", [])
+        except Exception as exc:
+            logger.error("Error querying Kalshi settlements: %s", exc)
+            return []
+
+    async def get_fills(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Fetch historical order fills for the portfolio from Kalshi API."""
+        endpoint = "/trade-api/v2/portfolio/fills"
+        url = f"{self.base_url}/portfolio/fills"
+        headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
+
+        session = await self._get_session()
+        try:
+            async with session.get(url, headers=headers, params={"limit": limit}) as resp:
+                if resp.status != 200:
+                    err_text = await resp.text()
+                    logger.error("Failed to fetch fills (HTTP %d): %s", resp.status, err_text)
+                    return []
+                data = await resp.json()
+                return data.get("fills", [])
+        except Exception as exc:
+            logger.error("Error querying Kalshi fills: %s", exc)
+            return []
 
     async def place_order(
         self,
@@ -120,8 +218,9 @@ class KalshiLiveOrderClient:
         price_dollars: Optional[Decimal] = None,
         client_order_id: Optional[str] = None,
         resting_only: bool = False,
+        exchange_index: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Submit a new order to the Kalshi exchange using the official V2 Trade API.
+        """Place an order on Kalshi V2 Production Exchange.
 
         Args:
             ticker: Market contract ticker (e.g. 'KXBTC15M-26AUG300215-15').
@@ -132,6 +231,7 @@ class KalshiLiveOrderClient:
             price_dollars: Limit price in dollars ($0.01 - $0.99) if limit order.
             client_order_id: Optional idempotency UUID. Generated automatically if omitted.
             resting_only: If true, enables post_only to guarantee maker liquidity.
+            exchange_index: Specific exchange shard (defaults to primary funded shard, 0).
 
         Returns:
             Dict containing order response and fill details, or None on failure.
@@ -157,8 +257,6 @@ class KalshiLiveOrderClient:
                 v2_price = Decimal("0.35")
 
         is_limit = order_type.lower() == "limit"
-        # Auto-detect shard: Shard 2 is Crypto (KXBTC*), Shard 0 is default
-        exchange_shard = 2 if ticker.startswith("KXBTC") else 0
         payload: Dict[str, Any] = {
             "ticker": ticker,
             "client_order_id": order_uuid,
@@ -168,33 +266,53 @@ class KalshiLiveOrderClient:
             "time_in_force": "good_till_canceled" if is_limit else "immediate_or_cancel",
             "self_trade_prevention_type": "taker_at_cross",
             "post_only": bool(resting_only and is_limit),
-            "exchange_index": exchange_shard,
         }
-
-        headers = get_auth_headers(self.api_key_id, self.private_key, "POST", endpoint)
-        headers["Content-Type"] = "application/json"
+        if exchange_index is not None and exchange_index >= 0:
+            payload["exchange_index"] = exchange_index
+        elif ticker.startswith("KXBTC15M") or ticker.startswith("KXBTCH") or ticker.startswith("KXBTCD"):
+            payload["exchange_index"] = 2
 
         session = await self._get_session()
-        try:
-            async with session.post(url, json=payload, headers=headers) as resp:
-                if resp.status not in (200, 201):
-                    err_text = await resp.text()
-                    logger.error(
-                        "Order rejected by Kalshi (HTTP %d): %s | Payload: %s",
-                        resp.status, err_text, payload,
-                    )
-                    return None
-                order_data = await resp.json()
-                logger.info(
-                    "[KALSHI LIVE PRODUCTION EXCHANGE] ORDER EXECUTED: %s %s %d %s | ID: %s | Fills: %s",
-                    action.upper(), side_val.upper(), count, ticker,
-                    order_data.get("order_id", order_uuid),
-                    order_data.get("fill_count", "0.00"),
-                )
-                return order_data
-        except Exception as exc:
-            logger.error("Network error placing order on Kalshi V2: %s", exc, exc_info=True)
-            return None
+        max_retries = 3
+        backoff_delay = 1.0
+
+        for attempt in range(max_retries):
+            headers = get_auth_headers(self.api_key_id, self.private_key, "POST", endpoint)
+            headers["Content-Type"] = "application/json"
+
+            try:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status in (200, 201):
+                        order_data = await resp.json()
+                        target_shard = payload.get("exchange_index", "auto")
+                        logger.info(
+                            "[KALSHI LIVE PRODUCTION EXCHANGE] ORDER EXECUTED: %s %s %d %s | ID: %s | Fills: %s | Shard: %s",
+                            action.upper(), side_val.upper(), count, ticker,
+                            order_data.get("order_id", order_uuid),
+                            order_data.get("fill_count", "0.00"),
+                            target_shard,
+                        )
+                        return order_data
+                    elif resp.status == 429:
+                        err_text = await resp.text()
+                        logger.warning(
+                            "Kalshi rate limited order (HTTP 429). Exponential backoff %0.1fs (attempt %d/%d): %s",
+                            backoff_delay, attempt + 1, max_retries, err_text,
+                        )
+                        await asyncio.sleep(backoff_delay)
+                        backoff_delay *= 2.0
+                        continue
+                    else:
+                        err_text = await resp.text()
+                        logger.error(
+                            "Order rejected by Kalshi (HTTP %d): %s | Payload: %s",
+                            resp.status, err_text, payload,
+                        )
+                        return None
+            except Exception as exc:
+                logger.error("Network error placing order on Kalshi V2: %s", exc, exc_info=True)
+                return None
+        return None
 
     async def cancel_order(self, order_id: str, ticker: Optional[str] = None) -> bool:
         """Cancel a resting order on Kalshi using V2 Trade API."""
@@ -223,13 +341,19 @@ class KalshiLiveOrderClient:
             raw_balance = bal_data.get("balance", 0)
             balance_dollars = Decimal(str(raw_balance)) / Decimal("100") if isinstance(raw_balance, int) else Decimal(str(raw_balance))
 
-        if "available_balance_dollars" in bal_data and bal_data["available_balance_dollars"] is not None:
+        if 2 in self.shard_balances:
+            available_margin = self.shard_balances[2]
+        elif "available_balance_dollars" in bal_data and bal_data["available_balance_dollars"] is not None:
             available_margin = Decimal(str(bal_data["available_balance_dollars"]))
         elif "balance_dollars" in bal_data and bal_data["balance_dollars"] is not None:
             available_margin = Decimal(str(bal_data["balance_dollars"]))
         else:
             raw_margin = bal_data.get("available_balance", bal_data.get("balance", 0))
             available_margin = Decimal(str(raw_margin)) / Decimal("100") if isinstance(raw_margin, int) else Decimal(str(raw_margin))
+
+        # Ensure crypto shard 2 is well funded if shard 0 has reserves
+        if self.shard_balances.get(2, Decimal("0.0")) < Decimal("5.00"):
+            await self.ensure_crypto_collateral()
 
         raw_payout = bal_data.get("payout", 0)
         payout_pending = Decimal(str(raw_payout)) / Decimal("100") if isinstance(raw_payout, int) else Decimal(str(raw_payout))

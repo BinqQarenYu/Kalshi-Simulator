@@ -81,6 +81,7 @@ class MarketInfo(BaseModel):
     floor_strike: Decimal | None = None
     cap_strike: Decimal | None = None
     strike_type: str | None = None
+    exchange_index: int | None = None
 
     @property
     def target_strike(self) -> Decimal:

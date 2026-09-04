@@ -422,14 +422,14 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       ctx.fill();
 
       // Floating Live Directional Delta Pill on Head
-      const diffVal = market.diff;
+      const diffVal = market?.diff ?? 0;
       const diffStr = diffVal >= 0 ? `▲ +$${diffVal.toFixed(2)}` : `▼ -$${Math.abs(diffVal).toFixed(2)}`;
       const tagBg = isUp ? '#00d084' : '#ff4d4d';
 
       ctx.fillStyle = tagBg;
       ctx.font = 'bold 10px "JetBrains Mono", Inter, sans-serif';
       ctx.textAlign = 'left';
-      ctx.fillText(`${diffStr} (${market.diff_pct >= 0 ? '+' : ''}${market.diff_pct.toFixed(3)}%)`, lastX + 10, lastY + 3.5);
+      ctx.fillText(`${diffStr} (${(market?.diff_pct ?? 0) >= 0 ? '+' : ''}${(market?.diff_pct ?? 0).toFixed(3)}%)`, lastX + 10, lastY + 3.5);
 
       // 8. Continuous Leftward-Flowing Time Axis (Non-Overlapping Time Ticks)
       ctx.fillStyle = '#6e7681';
@@ -544,9 +544,9 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       if (priceEl) priceEl.textContent = `$${snappedPt.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
       if (diffEl) {
-        const sign = diff >= 0 ? '+' : '';
-        const colorClass = diff >= 0 ? 'text-[#00d084]' : 'text-[#ff4d4d]';
-        diffEl.textContent = `${sign}$${diff.toFixed(2)} (${sign}${diffPct.toFixed(3)}%)`;
+        const sign = (diff ?? 0) >= 0 ? '+' : '';
+        const colorClass = (diff ?? 0) >= 0 ? 'text-[#00d084]' : 'text-[#ff4d4d]';
+        diffEl.textContent = `${sign}${(diff ?? 0).toFixed(2)} (${sign}${(diffPct ?? 0).toFixed(3)}%)`;
         diffEl.className = `tt-diff text-[11px] font-semibold flex items-center gap-1 mt-0.5 ${colorClass}`;
       }
 

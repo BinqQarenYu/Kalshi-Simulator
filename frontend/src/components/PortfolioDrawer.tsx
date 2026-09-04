@@ -264,14 +264,14 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
                                     {pos.side}
                                   </span>
                                 </td>
-                                <td className="py-2.5 text-right font-bold text-gray-200">{pos.position}</td>
-                                <td className="py-2.5 text-right text-gray-400">${pos.fees_paid.toFixed(2)}</td>
+                                <td className="py-2.5 text-right font-bold text-gray-200">{pos.position ?? 0}</td>
+                                <td className="py-2.5 text-right text-gray-400">${pos.fees_paid != null ? pos.fees_paid.toFixed(2) : '0.00'}</td>
                                 <td className={`py-2.5 text-right font-bold ${
-                                  pos.realized_pnl >= 0 ? 'text-[#00d084]' : 'text-[#ff4d4d]'
+                                  (pos.realized_pnl ?? 0) >= 0 ? 'text-[#00d084]' : 'text-[#ff4d4d]'
                                 }`}>
-                                  {pos.realized_pnl >= 0 ? '+' : ''}${pos.realized_pnl.toFixed(2)}
+                                  {(pos.realized_pnl ?? 0) >= 0 ? '+' : ''}${pos.realized_pnl != null ? pos.realized_pnl.toFixed(2) : '0.00'}
                                 </td>
-                                <td className="py-2.5 text-right text-gray-300">{pos.resting_orders_count}</td>
+                                <td className="py-2.5 text-right text-gray-300">{pos.resting_orders_count ?? 0}</td>
                                 <td className="py-2.5 text-right">
                                   <button
                                     type="button"
@@ -317,7 +317,7 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
               <div className={`text-lg font-mono font-extrabold mt-0.5 ${
                 isPnlPositive ? 'text-[#00d084]' : 'text-[#ff4d4d]'
               }`}>
-                {isPnlPositive ? '+' : ''}${portfolio.realized_pnl.toFixed(2)}
+                {isPnlPositive ? '+' : ''}${(portfolio.realized_pnl ?? 0).toFixed(2)}
               </div>
             </div>
 
@@ -325,9 +325,9 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
             <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3">
               <div className="text-[11px] font-semibold text-[#8b949e] uppercase">Unrealized P&L</div>
               <div className={`text-lg font-mono font-extrabold mt-0.5 ${
-                portfolio.unrealized_pnl >= 0 ? 'text-[#00d084]' : 'text-[#ff4d4d]'
+                (portfolio.unrealized_pnl ?? 0) >= 0 ? 'text-[#00d084]' : 'text-[#ff4d4d]'
               }`}>
-                {portfolio.unrealized_pnl >= 0 ? '+' : ''}${portfolio.unrealized_pnl.toFixed(2)}
+                {(portfolio.unrealized_pnl ?? 0) >= 0 ? '+' : ''}${(portfolio.unrealized_pnl ?? 0).toFixed(2)}
               </div>
             </div>
 
@@ -335,9 +335,9 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
             <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3">
               <div className="text-[11px] font-semibold text-[#8b949e] uppercase">Win Rate</div>
               <div className="text-lg font-mono font-extrabold text-white mt-0.5 flex items-center gap-1.5">
-                <span>{portfolio.win_rate.toFixed(1)}%</span>
+                <span>{(portfolio.win_rate ?? 0).toFixed(1)}%</span>
                 <span className="text-xs text-[#8b949e] font-normal">
-                  ({portfolio.wins}/{portfolio.total_trades})
+                  ({portfolio.wins ?? 0}/{portfolio.total_trades ?? 0})
                 </span>
               </div>
             </div>
@@ -347,10 +347,10 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
           <div>
             <h4 className="text-xs font-bold uppercase tracking-wider text-white mb-2 flex items-center gap-1.5">
               <Wallet className="h-3.5 w-3.5 text-blue-400" />
-              <span>Simulated Positions ({portfolio.positions.length})</span>
+              <span>Simulated Positions ({(portfolio.positions || []).length})</span>
             </h4>
 
-            {portfolio.positions.length === 0 ? (
+            {(portfolio.positions || []).length === 0 ? (
               <div className="text-center py-5 text-xs text-[#8b949e] bg-[#161b22] rounded-xl border border-[#30363d]">
                 No simulated positions open.
               </div>
@@ -369,9 +369,9 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#161b22]">
-                    {portfolio.positions.map((pos) => {
+                    {(portfolio.positions || []).map((pos) => {
                       const isClosing = !!closingTickers[pos.ticker];
-                      const isUpnlPositive = pos.unrealized_pnl >= 0;
+                      const isUpnlPositive = (pos.unrealized_pnl ?? 0) >= 0;
                       return (
                         <tr key={pos.ticker} className="hover:bg-[#161b22]/50 transition-colors">
                           <td className="py-2.5 font-bold text-white">{pos.ticker}</td>
@@ -382,13 +382,13 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
                               {pos.side}
                             </span>
                           </td>
-                          <td className="py-2.5 text-right font-bold text-gray-200">{pos.size}</td>
-                          <td className="py-2.5 text-right text-gray-400">${pos.entry_price.toFixed(3)}</td>
-                          <td className="py-2.5 text-right text-white font-bold">${pos.current_price.toFixed(3)}</td>
+                          <td className="py-2.5 text-right font-bold text-gray-200">{pos.size ?? (pos as any).position ?? 0}</td>
+                          <td className="py-2.5 text-right text-gray-400">${pos.entry_price != null ? pos.entry_price.toFixed(3) : '0.000'}</td>
+                          <td className="py-2.5 text-right text-white font-bold">${pos.current_price != null ? pos.current_price.toFixed(3) : '0.000'}</td>
                           <td className={`py-2.5 text-right font-bold ${
                             isUpnlPositive ? 'text-[#00d084]' : 'text-[#ff4d4d]'
                           }`}>
-                            {isUpnlPositive ? '+' : ''}${pos.unrealized_pnl.toFixed(2)}
+                            {isUpnlPositive ? '+' : ''}${pos.unrealized_pnl != null ? pos.unrealized_pnl.toFixed(2) : '0.00'}
                           </td>
                           <td className="py-2.5 text-right">
                             <button
@@ -438,8 +438,8 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
                             {ord.side}
                           </span>
                         </td>
-                        <td className="py-2.5 text-right text-gray-200">{ord.size}</td>
-                        <td className="py-2.5 text-right text-white font-bold">${ord.limit_price?.toFixed(3)}</td>
+                        <td className="py-2.5 text-right text-gray-200">{ord.size ?? 0}</td>
+                        <td className="py-2.5 text-right text-white font-bold">${ord.limit_price != null ? ord.limit_price.toFixed(3) : '--'}</td>
                         <td className="py-2.5 text-right text-amber-400 uppercase text-[10px] font-bold">
                           {ord.status}
                         </td>

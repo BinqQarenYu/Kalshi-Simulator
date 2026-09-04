@@ -52,6 +52,7 @@ class AgentGuardrails:
         self._rejection_reasons: dict[str, int] = {}
         self._recent_inceptions: list[dict[str, Any]] = []
         self._recent_rejections: list[dict[str, Any]] = []
+        self._last_log_rejection_ts: dict[str, float] = {}
 
     # -------------------------------------------------------------------------
     # 1. Pre-Trade Intent Validation
@@ -115,7 +116,19 @@ class AgentGuardrails:
                 self._record_rejection("cooldown_throttle", msg, ticker, now_utc)
                 return False, msg, 0, {"remaining_cooldown_s": rem}
 
-        # 5. Anti-Kamikaze Bankroll Sizing & Risk Caps
+        # 5. Price Corridor Guardrail Check (Avoid 98c tail blowups and <6c fee drag for automated bots)
+        if is_bot:
+            if est_price > Decimal("0.90"):
+                msg = f"PRICE CORRIDOR VETO: Estimated price ${est_price:.2f} > $0.90 ceiling. Asymmetric tail risk veto active."
+                self._record_rejection("price_ceiling_veto", msg, ticker, now_utc)
+                return False, msg, 0, {"price": float(est_price)}
+
+            if est_price < Decimal("0.06"):
+                msg = f"PRICE CORRIDOR VETO: Estimated price ${est_price:.2f} < $0.06 floor. Negative-EV fee drag lottery veto active."
+                self._record_rejection("price_floor_veto", msg, ticker, now_utc)
+                return False, msg, 0, {"price": float(est_price)}
+
+        # 6. Anti-Kamikaze Bankroll Sizing & Risk Caps
         max_risk_dollars = total_equity * self.max_risk_pct_per_trade
         unit_cost = max(Decimal("0.05"), min(Decimal("0.99"), est_price))
         
@@ -212,6 +225,12 @@ class AgentGuardrails:
         )
         return report
 
+    def record_order_attempt(self, ticker: str, cooldown_seconds: Optional[float] = None) -> None:
+        """Record an order attempt (fill, 0-fill, or rejection) to enforce execution cooldown."""
+        now_mono = time.monotonic()
+        self._last_order_ts = now_mono
+        self._last_order_ts_by_ticker[ticker] = now_mono
+
     # -------------------------------------------------------------------------
     # 3. Settlement & Cycle Unlocking
     # -------------------------------------------------------------------------
@@ -275,7 +294,11 @@ class AgentGuardrails:
         self._recent_rejections.insert(0, entry)
         if len(self._recent_rejections) > 30:
             self._recent_rejections.pop()
-        logger.warning("🛡️ [GUARDRAIL BLOCKED] %s", msg)
+        now_mono = time.monotonic()
+        key = f"{ticker}_{category}"
+        if now_mono - self._last_log_rejection_ts.get(key, 0.0) >= 5.0:
+            self._last_log_rejection_ts[key] = now_mono
+            logger.warning("🛡️ [GUARDRAIL BLOCKED] %s", msg)
 
     def get_status(self) -> Dict[str, Any]:
         """Return real-time guardrail telemetry for UI and diagnostics."""

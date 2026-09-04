@@ -142,7 +142,7 @@ export interface WinLossEventReport {
   contracts: number;
   entry_price: number;
   settlement_price: number;
-  outcome: 'win' | 'loss' | 'breakeven';
+  outcome: 'win' | 'loss' | 'breakeven' | 'flat';
   pnl: number;
   roi_pct: number;
   ai_confidence: number;
@@ -150,6 +150,8 @@ export interface WinLossEventReport {
   vpin_score: number;
   ev_edge: number;
   balance_after: number;
+  bot_type?: string;
+  execution_mode?: string;
   timestamp_utc: string;
 }
 
@@ -165,6 +167,9 @@ export interface WinLossReportsSummary {
 
 export interface WinLossReportsResponse {
   summary: WinLossReportsSummary;
+  domination_summary?: WinLossReportsSummary;
+  onnx_summary?: WinLossReportsSummary;
+  live_summary?: WinLossReportsSummary;
   reports: WinLossEventReport[];
 }
 

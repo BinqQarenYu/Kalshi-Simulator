@@ -30,7 +30,7 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
 
           <div className="flex items-baseline gap-2">
             <span className="text-xl sm:text-2xl font-black text-white">
-              {market.market_chance_pct.toFixed(1)}%
+              {(market?.market_chance_pct ?? 0).toFixed(1)}%
             </span>
             <span className="text-xs font-bold text-[#ff4d4d] flex items-center">
               ▼ 45.1

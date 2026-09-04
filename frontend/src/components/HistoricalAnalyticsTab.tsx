@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   TrendingUp,
+  TrendingDown,
   Award,
   ShieldAlert,
   ShieldCheck,
@@ -22,7 +23,16 @@ import {
   Bot,
   Zap,
   Radio,
+  Download,
+  FileSpreadsheet,
+  Play,
+  Loader2,
+  FileText,
+  CheckSquare,
+  Square,
+  Crown,
 } from 'lucide-react';
+import { WinLossEventReport } from '../types';
 
 interface PortfolioMetrics {
   total_trades: number;
@@ -161,7 +171,8 @@ interface ForwardValidationStatus {
   timestamp: string;
 }
 
-type SystemFilter = 'all' | '3_step_domination_bot' | 'onnx_ml_bot' | 'live';
+type SystemFilter = 'all' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot' | 'live';
+type SubTabType = '15m_reports' | 'journal' | 'settlements' | 'ai' | 'validation';
 
 function formatETTime(val: string | number | null | undefined): string {
   if (!val) return '--';
@@ -215,21 +226,34 @@ export const HistoricalAnalyticsTab: React.FC = () => {
   const [trades, setTrades] = useState<HistoricalTrade[]>([]);
   const [settlements, setSettlements] = useState<HistoricalSettlement[]>([]);
   const [aiPredictions, setAiPredictions] = useState<AIPrediction[]>([]);
+  const [winLossReports, setWinLossReports] = useState<WinLossEventReport[]>([]);
   const [validationStatus, setValidationStatus] = useState<ForwardValidationStatus | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'journal' | 'settlements' | 'ai' | 'validation'>('journal');
+  const [activeSubTab, setActiveSubTab] = useState<SubTabType>('15m_reports');
   const [loading, setLoading] = useState<boolean>(true);
 
   // Filter & Pagination States
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [botFilter, setBotFilter] = useState<'all' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot' | 'live'>('all');
   const [sideFilter, setSideFilter] = useState<'all' | 'yes' | 'no'>('all');
   const [outcomeFilter, setOutcomeFilter] = useState<'all' | 'win' | 'loss' | 'flat'>('all');
   const [page, setPage] = useState<number>(1);
 
+  // Multi-Selection State for Bulk Actions
+  const [selectedIds, setSelectedIds] = useState<Set<string | number>>(new Set());
+
+  // Test Bot Trigger State
+  const [isTestingBot, setIsTestingBot] = useState<boolean>(false);
+  const [testBotType, setTestBotType] = useState<'both' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot'>('both');
+  const [testResultMsg, setTestResultMsg] = useState<string | null>(null);
+
   // Reset Confirmation Modal State
   const [isResetModalOpen, setIsResetModalOpen] = useState<boolean>(false);
-  const [resetTarget, setResetTarget] = useState<'selected' | 'all'>('selected');
+  const [resetTarget, setResetTarget] = useState<string>('selected');
   const [resetting, setResetting] = useState<boolean>(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
+
+  // Global Export Menu State
+  const [isExportMenuOpen, setIsExportMenuOpen] = useState<boolean>(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -256,7 +280,13 @@ export const HistoricalAnalyticsTab: React.FC = () => {
       let botParam = '';
       let modeParam = '';
 
-      if (selectedSystem === '3_step_domination_bot') {
+      if (selectedSystem === 'macro_trend_dominion') {
+        botParam = 'macro_trend_dominion';
+        modeParam = 'simulated';
+      } else if (selectedSystem === 'dominion_2_bot') {
+        botParam = 'dominion_2_bot';
+        modeParam = 'simulated';
+      } else if (selectedSystem === '3_step_domination_bot') {
         botParam = '3_step_domination_bot';
         modeParam = 'simulated';
       } else if (selectedSystem === 'onnx_ml_bot') {
@@ -271,14 +301,17 @@ export const HistoricalAnalyticsTab: React.FC = () => {
       if (modeParam) queryParams.append('execution_mode', modeParam);
       const qs = queryParams.toString() ? `?${queryParams.toString()}` : '';
 
-      const [mRes, eqRes, trRes, stRes, aiRes, valRes, mAll, mDom, mOnnx, mLive] = await Promise.all([
+      const [mRes, eqRes, trRes, stRes, aiRes, valRes, wlRes, mAll, mMacro, mDom2, mDom, mOnnx, mLive] = await Promise.all([
         fetch(`/api/history/metrics${qs}`).then((r) => r.json()).catch(() => null),
         fetch(`/api/history/equity-curve${qs ? `${qs}&limit=1000` : '?limit=1000'}`).then((r) => r.json()).catch(() => []),
         fetch(`/api/history/trades${qs ? `${qs}&limit=500` : '?limit=500'}`).then((r) => r.json()).catch(() => []),
         fetch(`/api/history/settlements${qs ? `${qs}&limit=500` : '?limit=500'}`).then((r) => r.json()).catch(() => []),
         fetch(`/api/history/ai-predictions${botParam ? `?bot_type=${botParam}&limit=500` : '?limit=500'}`).then((r) => r.json()).catch(() => []),
         fetch(`/api/bot/forward-validation-status${qs}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/reports/full${qs ? `?${queryParams.toString()}` : ''}`).then((r) => r.json()).catch(() => null),
         fetch('/api/history/metrics?bot_type=all').then((r) => r.json()).catch(() => null),
+        fetch('/api/history/metrics?bot_type=macro_trend_dominion&execution_mode=simulated').then((r) => r.json()).catch(() => null),
+        fetch('/api/history/metrics?bot_type=dominion_2_bot&execution_mode=simulated').then((r) => r.json()).catch(() => null),
         fetch('/api/history/metrics?bot_type=3_step_domination_bot&execution_mode=simulated').then((r) => r.json()).catch(() => null),
         fetch('/api/history/metrics?bot_type=onnx_ml_bot&execution_mode=simulated').then((r) => r.json()).catch(() => null),
         fetch('/api/history/metrics?execution_mode=live').then((r) => r.json()).catch(() => null),
@@ -290,6 +323,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
       if (Array.isArray(stRes)) setSettlements(stRes);
       if (Array.isArray(aiRes)) setAiPredictions(aiRes);
       if (valRes) setValidationStatus(valRes);
+      if (wlRes && Array.isArray(wlRes.reports)) setWinLossReports(wlRes.reports);
 
       setSystemComparison([
         {
@@ -298,6 +332,20 @@ export const HistoricalAnalyticsTab: React.FC = () => {
           sublabel: 'Aggregated Portfolio Overview',
           icon: 'layers',
           metrics: mAll,
+        },
+        {
+          key: 'macro_trend_dominion',
+          label: 'Macro Trend Dominion',
+          sublabel: '1-Hour Macro Trend Following (Paper)',
+          icon: 'trending-up',
+          metrics: mMacro,
+        },
+        {
+          key: 'dominion_2_bot',
+          label: 'Dominion 2 Bot',
+          sublabel: 'Anti-Pin Asymmetric Scalper (Paper)',
+          icon: 'crown',
+          metrics: mDom2,
         },
         {
           key: '3_step_domination_bot',
@@ -334,17 +382,85 @@ export const HistoricalAnalyticsTab: React.FC = () => {
     return () => clearInterval(interval);
   }, [selectedSystem]);
 
-  // Reset page when switching tabs or filters
+  // Reset page & selection when switching tabs or filters
   useEffect(() => {
     setPage(1);
+    setSelectedIds(new Set());
   }, [activeSubTab, searchTerm, sideFilter, outcomeFilter, selectedSystem]);
 
-  // Handle Manual Reset
+  // 1. DELETE Single Item Action
+  const handleDeleteSingle = async (type: SubTabType, id: string | number) => {
+    try {
+      let endpoint = '';
+      if (type === '15m_reports') {
+        endpoint = `/api/reports/win-loss/${id}`;
+      } else if (type === 'journal') {
+        endpoint = `/api/history/trades/${id}`;
+      } else if (type === 'settlements') {
+        endpoint = `/api/history/settlements/${id}`;
+      } else if (type === 'ai') {
+        endpoint = `/api/history/ai-predictions/${id}`;
+      }
+
+      if (!endpoint) return;
+
+      const res = await fetch(endpoint, { method: 'DELETE' });
+      if (res.ok) {
+        if (type === '15m_reports') {
+          setWinLossReports((prev) => prev.filter((r) => r.report_id !== id));
+        } else if (type === 'journal') {
+          setTrades((prev) => prev.filter((t) => t.id !== id && t.trade_id !== id));
+        } else if (type === 'settlements') {
+          setSettlements((prev) => prev.filter((s) => s.id !== id && s.settlement_id !== id));
+        } else if (type === 'ai') {
+          setAiPredictions((prev) => prev.filter((p) => p.id !== id));
+        }
+        fetchAllData();
+      }
+    } catch (err) {
+      console.error(`Failed to delete record ${id}:`, err);
+    }
+  };
+
+  // 1. DELETE Batch / Bulk Selected Items Action
+  const handleDeleteBatch = async (type: SubTabType) => {
+    if (selectedIds.size === 0) return;
+    try {
+      let table = '';
+      if (type === '15m_reports') table = 'win_loss_reports';
+      else if (type === 'journal') table = 'trades';
+      else if (type === 'settlements') table = 'settlements';
+      else if (type === 'ai') table = 'ai_predictions';
+
+      if (!table) return;
+
+      const res = await fetch('/api/history/batch-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          table,
+          ids: Array.from(selectedIds),
+        }),
+      });
+
+      if (res.ok) {
+        setSelectedIds(new Set());
+        fetchAllData();
+      }
+    } catch (err) {
+      console.error('Batch delete failed:', err);
+    }
+  };
+
+  // 2. RESET Execution Handler
   const handleExecuteReset = async () => {
     setResetting(true);
     try {
-      const target = resetTarget === 'all' ? 'all' : selectedSystem;
-      const res = await fetch(`/api/reports/reset?target=${target}`, {
+      let targetParam = resetTarget;
+      if (resetTarget === 'selected') {
+        targetParam = selectedSystem === 'all' ? 'all' : selectedSystem;
+      }
+      const res = await fetch(`/api/reports/reset?target=${targetParam}`, {
         method: 'POST',
       });
       const data = await res.json();
@@ -352,13 +468,33 @@ export const HistoricalAnalyticsTab: React.FC = () => {
       setTimeout(() => {
         setIsResetModalOpen(false);
         setResetMessage(null);
+        setSelectedIds(new Set());
         fetchAllData();
-      }, 1200);
+      }, 1000);
     } catch (e) {
       console.error('Failed to reset reports:', e);
       setResetMessage('Reset request failed. Please try again.');
     } finally {
       setResetting(false);
+    }
+  };
+
+  // 3. RUN BOT TEST Handler
+  const handleRunBotTest = async (overrideType?: 'both' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot') => {
+    const targetType = overrideType || testBotType;
+    setIsTestingBot(true);
+    setTestResultMsg(null);
+    try {
+      const res = await fetch(`/api/bot/test-trade?bot_type=${targetType}`, { method: 'POST' });
+      const data = await res.json();
+      if (data?.message) {
+        setTestResultMsg(data.message);
+      }
+      fetchAllData();
+    } catch (err) {
+      setTestResultMsg(`Error testing bot: ${err}`);
+    } finally {
+      setIsTestingBot(false);
     }
   };
 
@@ -402,6 +538,8 @@ export const HistoricalAnalyticsTab: React.FC = () => {
         `Accumulating real-time equity snapshots for ${
           selectedSystem === 'all'
             ? 'all systems'
+            : selectedSystem === 'dominion_2_bot'
+            ? 'Dominion 2 Bot'
             : selectedSystem === '3_step_domination_bot'
             ? '3-Step Domination Bot'
             : selectedSystem === 'onnx_ml_bot'
@@ -487,7 +625,58 @@ export const HistoricalAnalyticsTab: React.FC = () => {
     ctx.fillText(`$${minVal.toFixed(2)}`, w - 8, h - 10);
   }, [equityCurve, dimensions, selectedSystem]);
 
+  // Helper to identify bot types
+  const isMacroBot = (r: WinLossEventReport) =>
+    r.bot_type === 'macro_trend_dominion' ||
+    r.bot_type === 'macro_trend' ||
+    r.ai_rationale?.toLowerCase().includes('macro trend');
+
+  const isDom2Bot = (r: WinLossEventReport) =>
+    r.bot_type === 'dominion_2_bot' ||
+    r.bot_type === 'dominion2' ||
+    r.bot_type === 'dominion_v2' ||
+    r.ai_rationale?.toLowerCase().includes('dominion 2');
+
+  const isDomBot = (r: WinLossEventReport) =>
+    r.bot_type === '3_step_domination_bot' ||
+    r.bot_type === 'domination' ||
+    (!r.bot_type && r.ai_rationale?.toLowerCase().includes('domination') && !r.ai_rationale?.toLowerCase().includes('dominion 2')) ||
+    (!r.bot_type && !r.ai_rationale?.toLowerCase().includes('dominion 2'));
+
+  const isOnnxBot = (r: WinLossEventReport) =>
+    r.bot_type === 'onnx_ml_bot' ||
+    r.bot_type === 'onnx' ||
+    r.bot_type?.includes('onnx') ||
+    r.ai_rationale?.toLowerCase().includes('onnx') ||
+    r.ai_rationale?.toLowerCase().includes('kelly');
+
   // Filtering Logic for Tables
+  const filteredWinLoss = (winLossReports || []).filter((r) => {
+    if (
+      searchTerm &&
+      !(r.ticker || '').toLowerCase().includes(searchTerm.toLowerCase()) &&
+      !(r.report_id || '').toLowerCase().includes(searchTerm.toLowerCase()) &&
+      !(r.cycle_time || '').toLowerCase().includes(searchTerm.toLowerCase()) &&
+      !(r.bot_type && r.bot_type.toLowerCase().includes(searchTerm.toLowerCase()))
+    ) {
+      return false;
+    }
+    if (botFilter !== 'all') {
+      if (botFilter === 'macro_trend_dominion' && !isMacroBot(r)) return false;
+      if (botFilter === 'dominion_2_bot' && !isDom2Bot(r)) return false;
+      if (botFilter === '3_step_domination_bot' && !isDomBot(r)) return false;
+      if (botFilter === 'onnx_ml_bot' && !isOnnxBot(r)) return false;
+      if (botFilter === 'live' && r.execution_mode !== 'live' && r.bot_type !== 'live') return false;
+    }
+    if (sideFilter !== 'all' && r.bot_side.toLowerCase() !== sideFilter) return false;
+    if (outcomeFilter !== 'all') {
+      if (outcomeFilter === 'win' && r.outcome !== 'win') return false;
+      if (outcomeFilter === 'loss' && r.outcome !== 'loss') return false;
+      if (outcomeFilter === 'flat' && !['flat', 'breakeven', 'skip', 'veto'].includes(r.outcome)) return false;
+    }
+    return true;
+  });
+
   const filteredTrades = trades.filter((t) => {
     if (
       searchTerm &&
@@ -519,7 +708,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
     return true;
   });
 
-  // Pagination Slice
+  // Pagination Helper
   const getPaginatedList = <T,>(list: T[]): { items: T[]; totalPages: number; totalCount: number } => {
     const totalCount = list.length;
     const totalPages = Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE));
@@ -529,47 +718,264 @@ export const HistoricalAnalyticsTab: React.FC = () => {
     return { items, totalPages, totalCount };
   };
 
+  const paginatedWinLoss = getPaginatedList(filteredWinLoss);
   const paginatedTrades = getPaginatedList(filteredTrades);
   const paginatedSettlements = getPaginatedList(filteredSettlements);
   const paginatedAi = getPaginatedList(filteredAi);
 
+  // Toggle Single Selection
+  const toggleSelectId = (id: string | number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // Toggle Select All Visible Items
+  const toggleSelectAllCurrentPage = (currentItems: (string | number)[]) => {
+    const allSelected = currentItems.every((id) => selectedIds.has(id));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        currentItems.forEach((id) => next.delete(id));
+      } else {
+        currentItems.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  // Multi-Bot 15M Win/Loss Aggregates for Top Banner
+  const calc15mStats = (reps: WinLossEventReport[]) => {
+    const safeReps = Array.isArray(reps) ? reps : [];
+    const total = safeReps.length;
+    const wins = safeReps.filter((r) => r.outcome === 'win').length;
+    const losses = safeReps.filter((r) => r.outcome === 'loss').length;
+    const winRate = total > 0 ? (wins / total) * 100 : 0;
+    const totalPnL = safeReps.reduce((acc, r) => acc + (r.pnl || 0), 0);
+    const grossProfits = safeReps.filter((r) => (r.pnl || 0) > 0).reduce((acc, r) => acc + (r.pnl || 0), 0);
+    const grossLosses = Math.abs(safeReps.filter((r) => (r.pnl || 0) < 0).reduce((acc, r) => acc + (r.pnl || 0), 0));
+    const profitFactor = grossLosses > 0 ? grossProfits / grossLosses : grossProfits > 0 ? 99.9 : 1.0;
+    const avgPnL = total > 0 ? totalPnL / total : 0;
+    return { total, wins, losses, winRate, totalPnL, profitFactor, avgPnL, grossProfits, grossLosses };
+  };
+
+  const dom15mReports = winLossReports.filter(isDomBot);
+  const onnx15mReports = winLossReports.filter(isOnnxBot);
+  const live15mReports = winLossReports.filter(
+    (r) => (r.execution_mode === 'live' || r.bot_type === 'live') && (r.ticker.includes('SEP01') || r.timestamp_utc?.startsWith('2026-09-01'))
+  );
+
+  const domStats15m = calc15mStats(dom15mReports);
+  const onnxStats15m = calc15mStats(onnx15mReports);
+  const liveStats15m = calc15mStats(live15mReports);
+  const combinedStats15m = calc15mStats(winLossReports);
+
   return (
-    <div className="space-y-6 text-slate-100 p-4 sm:p-6 bg-slate-950 rounded-xl border border-slate-800 shadow-2xl">
-      {/* Header & Controls */}
+    <div className="space-y-6 text-slate-100 p-3 sm:p-6 bg-slate-950 rounded-2xl border border-slate-800 shadow-2xl">
+      {/* --------------------------------------------------------------------------- */}
+      {/* 1. Header & Global Toolbar */}
+      {/* --------------------------------------------------------------------------- */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-4 border-b border-slate-800">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2.5">
-            <BarChart3 className="text-emerald-400 w-6 h-6 sm:w-7 sm:h-7" />
-            Institutional Performance Analytics & Trade Journal
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Isolated Bot Metrics • SQLite WAL Time-Series Store • Continuous 24/7 Crypto Annualization
-          </p>
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400">
+              <BarChart3 className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white flex items-center gap-2">
+                <span>Institutional Performance Analytics & Trade Journal</span>
+                <span className="px-2 py-0.5 text-[10px] font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-full font-bold">
+                  UNIFIED REPORTING HUB
+                </span>
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                Consolidated 15M Event Reports • Executions Ledger • Settlements • AI Inference • SQLite WAL Sync
+              </p>
+            </div>
+          </div>
         </div>
 
+        {/* Global Action Toolbar */}
         <div className="flex flex-wrap items-center gap-2.5 w-full lg:w-auto">
+          {/* Test Bot Trigger with Multi-Bot Selector */}
+          <div className="flex items-center bg-slate-900 border border-slate-700 rounded-xl p-0.5 shadow-sm">
+            <button
+              onClick={() => handleRunBotTest(testBotType)}
+              disabled={isTestingBot}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold rounded-lg shadow-md transition-all active:scale-95 disabled:opacity-50"
+              title="Execute immediate 15M cycle trade test and record report"
+            >
+              {isTestingBot ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+              <span>{isTestingBot ? 'Testing...' : '🧪 Run 15M Test'}</span>
+            </button>
+            <div className="flex items-center px-1 gap-1">
+              <button
+                onClick={() => {
+                  setTestBotType('both');
+                  handleRunBotTest('both');
+                }}
+                className={`px-2 py-1 text-[10px] font-bold rounded-md transition ${
+                  testBotType === 'both' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Run test trade for Both Domination and ONNX ML bots"
+              >
+                🚀 Both
+              </button>
+              <button
+                onClick={() => {
+                  setTestBotType('macro_trend_dominion');
+                  handleRunBotTest('macro_trend_dominion');
+                }}
+                className={`px-2 py-1 text-[10px] font-bold rounded-md transition ${
+                  testBotType === 'macro_trend_dominion' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Run test trade for Macro Trend Dominion"
+              >
+                📈 Macro Trend
+              </button>
+              <button
+                onClick={() => {
+                  setTestBotType('dominion_2_bot');
+                  handleRunBotTest('dominion_2_bot');
+                }}
+                className={`px-2 py-1 text-[10px] font-bold rounded-md transition ${
+                  testBotType === 'dominion_2_bot' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Run test trade for Dominion 2 Bot (Anti-Pin Scalper)"
+              >
+                👑 Dominion 2
+              </button>
+              <button
+                onClick={() => {
+                  setTestBotType('3_step_domination_bot');
+                  handleRunBotTest('3_step_domination_bot');
+                }}
+                className={`px-2 py-1 text-[10px] font-bold rounded-md transition ${
+                  testBotType === '3_step_domination_bot' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Run test trade for 3-Step Domination Bot"
+              >
+                ⚡ Domination
+              </button>
+              <button
+                onClick={() => {
+                  setTestBotType('onnx_ml_bot');
+                  handleRunBotTest('onnx_ml_bot');
+                }}
+                className={`px-2 py-1 text-[10px] font-bold rounded-md transition ${
+                  testBotType === 'onnx_ml_bot' ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Run test trade for ONNX ML Ensemble"
+              >
+                🧠 ONNX
+              </button>
+            </div>
+          </div>
+
           {/* Refresh Button */}
           <button
             onClick={fetchAllData}
             disabled={loading}
-            className="flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm font-semibold rounded-lg transition border border-slate-700 shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm font-semibold rounded-xl transition border border-slate-700 shadow-sm"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-400' : ''}`} />
-            Refresh Store
+            <span>Refresh</span>
           </button>
+
+          {/* Global Export Menu */}
+          <div className="relative">
+            <button
+              onClick={() => setIsExportMenuOpen(!isExportMenuOpen)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs sm:text-sm font-semibold rounded-xl transition border border-slate-700 shadow-sm"
+            >
+              <Download className="w-4 h-4 text-blue-400" />
+              <span>Export All</span>
+            </button>
+
+            {isExportMenuOpen && (
+              <div className="absolute right-0 mt-2 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-2 z-50 animate-in fade-in space-y-1 text-xs font-sans">
+                <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Download Reports
+                </div>
+                <a
+                  href="/api/reports/executive-summary/export.json"
+                  download="kalshi_executive_audit_summary.json"
+                  onClick={() => setIsExportMenuOpen(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-white transition"
+                >
+                  <FileText className="w-4 h-4 text-emerald-400" />
+                  <span>Executive Audit Summary (JSON)</span>
+                </a>
+                <a
+                  href="/api/reports/win-loss/export.csv"
+                  download="kalshi_15m_win_loss_reports.csv"
+                  onClick={() => setIsExportMenuOpen(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-white transition"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                  <span>15M Event Reports (CSV)</span>
+                </a>
+                <a
+                  href="/api/history/trades/export.csv"
+                  download="kalshi_trade_journal.csv"
+                  onClick={() => setIsExportMenuOpen(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-white transition"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-blue-400" />
+                  <span>Trade Journal (CSV)</span>
+                </a>
+                <a
+                  href="/api/history/settlements/export.csv"
+                  download="kalshi_settlements.csv"
+                  onClick={() => setIsExportMenuOpen(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-white transition"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-purple-400" />
+                  <span>Settlements Ledger (CSV)</span>
+                </a>
+                <a
+                  href="/api/history/ai-predictions/export.csv"
+                  download="kalshi_ai_decisions.csv"
+                  onClick={() => setIsExportMenuOpen(false)}
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-800 text-slate-200 hover:text-white transition"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-amber-400" />
+                  <span>AI Inferences (CSV)</span>
+                </a>
+              </div>
+            )}
+          </div>
 
           {/* Delete / Reset Button */}
           <button
             onClick={() => setIsResetModalOpen(true)}
-            className="flex items-center gap-2 px-3.5 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-rose-100 text-xs sm:text-sm font-semibold rounded-lg transition border border-rose-800/60 shadow-sm"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 hover:text-rose-100 text-xs sm:text-sm font-semibold rounded-xl transition border border-rose-800/60 shadow-sm"
           >
             <Trash2 className="w-4 h-4 text-rose-400" />
-            Reset Ledger
+            <span>Reset Ledger</span>
           </button>
         </div>
       </div>
 
-      {/* OVERALL SYSTEM EFFICIENCY SUMMARY MATRIX */}
+      {/* Live Test Feedback Banner */}
+      {testResultMsg && (
+        <div className="p-3 bg-blue-500/15 border border-blue-500/30 rounded-xl text-xs text-blue-300 flex items-center justify-between gap-2 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <Activity className="h-4 w-4 text-blue-400 shrink-0 animate-pulse" />
+            <span className="font-mono">{testResultMsg}</span>
+          </div>
+          <button onClick={() => setTestResultMsg(null)} className="text-slate-400 hover:text-white text-xs">
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------------------- */}
+      {/* 2. OVERALL MULTI-SYSTEM EFFICIENCY SUMMARY MATRIX */}
+      {/* --------------------------------------------------------------------------- */}
       <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-3.5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
           <div className="flex items-center gap-2.5">
@@ -578,13 +984,13 @@ export const HistoricalAnalyticsTab: React.FC = () => {
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
-                <span>Overall System Efficiency & Profitability Summary</span>
+                <span>Multi-Bot Profitability & Efficiency Benchmark</span>
                 <span className="px-2 py-0.5 text-[10px] font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 rounded-full font-bold">
-                  MULTI-BOT LIVE COMPARISON
+                  SIDE-BY-SIDE AUDIT
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Direct side-by-side comparison across all trading algorithms, models, and real capital execution.
+                Direct comparative performance across quantitative playbooks, deep neural models, and live fills.
               </p>
             </div>
           </div>
@@ -629,6 +1035,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
                   >
                     <td className="py-3 px-3 font-sans">
                       <div className="flex items-center gap-2">
+                        {item.icon === 'crown' && <Crown className="w-4 h-4 text-emerald-400 shrink-0" />}
                         {item.icon === 'zap' && <Zap className="w-4 h-4 text-amber-400 shrink-0" />}
                         {item.icon === 'cpu' && <Cpu className="w-4 h-4 text-purple-400 shrink-0" />}
                         {item.icon === 'radio' && <Radio className="w-4 h-4 text-rose-400 shrink-0 animate-pulse" />}
@@ -659,24 +1066,24 @@ export const HistoricalAnalyticsTab: React.FC = () => {
                       {m ? `${m.total_trades} (${m.wins}W / ${m.losses}L)` : '--'}
                     </td>
                     <td className="py-3 px-3 text-right font-bold text-white">
-                      {m && m.total_trades > 0 ? `${m.win_rate_pct.toFixed(1)}%` : '0.0%'}
+                      {m && m.total_trades > 0 && m.win_rate_pct != null ? `${m.win_rate_pct.toFixed(1)}%` : '0.0%'}
                     </td>
                     <td className={`py-3 px-3 text-right font-bold text-sm ${
                       m && m.net_pnl > 0 ? 'text-emerald-400' : m && m.net_pnl < 0 ? 'text-rose-400' : 'text-slate-400'
                     }`}>
-                      {m ? `${m.net_pnl >= 0 ? '+' : ''}$${m.net_pnl.toFixed(2)}` : '$0.00'}
+                      {m && m.net_pnl != null ? `${m.net_pnl >= 0 ? '+' : ''}$${m.net_pnl.toFixed(2)}` : '$0.00'}
                     </td>
                     <td className="py-3 px-3 text-right font-bold text-cyan-400">
-                      {m && m.total_trades > 0 ? m.profit_factor.toFixed(2) : '1.00'}
+                      {m && m.total_trades > 0 && m.profit_factor != null ? m.profit_factor.toFixed(2) : '1.00'}
                     </td>
                     <td className="py-3 px-3 text-right text-emerald-400 font-semibold">
-                      {m && m.total_trades > 0 ? `${m.expectancy_per_trade >= 0 ? '+' : ''}$${m.expectancy_per_trade.toFixed(2)}` : '$0.00'}
+                      {m && m.total_trades > 0 && m.expectancy_per_trade != null ? `${m.expectancy_per_trade >= 0 ? '+' : ''}$${m.expectancy_per_trade.toFixed(2)}` : '$0.00'}
                     </td>
                     <td className="py-3 px-3 text-right text-blue-400">
-                      {m && m.total_trades > 0 ? m.sharpe_ratio.toFixed(2) : '0.00'}
+                      {m && m.total_trades > 0 && m.sharpe_ratio != null ? m.sharpe_ratio.toFixed(2) : '0.00'}
                     </td>
                     <td className="py-3 px-3 text-right text-rose-400">
-                      {m && m.total_trades > 0 ? `${m.max_drawdown_pct.toFixed(2)}%` : '0.00%'}
+                      {m && m.total_trades > 0 && m.max_drawdown_pct != null ? `${m.max_drawdown_pct.toFixed(2)}%` : '0.00%'}
                     </td>
                     <td className="py-3 px-3 text-center font-sans">
                       <button
@@ -701,7 +1108,9 @@ export const HistoricalAnalyticsTab: React.FC = () => {
         </div>
       </div>
 
-      {/* Bot & System Filter Selector */}
+      {/* --------------------------------------------------------------------------- */}
+      {/* 3. Bot & System Isolated Drilldown Selector */}
+      {/* --------------------------------------------------------------------------- */}
       <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Bot className="w-4 h-4 text-emerald-400" />
@@ -722,10 +1131,34 @@ export const HistoricalAnalyticsTab: React.FC = () => {
           </button>
 
           <button
+            onClick={() => setSelectedSystem('macro_trend_dominion')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
+              selectedSystem === 'macro_trend_dominion'
+                ? 'bg-cyan-500/20 text-cyan-300 shadow-sm border border-cyan-500/40'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
+            Macro Trend Dominion (Paper)
+          </button>
+
+          <button
+            onClick={() => setSelectedSystem('dominion_2_bot')}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
+              selectedSystem === 'dominion_2_bot'
+                ? 'bg-emerald-500/20 text-emerald-300 shadow-sm border border-emerald-500/40'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Crown className="w-3.5 h-3.5 text-emerald-400" />
+            Dominion 2 Bot (Paper)
+          </button>
+
+          <button
             onClick={() => setSelectedSystem('3_step_domination_bot')}
             className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition ${
               selectedSystem === '3_step_domination_bot'
-                ? 'bg-emerald-500/20 text-emerald-300 shadow-sm border border-emerald-500/40'
+                ? 'bg-amber-500/20 text-amber-300 shadow-sm border border-amber-500/40'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
@@ -759,14 +1192,16 @@ export const HistoricalAnalyticsTab: React.FC = () => {
         </div>
       </div>
 
-      {/* KPI Cards Grid */}
+      {/* --------------------------------------------------------------------------- */}
+      {/* 4. KPI Cards Grid */}
+      {/* --------------------------------------------------------------------------- */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <div className="bg-slate-900/90 border border-slate-800 p-3.5 rounded-xl shadow-sm">
           <div className="text-[11px] font-semibold text-slate-400 flex items-center gap-1.5 uppercase">
             <Award className="w-3.5 h-3.5 text-amber-400" /> SHARPE RATIO
           </div>
           <div className="text-lg sm:text-xl font-bold text-emerald-400 mt-1 font-mono">
-            {metrics ? metrics.sharpe_ratio.toFixed(2) : '--'}
+            {metrics?.sharpe_ratio != null ? metrics.sharpe_ratio.toFixed(2) : '--'}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">365-Day 15M Annualized</div>
         </div>
@@ -776,7 +1211,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
             <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> SORTINO RATIO
           </div>
           <div className="text-lg sm:text-xl font-bold text-emerald-400 mt-1 font-mono">
-            {metrics ? metrics.sortino_ratio.toFixed(2) : '--'}
+            {metrics?.sortino_ratio != null ? metrics.sortino_ratio.toFixed(2) : '--'}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">Downside Risk Guard</div>
         </div>
@@ -786,10 +1221,10 @@ export const HistoricalAnalyticsTab: React.FC = () => {
             <Percent className="w-3.5 h-3.5 text-blue-400" /> WIN RATE
           </div>
           <div className="text-lg sm:text-xl font-bold text-white mt-1 font-mono">
-            {metrics ? `${metrics.win_rate_pct.toFixed(1)}%` : '--'}
+            {metrics?.win_rate_pct != null ? `${metrics.win_rate_pct.toFixed(1)}%` : '--'}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">
-            {metrics ? `${metrics.wins}W / ${metrics.losses}L (${metrics.total_trades} cycles)` : '--'}
+            {metrics ? `${metrics.wins ?? 0}W / ${metrics.losses ?? 0}L (${metrics.total_trades ?? 0} cycles)` : '--'}
           </div>
         </div>
 
@@ -798,7 +1233,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
             <ShieldAlert className="w-3.5 h-3.5 text-rose-400" /> MAX DRAWDOWN
           </div>
           <div className="text-lg sm:text-xl font-bold text-rose-400 mt-1 font-mono">
-            {metrics ? `${metrics.max_drawdown_pct.toFixed(2)}%` : '--'}
+            {metrics?.max_drawdown_pct != null ? `${metrics.max_drawdown_pct.toFixed(2)}%` : '--'}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">15% Gate Threshold</div>
         </div>
@@ -808,10 +1243,10 @@ export const HistoricalAnalyticsTab: React.FC = () => {
             <Activity className="w-3.5 h-3.5 text-cyan-400" /> PROFIT FACTOR
           </div>
           <div className="text-lg sm:text-xl font-bold text-cyan-400 mt-1 font-mono">
-            {metrics ? metrics.profit_factor.toFixed(2) : '--'}
+            {metrics?.profit_factor != null ? metrics.profit_factor.toFixed(2) : '--'}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">
-            {metrics ? `Payoff: ${metrics.payoff_ratio.toFixed(2)}x` : '--'}
+            {metrics?.payoff_ratio != null ? `Payoff: ${metrics.payoff_ratio.toFixed(2)}x` : '--'}
           </div>
         </div>
 
@@ -821,18 +1256,20 @@ export const HistoricalAnalyticsTab: React.FC = () => {
           </div>
           <div
             className={`text-lg sm:text-xl font-bold mt-1 font-mono ${
-              metrics && metrics.net_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+              metrics && (metrics.net_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
             }`}
           >
-            {metrics ? `${metrics.net_pnl >= 0 ? '+' : ''}$${metrics.net_pnl.toFixed(2)}` : '--'}
+            {metrics?.net_pnl != null ? `${metrics.net_pnl >= 0 ? '+' : ''}$${metrics.net_pnl.toFixed(2)}` : '--'}
           </div>
           <div className="text-[10px] text-slate-500 mt-0.5">
-            {metrics ? `ROI: ${metrics.total_roi_pct >= 0 ? '+' : ''}${metrics.total_roi_pct.toFixed(1)}%` : '--'}
+            {metrics?.total_roi_pct != null ? `ROI: ${metrics.total_roi_pct >= 0 ? '+' : ''}${metrics.total_roi_pct.toFixed(1)}%` : '--'}
           </div>
         </div>
       </div>
 
-      {/* HiDPI Canvas Equity Curve Section */}
+      {/* --------------------------------------------------------------------------- */}
+      {/* 5. HiDPI Canvas Equity Curve Section */}
+      {/* --------------------------------------------------------------------------- */}
       <div ref={containerRef} className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
           <div className="text-xs sm:text-sm font-semibold text-slate-200 flex items-center gap-2">
@@ -841,6 +1278,8 @@ export const HistoricalAnalyticsTab: React.FC = () => {
             <span className="text-emerald-400 font-mono">
               {selectedSystem === 'all'
                 ? 'All Combined'
+                : selectedSystem === 'dominion_2_bot'
+                ? 'Dominion 2 Bot'
                 : selectedSystem === '3_step_domination_bot'
                 ? '3-Step Domination Bot'
                 : selectedSystem === 'onnx_ml_bot'
@@ -864,75 +1303,251 @@ export const HistoricalAnalyticsTab: React.FC = () => {
         />
       </div>
 
-      {/* Sub-Tabs Selector */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-2">
-        <button
-          onClick={() => setActiveSubTab('journal')}
-          className={`px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-lg transition flex items-center gap-2 ${
-            activeSubTab === 'journal'
-              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-          }`}
-        >
-          <Layers className="w-4 h-4" /> Trade Journal ({trades.length})
-        </button>
+      {/* --------------------------------------------------------------------------- */}
+      {/* 6. Consolidated Sub-Tabs Selector */}
+      {/* --------------------------------------------------------------------------- */}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 15M Win/Loss Event Reports Tab */}
+          <button
+            onClick={() => setActiveSubTab('15m_reports')}
+            className={`px-3.5 py-2 text-xs sm:text-sm font-bold rounded-xl transition flex items-center gap-2 ${
+              activeSubTab === '15m_reports'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-transparent'
+            }`}
+          >
+            <Award className="w-4 h-4 text-emerald-400" />
+            <span>15M Win/Loss Reports</span>
+            <span className="px-1.5 py-0.2 text-[10px] font-mono bg-emerald-500/20 border border-emerald-500/30 rounded-full text-emerald-300">
+              {winLossReports.length}
+            </span>
+          </button>
 
-        <button
-          onClick={() => setActiveSubTab('settlements')}
-          className={`px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-lg transition flex items-center gap-2 ${
-            activeSubTab === 'settlements'
-              ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-          }`}
-        >
-          <Award className="w-4 h-4" /> Settlements ({settlements.length})
-        </button>
+          {/* Trade Journal Tab */}
+          <button
+            onClick={() => setActiveSubTab('journal')}
+            className={`px-3.5 py-2 text-xs sm:text-sm font-bold rounded-xl transition flex items-center gap-2 ${
+              activeSubTab === 'journal'
+                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-transparent'
+            }`}
+          >
+            <Layers className="w-4 h-4 text-blue-400" />
+            <span>Trade Journal</span>
+            <span className="px-1.5 py-0.2 text-[10px] font-mono bg-blue-500/20 border border-blue-500/30 rounded-full text-blue-300">
+              {trades.length}
+            </span>
+          </button>
 
-        <button
-          onClick={() => setActiveSubTab('ai')}
-          className={`px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-lg transition flex items-center gap-2 ${
-            activeSubTab === 'ai'
-              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-          }`}
-        >
-          <Cpu className="w-4 h-4" /> AI Decisions ({aiPredictions.length})
-        </button>
+          {/* Settlements Tab */}
+          <button
+            onClick={() => setActiveSubTab('settlements')}
+            className={`px-3.5 py-2 text-xs sm:text-sm font-bold rounded-xl transition flex items-center gap-2 ${
+              activeSubTab === 'settlements'
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-transparent'
+            }`}
+          >
+            <CheckCircle2 className="w-4 h-4 text-purple-400" />
+            <span>Settlements</span>
+            <span className="px-1.5 py-0.2 text-[10px] font-mono bg-purple-500/20 border border-purple-500/30 rounded-full text-purple-300">
+              {settlements.length}
+            </span>
+          </button>
 
-        <button
-          onClick={() => setActiveSubTab('validation')}
-          className={`px-3.5 py-2 text-xs sm:text-sm font-semibold rounded-lg transition flex items-center gap-2 ${
-            activeSubTab === 'validation'
-              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-          }`}
-        >
-          <ShieldCheck className="w-4 h-4" /> 100-Cycle Forward Validation Gate
-        </button>
+          {/* AI Decisions Tab */}
+          <button
+            onClick={() => setActiveSubTab('ai')}
+            className={`px-3.5 py-2 text-xs sm:text-sm font-bold rounded-xl transition flex items-center gap-2 ${
+              activeSubTab === 'ai'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-transparent'
+            }`}
+          >
+            <Cpu className="w-4 h-4 text-amber-400" />
+            <span>AI Decisions</span>
+            <span className="px-1.5 py-0.2 text-[10px] font-mono bg-amber-500/20 border border-amber-500/30 rounded-full text-amber-300">
+              {aiPredictions.length}
+            </span>
+          </button>
+
+          {/* Forward Validation Tab */}
+          <button
+            onClick={() => setActiveSubTab('validation')}
+            className={`px-3.5 py-2 text-xs sm:text-sm font-bold rounded-xl transition flex items-center gap-2 ${
+              activeSubTab === 'validation'
+                ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-transparent'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-indigo-400" />
+            <span>100-Cycle Forward Validation</span>
+          </button>
+        </div>
+
+        {/* Sub-Tab Action Controls (Export, Reset, Delete Selected) */}
+        <div className="flex items-center gap-2">
+          {/* Delete Selected Button */}
+          {selectedIds.size > 0 && activeSubTab !== 'validation' && (
+            <button
+              onClick={() => handleDeleteBatch(activeSubTab)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-lg shadow-sm transition animate-in fade-in"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Selected ({selectedIds.size})</span>
+            </button>
+          )}
+
+          {/* Sub-Tab Dedicated CSV Export */}
+          {activeSubTab === '15m_reports' && (
+            <a
+              href="/api/reports/win-loss/export.csv"
+              download="kalshi_15m_win_loss_reports.csv"
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg transition"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+              <span>CSV</span>
+            </a>
+          )}
+          {activeSubTab === 'journal' && (
+            <a
+              href="/api/history/trades/export.csv"
+              download="kalshi_trade_journal.csv"
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg transition"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-400" />
+              <span>CSV</span>
+            </a>
+          )}
+          {activeSubTab === 'settlements' && (
+            <a
+              href="/api/history/settlements/export.csv"
+              download="kalshi_settlements.csv"
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg transition"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-purple-400" />
+              <span>CSV</span>
+            </a>
+          )}
+          {activeSubTab === 'ai' && (
+            <a
+              href="/api/history/ai-predictions/export.csv"
+              download="kalshi_ai_decisions.csv"
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg transition"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+              <span>CSV</span>
+            </a>
+          )}
+
+          {/* Sub-Tab Dedicated JSON Export */}
+          {activeSubTab === '15m_reports' && (
+            <a
+              href="/api/reports/win-loss/export.json"
+              download="kalshi_15m_win_loss_reports.json"
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg transition"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-400" />
+              <span>JSON</span>
+            </a>
+          )}
+          {activeSubTab === 'journal' && (
+            <a
+              href="/api/history/trades/export.json"
+              download="kalshi_trade_journal.json"
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg transition"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-400" />
+              <span>JSON</span>
+            </a>
+          )}
+          {activeSubTab === 'settlements' && (
+            <a
+              href="/api/history/settlements/export.json"
+              download="kalshi_settlements.json"
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg transition"
+            >
+              <Download className="w-3.5 h-3.5 text-purple-400" />
+              <span>JSON</span>
+            </a>
+          )}
+          {activeSubTab === 'ai' && (
+            <a
+              href="/api/history/ai-predictions/export.json"
+              download="kalshi_ai_decisions.json"
+              className="flex items-center gap-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold rounded-lg transition"
+            >
+              <Download className="w-3.5 h-3.5 text-amber-400" />
+              <span>JSON</span>
+            </a>
+          )}
+
+          {/* Reset Current Tab */}
+          <button
+            onClick={() => {
+              setResetTarget(activeSubTab === '15m_reports' ? '15m_reports' : activeSubTab === 'journal' ? 'trades' : activeSubTab === 'settlements' ? 'settlements' : activeSubTab === 'ai' ? 'ai' : 'selected');
+              setIsResetModalOpen(true);
+            }}
+            className="flex items-center gap-1 px-3 py-1.5 bg-rose-950/30 hover:bg-rose-900/50 border border-rose-800/40 text-rose-300 hover:text-white text-xs font-semibold rounded-lg transition"
+            title="Reset active table"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Reset View</span>
+          </button>
+        </div>
       </div>
 
-      {/* Filter & Search Bar */}
+      {/* --------------------------------------------------------------------------- */}
+      {/* 7. Search & Filter Bar (for tabular views) */}
+      {/* --------------------------------------------------------------------------- */}
       {activeSubTab !== 'validation' && (
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/70 p-3 rounded-xl border border-slate-800 text-xs">
           <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-md">
             <Search className="w-4 h-4 text-slate-500" />
             <input
               type="text"
-              placeholder="Search ticker, trade ID..."
+              placeholder={`Search ${activeSubTab === '15m_reports' ? '15M reports (ticker, cycle, ID)...' : 'ticker, ID...'}`}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-md px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-full"
+              className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 w-full"
             />
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-md border border-slate-800">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Bot System Filter (for 15M reports) */}
+            {activeSubTab === '15m_reports' && (
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                <span className="text-[10px] text-slate-500 px-1 font-semibold uppercase">Bot:</span>
+                {[
+                  { id: 'all', label: 'All Bots' },
+                  { id: 'macro_trend_dominion', label: '📈 Macro Trend' },
+                  { id: 'dominion_2_bot', label: '👑 Dominion 2' },
+                  { id: '3_step_domination_bot', label: '⚡ Domination' },
+                  { id: 'onnx_ml_bot', label: '🧠 ONNX ML' },
+                  { id: 'live', label: '🔴 Live' },
+                ].map((b) => (
+                  <button
+                    key={b.id}
+                    onClick={() => setBotFilter(b.id as any)}
+                    className={`px-2 py-0.5 rounded-md font-bold text-[10px] transition ${
+                      botFilter === b.id ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Side Filter */}
+            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
               <span className="text-[10px] text-slate-500 px-1 font-semibold uppercase">Side:</span>
               {(['all', 'yes', 'no'] as const).map((s) => (
                 <button
                   key={s}
                   onClick={() => setSideFilter(s)}
-                  className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] transition ${
+                  className={`px-2 py-0.5 rounded-md font-bold uppercase text-[10px] transition ${
                     sideFilter === s ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -941,14 +1556,15 @@ export const HistoricalAnalyticsTab: React.FC = () => {
               ))}
             </div>
 
-            {activeSubTab === 'settlements' && (
-              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-md border border-slate-800">
+            {/* Outcome Filter */}
+            {(activeSubTab === '15m_reports' || activeSubTab === 'settlements') && (
+              <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
                 <span className="text-[10px] text-slate-500 px-1 font-semibold uppercase">Outcome:</span>
                 {(['all', 'win', 'loss'] as const).map((o) => (
                   <button
                     key={o}
                     onClick={() => setOutcomeFilter(o)}
-                    className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] transition ${
+                    className={`px-2 py-0.5 rounded-md font-bold uppercase text-[10px] transition ${
                       outcomeFilter === o ? 'bg-slate-700 text-white' : 'text-slate-400 hover:text-white'
                     }`}
                   >
@@ -961,15 +1577,396 @@ export const HistoricalAnalyticsTab: React.FC = () => {
         </div>
       )}
 
-      {/* Tables Section */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
-        {/* Trade Execution Journal */}
+      {/* --------------------------------------------------------------------------- */}
+      {/* 8. Active Sub-Tab Content */}
+      {/* --------------------------------------------------------------------------- */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+        {/* SUBTAB 1: 15-Minute Event Win/Loss Reports */}
+        {activeSubTab === '15m_reports' && (
+          <div>
+            {/* Top 15M Multi-Bot KPI Summary Matrix */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 p-4 bg-slate-950/70 border-b border-slate-800">
+              {/* Card 1: 3-Step Domination Bot */}
+              <div className="bg-slate-900/90 border border-sky-500/30 rounded-xl p-3.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5" />
+                    3-Step Domination Bot (15M)
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-mono bg-sky-500/10 border border-sky-500/30 rounded text-sky-300">
+                    {domStats15m.total} Events
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-slate-800/80">
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Win Rate</div>
+                    <div className="text-sm font-bold font-mono text-white">
+                      {(domStats15m?.winRate ?? 0).toFixed(1)}%
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-mono">
+                      {domStats15m?.wins ?? 0}W / {domStats15m?.losses ?? 0}L
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Net P&L</div>
+                    <div className={`text-sm font-bold font-mono ${(domStats15m?.totalPnL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {(domStats15m?.totalPnL ?? 0) >= 0 ? '+' : ''}${(domStats15m?.totalPnL ?? 0).toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Profit Factor</div>
+                    <div className="text-sm font-bold font-mono text-cyan-400">
+                      {(domStats15m?.profitFactor ?? 1.0).toFixed(2)}x
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 2: ONNX ML Ensemble */}
+              <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-3.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5" />
+                    ONNX ML Ensemble (15M)
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-mono bg-purple-500/10 border border-purple-500/30 rounded text-purple-300">
+                    {onnxStats15m?.total ?? 0} Events
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-slate-800/80">
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Win Rate</div>
+                    <div className="text-sm font-bold font-mono text-white">
+                      {(onnxStats15m?.winRate ?? 0).toFixed(1)}%
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-mono">
+                      {onnxStats15m?.wins ?? 0}W / {onnxStats15m?.losses ?? 0}L
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Net P&L</div>
+                    <div className={`text-sm font-bold font-mono ${(onnxStats15m?.totalPnL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {(onnxStats15m?.totalPnL ?? 0) >= 0 ? '+' : ''}${(onnxStats15m?.totalPnL ?? 0).toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Profit Factor</div>
+                    <div className="text-sm font-bold font-mono text-cyan-400">
+                      {(onnxStats15m?.profitFactor ?? 1.0).toFixed(2)}x
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 3: Combined Overall 15M Portfolio */}
+              <div className="bg-slate-900/90 border border-emerald-500/30 rounded-xl p-3.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Award className="w-3.5 h-3.5" />
+                    Combined 15M (Overall)
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-mono bg-emerald-500/10 border border-emerald-500/30 rounded text-emerald-300">
+                    {combinedStats15m?.total ?? 0} Total
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-slate-800/80">
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Win Rate</div>
+                    <div className="text-sm font-bold font-mono text-white">
+                      {(combinedStats15m?.winRate ?? 0).toFixed(1)}%
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-mono">
+                      {combinedStats15m?.wins ?? 0}W / {combinedStats15m?.losses ?? 0}L
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Net P&L</div>
+                    <div className={`text-sm font-bold font-mono ${(combinedStats15m?.totalPnL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {(combinedStats15m?.totalPnL ?? 0) >= 0 ? '+' : ''}${(combinedStats15m?.totalPnL ?? 0).toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Profit Factor</div>
+                    <div className="text-sm font-bold font-mono text-cyan-400">
+                      {(combinedStats15m?.profitFactor ?? 1.0).toFixed(2)}x
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 4: Live Real-Money Production (15M) */}
+              <div className="bg-slate-900/90 border border-rose-500/40 rounded-xl p-3.5 flex flex-col justify-between shadow-sm relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+                    <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+                    Live Production (15M Real)
+                  </span>
+                  <span className="px-1.5 py-0.5 text-[9px] font-mono bg-rose-500/15 border border-rose-500/40 rounded text-rose-300 font-bold">
+                    {liveStats15m?.total ?? 0} Fills
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-2 pt-2 border-t border-slate-800/80">
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Win Rate</div>
+                    <div className="text-sm font-bold font-mono text-white">
+                      {(liveStats15m?.winRate ?? 0).toFixed(1)}%
+                    </div>
+                    <div className="text-[9px] text-slate-500 font-mono">
+                      {liveStats15m?.wins ?? 0}W / {liveStats15m?.losses ?? 0}L
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Net P&L</div>
+                    <div className={`text-sm font-bold font-mono ${(liveStats15m?.totalPnL ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {(liveStats15m?.totalPnL ?? 0) >= 0 ? '+' : ''}${(liveStats15m?.totalPnL ?? 0).toFixed(2)}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] text-slate-500 uppercase font-semibold">Profit Factor</div>
+                    <div className="text-sm font-bold font-mono text-cyan-400">
+                      {(liveStats15m?.profitFactor ?? 1.0).toFixed(2)}x
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Reports Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
+                  <tr>
+                    <th className="py-3 px-3 w-8 text-center">
+                      <button
+                        onClick={() => toggleSelectAllCurrentPage(paginatedWinLoss.items.map((r) => r.report_id))}
+                        className="text-slate-400 hover:text-white"
+                        title="Select/Deselect All on Page"
+                      >
+                        {paginatedWinLoss.items.length > 0 &&
+                        paginatedWinLoss.items.every((r) => selectedIds.has(r.report_id)) ? (
+                          <CheckSquare className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-500" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="py-3 px-3">System / Bot</th>
+                    <th className="py-3 px-3.5">Cycle Window (ET)</th>
+                    <th className="py-3 px-3">Contract / Strike</th>
+                    <th className="py-3 px-3 text-center">Bot Action</th>
+                    <th className="py-3 px-3 text-right">Entry $\to$ Settle</th>
+                    <th className="py-3 px-3 text-center">Outcome</th>
+                    <th className="py-3 px-3 text-right">Realized P&L</th>
+                    <th className="py-3 px-3">AI Rationale & Microstructure</th>
+                    <th className="py-3 px-3 text-center">Delete</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {paginatedWinLoss.items.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="py-10 text-center text-slate-500 font-sans">
+                        <Award className="h-8 w-8 mx-auto mb-2 text-slate-600" />
+                        No 15-minute event reports recorded yet. Click &quot;🧪 Run 15M Test Bot&quot; above to simulate immediate trade events for both bots.
+                      </td>
+                    </tr>
+                  ) : (
+                    paginatedWinLoss.items.map((report) => {
+                      const isWin = report.outcome === 'win';
+                      const diffStrike = (report.settlement_btc_price || 0) - (report.strike_price || 0);
+                      const isSelected = selectedIds.has(report.report_id);
+                      const onnx = isOnnxBot(report);
+                      const live = report.execution_mode === 'live' || report.bot_type === 'live';
+
+                      return (
+                        <tr
+                          key={report.report_id}
+                          className={`hover:bg-slate-800/40 transition-colors ${
+                            isSelected ? 'bg-emerald-500/10' : ''
+                          }`}
+                        >
+                          <td className="py-3 px-3 text-center">
+                            <button
+                              onClick={() => toggleSelectId(report.report_id)}
+                              className="text-slate-400 hover:text-white"
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-emerald-400" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-600" />
+                              )}
+                            </button>
+                          </td>
+
+                          {/* Bot Badge */}
+                          <td className="py-3 px-3 whitespace-nowrap">
+                            {onnx ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                                <Cpu className="w-3 h-3 text-purple-400" />
+                                ONNX ML
+                              </span>
+                            ) : live ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                                <Radio className="w-3 h-3 text-rose-400" />
+                                Live Real
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-500/15 text-sky-300 border border-sky-500/30">
+                                <Zap className="w-3 h-3 text-sky-400" />
+                                Domination
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Cycle Time */}
+                          <td className="py-3 px-3.5 whitespace-nowrap">
+                            <div className="font-sans font-semibold text-slate-200 text-xs">{report.cycle_time}</div>
+                            <div className="text-[10px] text-slate-500 font-mono">{report.report_id}</div>
+                          </td>
+
+                          {/* Ticker & Strike */}
+                          <td className="py-3 px-3 whitespace-nowrap">
+                            <div className="text-amber-300 font-bold text-xs">
+                              ${report.strike_price ? report.strike_price.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'}
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              Spot: ${report.settlement_btc_price ? report.settlement_btc_price.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'}
+                              <span className={(diffStrike || 0) >= 0 ? ' text-emerald-400' : ' text-rose-400'}>
+                                {' '}({(diffStrike || 0) >= 0 ? '+' : ''}${(diffStrike || 0).toFixed(2)})
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Bot Action */}
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <span
+                              className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-bold uppercase ${
+                                report.bot_side === 'yes'
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                                  : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                              }`}
+                            >
+                              {(report.bot_side || 'BUY').toUpperCase()} ({report.contracts ?? 0} cts)
+                            </span>
+                          </td>
+
+                          {/* Entry -> Settle */}
+                          <td className="py-3 px-3 text-right whitespace-nowrap">
+                            <div className="text-slate-200 text-xs">
+                              {report.entry_price != null ? (report.entry_price * 100).toFixed(1) : '0.0'}¢ $\to$ ${report.settlement_price != null ? report.settlement_price.toFixed(2) : '0.00'}
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              Cost: ${(report.entry_price != null && report.contracts != null ? report.entry_price * report.contracts : 0).toFixed(2)}
+                            </div>
+                          </td>
+
+                          {/* Outcome */}
+                          <td className="py-3 px-3 text-center whitespace-nowrap">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                isWin
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                              }`}
+                            >
+                              {isWin ? <CheckCircle2 className="h-3 w-3" /> : <XCircle className="h-3 w-3" />}
+                              {(report.outcome || 'PENDING').toUpperCase()}
+                            </span>
+                          </td>
+
+                          {/* Realized PnL */}
+                          <td className="py-3 px-3 text-right whitespace-nowrap">
+                            <div className={`text-xs font-bold ${(report.pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {(report.pnl ?? 0) >= 0 ? '+' : ''}${report.pnl != null ? report.pnl.toFixed(2) : '0.00'}
+                            </div>
+                            <div className={`text-[10px] ${(report.roi_pct ?? 0) >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                              {(report.roi_pct ?? 0) >= 0 ? '+' : ''}{report.roi_pct != null ? report.roi_pct.toFixed(1) : '0.0'}% ROI
+                            </div>
+                          </td>
+
+                          {/* Rationale */}
+                          <td className="py-3 px-3 font-sans text-slate-300 text-xs max-w-xs">
+                            <div className="font-semibold text-slate-200 truncate" title={report.ai_rationale}>
+                              {report.ai_rationale || '--'}
+                            </div>
+                            <div className="text-[10px] text-slate-500 font-mono flex items-center gap-2 mt-0.5">
+                              <span>Conf: {report.ai_confidence != null ? (report.ai_confidence * 100).toFixed(1) : '0.0'}%</span>
+                              <span>•</span>
+                              <span>VPIN: {report.vpin_score != null ? report.vpin_score.toFixed(2) : '0.00'}</span>
+                              <span>•</span>
+                              <span>Edge: {report.ev_edge != null ? (report.ev_edge * 100).toFixed(1) : '0.0'}%</span>
+                            </div>
+                          </td>
+
+                          {/* Row Delete */}
+                          <td className="py-3 px-3 text-center">
+                            <button
+                              onClick={() => handleDeleteSingle('15m_reports', report.report_id)}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                              title="Delete this 15M report"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination Controls */}
+            {paginatedWinLoss.totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-950/60 text-xs">
+                <span className="text-slate-400">
+                  Showing {(page - 1) * ITEMS_PER_PAGE + 1} -{' '}
+                  {Math.min(page * ITEMS_PER_PAGE, paginatedWinLoss.totalCount)} of {paginatedWinLoss.totalCount} reports
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    className="p-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-slate-300 font-mono">
+                    Page {page} of {paginatedWinLoss.totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage((p) => Math.min(paginatedWinLoss.totalPages, p + 1))}
+                    disabled={page === paginatedWinLoss.totalPages}
+                    className="p-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SUBTAB 2: Trade Journal (Executions Ledger) */}
         {activeSubTab === 'journal' && (
           <div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs font-mono">
                 <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
                   <tr>
+                    <th className="py-3 px-3 w-8 text-center">
+                      <button
+                        onClick={() => toggleSelectAllCurrentPage(paginatedTrades.items.map((t) => t.id || t.trade_id))}
+                        className="text-slate-400 hover:text-white"
+                        title="Select/Deselect All on Page"
+                      >
+                        {paginatedTrades.items.length > 0 &&
+                        paginatedTrades.items.every((t) => selectedIds.has(t.id) || selectedIds.has(t.trade_id)) ? (
+                          <CheckSquare className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-500" />
+                        )}
+                      </button>
+                    </th>
                     <th className="py-3 px-4">Trade ID</th>
                     <th className="py-3 px-3">Date & Time (ET)</th>
                     <th className="py-3 px-3">Ticker</th>
@@ -979,48 +1976,73 @@ export const HistoricalAnalyticsTab: React.FC = () => {
                     <th className="py-3 px-3">Notional</th>
                     <th className="py-3 px-3">Bot / Mode</th>
                     <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-3 text-center">Delete</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
                   {paginatedTrades.items.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-8 text-center text-slate-500 font-sans">
+                      <td colSpan={11} className="py-8 text-center text-slate-500 font-sans">
                         No trade executions matching current filter criteria.
                       </td>
                     </tr>
                   ) : (
-                    paginatedTrades.items.map((t) => (
-                      <tr key={t.id} className="hover:bg-slate-800/40 transition">
-                        <td className="py-2.5 px-4 font-semibold text-slate-300">{t.trade_id}</td>
-                        <td className="py-2.5 px-3 text-slate-300">
-                          <span className="text-slate-500 mr-1.5">
-                            {formatETDate(t.timestamp_epoch_ms || t.timestamp_utc)}
-                          </span>
-                          {formatETTime(t.timestamp_epoch_ms || t.timestamp_utc)}
-                        </td>
-                        <td className="py-2.5 px-3 text-amber-300 font-bold">{t.ticker}</td>
-                        <td className="py-2.5 px-3">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              t.side.toLowerCase() === 'yes'
-                                ? 'bg-emerald-500/20 text-emerald-300'
-                                : 'bg-rose-500/20 text-rose-300'
-                            }`}
-                          >
-                            {t.side.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-white font-bold">{t.size}</td>
-                        <td className="py-2.5 px-3 text-slate-200">{(t.price * 100).toFixed(1)}¢</td>
-                        <td className="py-2.5 px-3 text-slate-200">${t.gross_value.toFixed(2)}</td>
-                        <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300 border border-slate-700">
-                            {t.bot_type ? t.bot_type.replace('_bot', '') : t.execution_mode}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-emerald-400 font-semibold">{t.status}</td>
-                      </tr>
-                    ))
+                    paginatedTrades.items.map((t) => {
+                      const isSelected = selectedIds.has(t.id) || selectedIds.has(t.trade_id);
+                      return (
+                        <tr key={t.id} className={`hover:bg-slate-800/40 transition ${isSelected ? 'bg-emerald-500/10' : ''}`}>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              onClick={() => toggleSelectId(t.id || t.trade_id)}
+                              className="text-slate-400 hover:text-white"
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-emerald-400" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-600" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-2.5 px-4 font-semibold text-slate-300">{t.trade_id}</td>
+                          <td className="py-2.5 px-3 text-slate-300">
+                            <span className="text-slate-500 mr-1.5">
+                              {formatETDate(t.timestamp_epoch_ms || t.timestamp_utc)}
+                            </span>
+                            {formatETTime(t.timestamp_epoch_ms || t.timestamp_utc)}
+                          </td>
+                          <td className="py-2.5 px-3 text-amber-300 font-bold">{t.ticker}</td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                t.side.toLowerCase() === 'yes'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : 'bg-rose-500/20 text-rose-300'
+                              }`}
+                            >
+                              {t.side.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-white font-bold">{t.size}</td>
+                          <td className="py-2.5 px-3 text-slate-200">{(t.price * 100).toFixed(1)}¢</td>
+                          <td className="py-2.5 px-3 text-slate-200">${t.gross_value.toFixed(2)}</td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300 border border-slate-700">
+                              {t.bot_type ? t.bot_type.replace('_bot', '') : t.execution_mode}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-emerald-400 font-semibold">{t.status}</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              onClick={() => handleDeleteSingle('journal', t.trade_id || t.id)}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                              title="Delete this trade"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -1057,13 +2079,27 @@ export const HistoricalAnalyticsTab: React.FC = () => {
           </div>
         )}
 
-        {/* Contract Settlements */}
+        {/* SUBTAB 3: Contract Settlements */}
         {activeSubTab === 'settlements' && (
           <div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs font-mono">
                 <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
                   <tr>
+                    <th className="py-3 px-3 w-8 text-center">
+                      <button
+                        onClick={() => toggleSelectAllCurrentPage(paginatedSettlements.items.map((s) => s.id || s.settlement_id))}
+                        className="text-slate-400 hover:text-white"
+                        title="Select/Deselect All on Page"
+                      >
+                        {paginatedSettlements.items.length > 0 &&
+                        paginatedSettlements.items.every((s) => selectedIds.has(s.id) || selectedIds.has(s.settlement_id)) ? (
+                          <CheckSquare className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-500" />
+                        )}
+                      </button>
+                    </th>
                     <th className="py-3 px-4">Settlement ID</th>
                     <th className="py-3 px-3">Date & Time (ET)</th>
                     <th className="py-3 px-3">Ticker</th>
@@ -1073,63 +2109,88 @@ export const HistoricalAnalyticsTab: React.FC = () => {
                     <th className="py-3 px-3">Outcome</th>
                     <th className="py-3 px-3">Realized P&L</th>
                     <th className="py-3 px-3">Balance After</th>
+                    <th className="py-3 px-3 text-center">Delete</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
                   {paginatedSettlements.items.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-8 text-center text-slate-500 font-sans">
+                      <td colSpan={11} className="py-8 text-center text-slate-500 font-sans">
                         No settlements matching current filter criteria.
                       </td>
                     </tr>
                   ) : (
-                    paginatedSettlements.items.map((s) => (
-                      <tr key={s.id} className="hover:bg-slate-800/40 transition">
-                        <td className="py-2.5 px-4 font-semibold text-slate-300">{s.settlement_id}</td>
-                        <td className="py-2.5 px-3 text-slate-300">
-                          <span className="text-slate-500 mr-1.5">
-                            {formatETDate(s.timestamp_epoch_ms || s.timestamp_utc)}
-                          </span>
-                          {formatETTime(s.timestamp_epoch_ms || s.timestamp_utc)}
-                        </td>
-                        <td className="py-2.5 px-3 text-amber-300 font-bold">{s.ticker}</td>
-                        <td className="py-2.5 px-3">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              s.side.toLowerCase() === 'yes'
-                                ? 'bg-emerald-500/20 text-emerald-300'
-                                : 'bg-rose-500/20 text-rose-300'
-                            }`}
-                          >
-                            {s.side.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-white font-bold">{s.size}</td>
-                        <td className="py-2.5 px-3 text-slate-200">{(s.entry_price * 100).toFixed(1)}¢</td>
-                        <td className="py-2.5 px-3">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 w-fit ${
-                              s.outcome.toLowerCase() === 'win'
-                                ? 'bg-emerald-500/20 text-emerald-300'
-                                : s.outcome.toLowerCase() === 'loss'
-                                ? 'bg-rose-500/20 text-rose-300'
-                                : 'bg-slate-500/20 text-slate-300'
-                            }`}
-                          >
-                            {s.outcome.toLowerCase() === 'win' ? (
-                              <CheckCircle2 className="w-3 h-3" />
-                            ) : s.outcome.toLowerCase() === 'loss' ? (
-                              <XCircle className="w-3 h-3" />
-                            ) : null}
-                            {s.outcome.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className={`py-2.5 px-3 font-bold ${s.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {s.pnl >= 0 ? '+' : ''}${s.pnl.toFixed(2)}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-300 font-semibold">${s.balance_after.toFixed(2)}</td>
-                      </tr>
-                    ))
+                    paginatedSettlements.items.map((s) => {
+                      const isSelected = selectedIds.has(s.id) || selectedIds.has(s.settlement_id);
+                      return (
+                        <tr key={s.id} className={`hover:bg-slate-800/40 transition ${isSelected ? 'bg-emerald-500/10' : ''}`}>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              onClick={() => toggleSelectId(s.id || s.settlement_id)}
+                              className="text-slate-400 hover:text-white"
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-emerald-400" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-600" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-2.5 px-4 font-semibold text-slate-300">{s.settlement_id}</td>
+                          <td className="py-2.5 px-3 text-slate-300">
+                            <span className="text-slate-500 mr-1.5">
+                              {formatETDate(s.timestamp_epoch_ms || s.timestamp_utc)}
+                            </span>
+                            {formatETTime(s.timestamp_epoch_ms || s.timestamp_utc)}
+                          </td>
+                          <td className="py-2.5 px-3 text-amber-300 font-bold">{s.ticker}</td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                s.side.toLowerCase() === 'yes'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : 'bg-rose-500/20 text-rose-300'
+                              }`}
+                            >
+                              {s.side.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-white font-bold">{s.size}</td>
+                          <td className="py-2.5 px-3 text-slate-200">{(s.entry_price * 100).toFixed(1)}¢</td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 w-fit ${
+                                s.outcome.toLowerCase() === 'win'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : s.outcome.toLowerCase() === 'loss'
+                                  ? 'bg-rose-500/20 text-rose-300'
+                                  : 'bg-slate-500/20 text-slate-300'
+                              }`}
+                            >
+                              {s.outcome.toLowerCase() === 'win' ? (
+                                <CheckCircle2 className="w-3 h-3" />
+                              ) : s.outcome.toLowerCase() === 'loss' ? (
+                                <XCircle className="w-3 h-3" />
+                              ) : null}
+                              {s.outcome.toUpperCase()}
+                            </span>
+                          </td>
+                          <td className={`py-2.5 px-3 font-bold ${s.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {s.pnl >= 0 ? '+' : ''}${s.pnl.toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-300 font-semibold">${s.balance_after.toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              onClick={() => handleDeleteSingle('settlements', s.settlement_id || s.id)}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                              title="Delete this settlement"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -1167,13 +2228,26 @@ export const HistoricalAnalyticsTab: React.FC = () => {
           </div>
         )}
 
-        {/* AI Inferences */}
+        {/* SUBTAB 4: AI Microstructure Decisions */}
         {activeSubTab === 'ai' && (
           <div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs font-mono">
                 <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
                   <tr>
+                    <th className="py-3 px-3 w-8 text-center">
+                      <button
+                        onClick={() => toggleSelectAllCurrentPage(paginatedAi.items.map((p) => p.id))}
+                        className="text-slate-400 hover:text-white"
+                        title="Select/Deselect All on Page"
+                      >
+                        {paginatedAi.items.length > 0 && paginatedAi.items.every((p) => selectedIds.has(p.id)) ? (
+                          <CheckSquare className="w-4 h-4 text-emerald-400" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-500" />
+                        )}
+                      </button>
+                    </th>
                     <th className="py-3 px-4">Date & Time (ET)</th>
                     <th className="py-3 px-3">Ticker</th>
                     <th className="py-3 px-3">P(UP)</th>
@@ -1182,45 +2256,70 @@ export const HistoricalAnalyticsTab: React.FC = () => {
                     <th className="py-3 px-3">VPIN Toxicity</th>
                     <th className="py-3 px-3">Decision Signal</th>
                     <th className="py-3 px-3">Playbook Rationale</th>
+                    <th className="py-3 px-3 text-center">Delete</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50">
                   {paginatedAi.items.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-slate-500 font-sans">
+                      <td colSpan={10} className="py-8 text-center text-slate-500 font-sans">
                         No AI predictions matching current criteria.
                       </td>
                     </tr>
                   ) : (
-                    paginatedAi.items.map((p) => (
-                      <tr key={p.id} className="hover:bg-slate-800/40 transition">
-                        <td className="py-2.5 px-4 text-slate-300">
-                          <span className="text-slate-500 mr-1.5">
-                            {formatETDate(p.timestamp_epoch_ms || p.timestamp_utc)}
-                          </span>
-                          {formatETTime(p.timestamp_epoch_ms || p.timestamp_utc)}
-                        </td>
-                        <td className="py-2.5 px-3 text-amber-300 font-bold">{p.ticker}</td>
-                        <td className="py-2.5 px-3 text-emerald-400 font-bold">{(p.p_up * 100).toFixed(1)}%</td>
-                        <td className="py-2.5 px-3 text-rose-400 font-bold">{(p.p_down * 100).toFixed(1)}%</td>
-                        <td className="py-2.5 px-3 text-slate-400">{(p.p_wait * 100).toFixed(1)}%</td>
-                        <td className="py-2.5 px-3">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              p.vpin <= 0.35
-                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                : p.vpin <= 0.65
-                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                            }`}
-                          >
-                            {p.vpin.toFixed(2)} {p.vpin <= 0.35 ? 'SAFE' : p.vpin <= 0.65 ? 'WARN' : 'TOXIC'}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 font-bold text-white uppercase">{p.recommended_side}</td>
-                        <td className="py-2.5 px-3 text-slate-400 truncate max-w-sm">{p.rationale || '--'}</td>
-                      </tr>
-                    ))
+                    paginatedAi.items.map((p) => {
+                      const isSelected = selectedIds.has(p.id);
+                      return (
+                        <tr key={p.id} className={`hover:bg-slate-800/40 transition ${isSelected ? 'bg-emerald-500/10' : ''}`}>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              onClick={() => toggleSelectId(p.id)}
+                              className="text-slate-400 hover:text-white"
+                            >
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-emerald-400" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-600" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-2.5 px-4 text-slate-300">
+                            <span className="text-slate-500 mr-1.5">
+                              {formatETDate(p.timestamp_epoch_ms || p.timestamp_utc)}
+                            </span>
+                            {formatETTime(p.timestamp_epoch_ms || p.timestamp_utc)}
+                          </td>
+                          <td className="py-2.5 px-3 text-amber-300 font-bold">{p.ticker}</td>
+                          <td className="py-2.5 px-3 text-emerald-400 font-bold">{(p.p_up * 100).toFixed(1)}%</td>
+                          <td className="py-2.5 px-3 text-rose-400 font-bold">{(p.p_down * 100).toFixed(1)}%</td>
+                          <td className="py-2.5 px-3 text-slate-400">{(p.p_wait * 100).toFixed(1)}%</td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                p.vpin <= 0.35
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                  : p.vpin <= 0.65
+                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                  : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                              }`}
+                            >
+                              {p.vpin.toFixed(2)} {p.vpin <= 0.35 ? 'SAFE' : p.vpin <= 0.65 ? 'WARN' : 'TOXIC'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-white uppercase">{p.recommended_side}</td>
+                          <td className="py-2.5 px-3 text-slate-400 truncate max-w-sm">{p.rationale || '--'}</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <button
+                              onClick={() => handleDeleteSingle('ai', p.id)}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                              title="Delete this AI prediction"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
@@ -1257,7 +2356,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
           </div>
         )}
 
-        {/* 100-Cycle Forward Validation Gate */}
+        {/* SUBTAB 5: 100-Cycle Forward Validation Gate */}
         {activeSubTab === 'validation' && (
           <div className="p-5 flex flex-col gap-6">
             {/* Top Readiness Banner */}
@@ -1385,39 +2484,80 @@ export const HistoricalAnalyticsTab: React.FC = () => {
         )}
       </div>
 
-      {/* Manual Reset Confirmation Modal */}
+      {/* --------------------------------------------------------------------------- */}
+      {/* 9. Reset Confirmation Modal */}
+      {/* --------------------------------------------------------------------------- */}
       {isResetModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 max-w-md w-full shadow-2xl space-y-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-rose-500/20 text-rose-400 rounded-lg border border-rose-500/30">
+              <div className="p-3 bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/30">
                 <AlertTriangle className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-lg font-bold text-white">Reset Historical Reports</h3>
+                <h3 className="text-lg font-bold text-white">Reset Historical Reports & Ledger</h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Clear win/loss records and recalculate efficiency metrics.
+                  Clear historical records and recalculate efficiency metrics.
                 </p>
               </div>
             </div>
 
-            <div className="space-y-2 bg-slate-950/80 p-3.5 rounded-lg border border-slate-800 text-xs">
-              <div className="text-slate-300 font-semibold mb-1">Select Reset Scope:</div>
-              
-              <label className="flex items-center gap-2.5 cursor-pointer p-2 rounded hover:bg-slate-800/50">
+            <div className="space-y-2 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 text-xs">
+              <div className="text-slate-300 font-semibold mb-1">Select Target Scope to Reset:</div>
+
+              <label className="flex items-center gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-slate-800/50">
+                <input
+                  type="radio"
+                  name="resetTarget"
+                  checked={resetTarget === '15m_reports'}
+                  onChange={() => setResetTarget('15m_reports')}
+                  className="text-emerald-500 focus:ring-emerald-500"
+                />
+                <span className="text-slate-200">
+                  Reset <strong className="text-emerald-400">15-Minute Event Reports</strong> only
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-slate-800/50">
+                <input
+                  type="radio"
+                  name="resetTarget"
+                  checked={resetTarget === 'trades'}
+                  onChange={() => setResetTarget('trades')}
+                  className="text-blue-500 focus:ring-blue-500"
+                />
+                <span className="text-slate-200">
+                  Reset <strong className="text-blue-400">Trade Journal Executions</strong> only
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-slate-800/50">
+                <input
+                  type="radio"
+                  name="resetTarget"
+                  checked={resetTarget === 'settlements'}
+                  onChange={() => setResetTarget('settlements')}
+                  className="text-purple-500 focus:ring-purple-500"
+                />
+                <span className="text-slate-200">
+                  Reset <strong className="text-purple-400">Settlements History</strong> only
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-slate-800/50">
                 <input
                   type="radio"
                   name="resetTarget"
                   checked={resetTarget === 'selected'}
                   onChange={() => setResetTarget('selected')}
-                  className="text-emerald-500 focus:ring-emerald-500"
+                  className="text-amber-500 focus:ring-amber-500"
                 />
                 <span className="text-slate-200">
-                  Reset <strong className="text-emerald-400">{selectedSystem === 'all' ? 'All Systems' : selectedSystem}</strong> only
+                  Reset <strong className="text-amber-400">{selectedSystem === 'all' ? 'All Systems' : selectedSystem}</strong> only
                 </span>
               </label>
 
-              <label className="flex items-center gap-2.5 cursor-pointer p-2 rounded hover:bg-slate-800/50">
+              <label className="flex items-center gap-2.5 cursor-pointer p-2 rounded-lg hover:bg-slate-800/50">
                 <input
                   type="radio"
                   name="resetTarget"
@@ -1426,13 +2566,13 @@ export const HistoricalAnalyticsTab: React.FC = () => {
                   className="text-rose-500 focus:ring-rose-500"
                 />
                 <span className="text-slate-200">
-                  Reset <strong className="text-rose-400">All History Globally</strong> (Complete Wipe)
+                  Reset <strong className="text-rose-400">Complete Ledger Globally</strong> (Factory Wipe)
                 </span>
               </label>
             </div>
 
             {resetMessage && (
-              <div className="p-2.5 rounded bg-slate-800 text-xs text-emerald-400 text-center font-mono border border-slate-700">
+              <div className="p-2.5 rounded-xl bg-slate-800 text-xs text-emerald-400 text-center font-mono border border-slate-700">
                 {resetMessage}
               </div>
             )}
@@ -1441,14 +2581,14 @@ export const HistoricalAnalyticsTab: React.FC = () => {
               <button
                 onClick={() => setIsResetModalOpen(false)}
                 disabled={resetting}
-                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition"
+                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition"
               >
                 Cancel
               </button>
               <button
                 onClick={handleExecuteReset}
                 disabled={resetting}
-                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition flex items-center gap-1.5 shadow-md disabled:opacity-50"
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 rounded-xl transition flex items-center gap-1.5 shadow-md disabled:opacity-50"
               >
                 {resetting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                 Confirm Reset
@@ -1460,3 +2600,5 @@ export const HistoricalAnalyticsTab: React.FC = () => {
     </div>
   );
 };
+
+export default HistoricalAnalyticsTab;
