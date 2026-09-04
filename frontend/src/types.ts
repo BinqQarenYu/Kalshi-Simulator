@@ -65,6 +65,25 @@ export interface AISignals {
   active_playbook?: string;
   playbook_stage?: string;
   edge_pct?: number;
+  onnx_signal?: string;
+  onnx_confidence?: number;
+  onnx_prob_long?: number;
+  onnx_prob_short?: number;
+  onnx_prob_wait?: number;
+}
+
+export interface BtcOrderflowSummary {
+  spot_price: number;
+  best_bid: number;
+  best_ask: number;
+  spread_bps: number;
+  cvd_btc: number;
+  ofi_l1: number;
+  connected: boolean;
+  source: string;
+  ticks_count: number;
+  trades_count: number;
+  recent_trades_buffer?: number;
 }
 
 export interface StrategyBotInfo {
@@ -290,6 +309,7 @@ export interface DashboardState {
     mode: 'mock' | 'live';
     timeframe: string;
   };
+  btc_orderflow?: BtcOrderflowSummary;
 }
 
 export interface LivePositionItem {

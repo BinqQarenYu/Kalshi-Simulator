@@ -28,6 +28,7 @@ from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
+from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
 from kalshi_sim.notifications import TelemetryAlertDispatcher
 from kalshi_sim.order_client import KalshiDemoOrderClient
 from kalshi_sim.order_simulator import OrderSimulator
@@ -77,6 +78,7 @@ class SimulationAgent:
         telemetry_alerts: Optional[TelemetryAlertDispatcher] = None,
         spot_price_getter: Optional[Callable[[], Decimal]] = None,
         guardrails: Optional[AgentGuardrails] = None,
+        btc_orderflow_feed: Optional[BtcOrderflowFeed] = None,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
@@ -84,6 +86,7 @@ class SimulationAgent:
         self._telemetry_alerts = telemetry_alerts
         self._spot_price_getter = spot_price_getter
         self._guardrails = guardrails or AgentGuardrails()
+        self._btc_orderflow_feed = btc_orderflow_feed or BtcOrderflowFeed()
 
         # Strategy Portfolios ($15 each starting capital)
         self._portfolio_macro_trend = Portfolio(starting_balance=starting_capital)
@@ -277,10 +280,21 @@ class SimulationAgent:
                             time_to_expiry_s = rem_secs
 
                         vpin_score = 0.15
+                        onnx_res = None
                         try:
-                            vpin_score = float(self._onnx_engine.extractor.compute_vpin())
-                        except Exception:
-                            pass
+                            # 1. Fetch live continuous Bitcoin L2 orderbook and trades from btc_orderflow_feed
+                            btc_book, btc_trades = self._btc_orderflow_feed.get_btc_l2_state()
+                            # 2. Run ONNX inference on genuine Bitcoin orderflow
+                            onnx_res = await asyncio.to_thread(
+                                self._onnx_engine.process_orderbook_tick, btc_book, btc_trades
+                            )
+                            vpin_score = float(onnx_res.get("vpin_score", 0.15))
+                        except Exception as exc:
+                            logger.debug("[BTC ONNX] Inference fallback: %s", exc)
+                            try:
+                                vpin_score = float(self._onnx_engine.extractor.compute_vpin())
+                            except Exception:
+                                pass
 
                         macro_dec = self._macro_trend_bot.evaluate(
                             book=book,
@@ -291,16 +305,21 @@ class SimulationAgent:
                             total_equity=self._portfolio_macro_trend.equity,
                             max_position_size=1,
                             estimated_vpin=vpin_score,
+                            onnx_result=onnx_res,
                         )
 
                         if macro_dec.recommended_side in ("yes", "no") and macro_dec.recommended_contracts > 0:
                             m_side = OrderSide.YES if macro_dec.recommended_side == "yes" else OrderSide.NO
                             logger.info(
-                                "[%s] %-18s | %-3s (%s) | Regime: %s (1h: %+.2f%%) | Edge=%+.1f%% | EV=+%s/ct | Size=%d ct",
+                                "[%s] %-18s | %-3s (%s) | ONNX BTC: %s(%.1f%%) [L:%.2f S:%.2f] | Regime: %s (1h: %+.2f%%) | Edge=%+.1f%% | EV=+%s/ct | Size=%d ct",
                                 "LIVE MACRO TREND" if is_live else "MACRO TREND DOMINION",
                                 ticker,
                                 macro_dec.recommended_side.upper(),
                                 macro_dec.active_playbook,
+                                macro_dec.onnx_signal,
+                                macro_dec.onnx_confidence * 100.0,
+                                macro_dec.onnx_prob_long,
+                                macro_dec.onnx_prob_short,
                                 macro_dec.macro_regime,
                                 macro_dec.trend_1h_pct,
                                 macro_dec.edge_pct,

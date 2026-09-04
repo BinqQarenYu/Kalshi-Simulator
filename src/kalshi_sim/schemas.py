@@ -219,14 +219,15 @@ class TickerUpdate(BaseModel):
 # ---------------------------------------------------------------------------
 
 class TradeEvent(BaseModel):
-    """Public fill from ``trade`` channel."""
+    """Public fill from ``trade`` channel or external crypto tape."""
     trade_id: str
     market_ticker: str
     yes_price: Decimal
-    no_price: Decimal
+    no_price: Decimal = Decimal("0")
     count: Decimal
-    taker_side: Literal["yes", "no"]
+    taker_side: Literal["yes", "no", "buy", "sell"]
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    price: Optional[Decimal] = None
 
     @classmethod
     def from_ws(cls, msg: dict) -> TradeEvent:
@@ -263,13 +264,15 @@ class L2BookState:
         "no_book",
         "last_update",
         "_stale",
+        "is_spot",
     )
 
-    def __init__(self, market_ticker: str) -> None:
+    def __init__(self, market_ticker: str, is_spot: bool = False) -> None:
         self.market_ticker = market_ticker
+        self.is_spot = is_spot
         self.last_seq: int = -1
-        self.yes_book: dict[Decimal, Decimal] = {}  # price → qty
-        self.no_book: dict[Decimal, Decimal] = {}
+        self.yes_book: dict[Decimal, Decimal] = {}  # price → qty (Bids in spot or YES in binary)
+        self.no_book: dict[Decimal, Decimal] = {}   # price → qty (Asks in spot or NO in binary)
         self.last_update: datetime = datetime.now(timezone.utc)
         self._stale: bool = True
 
@@ -289,7 +292,11 @@ class L2BookState:
 
     @property
     def best_yes_ask(self) -> Decimal | None:
-        """In a binary market, yes ask = 1 - best_no_bid."""
+        """In a spot market, yes ask is the lowest ask price. In binary, yes ask = 1 - best_no_bid."""
+        if self.is_spot:
+            if not self.no_book:
+                return None
+            return min(self.no_book.keys())
         nb = self.best_no_bid
         if nb is None:
             return None
@@ -297,7 +304,9 @@ class L2BookState:
 
     @property
     def best_no_ask(self) -> Decimal | None:
-        """In a binary market, no ask = 1 - best_yes_bid."""
+        """In a spot market, no ask returns best_yes_bid. In binary, no ask = 1 - best_yes_bid."""
+        if self.is_spot:
+            return self.best_yes_bid
         yb = self.best_yes_bid
         if yb is None:
             return None
@@ -335,7 +344,7 @@ class L2BookState:
         asks = sorted(
             (OrderBookLevel(price=p, quantity=q) for p, q in self.no_book.items()),
             key=lambda lv: lv.price,
-            reverse=True,
+            reverse=False if self.is_spot else True,
         )[:n]
         return bids, asks
 

@@ -55,6 +55,7 @@ from kalshi_sim.notifications import TelemetryAlertDispatcher
 from kalshi_sim.ohlcv_aggregator import OHLCVAggregator
 from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
 from kalshi_sim.orderbook import OrderBookManager
+from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
 from kalshi_sim.rate_limiter import kalshi_rate_limiter
 from kalshi_sim.schemas import (
     CandleInterval,
@@ -164,6 +165,9 @@ class ServerState:
         self.twap_60s_samples: list[Decimal] = []
         self.twap_60s_price: Optional[Decimal] = None
         self.last_twap_second: int = -1
+
+        # Real-time Institutional Bitcoin Orderflow Feed (Binance / Coinbase L2)
+        self.btc_orderflow_feed = BtcOrderflowFeed()
 
         # Decoupled AI & Microstructure Worker
         self.ai_worker = AIWorker(
@@ -1439,6 +1443,7 @@ async def start_background_simulation() -> None:
         telemetry_alerts=state.telemetry_alerts,
         spot_price_getter=lambda: state.current_btc_price,
         order_client=order_client,
+        btc_orderflow_feed=state.btc_orderflow_feed,
     )
     state.sim_agent.execution_mode = state.mode
     state.tick_writer = TickWriter(data_dir=state.data_dir, timeframe="paper_live")
@@ -1515,6 +1520,14 @@ async def start_background_simulation() -> None:
     else:
         await start_mock_feed()
 
+    # Start real-time institutional Bitcoin orderflow feed
+    await state.btc_orderflow_feed.start()
+    def _on_btc_feed_tick(price: Decimal) -> None:
+        if price != state.current_btc_price:
+            state.current_btc_price = price
+            state.is_dirty = True
+    state.btc_orderflow_feed.register_on_tick(_on_btc_feed_tick)
+
     state.ticker_timer_task = asyncio.create_task(live_ticker_and_timer_loop(), name="ticker_timer")
     state.broadcast_task = asyncio.create_task(broadcast_loop(), name="broadcast_loop")
     state.btc_ws_task = asyncio.create_task(live_btc_spot_ws_loop(), name="btc_spot_ws")
@@ -1523,7 +1536,7 @@ async def start_background_simulation() -> None:
     state.live_balance_task = asyncio.create_task(live_balance_sync_loop(), name="live_balance_sync")
     if state.mode == "live":
         asyncio.create_task(sync_live_settlements(), name="initial_settlement_sync")
-    logger.info("Simulation background tasks started in '%s' mode with Decoupled AI Worker, Agent_integrity_check & Live Balance Sync active.", state.mode)
+    logger.info("Simulation background tasks started in '%s' mode with Real-time BTC Orderflow Feed, Decoupled AI Worker, Agent_integrity_check & Live Balance Sync active.", state.mode)
 
 
 @asynccontextmanager
@@ -1549,6 +1562,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state.integrity_task.cancel()
     if state.live_balance_task:
         state.live_balance_task.cancel()
+    if hasattr(state, "btc_orderflow_feed") and state.btc_orderflow_feed:
+        await state.btc_orderflow_feed.stop()
     await stop_current_feed()
     if state.sim_agent:
         await state.sim_agent.stop()
@@ -3156,9 +3171,13 @@ async def test_bot_trade_endpoint(
         book.no_book = {Decimal("0.52"): Decimal("500"), Decimal("0.55"): Decimal("1000")}
         state.orderbook._books[ticker] = book
 
-    # Run Stage 1 ONNX Inference
-    trades = state.sim_agent._recent_trades.get(ticker, [])
-    onnx_res = state.sim_agent._onnx_engine.process_orderbook_tick(book, latest_trades=trades)
+    # Run Stage 1 ONNX Inference on genuine Bitcoin orderflow
+    if hasattr(state, "btc_orderflow_feed") and state.btc_orderflow_feed:
+        btc_book, btc_trades = state.btc_orderflow_feed.get_btc_l2_state()
+        onnx_res = state.sim_agent._onnx_engine.process_orderbook_tick(btc_book, latest_trades=btc_trades)
+    else:
+        trades = state.sim_agent._recent_trades.get(ticker, [])
+        onnx_res = state.sim_agent._onnx_engine.process_orderbook_tick(book, latest_trades=trades)
     
     prob_long = float(onnx_res.get("prob_long", 0.68))
     prob_short = float(onnx_res.get("prob_short", 0.22))
@@ -4244,6 +4263,7 @@ def _build_full_state_payload() -> dict[str, Any]:
         "compliance_status": state.law_order_agent.get_compliance_status(),
         "guardrails_status": state.guardrails_agent.get_status(),
         "token_credit_status": state.token_credit_agent.get_status(),
+        "btc_orderflow": state.btc_orderflow_feed.get_orderflow_summary() if hasattr(state, "btc_orderflow_feed") and state.btc_orderflow_feed else None,
     }
 
 

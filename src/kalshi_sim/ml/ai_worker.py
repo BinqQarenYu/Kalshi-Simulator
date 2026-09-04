@@ -129,10 +129,19 @@ class AIWorker:
                         # 0. Strategy: Macro Trend Dominion
                         if self.active_strategy_bot in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
                             vpin_val = 0.15
+                            onnx_res = None
                             try:
-                                vpin_val = float(self._sim_agent._onnx_engine.extractor.compute_vpin())
+                                if hasattr(self._sim_agent, "_btc_orderflow_feed"):
+                                    btc_book, btc_trades = self._sim_agent._btc_orderflow_feed.get_btc_l2_state()
+                                    onnx_res = self._sim_agent._onnx_engine.process_orderbook_tick(btc_book, latest_trades=btc_trades)
+                                else:
+                                    onnx_res = self._sim_agent._onnx_engine.process_orderbook_tick(book, latest_trades=trades)
+                                vpin_val = float(onnx_res.get("vpin_score", 0.15))
                             except Exception:
-                                pass
+                                try:
+                                    vpin_val = float(self._sim_agent._onnx_engine.extractor.compute_vpin())
+                                except Exception:
+                                    pass
 
                             m_dec = self._macro_trend_bot.evaluate(
                                 book=book,
@@ -143,6 +152,7 @@ class AIWorker:
                                 total_equity=equity,
                                 max_position_size=1,
                                 estimated_vpin=vpin_val,
+                                onnx_result=onnx_res,
                             )
 
                             compute_duration = (asyncio.get_event_loop().time() - start_t) * 1000.0
@@ -159,6 +169,11 @@ class AIWorker:
                                 "p_up": m_dec.p_up,
                                 "p_down": m_dec.p_down,
                                 "p_wait": m_dec.p_wait,
+                                "onnx_signal": m_dec.onnx_signal,
+                                "onnx_confidence": m_dec.onnx_confidence,
+                                "onnx_prob_long": m_dec.onnx_prob_long,
+                                "onnx_prob_short": m_dec.onnx_prob_short,
+                                "onnx_prob_wait": m_dec.onnx_prob_wait,
                                 "vpin": m_dec.vpin,
                                 "vpin_is_safe": m_dec.vpin_is_safe,
                                 "ev_yes": m_dec.ev_yes,

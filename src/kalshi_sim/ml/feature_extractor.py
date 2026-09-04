@@ -59,9 +59,9 @@ class KalshiOrderflowFeatureExtractor:
     def process_trade(self, trade_event: TradeEvent) -> None:
         """Update trade-dependent state (CVD, VPIN, Whale prints, Absorption)."""
         qty = float(trade_event.count)
-        price = float(trade_event.yes_price)
-        taker_side = trade_event.taker_side.lower()
-        trade_dir = 1.0 if taker_side == "yes" else -1.0
+        price = float(trade_event.price if getattr(trade_event, "price", None) is not None else trade_event.yes_price)
+        taker_side = str(trade_event.taker_side).lower()
+        trade_dir = 1.0 if taker_side in ("yes", "buy") else -1.0
 
         trade_dict = {
             "p": price,
@@ -144,15 +144,24 @@ class KalshiOrderflowFeatureExtractor:
 
         # 1. Price Mechanics
         best_bid = float(bids[0].price)
-        # Yes Ask in binary options is 1.0 - Best No Bid
-        best_ask = float(Decimal("1.0") - asks[0].price) if asks else (best_bid + 0.01)
-        if best_bid <= 0:
-            best_bid = 0.01
-        if best_ask <= best_bid:
-            best_ask = best_bid + 0.01
+        is_spot = getattr(book, "is_spot", False) or best_bid > 10.0
 
-        # Binary contract spread scaled to match normalized continuous asset training distribution
-        spread_bps = float(max(0.001, min(0.25, best_ask - best_bid)))
+        if is_spot:
+            best_ask = float(asks[0].price) if asks else (best_bid + 0.01)
+            if best_ask <= best_bid:
+                best_ask = best_bid + 0.01
+            # Spot continuous asset spread scaled to match normalized continuous asset training distribution (~0.010 mean)
+            mid = (best_bid + best_ask) / 2.0
+            spread_bps = float(max(0.0001, ((best_ask - best_bid) / mid) * 100.0))
+        else:
+            # Yes Ask in binary options is 1.0 - Best No Bid
+            best_ask = float(Decimal("1.0") - asks[0].price) if asks else (best_bid + 0.01)
+            if best_bid <= 0:
+                best_bid = 0.01
+            if best_ask <= best_bid:
+                best_ask = best_bid + 0.01
+            # Binary contract spread scaled to match normalized continuous asset training distribution
+            spread_bps = float(max(0.001, min(0.25, best_ask - best_bid)))
 
         # 2. Spatial Volumes
         bid_sizes = [float(lv.quantity) for lv in bids] + [0.0] * (self.target_depth - len(bids))

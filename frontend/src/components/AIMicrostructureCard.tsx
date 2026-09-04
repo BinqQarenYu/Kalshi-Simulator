@@ -398,6 +398,38 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
         </div>
       </div>
 
+      {/* Real Bitcoin Orderflow Telemetry (ONNX Machine Learning) */}
+      {signals.onnx_signal && (
+        <div className="flex items-center justify-between bg-[#161b22] border border-cyan-500/30 rounded-xl p-3 text-xs">
+          <div className="flex items-center gap-2">
+            <Cpu className="h-4 w-4 text-cyan-400" />
+            <div>
+              <div className="font-semibold text-white flex items-center gap-1.5">
+                <span>Bitcoin Orderflow (ONNX)</span>
+                <span className="px-1.5 py-0.2 text-[8px] font-mono bg-cyan-500/20 text-cyan-300 rounded font-bold">
+                  BTC SPOT L2
+                </span>
+              </div>
+              <div className="text-[10px] text-[#8b949e]">
+                Long: {((signals.onnx_prob_long ?? 0) * 100).toFixed(1)}% • Short: {((signals.onnx_prob_short ?? 0) * 100).toFixed(1)}%
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-bold font-mono text-[11px] ${
+              signals.onnx_signal === 'LONG'
+                ? 'bg-[#00d084]/20 text-[#00d084] border border-[#00d084]/40'
+                : signals.onnx_signal === 'SHORT'
+                ? 'bg-[#ff4d4d]/20 text-[#ff4d4d] border border-[#ff4d4d]/40'
+                : 'bg-gray-500/20 text-gray-300 border border-gray-500/40'
+            }`}>
+              {signals.onnx_signal} ({((signals.onnx_confidence ?? 0) * 100).toFixed(0)}%)
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* VPIN Toxicity Guardrail */}
       <div className="flex items-center justify-between bg-[#161b22] border border-[#30363d] rounded-xl p-3 text-xs">
         <div className="flex items-center gap-2">
