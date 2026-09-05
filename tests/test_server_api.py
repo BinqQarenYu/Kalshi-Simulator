@@ -309,3 +309,27 @@ def test_win_loss_export_endpoints(client: TestClient) -> None:
         assert isinstance(reports_list, list)
 
 
+
+
+def test_cors_middleware_headers(client: TestClient) -> None:
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:3000"
+    assert response.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_cors_middleware_disallows_unauthorized_origin(client: TestClient) -> None:
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://evil-attacker.com",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.headers.get("access-control-allow-origin") != "http://evil-attacker.com"
