@@ -68,10 +68,14 @@ class TickWriter:
 
     async def open(self) -> Path:
         """Create and open a new tick file and start the background drain task."""
-        self._data_dir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        self._file_path = self._data_dir / f"ticks_{self._timeframe}_{ts}.jsonl"
-        self._file = open(self._file_path, "ab")  # binary for orjson
+        def _open_file() -> tuple[Path, Any]:
+            self._data_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+            file_path = self._data_dir / f"ticks_{self._timeframe}_{ts}.jsonl"
+            file_obj = open(file_path, "ab")  # binary for orjson
+            return file_path, file_obj
+
+        self._file_path, self._file = await asyncio.to_thread(_open_file)
         self._write_count = 0
         self._closed = False
         self._drain_task = asyncio.create_task(self._drain_worker(), name=f"tick_writer_{self._timeframe}")
@@ -172,8 +176,11 @@ class TickWriter:
                 except asyncio.QueueEmpty:
                     break
 
-            self._file.flush()
-            self._file.close()
+            def _close_file(file_obj: Any) -> None:
+                file_obj.flush()
+                file_obj.close()
+
+            await asyncio.to_thread(_close_file, self._file)
             self._file = None
             logger.info(
                 "Tick writer closed: %s (%d records)",
