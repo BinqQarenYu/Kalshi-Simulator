@@ -42,17 +42,21 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
         <div className="flex items-center gap-2">
           <button
             onClick={() => onQuickTrade('yes')}
-            className="px-4 py-1.5 rounded-full text-xs font-extrabold bg-[#00d084]/15 hover:bg-[#00d084]/25 text-[#00d084] border border-[#00d084]/40 transition-all shadow-sm active:scale-95"
+            className="px-4 py-1.5 rounded-full text-xs font-extrabold bg-[#00d084]/15 hover:bg-[#00d084]/25 text-[#00d084] border border-[#00d084]/40 transition-all shadow-sm active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084]"
           >
             Up {market.yes_cents_str}
           </button>
           <button
             onClick={() => onQuickTrade('no')}
-            className="px-4 py-1.5 rounded-full text-xs font-extrabold bg-[#ff4d4d]/15 hover:bg-[#ff4d4d]/25 text-[#ff4d4d] border border-[#ff4d4d]/40 transition-all shadow-sm active:scale-95"
+            className="px-4 py-1.5 rounded-full text-xs font-extrabold bg-[#ff4d4d]/15 hover:bg-[#ff4d4d]/25 text-[#ff4d4d] border border-[#ff4d4d]/40 transition-all shadow-sm active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff4d4d]"
           >
             Down {market.no_cents_str}
           </button>
-          <button className="p-1 text-[#8b949e] hover:text-white transition-colors" title="Sort/Filter">
+          <button
+            className="p-1 text-[#8b949e] hover:text-white transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b949e]"
+            title="Sort or filter options"
+            aria-label="Sort or filter options"
+          >
             <ArrowDownUp className="h-4 w-4" />
           </button>
         </div>
@@ -62,7 +66,7 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
       <div className="flex items-center gap-4 text-xs font-semibold border-t border-[#21262d] pt-2">
         <button
           onClick={() => onSelectTab('trade_up')}
-          className={`pb-1 border-b-2 transition-all ${
+          className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
             activeTab === 'trade_up'
               ? 'border-[#00d084] text-[#00d084]'
               : 'border-transparent text-[#8b949e] hover:text-white'
@@ -72,7 +76,7 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
         </button>
         <button
           onClick={() => onSelectTab('trade_down')}
-          className={`pb-1 border-b-2 transition-all ${
+          className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff4d4d] ${
             activeTab === 'trade_down'
               ? 'border-[#ff4d4d] text-[#ff4d4d]'
               : 'border-transparent text-[#8b949e] hover:text-white'
@@ -82,7 +86,7 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
         </button>
         <button
           onClick={() => onSelectTab('graph')}
-          className={`pb-1 border-b-2 transition-all ${
+          className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${
             activeTab === 'graph'
               ? 'border-white text-white'
               : 'border-transparent text-[#8b949e] hover:text-white'
@@ -92,7 +96,7 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
         </button>
         <button
           onClick={() => onSelectTab('orderbook')}
-          className={`pb-1 border-b-2 transition-all ${
+          className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
             activeTab === 'orderbook'
               ? 'border-[#f7931a] text-[#f7931a]'
               : 'border-transparent text-[#8b949e] hover:text-white'
