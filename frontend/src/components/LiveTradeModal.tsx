@@ -70,9 +70,10 @@ export const LiveTradeModal: React.FC<LiveTradeModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-[#161b22] transition-colors"
+            aria-label="Close Live Order Confirmation"
+            className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-[#161b22] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]"
           >
-            <X className="h-5 w-5" />
+            <X className="h-5 w-5" aria-hidden="true" />
           </button>
         </div>
 
@@ -113,8 +114,8 @@ export const LiveTradeModal: React.FC<LiveTradeModalProps> = ({
         {/* Dry-Run Toggle Bar */}
         <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3 flex items-center justify-between">
           <div className="space-y-0.5">
-            <div className="text-xs font-bold text-white flex items-center gap-1.5">
-              <CheckCircle2 className="h-3.5 w-3.5 text-[#3b82f6]" />
+            <div id="dry-run-label" className="text-xs font-bold text-white flex items-center gap-1.5">
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#3b82f6]" aria-hidden="true" />
               <span>Safety Dry-Run Mode</span>
             </div>
             <p className="text-[11px] text-[#8b949e]">
@@ -125,11 +126,14 @@ export const LiveTradeModal: React.FC<LiveTradeModalProps> = ({
           </div>
           <button
             type="button"
+            role="switch"
+            aria-checked={isDryRun}
+            aria-labelledby="dry-run-label"
             onClick={() => {
               soundFX.playClickSound();
               setIsDryRun(!isDryRun);
             }}
-            className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors ${
+            className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6] ${
               isDryRun ? 'bg-[#3b82f6]' : 'bg-[#ff4d4d]'
             }`}
           >
