@@ -38,8 +38,17 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market }) => {
               {market.current_btc_price_str}
             </div>
             <div className={`text-xs font-semibold flex items-center gap-1 ${deltaColor}`}>
-              <span>{isUp ? '+' : ''}${(market?.diff ?? 0).toFixed(2)}</span>
-              <span>({isUp ? '+' : ''}{Math.abs(market?.diff_pct ?? 0) < 0.1 ? (market?.diff_pct ?? 0).toFixed(3) : (market?.diff_pct ?? 0).toFixed(2)}%)</span>
+              {viewMode === '$' ? (
+                <>
+                  <span className="font-bold">{isUp ? '+' : ''}${(market?.diff ?? 0).toFixed(2)}</span>
+                  <span className="opacity-75">({isUp ? '+' : ''}{Math.abs(market?.diff_pct ?? 0) < 0.1 ? (market?.diff_pct ?? 0).toFixed(3) : (market?.diff_pct ?? 0).toFixed(2)}%)</span>
+                </>
+              ) : (
+                <>
+                  <span className="font-bold">{isUp ? '+' : ''}{Math.abs(market?.diff_pct ?? 0) < 0.1 ? (market?.diff_pct ?? 0).toFixed(3) : (market?.diff_pct ?? 0).toFixed(2)}%</span>
+                  <span className="opacity-75">({isUp ? '+' : ''}${(market?.diff ?? 0).toFixed(2)})</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -47,18 +56,28 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market }) => {
         {/* Right: Currency Toggle + Brand + Expiry Countdown */}
         <div className="flex items-center gap-4">
           {/* $ / % Toggle */}
-          <div className="flex items-center bg-[#161b22] border border-[#30363d] rounded-lg p-0.5">
+          <div
+            role="group"
+            aria-label="Price change display mode"
+            className="flex items-center bg-[#161b22] border border-[#30363d] rounded-lg p-0.5"
+          >
             <button
+              type="button"
               onClick={() => setViewMode('$')}
-              className={`px-2 py-0.5 text-xs font-bold rounded ${
+              aria-label="Display price change in dollars"
+              aria-pressed={viewMode === '$'}
+              className={`px-2.5 py-0.5 text-xs font-bold rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
                 viewMode === '$' ? 'bg-[#30363d] text-white' : 'text-[#8b949e] hover:text-white'
               }`}
             >
               $
             </button>
             <button
+              type="button"
               onClick={() => setViewMode('%')}
-              className={`px-2 py-0.5 text-xs font-bold rounded ${
+              aria-label="Display price change in percent"
+              aria-pressed={viewMode === '%'}
+              className={`px-2.5 py-0.5 text-xs font-bold rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
                 viewMode === '%' ? 'bg-[#30363d] text-white' : 'text-[#8b949e] hover:text-white'
               }`}
             >
