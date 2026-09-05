@@ -18,8 +18,8 @@ Rather than relying on a single static model throughout the contract's life, the
 The engine runs a continuous execution loop evaluating live Level-2 Central Limit Order Book (CLOB) data, real-time Bitcoin spot index pricing, and order flow imbalance metrics.
 
 ```
-  0m (Cycle Start)       5m (Mid-Cycle)        11m (Late-Cycle)      14m 15m (Expiry)
-  │─────────────────────│─────────────────────│─────────────────────│───│
+  0m (Cycle Start)       5m (Mid-Cycle)        11m (Late-Cycle)      14:15  15m (Expiry)
+  │─────────────────────│─────────────────────│─────────────────────│──────│
   ▲                     ▲                     ▲                     ▲
   │                     │                     │                     │
   [ PLAYBOOK 1 ]        [ PLAYBOOK 2 ]        [ PLAYBOOK 3 ]        [ SETTLEMENT ]
@@ -32,7 +32,7 @@ The engine runs a continuous execution loop evaluating live Level-2 Central Limi
 #### Playbook 1: Early Momentum Breakout ($T > 600\text{s}$ / $10\text{m} - 15\text{m}$ Remaining)
 * **Objective**: Capture early cycle directional surges away from the strike price.
 * **Math Model**: Standard Normal Cumulative Distribution Function $\Phi(z)$ based on time-scaled volatility:
-  $$\tau_{\text{mins}} = \frac{T}{60.0}, \quad \sigma_{\text{expected}} = \max(18.0, \sigma_{\text{default}} \cdot \sqrt{\tau_{\text{mins}}})$$
+  $$\tau_{\text{mins}} = \max\left(0.1, \frac{T}{60.0}\right), \quad \sigma_{\text{expected}} = \max\left(18.0, \sigma_{\text{default}} \cdot \sqrt{\tau_{\text{mins}}}\right)$$
   $$z = \frac{S_t - K}{\sigma_{\text{expected}}}, \quad P(\text{YES}) = \Phi(z)$$
 * **Trigger**: $|\text{Spot} - \text{Strike}| \ge \$35.00$ with statistical edge $\ge 6.0\%$.
 
@@ -40,6 +40,7 @@ The engine runs a continuous execution loop evaluating live Level-2 Central Limi
 * **Objective**: Combine spot moneyness with multi-level Order Flow Imbalance (OFI) and Level-3 order book volume skew.
 * **Math Model**:
   $$\text{Book Skew} = \frac{\text{BidVol}_{L3} - \text{AskVol}_{L3}}{\max(1.0, \text{BidVol}_{L3} + \text{AskVol}_{L3})}$$
+  $$\sigma_{\text{expected}} = \max\left(10.0, \sigma_{\text{default}} \cdot \sqrt{\tau_{\text{mins}}}\right)$$
   $$z = \frac{(S_t - K) + (\text{Book Skew} \times 12.0)}{\sigma_{\text{expected}}}$$
   $$P(\text{YES}) = \Phi(z)$$
 
@@ -82,11 +83,10 @@ A trade entry is triggered if **ALL** of the following conditions pass simultane
 | Filter / Veto Name | Trigger Condition | Action / Result |
 | :--- | :--- | :--- |
 | **VPIN Toxicity Veto** | $\text{VPIN} > 0.60$ | Vetoes all new orders to prevent adverse selection by informed whales. |
-| **Spot Proximity Veto** | $\|S_t - K\| < \$35.00$ | Vetoes trade entries when BTC is pinned near strike (50/50 coin-flip zone). |
+| **Spot Proximity Veto** | $|S_t - K| < \$35.00$ | Vetoes trade entries when BTC is pinned near strike (50/50 coin-flip zone). |
 | **Price Cap Hard Kill** | $\text{Ask} > \$0.72$ | Hard veto on any contract over 72¢ (prevents asymmetric risk of risking 72¢+ to win < 28¢). |
-| **Price Cap Standard** | $\text{Ask} > \$0.62$ and $\|S_t - K\| < \$80.00$ | Vetoes entries over 62¢ unless deep spot separation is confirmed. |
-| **Momentum Alignment Veto**| Bet NO when $S_t > K + \$35$ or bet YES when $S_t < K - \$35$ with Edge $< 15\%$ | Blocks contrarian trades against active market momentum. |
-| **Overnight Cautious Mode** | Time between 1:00 AM – 6:00 AM ET | Requires higher edge ($\ge 12\%$) and wider separation ($\ge \$75$), caps size at 1 contract. |
+| **Price Cap Standard** | $\text{Ask} > \$0.62$ and $|S_t - K| < \$80.00$ | Vetoes entries over 62¢ unless deep spot separation is confirmed. |
+| **Momentum Alignment Veto**| Bet NO when $S_t > K + \$35$ or bet YES when $S_t < K - \$35$ with Edge $< 15\%$ | Blocks contrarian trades against active market momentum unless edge $\ge 15\%$. |
 | **Expiry Lock Window** | $T < 45\text{s}$ | Locks new entries in final 45 seconds prior to settlement. |
 
 ---
@@ -125,5 +125,5 @@ The bot continuously monitors open positions against live order book bids for ea
 1. **Fractional Kelly Criterion ($0.15 \cdot f^*$)**:
    $$f^* = \frac{p \cdot b - (1 - p)}{b} = \frac{p - \text{Ask}_{\text{effective}}}{1 - \text{Ask}_{\text{effective}}}$$
    $$\text{Contract Size} = \min\left(\text{MaxSize}, \frac{\text{Equity} \times 0.05 \times (0.15 \cdot f^*)}{\text{Ask} + \text{Fee}}\right)$$
-2. **Micro-Capital Sizing Cap**: In live trading ($30 bankroll), sizing is strictly capped at **1–2 contracts** ($0.50 – $1.50 per trade), preventing drawdown.
+2. **Micro-Capital Sizing Cap**: Sizing is strictly capped at max position size or available liquidity, preventing catastrophic drawdown.
 3. **Daily Circuit Breaker**: Auto-trips and halts trading if cumulative drawdown exceeds **15%**.
