@@ -27,10 +27,16 @@ import time
 class OrderBookManager:
     """Manages reconstructed L2 order books across multiple Kalshi markets."""
 
-    def __init__(self) -> None:
-        """Initialize the order book manager with an empty books registry."""
+    def __init__(self, enforce_consecutive_seq: bool = True) -> None:
+        """Initialize the order book manager with an empty books registry.
+
+        Args:
+            enforce_consecutive_seq: If True, delta.seq must equal last_seq + 1 (single-market stream).
+                If False, delta.seq is monotonically increasing across a shared multi-market session.
+        """
         self._books: dict[str, L2BookState] = {}
         self._last_gap_warning: dict[str, float] = {}
+        self._enforce_consecutive_seq = enforce_consecutive_seq
         self._logger = logging.getLogger(__name__)
 
     def apply_snapshot(self, snapshot: OrderBookSnapshot) -> L2BookState:
@@ -85,7 +91,7 @@ class OrderBookManager:
 
         if book.last_seq == -1:
             book.last_seq = delta.seq
-        else:
+        elif self._enforce_consecutive_seq:
             expected_seq = book.last_seq + 1
             if delta.seq != expected_seq:
                 now = time.monotonic()
@@ -100,6 +106,11 @@ class OrderBookManager:
                 book._stale = True
                 book.last_seq = delta.seq
                 return None
+        else:
+            if book.last_seq != -1 and delta.seq < book.last_seq:
+                # Discard out-of-order delta older than current book state
+                return book
+            book._stale = False
 
         # Apply delta to the appropriate side book
         side_book = book.yes_book if delta.side == "yes" else book.no_book

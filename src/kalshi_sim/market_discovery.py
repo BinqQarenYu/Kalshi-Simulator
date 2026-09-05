@@ -72,24 +72,41 @@ async def discover_btc_markets(
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                             "Accept": "application/json",
                         }
-                    async with session.get(
-                        url,
-                        params=params,
-                        headers=headers,
-                        timeout=aiohttp.ClientTimeout(total=4.0),
-                    ) as resp:
+                    backoff = 1.0
+                    retry_limit = 3
+                    succeeded = False
 
-                        if resp.status != 200:
-                            text = await resp.text()
-                            logger.error(
-                                "HTTP error querying markets for series %s (status %d): %s",
-                                series,
-                                resp.status,
-                                text,
-                            )
-                            break
-
-                        data = await resp.json()
+                    for attempt in range(retry_limit):
+                        async with session.get(
+                            url,
+                            params=params,
+                            headers=headers,
+                            timeout=aiohttp.ClientTimeout(total=3.0),
+                        ) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                succeeded = True
+                                break
+                            elif resp.status == 429:
+                                text = await resp.text()
+                                logger.warning(
+                                    "Kalshi rate limited market discovery (HTTP 429) for %s. Backing off %0.1fs (attempt %d/%d): %s",
+                                    series, backoff, attempt + 1, retry_limit, text,
+                                )
+                                await asyncio.sleep(backoff)
+                                backoff *= 2.0
+                                continue
+                            else:
+                                text = await resp.text()
+                                logger.error(
+                                    "HTTP error querying markets for series %s (status %d): %s",
+                                    series,
+                                    resp.status,
+                                    text,
+                                )
+                                break
+                    if not succeeded:
+                        break
                 except Exception as exc:
                     logger.error(
                         "Network or parsing error querying markets for series %s: %s",

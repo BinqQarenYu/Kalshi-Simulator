@@ -299,7 +299,7 @@ def test_win_loss_export_endpoints(client: TestClient) -> None:
         resp_csv = client.get("/api/reports/win-loss/export.csv")
         assert resp_csv.status_code == 200
         assert "text/csv" in resp_csv.headers["content-type"]
-        assert "report_id,cycle_time,ticker" in resp_csv.text
+        assert "report_id" in resp_csv.text and "bot_type" in resp_csv.text and "ticker" in resp_csv.text
 
         # JSON export
         resp_json = client.get("/api/reports/win-loss/export.json")

@@ -54,6 +54,17 @@ class DominationDecision:
     spot_diff: float
 
 
+@dataclass(frozen=True)
+class DominationExitDecision:
+    """Structured exit decision output from the 3-Step Domination Bot."""
+    should_exit: bool
+    exit_reason: str  # 'TAKE_PROFIT_CEILING' | 'TAKE_PROFIT_ROI' | 'LATE_CYCLE_HARVEST' | 'HOLD' | 'NO_BID' | 'NONE'
+    exit_price: Decimal
+    profit_pct: float
+    unrealized_pnl: Decimal
+    rationale: str
+
+
 class ThreeStepDominationBot:
     """Institutional Cycle-Aware 3-Step Quantitative Strategy Bot."""
 
@@ -62,23 +73,35 @@ class ThreeStepDominationBot:
 
     def __init__(
         self,
-        min_edge_pct: float = 0.04,  # 4.0% minimum edge (conservative risk-first calibration)
+        min_edge_pct: float = 0.06,  # 6.0% minimum edge (raised from 4% — data shows 4-6% edge trades are coin-flips)
         min_ev_dollars: Decimal = Decimal("0.02"),  # Minimum $0.02 net EV per contract
         vpin_toxic_threshold: float = 0.60,
         vpin_safe_threshold: float = 0.35,
         default_btc_1m_volatility: float = 14.0,  # $14 typical 1-min BTC spot std dev
+        take_profit_price_threshold: Decimal = Decimal("0.95"),  # 95c tail risk ceiling
+        min_take_profit_roi: float = 0.20,  # +20% minimum ROI for early exit
+        late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
+        fee_per_contract: Decimal = Decimal("0.01"),  # Real exchange taker fee
+        min_spot_diff: float = 35.0,  # $35 minimum spot-strike distance (skip coin-flip territory)
+        max_entry_price: float = 0.62,  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
     ) -> None:
         self.min_edge_pct = min_edge_pct
         self.min_ev_dollars = min_ev_dollars
         self.vpin_toxic_threshold = vpin_toxic_threshold
         self.vpin_safe_threshold = vpin_safe_threshold
         self.default_btc_1m_volatility = default_btc_1m_volatility
+        self.take_profit_price_threshold = take_profit_price_threshold
+        self.min_take_profit_roi = min_take_profit_roi
+        self.late_cycle_roi = late_cycle_roi
+        self.fee_per_contract = fee_per_contract
+        self.min_spot_diff = min_spot_diff
+        self.max_entry_price = max_entry_price
 
         # Underlying Stage 2 EV & Quarter-Kelly Optimizer
         self._ev_engine = StatisticalEVEngine(
             min_ev_threshold=min_ev_dollars,
             min_edge_pct=min_edge_pct,
-            fee_per_contract=Decimal("0.01"),
+            fee_per_contract=fee_per_contract,
             fractional_kelly=0.15,  # 15% Fractional Kelly for capital preservation
             max_portfolio_risk_pct=Decimal("0.05"),  # 5% max risk per trade
             vpin_safe_threshold=vpin_safe_threshold,
@@ -121,6 +144,18 @@ class ThreeStepDominationBot:
                 vpin_is_safe=False,
                 rationale=f"VPIN Toxicity Veto: Score={estimated_vpin:.2f} > {self.vpin_toxic_threshold:.2f}. "
                           f"Suppressing all trades to prevent adverse whale selection.",
+            )
+
+        # Step 0.5: Minimum Spot-Strike Distance Filter (skip coin-flip territory)
+        # Data shows entries within $35 of strike have ~50% WR — pure coin flips.
+        # Only enter when BTC has meaningfully moved away from the strike.
+        if abs(spot_diff) < self.min_spot_diff:
+            return self._build_wait_decision(
+                time_to_expiry_s=time_to_expiry_s,
+                spot_diff=spot_diff,
+                vpin=estimated_vpin,
+                rationale=f"Spot-Strike Proximity Veto: |Diff|=${abs(spot_diff):.2f} < ${self.min_spot_diff:.0f} threshold. "
+                          f"BTC is pinned near strike — coin-flip territory, skipping.",
             )
 
         # Classify Active Playbook by Expiration Countdown Window
@@ -329,7 +364,58 @@ class ThreeStepDominationBot:
         spot_diff: float,
         rationale: str,
     ) -> DominationDecision:
-        """Construct normalized DominationDecision object."""
+        """Construct normalized DominationDecision object with dynamic price cap protection."""
+        # Dynamic Two-Tier Entry Price Cap (Q3 Winning Choice)
+        if ev_res.recommended_side in (OrderSide.YES, OrderSide.NO) and ev_res.recommended_contracts > 0:
+            target_ask = float(ev_res.market_price)
+            # Tier 1: Absolute hard ceiling above $0.72 (inverted R:R suicide)
+            if target_ask > 0.72:
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=vpin,
+                    rationale=(
+                        f"Price Cap Veto (Hard Kill): Recommended {ev_res.recommended_side.value.upper()} ask=${target_ask:.2f} > $0.72 max ceiling. "
+                        f"Inverted risk/reward ratio ({target_ask*100:.0f}c risk to win {(1.0-target_ask)*100:.0f}c). Skipping."
+                    ),
+                )
+            # Tier 2: Standard cap ($0.62) unless spot diff is deep in-the-money (>= $80)
+            if target_ask > self.max_entry_price and abs(spot_diff) < 80.0:
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=vpin,
+                    rationale=(
+                        f"Price Cap Veto (Standard): Recommended {ev_res.recommended_side.value.upper()} ask=${target_ask:.2f} > ${self.max_entry_price:.2f} cap. "
+                        f"Requires deep spot separation (|Diff|=${abs(spot_diff):.2f} < $80.00). Skipping."
+                    ),
+                )
+
+            # Momentum Alignment Filter (P0 Fix — data: 0W/6L for contrarian NO in VOL_UP)
+            # When BTC has moved meaningfully away from strike, bet WITH the direction.
+            # Contrarian bets (against momentum) require 2.5x higher edge threshold.
+            edge_pct = float(ev_res.statistical_edge) * 100.0
+            contrarian_min_edge = 15.0  # 15% minimum edge for contrarian bets
+            is_contrarian = False
+            if spot_diff > self.min_spot_diff and ev_res.recommended_side == OrderSide.NO:
+                # BTC above strike (VOLATILE_UP) but betting NO (price will drop) — contrarian
+                is_contrarian = True
+            elif spot_diff < -self.min_spot_diff and ev_res.recommended_side == OrderSide.YES:
+                # BTC below strike (VOLATILE_DOWN) but betting YES (price will rise) — contrarian
+                is_contrarian = True
+
+            if is_contrarian and edge_pct < contrarian_min_edge:
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=vpin,
+                    rationale=(
+                        f"Momentum Alignment Veto: {ev_res.recommended_side.value.upper()} is contrarian "
+                        f"(Diff={spot_diff:+.1f}). Edge={edge_pct:.1f}% < {contrarian_min_edge:.0f}% "
+                        f"contrarian threshold. Bet WITH momentum, not against it."
+                    ),
+                )
+
         is_yes = ev_res.recommended_side == OrderSide.YES
         is_no = ev_res.recommended_side == OrderSide.NO
 
@@ -389,3 +475,100 @@ class ThreeStepDominationBot:
             time_to_expiry_s=round(time_to_expiry_s, 1),
             spot_diff=round(spot_diff, 2),
         )
+
+    def evaluate_exit(
+        self,
+        side: OrderSide | str,
+        entry_price: Decimal,
+        size: int,
+        book: Optional[L2BookState],
+        time_to_expiry_s: float,
+        spot_price: float = 0.0,
+        target_strike: float = 0.0,
+    ) -> DominationExitDecision:
+        """Evaluate open position against quantitative Take-Profit and Early Liquidation rules."""
+        if not book or size <= 0:
+            return DominationExitDecision(
+                should_exit=False,
+                exit_reason="NONE",
+                exit_price=Decimal("0.00"),
+                profit_pct=0.0,
+                unrealized_pnl=Decimal("0.00"),
+                rationale="No order book or zero position size.",
+            )
+
+        side_is_yes = (side == OrderSide.YES) if isinstance(side, OrderSide) else (str(side).lower() == "yes")
+        best_bid = book.best_yes_bid if side_is_yes else book.best_no_bid
+
+        if best_bid is None or best_bid <= Decimal("0.00"):
+            return DominationExitDecision(
+                should_exit=False,
+                exit_reason="NO_BID",
+                exit_price=Decimal("0.00"),
+                profit_pct=0.0,
+                unrealized_pnl=Decimal("0.00"),
+                rationale=f"Cannot exit: No active bid on the {'YES' if side_is_yes else 'NO'} book to liquidate against.",
+            )
+
+        safe_entry = max(Decimal("0.01"), entry_price)
+        gross_pnl_per_ct = best_bid - safe_entry
+        net_pnl_per_ct = gross_pnl_per_ct - self.fee_per_contract
+        total_net_pnl = net_pnl_per_ct * Decimal(str(size))
+        roi = float(gross_pnl_per_ct / safe_entry)
+
+        # Rule 1: Asymmetric Tail Risk Ceiling (e.g. Bid >= $0.95 or $0.98)
+        # Eliminates holding to $1.00 when 95%+ of value is captured and remaining upside is tiny
+        if best_bid >= self.take_profit_price_threshold and net_pnl_per_ct > Decimal("0.00"):
+            return DominationExitDecision(
+                should_exit=True,
+                exit_reason="TAKE_PROFIT_CEILING",
+                exit_price=best_bid,
+                profit_pct=round(roi * 100.0, 2),
+                unrealized_pnl=round(total_net_pnl, 4),
+                rationale=(
+                    f"🎯 [TAKE PROFIT CEILING] Best bid ${best_bid:.2f} >= ${self.take_profit_price_threshold:.2f} ceiling | "
+                    f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | "
+                    f"Liquidating early to eliminate asymmetric late-cycle reversal risk."
+                ),
+            )
+
+        # Rule 2: Late-Cycle Expiration Defense (T <= 120s, Bid >= $0.85, ROI >= 15%)
+        # In final 2 minutes, binary gamma risk explodes; lock in gains before unpredictable settlement
+        if time_to_expiry_s <= 120.0 and best_bid >= Decimal("0.85") and roi >= self.late_cycle_roi and net_pnl_per_ct > Decimal("0.00"):
+            return DominationExitDecision(
+                should_exit=True,
+                exit_reason="LATE_CYCLE_HARVEST",
+                exit_price=best_bid,
+                profit_pct=round(roi * 100.0, 2),
+                unrealized_pnl=round(total_net_pnl, 4),
+                rationale=(
+                    f"⏱️ [LATE CYCLE HARVEST] T={int(time_to_expiry_s)}s <= 120s | "
+                    f"Bid ${best_bid:.2f} with +{roi*100:.1f}% ROI | "
+                    f"Net profit +${total_net_pnl:.2f} | Locking in win before binary settlement volatility."
+                ),
+            )
+
+        # Rule 3: High-Gain Target ROI Harvest (ROI >= 20% and Bid >= $0.80)
+        if roi >= self.min_take_profit_roi and best_bid >= Decimal("0.80") and net_pnl_per_ct > Decimal("0.00"):
+            return DominationExitDecision(
+                should_exit=True,
+                exit_reason="TAKE_PROFIT_ROI",
+                exit_price=best_bid,
+                profit_pct=round(roi * 100.0, 2),
+                unrealized_pnl=round(total_net_pnl, 4),
+                rationale=(
+                    f"💰 [TAKE PROFIT ROI] Net ROI +{roi*100:.1f}% >= +{self.min_take_profit_roi*100:.0f}% target at ${best_bid:.2f} | "
+                    f"Net profit +${total_net_pnl:.2f} | Securing banked returns."
+                ),
+            )
+
+        pnl_prefix = "+" if total_net_pnl >= Decimal("0.00") else "-"
+        return DominationExitDecision(
+            should_exit=False,
+            exit_reason="HOLD",
+            exit_price=best_bid,
+            profit_pct=round(roi * 100.0, 2),
+            unrealized_pnl=round(total_net_pnl, 4),
+            rationale=f"Holding position: Bid ${best_bid:.2f} (ROI: {roi*100:+.1f}%, PnL: {pnl_prefix}${abs(total_net_pnl):.2f}) has not hit take-profit criteria.",
+        )
+

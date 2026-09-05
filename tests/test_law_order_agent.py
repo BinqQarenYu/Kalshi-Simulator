@@ -22,11 +22,11 @@ def test_initial_compliance_status(law_agent):
     status = law_agent.get_compliance_status()
     assert status["status"] == "COMPLIANT"
     assert status["score"] == 100.0
-    assert status["total_checks"] == 6
-    assert status["passed"] == 6
+    assert status["total_checks"] == 9
+    assert status["passed"] == 9
     assert status["failed"] == 0
     assert status["warnings"] == 0
-    assert len(status["checks"]) == 6
+    assert len(status["checks"]) == 9
     assert status["recent_violations_count"] == 0
 
 

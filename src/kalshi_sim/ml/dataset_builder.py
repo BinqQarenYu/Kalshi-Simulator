@@ -51,11 +51,15 @@ class DatasetBuilder:
         price_diff_threshold: float = 0.01,
         target_depth: int = 15,
         spatial_alpha: float = 0.425,
+        sample_stride: int = 1,
+        max_frames_per_file: Optional[int] = None,
     ) -> None:
         self.horizon_steps = horizon_steps
         self.price_diff_threshold = price_diff_threshold
         self.target_depth = target_depth
         self.spatial_alpha = spatial_alpha
+        self.sample_stride = max(1, sample_stride)
+        self.max_frames_per_file = max_frames_per_file
 
     def parse_tick_file(self, file_path: Union[str, Path]) -> List[TickFrame]:
         """Stream and parse a single JSONL tick recording file."""
@@ -73,8 +77,10 @@ class DatasetBuilder:
         frames: List[TickFrame] = []
         current_ticker = "KXBTC15M"
 
+        tick_idx = 0
         with open(file_path, "rb") as f:
             for line in f:
+                tick_idx += 1
                 line = line.strip()
                 if not line:
                     continue
@@ -99,7 +105,7 @@ class DatasetBuilder:
                 ticker_str = str(data.get("market_ticker") or data.get("ticker") or current_ticker)
                 current_ticker = ticker_str
 
-                # Process event type
+                # Process event type to keep book_mgr and extractor state perfectly updated
                 if record_type == "OrderBookSnapshot":
                     try:
                         yes_raw = data.get("yes_levels", [])
@@ -162,6 +168,10 @@ class DatasetBuilder:
                         logger.debug("Failed parsing trade: %s", e)
                         continue
 
+                # Filter frame sampling by stride to reduce autocorrelation and speed up parsing
+                if self.sample_stride > 1 and (tick_idx % self.sample_stride != 0):
+                    continue
+
                 # Build current L2 book state and extract features
                 l2_state = book_mgr.get_book(current_ticker)
                 if not l2_state:
@@ -180,6 +190,9 @@ class DatasetBuilder:
                         mid_price=float(mid_p),
                     )
                 )
+
+                if self.max_frames_per_file and len(frames) >= self.max_frames_per_file:
+                    break
 
         return frames
 
@@ -221,7 +234,10 @@ class DatasetBuilder:
         return X, y
 
     def build_from_directory(
-        self, data_dir: Union[str, Path], file_pattern: str = "ticks_*.jsonl"
+        self,
+        data_dir: Union[str, Path],
+        file_pattern: str = "ticks_*.jsonl",
+        max_files: Optional[int] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Iterate over all matching tick files in a directory and concatenate into feature tensors."""
         data_dir = Path(data_dir)
@@ -229,6 +245,8 @@ class DatasetBuilder:
         all_y: List[np.ndarray] = []
 
         files = sorted(list(data_dir.glob(file_pattern)))
+        if max_files and len(files) > max_files:
+            files = files[-max_files:]  # Take the most recent files
         logger.info("Found %d tick files matching %s in %s", len(files), file_pattern, data_dir)
 
         for file_path in files:
