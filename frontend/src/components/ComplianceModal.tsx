@@ -158,7 +158,8 @@ export const ComplianceModal: React.FC<ComplianceModalProps> = ({
             </button>
             <button
               onClick={onClose}
-              className="p-2 text-[#8b949e] hover:text-white rounded-lg hover:bg-[#21262d] transition-colors text-lg font-bold leading-none ml-2"
+              aria-label="Close compliance modal"
+              className="p-2 text-[#8b949e] hover:text-white rounded-lg hover:bg-[#21262d] transition-colors text-lg font-bold leading-none ml-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
             >
               ✕
             </button>
