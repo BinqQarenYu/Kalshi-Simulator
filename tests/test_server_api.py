@@ -333,3 +333,17 @@ def test_cors_middleware_disallows_unauthorized_origin(client: TestClient) -> No
         },
     )
     assert response.headers.get("access-control-allow-origin") != "http://evil-attacker.com"
+
+
+def test_export_ticks_security_path_traversal(client: TestClient) -> None:
+    """Verify export_ticks endpoint blocks path traversal and glob injection payloads."""
+    with client:
+        # Invalid timeframe parameters containing path traversal or wildcards should return 400
+        for invalid_tf in ["../..", "../../*", "mock*", "mock/../..", "mock;id", "mock?"]:
+            resp = client.get(f"/api/export/ticks?timeframe={invalid_tf}")
+            assert resp.status_code == 400, f"Expected 400 for timeframe={invalid_tf}, got {resp.status_code}"
+            assert "Invalid timeframe parameter" in resp.json()["detail"]
+
+        # Valid timeframe should be accepted (returns 200 if ticks exist, or 404 if no tick files found, but NOT 400)
+        resp_valid = client.get("/api/export/ticks?timeframe=mock")
+        assert resp_valid.status_code in (200, 404)

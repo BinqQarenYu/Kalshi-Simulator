@@ -17,6 +17,7 @@ import logging
 import math
 import os
 import random
+import re
 import sys
 import time
 import uuid
@@ -1906,6 +1907,9 @@ async def get_hot_ticks(ticker: str, limit: int = 100) -> dict:
 @app.get("/api/export/ticks")
 async def export_ticks(timeframe: str = "mock") -> FileResponse:
     """Download the active session tick recording JSONL file."""
+    if not re.match(r"^[a-zA-Z0-9_\-]+$", timeframe):
+        raise HTTPException(status_code=400, detail="Invalid timeframe parameter.")
+
     data_dir = state.data_dir
     files = sorted(data_dir.glob(f"ticks_{timeframe}_*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
     if not files:
@@ -1916,6 +1920,11 @@ async def export_ticks(timeframe: str = "mock") -> FileResponse:
         raise HTTPException(status_code=404, detail="No recorded tick files found.")
 
     target_file = files[0]
+    resolved_target = target_file.resolve()
+    resolved_data_dir = data_dir.resolve()
+    if not resolved_target.is_relative_to(resolved_data_dir):
+        raise HTTPException(status_code=400, detail="Invalid file path.")
+
     return FileResponse(
         path=str(target_file),
         media_type="application/x-ndjson",
