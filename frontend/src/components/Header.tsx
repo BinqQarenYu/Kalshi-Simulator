@@ -26,6 +26,7 @@ interface HeaderProps {
   reportsCount?: number;
   integrityStatus?: IntegrityStatus;
   complianceStatus?: ComplianceStatus;
+  botAuditStatus?: any;
   systemResources?: SystemResourceMetrics;
   onToggleAI: (enabled: boolean) => void;
   onToggleMode?: (mode: 'mock' | 'live') => void;
@@ -58,6 +59,7 @@ export const Header: React.FC<HeaderProps> = ({
   reportsCount = 0,
   integrityStatus,
   complianceStatus,
+  botAuditStatus,
   systemResources,
   onToggleAI,
   onToggleMode,
@@ -304,6 +306,29 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             )}
           </div>
+        </div>
+
+        {/* Pre-Deployment 4-Pillar Audit Certification Badge */}
+        <div
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border shadow-sm transition-all cursor-help ${
+            botAuditStatus?.is_certified !== false
+              ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 shadow-emerald-500/10'
+              : 'bg-rose-950/40 border-rose-500/60 text-rose-300 animate-pulse shadow-rose-500/20'
+          }`}
+          title={
+            botAuditStatus?.is_certified !== false
+              ? `✅ 4-PILLAR PRE-DEPLOYMENT AUDIT CERTIFIED\n• Guardrails: Micro-cap 1-2 contracts, cycle locks, resting order locks, VPIN veto\n• Math Invariants: Strict Decimal types, {0, 1} binary payoff\n• Truths: Zero-mock in live, secret isolation, ET clock parity\n• Law & Order: CFTC anti-wash, uncrossed order books`
+              : `❌ AUDIT BLOCKED: ${botAuditStatus?.report?.failure_reasons?.join('; ') || 'Bot failed pre-deployment audit'}`
+          }
+        >
+          {botAuditStatus?.is_certified !== false ? (
+            <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
+          ) : (
+            <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
+          )}
+          <span className="tracking-wide font-mono text-[10px]">
+            {botAuditStatus?.is_certified !== false ? 'AUDITED & CERTIFIED' : 'AUDIT BLOCKED'}
+          </span>
         </div>
 
         {/* Right Action Cluster */}

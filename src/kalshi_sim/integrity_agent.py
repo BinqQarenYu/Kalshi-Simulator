@@ -250,6 +250,29 @@ class AgentIntegrityCheck:
                     message=f"No orderbook state for active ticker {active_ticker}",
                 )
             )
+            # Check sequence gaps even if current book snapshot is initializing
+            if self._seq_gap_count == 0:
+                items.append(
+                    IntegrityCheckItem(
+                        name="L2 Delta Sequence Monotonicity",
+                        category="microstructure",
+                        status="PASS",
+                        message="Zero dropped deltas or sequence gaps detected on WebSocket feed.",
+                        metric_value="0 gaps",
+                        threshold="0 gaps",
+                    )
+                )
+            else:
+                items.append(
+                    IntegrityCheckItem(
+                        name="L2 Delta Sequence Monotonicity",
+                        category="microstructure",
+                        status="FAIL",
+                        message=f"{self._seq_gap_count} sequence gaps detected! Resync triggered.",
+                        metric_value=f"{self._seq_gap_count} gaps",
+                        threshold="0 gaps",
+                    )
+                )
             return items
 
         # 1. Crossed Book Anomaly Check: Best YES Bid + Best NO Bid <= 1.00

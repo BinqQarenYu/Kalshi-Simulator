@@ -309,8 +309,6 @@ def test_win_loss_export_endpoints(client: TestClient) -> None:
         assert isinstance(reports_list, list)
 
 
-
-
 def test_cors_middleware_headers(client: TestClient) -> None:
     response = client.options(
         "/api/health",
@@ -333,3 +331,32 @@ def test_cors_middleware_disallows_unauthorized_origin(client: TestClient) -> No
         },
     )
     assert response.headers.get("access-control-allow-origin") != "http://evil-attacker.com"
+
+
+def test_domination_config_endpoints(client: TestClient) -> None:
+    with client:
+        # GET config
+        resp = client.get("/api/bot/domination/config")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "discount_limit_price" in data
+        assert data["order_type"] == "limit"
+        assert data["fee_per_contract"] == 0.00
+        assert data["mode"] == "maker_sniper"
+
+        # POST update discount price
+        update_resp = client.post("/api/bot/domination/config", json={"discount_limit_price": 0.35})
+        assert update_resp.status_code == 200
+        up_data = update_resp.json()
+        assert up_data["success"] is True
+        assert up_data["discount_limit_price"] == 0.35
+
+        # Verify state broadcast payload includes domination_discount_price
+        state_resp = client.get("/api/state")
+        assert state_resp.status_code == 200
+        assert state_resp.json()["settings"]["domination_discount_price"] == 0.35
+
+        # Also test update via /api/settings
+        set_resp = client.post("/api/settings", json={"domination_discount_price": 0.40})
+        assert set_resp.status_code == 200
+        assert set_resp.json()["domination_discount_price"] == 0.40

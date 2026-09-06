@@ -99,3 +99,53 @@ def test_domination_bot_vpin_toxicity_veto() -> None:
     assert decision.vpin_is_safe is False
     assert decision.recommended_side == "wait"
     assert "VPIN Toxicity Veto" in decision.rationale
+
+
+def test_domination_bot_discount_sniper_maker_execution() -> None:
+    """Verify that Domination Bot places resting maker limit orders at the user's discount price ($0.35) with $0.00 fee."""
+    bot = ThreeStepDominationBot(
+        min_edge_pct=0.05,
+        min_ev_dollars=Decimal("0.02"),
+        min_spot_diff=35.0,
+        discount_limit_price=Decimal("0.35"),
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    # Current exchange ask is 0.60 (tradeable, but user demands 35c discount or nothing)
+    book.yes_book = {Decimal("0.60"): Decimal("200")}
+    book.no_book = {Decimal("0.40"): Decimal("200")}
+
+    # Spot is +$60 above strike, T = 120s
+    decision = bot.evaluate(
+        book=book,
+        spot_price=78710.0,
+        target_strike=78650.0,
+        time_to_expiry_s=120.0,
+        total_equity=Decimal("100.00"),
+        max_position_size=10,
+        estimated_vpin=0.10,
+    )
+
+    assert decision.recommended_side == "yes"
+    assert decision.order_type == "limit"
+    assert decision.limit_price == 0.35
+    assert "Discount Sniper" in decision.rationale
+    assert "$0.00 Fee" in decision.rationale
+    assert "@ $0.35" in decision.rationale
+
+
+def test_domination_bot_dynamic_discount_update() -> None:
+    """Verify that calling set_discount_limit_price dynamically tunes the sniper ceiling."""
+    bot = ThreeStepDominationBot(discount_limit_price=Decimal("0.48"))
+    assert bot.discount_limit_price == Decimal("0.48")
+
+    # Tune down to 30 cents
+    bot.set_discount_limit_price(0.30)
+    assert bot.discount_limit_price == Decimal("0.30")
+
+    # Clamped within safe boundaries [0.10, 0.50]
+    bot.set_discount_limit_price(0.05)
+    assert bot.discount_limit_price == Decimal("0.10")
+
+    bot.set_discount_limit_price(0.75)
+    assert bot.discount_limit_price == Decimal("0.50")

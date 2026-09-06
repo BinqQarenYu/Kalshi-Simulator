@@ -212,11 +212,21 @@ class HistoricalQueryService:
                 eq_row = await cursor.fetchone()
                 current_equity = float(eq_row["equity"]) if eq_row else initial_capital
                 current_balance = float(eq_row["balance"]) if eq_row else initial_capital
-                if execution_mode == "live" and (current_equity > 50.0 or current_balance > 50.0):
-                    # Sanitize against any legacy mock simulation pollution
-                    realized_pnl_so_far = sum(float(r["pnl"]) for r in settlement_rows)
-                    current_equity = round(initial_capital + realized_pnl_so_far, 2)
-                    current_balance = round(initial_capital + realized_pnl_so_far, 2)
+                if execution_mode == "live":
+                    # Derive live balance from latest settlement balance_after if available
+                    if settlement_rows:
+                        async with db.execute(
+                            f"SELECT balance_after FROM settlements{st_where} ORDER BY timestamp_epoch_ms DESC LIMIT 1",
+                            st_params,
+                        ) as st_cur:
+                            st_row = await st_cur.fetchone()
+                            if st_row and st_row["balance_after"] is not None and float(st_row["balance_after"]) > 0:
+                                current_balance = float(st_row["balance_after"])
+                                current_equity = float(st_row["balance_after"])
+                    elif current_equity > 50.0 or current_balance > 50.0:
+                        realized_pnl_so_far = sum(float(r["pnl"]) for r in settlement_rows)
+                        current_equity = round(initial_capital + realized_pnl_so_far, 2)
+                        current_balance = round(initial_capital + realized_pnl_so_far, 2)
 
         total_settled = len(settlement_rows)
         if total_settled == 0:
@@ -260,6 +270,8 @@ class HistoricalQueryService:
 
         total_realized_pnl = sum(pnls)
         net_pnl = total_realized_pnl - total_fees
+        if execution_mode == "live":
+            initial_capital = max(25.0, round(current_balance - net_pnl, 2))
         total_roi = (net_pnl / initial_capital) * 100.0 if initial_capital > 0 else 0.0
 
         avg_win = float(np.mean(winning_pnls)) if winning_pnls else 0.0

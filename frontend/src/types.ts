@@ -70,6 +70,9 @@ export interface AISignals {
   onnx_prob_long?: number;
   onnx_prob_short?: number;
   onnx_prob_wait?: number;
+  order_type?: string;
+  limit_price?: number;
+  discount_limit_price?: number;
 }
 
 export interface BtcOrderflowSummary {
@@ -308,13 +311,33 @@ export interface DashboardState {
   win_loss_reports?: WinLossEventReport[];
   integrity_status?: IntegrityStatus;
   compliance_status?: ComplianceStatus;
+  bot_audit_status?: {
+    active_bot: string;
+    is_certified: boolean;
+    report?: {
+      bot_id: string;
+      bot_name: string;
+      status: 'CERTIFIED' | 'BLOCKED';
+      certification_id: string;
+      certified_at: string;
+      pillars: Record<string, {
+        pillar_name: string;
+        status: 'PASS' | 'FAIL';
+        message: string;
+        details?: Record<string, any>;
+      }>;
+      failure_reasons: string[];
+    };
+  };
   memory_profile?: MemoryProfileData;
   system_resources?: SystemResourceMetrics;
   settings: {
     ai_auto_trade: boolean;
     active_strategy_bot?: string;
+    bot_certified?: boolean;
     mode: 'mock' | 'live';
     timeframe: string;
+    domination_discount_price?: number;
   };
   btc_orderflow?: BtcOrderflowSummary;
 }

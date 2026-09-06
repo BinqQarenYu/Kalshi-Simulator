@@ -83,6 +83,11 @@ class AIWorker:
             self.active_strategy_bot = strategy_id
             logger.info("AIWorker active strategy bot switched to: %s", strategy_id)
 
+    def set_domination_discount_price(self, price: Decimal | float | str) -> None:
+        """Dynamically update the maker discount limit price ceiling on the domination bot."""
+        if hasattr(self, "_domination_bot") and hasattr(self._domination_bot, "set_discount_limit_price"):
+            self._domination_bot.set_discount_limit_price(price)
+
     def get_cached_signals(self) -> dict[str, Any]:
         """Return the latest cached AI state instantly with <0.001ms latency."""
         return self._cached_signals.copy()
@@ -281,6 +286,9 @@ class AIWorker:
                                 "kelly_f_no": dec.kelly_f_no,
                                 "recommended_side": dec.recommended_side,
                                 "rationale": dec.rationale,
+                                "order_type": getattr(dec, "order_type", "limit"),
+                                "limit_price": getattr(dec, "limit_price", 0.48),
+                                "discount_limit_price": float(self._domination_bot.discount_limit_price),
                                 "compute_latency_ms": round(compute_duration, 2),
                             }
 

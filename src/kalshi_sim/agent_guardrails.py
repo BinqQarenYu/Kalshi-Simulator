@@ -22,7 +22,7 @@ class AgentGuardrails:
         self,
         min_order_interval_seconds: float = 45.0,
         max_risk_pct_per_trade: Decimal = Decimal("0.08"),  # Max 8% of equity per trade
-        max_micro_bankroll_contracts: int = 4,  # Max contracts for equity <= $100
+        max_micro_bankroll_contracts: int = 2,  # Hard cap: Max 1-2 contracts for equity <= $100
         max_nano_bankroll_contracts: int = 2,   # Max contracts for equity <= $25
         consecutive_loss_taper_threshold: int = 2,
         drawdown_taper_threshold: Decimal = Decimal("0.15"),  # 15% drawdown activates taper
@@ -224,6 +224,50 @@ class AgentGuardrails:
             cycle_key, trade_id, side.upper(), size, float(price)
         )
         return report
+
+    def record_resting_order(
+        self,
+        order_id: str,
+        ticker: str,
+        side: str,
+        size: int,
+        price: Decimal,
+        cycle_id: Optional[str] = None,
+        bot_type: str = "3_step_domination_bot",
+    ) -> None:
+        """Lock the cycle immediately upon submitting a resting limit order to prevent duplicate orders."""
+        now_mono = time.monotonic()
+        now_utc = datetime.now(timezone.utc).isoformat()
+        cycle_key = cycle_id or ticker
+        self._cycle_locks[cycle_key] = order_id
+        self._last_order_ts = now_mono
+        self._last_order_ts_by_ticker[ticker] = now_mono
+        
+        report = {
+            "event_type": "RESTING_ORDER_SUBMISSION",
+            "trade_id": order_id,
+            "ticker": ticker,
+            "side": side.lower(),
+            "size": size,
+            "price": float(price),
+            "cost": float(price * Decimal(str(size))),
+            "fee": 0.0,
+            "bot_type": bot_type,
+            "execution_mode": "live",
+            "rationale": "Resting maker limit order submitted; cycle locked to max 1 entry.",
+            "vpin": 0.15,
+            "ai_prob": 0.50,
+            "cycle_key": cycle_key,
+            "timestamp_utc": now_utc,
+        }
+        self._recent_inceptions.insert(0, report)
+        if len(self._recent_inceptions) > 50:
+            self._recent_inceptions.pop()
+
+        logger.info(
+            "🛡️ [GUARDRAIL RESTING LOCK] Locked cycle '%s' for resting order %s (%s %d cts @ $%.2f). Max 1 order per cycle enforced.",
+            cycle_key, order_id, side.upper(), size, float(price)
+        )
 
     def record_order_attempt(self, ticker: str, cooldown_seconds: Optional[float] = None) -> None:
         """Record an order attempt (fill, 0-fill, or rejection) to enforce execution cooldown."""

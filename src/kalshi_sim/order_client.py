@@ -170,43 +170,81 @@ class KalshiLiveOrderClient:
             data = await resp.json()
             return data.get("orders", [])
 
-    async def get_settlements(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Fetch historical market settlements for the portfolio from Kalshi API."""
+    async def get_settlements(
+        self,
+        limit: int = 100,
+        all_pages: bool = False,
+        max_pages: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Fetch historical market settlements for the portfolio from Kalshi API with pagination."""
         endpoint = "/trade-api/v2/portfolio/settlements"
         url = f"{self.base_url}/portfolio/settlements"
-        headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
-
         session = await self._get_session()
+        all_settlements: List[Dict[str, Any]] = []
+        cursor: Optional[str] = None
+        page = 0
+
         try:
-            async with session.get(url, headers=headers, params={"limit": limit}) as resp:
-                if resp.status != 200:
-                    err_text = await resp.text()
-                    logger.error("Failed to fetch settlements (HTTP %d): %s", resp.status, err_text)
-                    return []
-                data = await resp.json()
-                return data.get("settlements", [])
+            while page < max_pages:
+                page += 1
+                headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
+                params: Dict[str, Any] = {"limit": limit}
+                if cursor:
+                    params["cursor"] = cursor
+
+                async with session.get(url, headers=headers, params=params) as resp:
+                    if resp.status != 200:
+                        err_text = await resp.text()
+                        logger.error("Failed to fetch settlements (HTTP %d): %s", resp.status, err_text)
+                        break
+                    data = await resp.json()
+                    batch = data.get("settlements", [])
+                    all_settlements.extend(batch)
+                    cursor = data.get("cursor")
+                    if not all_pages or not cursor or not batch:
+                        break
+            return all_settlements
         except Exception as exc:
             logger.error("Error querying Kalshi settlements: %s", exc)
-            return []
+            return all_settlements
 
-    async def get_fills(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Fetch historical order fills for the portfolio from Kalshi API."""
+    async def get_fills(
+        self,
+        limit: int = 100,
+        all_pages: bool = False,
+        max_pages: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Fetch historical order fills for the portfolio from Kalshi API with pagination."""
         endpoint = "/trade-api/v2/portfolio/fills"
         url = f"{self.base_url}/portfolio/fills"
-        headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
-
         session = await self._get_session()
+        all_fills: List[Dict[str, Any]] = []
+        cursor: Optional[str] = None
+        page = 0
+
         try:
-            async with session.get(url, headers=headers, params={"limit": limit}) as resp:
-                if resp.status != 200:
-                    err_text = await resp.text()
-                    logger.error("Failed to fetch fills (HTTP %d): %s", resp.status, err_text)
-                    return []
-                data = await resp.json()
-                return data.get("fills", [])
+            while page < max_pages:
+                page += 1
+                headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
+                params: Dict[str, Any] = {"limit": limit}
+                if cursor:
+                    params["cursor"] = cursor
+
+                async with session.get(url, headers=headers, params=params) as resp:
+                    if resp.status != 200:
+                        err_text = await resp.text()
+                        logger.error("Failed to fetch fills (HTTP %d): %s", resp.status, err_text)
+                        break
+                    data = await resp.json()
+                    batch = data.get("fills", [])
+                    all_fills.extend(batch)
+                    cursor = data.get("cursor")
+                    if not all_pages or not cursor or not batch:
+                        break
+            return all_fills
         except Exception as exc:
             logger.error("Error querying Kalshi fills: %s", exc)
-            return []
+            return all_fills
 
     async def place_order(
         self,
