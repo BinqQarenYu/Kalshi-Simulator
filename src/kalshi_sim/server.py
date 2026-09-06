@@ -654,15 +654,16 @@ async def live_btc_spot_sync_loop() -> None:
                         amt_str = data.get("data", {}).get("amount")
                         if amt_str:
                             state.current_btc_price = Decimal(str(amt_str))
-            except Exception:
+            except Exception as exc:
+                logger.debug("[SPOT SYNC] Coinbase REST sync error: %s", exc)
                 try:
                     async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
                         if resp2.status == 200:
                             data2 = await resp2.json()
                             if "price" in data2:
                                 state.current_btc_price = Decimal(str(data2["price"]))
-                except Exception:
-                    pass
+                except Exception as exc2:
+                    logger.debug("[SPOT SYNC] Binance REST fallback sync error: %s", exc2)
             await asyncio.sleep(0.5)
 
 
