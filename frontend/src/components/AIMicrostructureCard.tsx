@@ -27,6 +27,8 @@ interface AIMicrostructureCardProps {
   onSelectStrategy?: (strategyId: string) => Promise<any>;
   onTestBot?: () => Promise<any>;
   onOpenReports?: () => void;
+  dominationDiscountPrice?: number;
+  onUpdateDiscountPrice?: (price: number) => Promise<any>;
 }
 
 export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.memo(({
@@ -34,11 +36,41 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   onSelectStrategy,
   onTestBot,
   onOpenReports,
+  dominationDiscountPrice,
+  onUpdateDiscountPrice,
 }) => {
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const [localDiscount, setLocalDiscount] = useState<number>(
+    dominationDiscountPrice ?? signals.discount_limit_price ?? 0.48
+  );
+
+  useEffect(() => {
+    if (dominationDiscountPrice !== undefined) {
+      setLocalDiscount(dominationDiscountPrice);
+    } else if (signals.discount_limit_price !== undefined) {
+      setLocalDiscount(signals.discount_limit_price);
+    }
+  }, [dominationDiscountPrice, signals.discount_limit_price]);
+
+  const handleDiscountChange = async (newPrice: number) => {
+    const rounded = Math.round(newPrice * 100) / 100;
+    const clamped = Math.min(0.50, Math.max(0.15, rounded));
+    setLocalDiscount(clamped);
+    if (onUpdateDiscountPrice) {
+      try {
+        await onUpdateDiscountPrice(clamped);
+        setFeedback(`Maker Discount Limit set to $${clamped.toFixed(2)} (${(clamped * 100).toFixed(0)}¢)`);
+        setTimeout(() => setFeedback(null), 3000);
+      } catch (err) {
+        setFeedback('Failed to update discount limit');
+        setTimeout(() => setFeedback(null), 3000);
+      }
+    }
+  };
 
   const activeStrategy = signals.strategy_id || '3_step_domination_bot';
   const isMacroOnnx = activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion';
@@ -348,6 +380,132 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
           <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-black/30 rounded-full uppercase">
             Active
           </span>
+        </div>
+      )}
+
+      {/* ⚡ Option B: Maker Discount Sniper Controller ($0.00 Fees) */}
+      {is3StepBot && (
+        <div className="bg-[#161b22] border border-amber-500/30 rounded-xl p-3.5 flex flex-col gap-3 shadow-inner">
+          <div className="flex items-center justify-between border-b border-[#21262d] pb-2">
+            <div className="flex items-center gap-2">
+              <div className="h-6 w-6 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                <Sliders className="h-3.5 w-3.5 text-amber-400" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>DISCOUNT SNIPER CONTROLLER</span>
+                  <span className="px-1.5 py-0.2 text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full font-bold">
+                    $0.00 FEE
+                  </span>
+                </div>
+                <div className="text-[10px] text-gray-400">
+                  Option B: Resting Maker Limit Orders • Never chases expensive asks
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs font-mono font-bold text-amber-400">
+                {(localDiscount * 100).toFixed(0)}¢ Cap
+              </div>
+              <div className="text-[9px] font-mono text-gray-500">
+                Max Entry Limit
+              </div>
+            </div>
+          </div>
+
+          {/* Quick Preset Pills */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center text-[10px] font-semibold text-[#8b949e]">
+              <span>QUICK PRESETS</span>
+              <span className="font-mono text-gray-400">Target Entry Price</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {[0.30, 0.35, 0.40, 0.45, 0.48].map((preset) => {
+                const isActive = Math.abs(localDiscount - preset) < 0.005;
+                return (
+                  <button
+                    key={preset}
+                    onClick={() => {
+                      soundFX.playClickSound();
+                      handleDiscountChange(preset);
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-mono font-bold transition-all border ${
+                      isActive
+                        ? 'bg-amber-500/25 border-amber-400 text-amber-300 shadow-sm shadow-amber-500/30 scale-[1.02]'
+                        : 'bg-[#0d1117] border-[#30363d] text-gray-300 hover:border-amber-500/50 hover:bg-[#21262d]'
+                    }`}
+                  >
+                    {(preset * 100).toFixed(0)}¢
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Precision Range Slider */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center text-[10px] font-semibold text-[#8b949e]">
+              <span>FINE-TUNE DISCOUNT CEILING</span>
+              <span className="font-mono text-amber-300 font-bold">${localDiscount.toFixed(2)}</span>
+            </div>
+            <input
+              type="range"
+              min="0.15"
+              max="0.50"
+              step="0.01"
+              value={localDiscount}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
+                setLocalDiscount(val);
+              }}
+              onPointerUp={() => handleDiscountChange(localDiscount)}
+              onKeyUp={() => handleDiscountChange(localDiscount)}
+              className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-amber-400"
+            />
+            <div className="flex justify-between text-[9px] font-mono text-gray-500">
+              <span>15¢ (Deep Value)</span>
+              <span>35¢ (Sweet Spot)</span>
+              <span>50¢ (Even Odds)</span>
+            </div>
+          </div>
+
+          {/* Live Asymmetric Risk/Reward Matrix */}
+          <div className="grid grid-cols-4 gap-2 bg-[#0d1117] border border-[#30363d] rounded-lg p-2 text-center">
+            <div>
+              <div className="text-[9px] text-gray-400 font-medium">MAX RISK</div>
+              <div className="text-xs font-mono font-bold text-rose-400">
+                {(localDiscount * 100).toFixed(0)}¢
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] text-gray-400 font-medium">MAX PROFIT</div>
+              <div className="text-xs font-mono font-bold text-emerald-400">
+                {((1 - localDiscount) * 100).toFixed(0)}¢
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] text-gray-400 font-medium">PAYOUT ROI</div>
+              <div className="text-xs font-mono font-bold text-amber-300">
+                {localDiscount > 0 ? (((1 - localDiscount) / localDiscount)).toFixed(2) : '0.00'}x
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] text-gray-400 font-medium">MAKER FEE</div>
+              <div className="text-xs font-mono font-bold text-cyan-400">
+                $0.00
+              </div>
+            </div>
+          </div>
+
+          {/* Maker Sniper Status Banner */}
+          <div className="text-[10px] text-gray-400 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2 flex items-center gap-2">
+            <Target className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+            <span className="leading-tight">
+              {signals.order_type === 'limit' && signals.limit_price
+                ? `Resting Maker Limit armed at $${signals.limit_price.toFixed(2)} (${signals.recommended_side?.toUpperCase()}). Auto-cancels at T<=45s.`
+                : `Sniper will rest limit order at ≤$${localDiscount.toFixed(2)} with $0.00 fee when edge triggers.`}
+            </span>
+          </div>
         </div>
       )}
 

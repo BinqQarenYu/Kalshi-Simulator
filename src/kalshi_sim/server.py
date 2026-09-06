@@ -37,6 +37,7 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
+from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
 from kalshi_sim.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, async_validate_credentials, create_aiohttp_connector, load_private_key
 from kalshi_sim.data_memory_manager import MarketDataMemoryManager, MemoryProfile
 from kalshi_sim.db import HistoricalQueryService, get_db_writer
@@ -50,6 +51,10 @@ from kalshi_sim.mock_feed import MockKalshiFeed
 
 
 from kalshi_sim.ml.ai_worker import AIWorker
+from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
+from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
+from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
+from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
 from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine
 from kalshi_sim.notifications import TelemetryAlertDispatcher
 from kalshi_sim.ohlcv_aggregator import OHLCVAggregator
@@ -88,6 +93,21 @@ TIMEFRAME_CONFIGS: dict[Timeframe, dict[str, Any]] = {
     Timeframe.ONE_HOUR: {"series": "KXBTCH", "title": "BTC 1 Hour", "duration": "1h", "expiry_seconds": 3600},
     Timeframe.DAILY: {"series": "KXBTCD", "title": "BTC Daily", "duration": "24h", "expiry_seconds": 86400},
 }
+
+def resolve_bot_instance(bot_id: str) -> Any:
+    """Resolve a bot instance from active simulation agent or fallback factory."""
+    if state.sim_agent and hasattr(state.sim_agent, "get_bot_instance"):
+        inst = state.sim_agent.get_bot_instance(bot_id)
+        if inst:
+            return inst
+    if bot_id == "3_step_domination_bot":
+        return ThreeStepDominationBot()
+    elif bot_id in ("dominion_2_bot", "dominion2", "dominion_v2"):
+        return Dominion2Bot()
+    elif bot_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend", "macro_trend_dominion", "macro_trend_dominion_bot"):
+        return MacroTrendDominionBot()
+    return None
+
 
 def prevent_windows_sleep() -> None:
     """Prevent Windows from sleeping or suspending background execution even when monitor is off."""
@@ -154,6 +174,7 @@ class ServerState:
         self.ai_worker_task: asyncio.Task | None = None
         self.ai_auto_trade: bool = True
         self.active_strategy_bot: str = "3_step_domination_bot"
+        self.domination_discount_price: Decimal = Decimal("0.48")
         self.mode: Literal["mock", "live"] = "live"
         self.market_expiry_seconds: int = 900
         self.is_dirty: bool = True
@@ -188,6 +209,13 @@ class ServerState:
         # Agent_Token_Credit Conservation & Anti-Redundancy Guardian
         self.token_credit_agent = get_token_credit_agent()
 
+        # Pre-Deployment Bot Auditor & Certification Gatekeeper
+        self.bot_auditor = BotDeploymentAuditor(
+            guardrails=self.guardrails_agent,
+            integrity_agent=self.integrity_agent,
+            law_order_agent=self.law_order_agent,
+        )
+
         # Telemetry & Instant Alert Webhook Dispatcher (Phase 3.3)
         self.telemetry_alerts = TelemetryAlertDispatcher()
 
@@ -205,6 +233,18 @@ class ServerState:
             max_active_tickers=50,
             batch_flush_size=100,
             flush_interval_seconds=1.0,
+        )
+
+        # Autonomous Continuous Background ONNX Model Trainer (Live Trading Protected)
+        self.continuous_trainer = ContinuousModelTrainer(
+            data_dir=self.data_dir,
+            models_dir=Path("models"),
+            training_interval_seconds=180.0,
+            batch_size=32,
+            learning_rate=2e-4,
+            epochs_per_cycle=4,
+            max_recent_tick_files=15,
+            enabled=True,
         )
 
         # 15-Minute Event Win/Loss Reports Ledger (Disk-Persisted, No Auto-Reset)
@@ -859,7 +899,7 @@ def format_cycle_time_from_iso(iso_str: str) -> str:
         return "15M Event Cycle ET"
 
 
-async def sync_live_settlements() -> list[dict[str, Any]]:
+async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]:
     """Synchronize live settlements directly from Kalshi API and reconcile with executed trades to generate live win/loss reports."""
     client = state.order_client
     if client is None and state.sim_agent and hasattr(state.sim_agent, "_order_client"):
@@ -883,19 +923,40 @@ async def sync_live_settlements() -> list[dict[str, Any]]:
         return []
 
     try:
-        settlements = await client.get_settlements(limit=50)
+        # Full sync when explicitly requested or on startup when local live report history is incomplete
+        current_live_count = len([r for r in state.win_loss_reports if r.get("execution_mode") == "live"])
+        need_full = full_sync or (current_live_count < 100)
+        settlements = await client.get_settlements(limit=100, all_pages=need_full, max_pages=20)
         if not settlements:
             return []
 
+        real_bal_dollars = Decimal("21.97")
+        try:
+            bal_data = await client.get_balance()
+            if bal_data and "balance_dollars" in bal_data:
+                b_val = Decimal(str(bal_data["balance_dollars"]))
+                if b_val > Decimal("0"):
+                    real_bal_dollars = b_val
+            if state.live_portfolio is None:
+                state.live_portfolio = {}
+            state.live_portfolio["balance_dollars"] = float(real_bal_dollars)
+        except Exception as bal_err:
+            logger.debug("Failed fetching balance in sync_live_settlements: %s", bal_err)
+
         settlements_by_ticker = {s.get("ticker"): s for s in settlements if s.get("ticker")}
-        existing_report_ids = {r.get("report_id") for r in state.win_loss_reports}
-        existing_tickers = {r.get("ticker") for r in state.win_loss_reports if r.get("execution_mode") == "live"}
+        if full_sync or current_live_count < len(settlements):
+            state.win_loss_reports = [r for r in state.win_loss_reports if r.get("execution_mode") != "live" and r.get("bot_type") != "live"]
+            existing_report_ids = {r.get("report_id") for r in state.win_loss_reports}
+            existing_tickers = set()
+        else:
+            existing_report_ids = {r.get("report_id") for r in state.win_loss_reports}
+            existing_tickers = {r.get("ticker") for r in state.win_loss_reports if r.get("execution_mode") == "live"}
 
         # Query local live trades from SQLite to reconcile attribution
         live_db_trades: dict[str, dict[str, Any]] = {}
         try:
             import sqlite3
-            con = sqlite3.connect("data/kalshi_history.db")
+            con = sqlite3.connect(str(state.data_dir / "kalshi_history.db"))
             cur = con.cursor()
             cur.execute("SELECT trade_id, ticker, side, size, price, gross_value, timestamp_utc, bot_type FROM trades WHERE execution_mode = 'live'")
             for row in cur.fetchall():
@@ -957,10 +1018,7 @@ async def sync_live_settlements() -> list[dict[str, Any]]:
                 strike_price = state.target_strike
 
             settlement_btc_price = strike_price + (Decimal("45.00") if market_result == "yes" else Decimal("-45.00"))
-
-            live_bal = getattr(client, "shard_balances", {}).get(2, Decimal("0.0"))
-            if live_bal == Decimal("0.0") and hasattr(client, "last_balance"):
-                live_bal = getattr(client, "last_balance", Decimal("25.00"))
+            live_bal = real_bal_dollars
 
             rep = record_win_loss_event_report(
                 ticker=ticker,
@@ -988,10 +1046,10 @@ async def sync_live_settlements() -> list[dict[str, Any]]:
             existing_tickers.add(ticker)
             logger.info("[LIVE REPORT GENERATED FROM TRADE] %s | %s | PnL: $%.4f", ticker, outcome.upper(), float(pnl))
 
-        # 2. Check any other KXBTC settlements with traded volume for today's session
+        # 2. Reconcile ALL genuine Kalshi settlements directly from Kalshi API
         for s in settlements:
             ticker = s.get("ticker", "")
-            if not ticker or not ticker.startswith("KXBTC") or "SEP01" not in ticker:
+            if not ticker or not ticker.startswith("KX"):
                 continue
 
             report_id = f"WLR-LIVE-{ticker}"
@@ -999,28 +1057,29 @@ async def sync_live_settlements() -> list[dict[str, Any]]:
                 continue
 
             try:
-                yes_cnt = int(float(str(s.get("yes_count_fp", 0))))
-                no_cnt = int(float(str(s.get("no_count_fp", 0))))
-                yes_cost = Decimal(str(s.get("yes_total_cost_dollars", "0")))
-                no_cost = Decimal(str(s.get("no_total_cost_dollars", "0")))
-                revenue = Decimal(str(s.get("revenue", 0))) / Decimal("100")
-                fee = Decimal(str(s.get("fee_cost", "0")))
+                yes_cnt = int(float(str(s.get("yes_count_fp", "0") or "0")))
+                no_cnt = int(float(str(s.get("no_count_fp", "0") or "0")))
+                yes_cost = Decimal(str(s.get("yes_total_cost_dollars", "0") or "0"))
+                no_cost = Decimal(str(s.get("no_total_cost_dollars", "0") or "0"))
+                revenue = Decimal(str(s.get("revenue", 0) or 0)) / Decimal("100")
+                fee = Decimal(str(s.get("fee_cost", "0") or "0"))
             except Exception:
                 continue
 
             total_cnt = yes_cnt + no_cnt
-            if total_cnt == 0:
+            total_cost = yes_cost + no_cost
+            if total_cnt == 0 and total_cost == Decimal("0") and revenue == Decimal("0"):
                 continue
 
-            side = "yes" if (yes_cnt > 0 or yes_cost > 0) else "no"
-            contracts = yes_cnt if side == "yes" else no_cnt
-            cost = yes_cost if side == "yes" else no_cost
+            side = "yes" if yes_cnt > no_cnt else ("no" if no_cnt > yes_cnt else ("yes" if yes_cost >= no_cost else "no"))
+            contracts = total_cnt if total_cnt > 0 else 1
+            cost = total_cost
             entry_price = (cost / Decimal(str(contracts))) if contracts > 0 else Decimal("0.50")
 
             market_result = s.get("market_result", "").lower()
-            won = (side == market_result) or (revenue > Decimal("0"))
-            outcome = "win" if won else "loss"
             pnl = revenue - cost - fee
+            won = (pnl > Decimal("0")) or (side == market_result and revenue > Decimal("0"))
+            outcome = "win" if won else ("loss" if pnl < Decimal("0") else "flat")
 
             settled_ts = s.get("settled_time") or datetime.now(timezone.utc).isoformat()
             cycle_time = format_cycle_time_from_iso(settled_ts)
@@ -1034,7 +1093,7 @@ async def sync_live_settlements() -> list[dict[str, Any]]:
                 strike_price = state.target_strike
 
             settlement_btc_price = strike_price + (Decimal("50.00") if market_result == "yes" else Decimal("-50.00"))
-            live_bal = getattr(client, "shard_balances", {}).get(2, Decimal("25.00"))
+            live_bal = real_bal_dollars
 
             rep = record_win_loss_event_report(
                 ticker=ticker,
@@ -1057,10 +1116,81 @@ async def sync_live_settlements() -> list[dict[str, Any]]:
                 cycle_time=cycle_time,
                 balance_after=live_bal,
             )
+            rep["gross_pnl"] = float(revenue - cost)
+            rep["fee"] = float(fee)
             new_reports.append(rep)
             existing_report_ids.add(report_id)
             existing_tickers.add(ticker)
             logger.info("[LIVE REPORT GENERATED FROM SETTLEMENT] %s | %s | PnL: $%.4f", ticker, outcome.upper(), float(pnl))
+
+        if new_reports:
+            # Sort all win_loss_reports by timestamp_utc descending so newest trades always show on top
+            state.win_loss_reports.sort(key=lambda r: str(r.get("timestamp_utc", "")), reverse=True)
+            state.save_persisted_reports()
+
+            # Ensure SQLite store has all live records for historical query service
+            try:
+                import sqlite3
+                con = sqlite3.connect(str(state.data_dir / "kalshi_history.db"))
+                cur = con.cursor()
+                for r in new_reports:
+                    ts_str = str(r.get("timestamp_utc", ""))
+                    try:
+                        dt_val = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                        epoch_ms = int(dt_val.timestamp() * 1000)
+                    except Exception:
+                        epoch_ms = int(time.time() * 1000)
+
+                    cur.execute(
+                        """
+                        INSERT OR REPLACE INTO settlements (
+                            settlement_id, timestamp_utc, timestamp_epoch_ms, ticker, side, size,
+                            entry_price, settlement_price, outcome, pnl, balance_after, bot_type, execution_mode
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            r["report_id"],
+                            ts_str,
+                            epoch_ms,
+                            r["ticker"],
+                            r["bot_side"],
+                            r["contracts"],
+                            float(r["entry_price"]),
+                            float(r["settlement_price"]),
+                            r["outcome"],
+                            float(r.get("gross_pnl", r["pnl"])),
+                            float(r.get("balance_after", 21.97)),
+                            r.get("bot_type", "3_step_domination_bot"),
+                            "live",
+                        )
+                    )
+                    cur.execute(
+                        """
+                        INSERT OR REPLACE INTO trades (
+                            trade_id, timestamp_utc, timestamp_epoch_ms, ticker, timeframe, side,
+                            size, price, gross_value, fees, bot_type, execution_mode, status
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            f"live_tr_{r['ticker']}",
+                            ts_str,
+                            epoch_ms,
+                            r["ticker"],
+                            "15m",
+                            r["bot_side"],
+                            r["contracts"],
+                            float(r["entry_price"]),
+                            float(r["entry_price"]) * r["contracts"],
+                            float(r.get("fee", 0.0)),
+                            r.get("bot_type", "3_step_domination_bot"),
+                            "live",
+                            "filled",
+                        )
+                    )
+                con.commit()
+                con.close()
+            except Exception as db_sync_exc:
+                logger.debug("Direct DB sync exception: %s", db_sync_exc)
 
         return new_reports
     except Exception as exc:
@@ -1474,6 +1604,7 @@ async def start_background_simulation() -> None:
         spot_price_getter=lambda: state.current_btc_price,
         order_client=order_client,
         btc_orderflow_feed=state.btc_orderflow_feed,
+        bot_auditor=state.bot_auditor,
     )
     state.sim_agent.execution_mode = state.mode
     state.tick_writer = TickWriter(data_dir=state.data_dir, timeframe="paper_live")
@@ -1576,7 +1707,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await state.memory_manager.start()
     await start_background_simulation()
     await state.gdrive_sync.start()
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        state.continuous_trainer.start()
     yield
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        state.continuous_trainer.stop()
     await state.gdrive_sync.stop()
     if state.ai_worker:
         state.ai_worker.stop()
@@ -1653,6 +1788,10 @@ class SettingsRequest(BaseModel):
     active_timeframe: str | None = None
     active_ticker: str | None = None
     mode: Literal["mock", "live"] | None = None
+    domination_discount_price: float | None = Field(default=None, ge=0.10, le=0.50)
+
+class DominationConfigRequest(BaseModel):
+    discount_limit_price: float = Field(default=0.48, ge=0.10, le=0.50, description="Maker discount limit price ceiling")
 
 class StrategySelectRequest(BaseModel):
     strategy_id: str
@@ -2782,6 +2921,20 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
             cand_bot = "dominion_2_bot"
 
         if cand_bot in ("macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
+            # Enforce Pre-Deployment Audit Certification Gate
+            if not state.bot_auditor.is_certified(cand_bot):
+                bot_inst = resolve_bot_instance(cand_bot)
+                rep = state.bot_auditor.audit_bot(cand_bot, bot_inst, mode=state.mode)
+                if not rep.is_certified:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "error": f"Bot '{cand_bot}' failed pre-deployment audit certification gate.",
+                            "failure_reasons": rep.to_dict()["failure_reasons"],
+                            "pillars": rep.to_dict()["pillars"],
+                        },
+                    )
+
             state.active_strategy_bot = cand_bot
             if state.ai_worker:
                 state.ai_worker.set_active_strategy(cand_bot)
@@ -2816,6 +2969,13 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
             pass
     if req.active_ticker:
         state.active_ticker = req.active_ticker
+    if req.domination_discount_price is not None:
+        state.domination_discount_price = Decimal(str(round(req.domination_discount_price, 2)))
+        if state.sim_agent and hasattr(state.sim_agent, "set_domination_discount_price"):
+            state.sim_agent.set_domination_discount_price(state.domination_discount_price)
+        if state.ai_worker and hasattr(state.ai_worker, "set_domination_discount_price"):
+            state.ai_worker.set_domination_discount_price(state.domination_discount_price)
+        logger.info(f"[SETTINGS] Updated domination discount limit price to ${state.domination_discount_price}")
 
     return {
         "ai_auto_trade": state.ai_auto_trade,
@@ -2824,6 +2984,36 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
         "active_ticker": state.active_ticker,
         "target_strike": float(state.target_strike),
         "mode": state.mode,
+        "domination_discount_price": float(state.domination_discount_price),
+    }
+
+
+@app.get("/api/bot/domination/config")
+async def get_domination_config_endpoint() -> dict[str, Any]:
+    """Get current Domination Bot Maker Discount Sniper configuration."""
+    return {
+        "discount_limit_price": float(state.domination_discount_price),
+        "order_type": "limit",
+        "fee_per_contract": 0.00,
+        "mode": "maker_sniper",
+    }
+
+
+@app.post("/api/bot/domination/config")
+async def update_domination_config_endpoint(req: DominationConfigRequest) -> dict[str, Any]:
+    """Update Domination Bot Maker Discount Sniper configuration."""
+    state.domination_discount_price = Decimal(str(round(req.discount_limit_price, 2)))
+    if state.sim_agent and hasattr(state.sim_agent, "set_domination_discount_price"):
+        state.sim_agent.set_domination_discount_price(state.domination_discount_price)
+    if state.ai_worker and hasattr(state.ai_worker, "set_domination_discount_price"):
+        state.ai_worker.set_domination_discount_price(state.domination_discount_price)
+    logger.info(f"[DOMINATION CONFIG] Updated discount limit price to ${state.domination_discount_price}")
+    return {
+        "success": True,
+        "discount_limit_price": float(state.domination_discount_price),
+        "order_type": "limit",
+        "fee_per_contract": 0.00,
+        "mode": "maker_sniper",
     }
 
 
@@ -2931,6 +3121,20 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
 
     if strat_id not in ("macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
         raise HTTPException(status_code=400, detail=f"Invalid strategy_id: {req.strategy_id}")
+
+    # Enforce Pre-Deployment Audit Certification Gate
+    if not state.bot_auditor.is_certified(strat_id):
+        bot_inst = resolve_bot_instance(strat_id)
+        rep = state.bot_auditor.audit_bot(strat_id, bot_inst, mode=state.mode)
+        if not rep.is_certified:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": f"Bot '{strat_id}' failed pre-deployment audit certification gate.",
+                    "failure_reasons": rep.to_dict()["failure_reasons"],
+                    "pillars": rep.to_dict()["pillars"],
+                },
+            )
 
     state.active_strategy_bot = strat_id
     if state.ai_worker:
@@ -3592,19 +3796,28 @@ def _calculate_15m_metrics(reports_subset: list[dict[str, Any]]) -> dict[str, An
 
 
 @app.get("/api/reports/live")
-async def get_live_reports_endpoint(limit: int = 50) -> dict[str, Any]:
+async def get_live_reports_endpoint(limit: int = 500) -> dict[str, Any]:
     """Retrieve live real-money execution win/loss reports."""
     if state.mode == "live":
-        await sync_live_settlements()
+        await sync_live_settlements(full_sync=True)
 
     live_reports = [
         r for r in state.win_loss_reports
         if (r.get("execution_mode") == "live" or r.get("bot_type") == "live")
-        and ("SEP01" in r.get("ticker", "") or str(r.get("timestamp_utc", "")).startswith("2026-09-01"))
     ]
     summary = _calculate_15m_metrics(live_reports)
+    cur_bal = 21.97
+    if state.live_portfolio and "balance_dollars" in state.live_portfolio:
+        try:
+            cur_bal = float(state.live_portfolio["balance_dollars"])
+        except Exception:
+            pass
+    elif state.order_client and hasattr(state.order_client, "shard_balances"):
+        b2 = state.order_client.shard_balances.get(2)
+        if b2:
+            cur_bal = float(b2)
+    summary["current_balance"] = round(cur_bal, 2)
     summary["starting_capital"] = 25.00
-    summary["current_balance"] = round(25.00 + summary["total_pnl"], 2)
     return {
         "summary": summary,
         "reports": live_reports[:limit],
@@ -3631,7 +3844,6 @@ async def get_win_loss_reports_endpoint(
     live_reports = [
         r for r in all_reports
         if (r.get("execution_mode") == "live" or r.get("bot_type") == "live")
-        and ("SEP01" in r.get("ticker", "") or str(r.get("timestamp_utc", "")).startswith("2026-09-01"))
     ]
     sim_reports = [r for r in all_reports if r.get("execution_mode") in ("simulated", "mock", "paper", None)]
 
@@ -3783,8 +3995,8 @@ async def get_full_24h_reports(
     gross_losses = abs(sum(r.get("pnl", 0.0) for r in reports if r.get("pnl", 0.0) < 0))
     profit_factor = (gross_profits / gross_losses) if gross_losses > 0 else (99.9 if gross_profits > 0 else 1.0)
     
-    if state.mode == "live" or mode == "live":
-        current_equity = float(state.live_portfolio.get("balance_dollars", 28.20)) if state.live_portfolio else float(state.sim_agent._portfolio.equity if state.sim_agent else 100.0)
+    if state.mode == "live" or mode == "live" or execution_mode == "live":
+        current_equity = float(state.live_portfolio.get("balance_dollars", 21.97)) if state.live_portfolio else float(state.sim_agent._portfolio.equity if state.sim_agent else 100.0)
     else:
         current_equity = float(state.sim_agent._portfolio.equity) if state.sim_agent else 100.0
 
@@ -4267,7 +4479,48 @@ async def unlock_guardrail_cycle_endpoint(cycle_key: str) -> dict[str, Any]:
     """Manually release a 1-trade-per-cycle lock."""
     state.guardrails_agent.unlock_cycle(cycle_key)
     state.is_dirty = True
-    return {"success": True, "message": f"Cycle lock '{cycle_key}' released.", "status": state.guardrails_agent.get_status()}
+# ---------------------------------------------------------------------------
+# Pre-Deployment Bot Auditor & Certification Gate Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/bot/audit/status")
+async def get_bot_audit_status_endpoint() -> dict[str, Any]:
+    """Retrieve live pre-deployment certification status for all bots and active strategy."""
+    all_certs = state.bot_auditor.get_all_certifications()
+    active_strat = state.active_strategy_bot
+    active_cert = state.bot_auditor.get_certification(active_strat)
+    return {
+        **all_certs,
+        "active_strategy_bot": active_strat,
+        "active_bot_certified": state.bot_auditor.is_certified(active_strat),
+        "active_bot_report": active_cert.to_dict() if active_cert else None,
+    }
+
+
+class CertifyBotRequest(BaseModel):
+    bot_id: Optional[str] = None
+
+
+@app.post("/api/bot/audit/certify")
+async def certify_bot_endpoint(req: CertifyBotRequest) -> dict[str, Any]:
+    """Run on-demand pre-deployment audit certification across bots."""
+    target_bots = [req.bot_id] if req.bot_id else [
+        "3_step_domination_bot",
+        "dominion_2_bot",
+        "macro_trend_dominion",
+        "macro_onnx",
+    ]
+    reports = {}
+    for bid in target_bots:
+        bot_inst = resolve_bot_instance(bid)
+        rep = state.bot_auditor.audit_bot(bid, bot_inst, mode=state.mode)
+        reports[bid] = rep.to_dict()
+    state.is_dirty = True
+    return {
+        "success": True,
+        "reports": reports,
+        "all_certified": all(r.get("is_certified", False) for r in reports.values()),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -4284,6 +4537,36 @@ async def get_system_resources_endpoint() -> dict[str, Any]:
 async def trigger_manual_gc_endpoint(generation: int = 1) -> dict[str, Any]:
     """Execute a controlled deterministic garbage collection sweep."""
     return state.system_governor.trigger_controlled_gc_sweep(generation=generation)
+
+
+# ---------------------------------------------------------------------------
+# Continuous ONNX Model Training Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/api/training/status")
+async def get_training_status_endpoint() -> dict[str, Any]:
+    """Retrieve real-time telemetry for continuous background ONNX model training."""
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        return state.continuous_trainer.get_status()
+    return {"status": "NOT_INITIALIZED", "is_running": False}
+
+
+@app.post("/api/training/pause")
+async def pause_training_endpoint() -> dict[str, Any]:
+    """Temporarily pause background ONNX model training."""
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        state.continuous_trainer.pause()
+        return {"success": True, "message": "Continuous training paused.", "status": state.continuous_trainer.get_status()}
+    return {"success": False, "message": "Trainer not initialized."}
+
+
+@app.post("/api/training/resume")
+async def resume_training_endpoint() -> dict[str, Any]:
+    """Resume continuous background ONNX model training."""
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        state.continuous_trainer.resume()
+        return {"success": True, "message": "Continuous training resumed.", "status": state.continuous_trainer.get_status()}
+    return {"success": False, "message": "Trainer not initialized."}
 
 
 
@@ -4516,14 +4799,22 @@ def _build_full_state_payload() -> dict[str, Any]:
         "settings": {
             "ai_auto_trade": state.ai_auto_trade,
             "active_strategy_bot": state.active_strategy_bot,
+            "bot_certified": state.bot_auditor.is_certified(state.active_strategy_bot),
             "mode": state.mode,
             "timeframe": state.active_timeframe.value,
+            "domination_discount_price": float(state.domination_discount_price),
+        },
+        "bot_audit_status": {
+            "active_bot": state.active_strategy_bot,
+            "is_certified": state.bot_auditor.is_certified(state.active_strategy_bot),
+            "report": state.bot_auditor.get_certification(state.active_strategy_bot).to_dict() if state.bot_auditor.get_certification(state.active_strategy_bot) else None,
         },
         "integrity_status": state.integrity_agent.get_latest_status(),
         "compliance_status": state.law_order_agent.get_compliance_status(),
         "guardrails_status": state.guardrails_agent.get_status(),
         "token_credit_status": state.token_credit_agent.get_status(),
         "btc_orderflow": state.btc_orderflow_feed.get_orderflow_summary() if hasattr(state, "btc_orderflow_feed") and state.btc_orderflow_feed else None,
+        "continuous_training": state.continuous_trainer.get_status() if hasattr(state, "continuous_trainer") and state.continuous_trainer else None,
     }
 
 

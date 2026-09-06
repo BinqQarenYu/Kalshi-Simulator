@@ -38,6 +38,7 @@ export function App() {
     triggerKillSwitch,
     selectStrategyBot,
     testBotTrade,
+    updateDominationDiscountPrice,
   } = useKalshiWebSocket();
 
   const [mainView, setMainView] = useState<'trading' | 'analytics'>('trading');
@@ -169,6 +170,7 @@ export function App() {
         reportsCount={Array.isArray(data.win_loss_reports) ? data.win_loss_reports.length : 0}
         integrityStatus={data.integrity_status}
         complianceStatus={data.compliance_status}
+        botAuditStatus={data.bot_audit_status}
         systemResources={data.system_resources}
         onToggleAI={toggleAIAutoTrade}
         onToggleMode={toggleFeedMode}
@@ -389,6 +391,8 @@ export function App() {
                     onSelectStrategy={selectStrategyBot}
                     onTestBot={!isLive ? handleTestBot : undefined}
                     onOpenReports={() => setIsReportsOpen(true)}
+                    dominationDiscountPrice={data.settings?.domination_discount_price ?? data.ai_signals?.discount_limit_price ?? 0.48}
+                    onUpdateDiscountPrice={updateDominationDiscountPrice}
                   />
                 </div>
               ) : (
@@ -437,6 +441,8 @@ export function App() {
                   onSelectStrategy={selectStrategyBot}
                   onTestBot={undefined}
                   onOpenReports={() => setIsReportsOpen(true)}
+                  dominationDiscountPrice={data.settings?.domination_discount_price ?? data.ai_signals?.discount_limit_price ?? 0.48}
+                  onUpdateDiscountPrice={updateDominationDiscountPrice}
                 />
               </>
             ) : (
@@ -446,6 +452,8 @@ export function App() {
                 onSelectStrategy={selectStrategyBot}
                 onTestBot={handleTestBot}
                 onOpenReports={() => setIsReportsOpen(true)}
+                dominationDiscountPrice={data.settings?.domination_discount_price ?? data.ai_signals?.discount_limit_price ?? 0.48}
+                onUpdateDiscountPrice={updateDominationDiscountPrice}
               />
             )}
           </div>

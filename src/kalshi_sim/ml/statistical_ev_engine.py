@@ -162,6 +162,7 @@ class StatisticalEVEngine:
         max_position_size: int = 50,
         vpin: float = 0.0,
         prob_wait: float = 0.0,
+        fee_override: Optional[Decimal] = None,
     ) -> ExpectedValueResult:
         """Calculate the most profitable side (YES vs NO) based on Expected Value and Kelly sizing.
 
@@ -174,10 +175,13 @@ class StatisticalEVEngine:
             max_position_size: Hard cap on maximum contracts per trade.
             vpin: Current Volume-Synchronized Probability of Informed Trading score.
             prob_wait: Estimated probability of chop / stationary regime (Label 2: WAIT).
+            fee_override: Optional fee override (e.g. Decimal("0.00") for maker limit orders).
 
         Returns:
             ExpectedValueResult: Actionable execution decision with full math diagnostics.
         """
+        active_fee = fee_override if fee_override is not None else self.fee_per_contract
+
         # 1. Check if WAIT regime dominates (chop / no momentum)
         if prob_wait > 0.0 and prob_wait >= max(prob_up, prob_down):
             chosen_p = max(prob_up, prob_down)
@@ -189,7 +193,7 @@ class StatisticalEVEngine:
                 market_price=chosen_ask,
                 expected_value=Decimal("0.00"),
                 net_expected_value=Decimal("0.00"),
-                fee_per_contract=self.fee_per_contract,
+                fee_per_contract=active_fee,
                 statistical_edge=0.0,
                 kelly_fraction=0.0,
                 recommended_contracts=0,
@@ -221,14 +225,14 @@ class StatisticalEVEngine:
         # Net EV (post-fee): E[YES_net] = P(YES) - Ask_YES - Fee
         p_yes_dec = Decimal(str(round(p_yes, 4)))
         ev_yes_gross = p_yes_dec * (Decimal("1.00") - yes_ask) - (Decimal("1.00") - p_yes_dec) * yes_ask
-        ev_yes_net = ev_yes_gross - self.fee_per_contract
-        edge_yes = p_yes - float(yes_ask) - float(self.fee_per_contract)
+        ev_yes_net = ev_yes_gross - active_fee
+        edge_yes = p_yes - float(yes_ask) - float(active_fee)
 
         # 4. Compute Gross and Net Expected Value (EV) for NO:
         p_no_dec = Decimal(str(round(p_no, 4)))
         ev_no_gross = p_no_dec * (Decimal("1.00") - no_ask) - (Decimal("1.00") - p_no_dec) * no_ask
-        ev_no_net = ev_no_gross - self.fee_per_contract
-        edge_no = p_no - float(no_ask) - float(self.fee_per_contract)
+        ev_no_net = ev_no_gross - active_fee
+        edge_no = p_no - float(no_ask) - float(active_fee)
 
         # 5. Compare both sides and select the direction with higher Net EV
         if ev_yes_net >= ev_no_net:
@@ -255,7 +259,7 @@ class StatisticalEVEngine:
                 market_price=chosen_ask,
                 expected_value=chosen_ev_gross,
                 net_expected_value=chosen_ev_net,
-                fee_per_contract=self.fee_per_contract,
+                fee_per_contract=active_fee,
                 statistical_edge=chosen_edge,
                 kelly_fraction=0.0,
                 recommended_contracts=0,
@@ -271,13 +275,13 @@ class StatisticalEVEngine:
                 market_price=chosen_ask,
                 expected_value=chosen_ev_gross,
                 net_expected_value=chosen_ev_net,
-                fee_per_contract=self.fee_per_contract,
+                fee_per_contract=active_fee,
                 statistical_edge=chosen_edge,
                 kelly_fraction=0.0,
                 recommended_contracts=0,
                 rationale=(
                     f"Sub-threshold Net EV: Net EV=${chosen_ev_net:.3f} (< ${self.min_ev_threshold:.2f}) "
-                    f"after ${self.fee_per_contract:.2f}/ct fee, or Edge={chosen_edge:.1%} (< {self.min_edge_pct:.1%})"
+                    f"after ${active_fee:.2f}/ct fee, or Edge={chosen_edge:.1%} (< {self.min_edge_pct:.1%})"
                 ),
             )
 
@@ -291,7 +295,7 @@ class StatisticalEVEngine:
                 market_price=chosen_ask,
                 expected_value=chosen_ev_gross,
                 net_expected_value=chosen_ev_net,
-                fee_per_contract=self.fee_per_contract,
+                fee_per_contract=active_fee,
                 statistical_edge=chosen_edge,
                 kelly_fraction=0.0,
                 recommended_contracts=0,
@@ -302,7 +306,7 @@ class StatisticalEVEngine:
             )
 
         # 8. Compute Fractional Kelly Position Sizing on Effective Net Cost
-        effective_cost = float(chosen_ask + self.fee_per_contract)
+        effective_cost = float(chosen_ask + active_fee)
         b = max(0.01, (1.0 - effective_cost) / effective_cost)
 
         # Kelly fraction f* = (p * b - (1 - p)) / b
@@ -317,7 +321,7 @@ class StatisticalEVEngine:
         kelly_capital = total_equity * Decimal(str(round(tapered_kelly, 6)))
         allocated_capital = min(max_capital_to_risk, kelly_capital)
 
-        unit_cost = chosen_ask + self.fee_per_contract
+        unit_cost = chosen_ask + active_fee
         contracts = int(allocated_capital / unit_cost) if unit_cost > 0 else 0
         contracts = max(1, min(max_position_size, contracts))
 
@@ -328,7 +332,7 @@ class StatisticalEVEngine:
 
         rationale = (
             f"Stage 2 Optimal EV: {chosen_side.value.upper()} | "
-            f"AI_P={chosen_p:.1%} vs MktPrice=${chosen_ask:.2f} (Fee=${self.fee_per_contract:.2f}) | "
+            f"AI_P={chosen_p:.1%} vs MktPrice=${chosen_ask:.2f} (Fee=${active_fee:.2f}) | "
             f"Net EV=+${chosen_ev_net:.3f}/ct | Net Edge=+{chosen_edge:.1%} | "
             f"Kelly={scaled_kelly:.1%}→{tapered_kelly:.1%}{taper_note}"
         )
@@ -340,7 +344,7 @@ class StatisticalEVEngine:
             market_price=chosen_ask,
             expected_value=chosen_ev_gross,
             net_expected_value=chosen_ev_net,
-            fee_per_contract=self.fee_per_contract,
+            fee_per_contract=active_fee,
             statistical_edge=chosen_edge,
             kelly_fraction=tapered_kelly,
             recommended_contracts=contracts,

@@ -52,6 +52,8 @@ class DominationDecision:
     edge_pct: float
     time_to_expiry_s: float
     spot_diff: float
+    order_type: str = "limit"
+    limit_price: float = 0.48
 
 
 @dataclass(frozen=True)
@@ -81,9 +83,10 @@ class ThreeStepDominationBot:
         take_profit_price_threshold: Decimal = Decimal("0.95"),  # 95c tail risk ceiling
         min_take_profit_roi: float = 0.20,  # +20% minimum ROI for early exit
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
-        fee_per_contract: Decimal = Decimal("0.01"),  # Real exchange taker fee
+        fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
         min_spot_diff: float = 35.0,  # $35 minimum spot-strike distance (skip coin-flip territory)
-        max_entry_price: float = 0.62,  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
+        max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
+        discount_limit_price: Decimal = Decimal("0.48"),  # Configurable discount sniper ceiling
     ) -> None:
         self.min_edge_pct = min_edge_pct
         self.min_ev_dollars = min_ev_dollars
@@ -95,7 +98,8 @@ class ThreeStepDominationBot:
         self.late_cycle_roi = late_cycle_roi
         self.fee_per_contract = fee_per_contract
         self.min_spot_diff = min_spot_diff
-        self.max_entry_price = max_entry_price
+        self.max_entry_price = Decimal(str(max_entry_price))
+        self.discount_limit_price = max(Decimal("0.10"), min(Decimal("0.50"), discount_limit_price))
 
         # Underlying Stage 2 EV & Quarter-Kelly Optimizer
         self._ev_engine = StatisticalEVEngine(
@@ -107,6 +111,13 @@ class ThreeStepDominationBot:
             vpin_safe_threshold=vpin_safe_threshold,
             vpin_toxic_threshold=vpin_toxic_threshold,
         )
+
+    def set_discount_limit_price(self, new_price: Decimal | float | str) -> None:
+        """Dynamically update the maker discount limit price ceiling."""
+        dec_price = Decimal(str(new_price))
+        clamped = max(Decimal("0.10"), min(Decimal("0.50"), dec_price))
+        self.discount_limit_price = clamped
+        logger.info("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
 
     def evaluate(
         self,
@@ -162,6 +173,11 @@ class ThreeStepDominationBot:
         # Standard Kalshi 15M cycle: T in [0, 900s]
         tau_mins = max(0.1, time_to_expiry_s / 60.0)
 
+        # Candidate pricing at user discount limit ceiling (Option B - Resting Maker Limit)
+        discount_price = self.discount_limit_price
+        eff_yes_price = min(best_yes_ask, discount_price) if best_yes_ask is not None else discount_price
+        eff_no_price = min(best_no_ask, discount_price) if best_no_ask is not None else discount_price
+
         # -------------------------------------------------------------------
         # PLAYBOOK 3: Late-Cycle High-Probability Gamma Snub (0:45s - 4:00m left)
         # -------------------------------------------------------------------
@@ -176,19 +192,20 @@ class ThreeStepDominationBot:
 
             # Digital Option Cumulative Probability Phi(z)
             prob_yes_raw = _standard_normal_cdf(z_score)
-            prob_yes = max(0.02, min(0.98, prob_yes_raw))
+            prob_yes = max(0.001, min(0.999, prob_yes_raw))
             prob_no = 1.0 - prob_yes
             prob_wait = 0.05
 
             ev_res = self._ev_engine.compute_optimal_execution(
                 prob_up=prob_yes,
                 prob_down=prob_no,
-                best_yes_ask=best_yes_ask,
-                best_no_ask=best_no_ask,
+                best_yes_ask=eff_yes_price,
+                best_no_ask=eff_no_price,
                 total_equity=total_equity,
                 max_position_size=max_position_size,
                 vpin=estimated_vpin,
                 prob_wait=prob_wait,
+                fee_override=Decimal("0.00"),
             )
 
             side_str = ev_res.recommended_side.value if ev_res.recommended_side else "wait"
@@ -199,7 +216,7 @@ class ThreeStepDominationBot:
                 rationale = (
                     f"[{playbook_title}] High-Certainty Expiration Harvest | "
                     f"T={int(time_to_expiry_s)}s left | Spot Diff: {spot_diff:+.2f} | "
-                    f"True Prob: {target_prob*100:.1f}% vs Market: ${ev_res.market_price} | "
+                    f"True Prob: {target_prob*100:.1f}% vs Discount Target: ${discount_price:.2f} | "
                     f"Net EV: +${ev_res.expected_value:.2f}/ct | Edge: {edge_val*100:+.1f}% | "
                     f"Kelly: {ev_res.kelly_fraction*100:.1f}% ({ev_res.recommended_contracts} cts)"
                 )
@@ -207,9 +224,10 @@ class ThreeStepDominationBot:
                 rationale = (
                     f"[{playbook_title}] In Range | T={int(time_to_expiry_s)}s left | "
                     f"Spot Diff: {spot_diff:+.2f} | True Prob: YES {prob_yes*100:.1f}% vs NO {prob_no*100:.1f}% | "
-                    f"No edge exceeding {self.min_edge_pct*100:.0f}% post-fee."
+                    f"No edge exceeding {self.min_edge_pct*100:.0f}% at ${discount_price:.2f} discount."
                 )
 
+            actual_ask_p3 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -222,6 +240,7 @@ class ThreeStepDominationBot:
                 time_to_expiry_s=time_to_expiry_s,
                 spot_diff=spot_diff,
                 rationale=rationale,
+                actual_market_ask=actual_ask_p3,
             )
 
         # -------------------------------------------------------------------
@@ -243,19 +262,20 @@ class ThreeStepDominationBot:
             z_score = (spot_diff + book_skew * 12.0) / expected_vol
 
             prob_yes_raw = _standard_normal_cdf(z_score)
-            prob_yes = max(0.10, min(0.90, prob_yes_raw))
+            prob_yes = max(0.001, min(0.999, prob_yes_raw))
             prob_no = 1.0 - prob_yes
             prob_wait = 0.12
 
             ev_res = self._ev_engine.compute_optimal_execution(
                 prob_up=prob_yes,
                 prob_down=prob_no,
-                best_yes_ask=best_yes_ask,
-                best_no_ask=best_no_ask,
+                best_yes_ask=eff_yes_price,
+                best_no_ask=eff_no_price,
                 total_equity=total_equity,
                 max_position_size=max_position_size,
                 vpin=estimated_vpin,
                 prob_wait=prob_wait,
+                fee_override=Decimal("0.00"),
             )
 
             if ev_res.has_positive_edge and ev_res.recommended_side:
@@ -272,6 +292,7 @@ class ThreeStepDominationBot:
                     f"Spot Diff: {spot_diff:+.2f} | Awaiting high-conviction order flow edge."
                 )
 
+            actual_ask_p2 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -284,6 +305,7 @@ class ThreeStepDominationBot:
                 time_to_expiry_s=time_to_expiry_s,
                 spot_diff=spot_diff,
                 rationale=rationale,
+                actual_market_ask=actual_ask_p2,
             )
 
         # -------------------------------------------------------------------
@@ -299,19 +321,20 @@ class ThreeStepDominationBot:
             z_score = spot_diff / expected_vol
 
             prob_yes_raw = _standard_normal_cdf(z_score)
-            prob_yes = max(0.20, min(0.80, prob_yes_raw))
+            prob_yes = max(0.001, min(0.999, prob_yes_raw))
             prob_no = 1.0 - prob_yes
             prob_wait = 0.20
 
             ev_res = self._ev_engine.compute_optimal_execution(
                 prob_up=prob_yes,
                 prob_down=prob_no,
-                best_yes_ask=best_yes_ask,
-                best_no_ask=best_no_ask,
+                best_yes_ask=eff_yes_price,
+                best_no_ask=eff_no_price,
                 total_equity=total_equity,
                 max_position_size=max_position_size,
                 vpin=estimated_vpin,
                 prob_wait=prob_wait,
+                fee_override=Decimal("0.00"),
             )
 
             if ev_res.has_positive_edge and ev_res.recommended_side:
@@ -327,6 +350,7 @@ class ThreeStepDominationBot:
                     f"Spot Diff: {spot_diff:+.2f} | Scanning for momentum velocity across strike."
                 )
 
+            actual_ask_p1 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -339,6 +363,7 @@ class ThreeStepDominationBot:
                 time_to_expiry_s=time_to_expiry_s,
                 spot_diff=spot_diff,
                 rationale=rationale,
+                actual_market_ask=actual_ask_p1,
             )
 
         # Expiry lock window (<45s)
@@ -363,11 +388,14 @@ class ThreeStepDominationBot:
         time_to_expiry_s: float,
         spot_diff: float,
         rationale: str,
+        actual_market_ask: Optional[float] = None,
     ) -> DominationDecision:
         """Construct normalized DominationDecision object with dynamic price cap protection."""
+        discount_price_val = float(self.discount_limit_price)
+
         # Dynamic Two-Tier Entry Price Cap (Q3 Winning Choice)
         if ev_res.recommended_side in (OrderSide.YES, OrderSide.NO) and ev_res.recommended_contracts > 0:
-            target_ask = float(ev_res.market_price)
+            target_ask = actual_market_ask if actual_market_ask is not None else float(ev_res.market_price)
             # Tier 1: Absolute hard ceiling above $0.72 (inverted R:R suicide)
             if target_ask > 0.72:
                 return self._build_wait_decision(
@@ -418,6 +446,19 @@ class ThreeStepDominationBot:
 
         is_yes = ev_res.recommended_side == OrderSide.YES
         is_no = ev_res.recommended_side == OrderSide.NO
+        chosen_side_str = ev_res.recommended_side.value if ev_res.recommended_side else "wait"
+
+        if (is_yes or is_no) and ev_res.recommended_contracts > 0:
+            target_side = chosen_side_str.upper()
+            potential_reward = 1.0 - discount_price_val
+            payoff_mult = potential_reward / discount_price_val if discount_price_val > 0 else 1.0
+            target_prob = p_up if is_yes else p_down
+            rationale = (
+                f"[{playbook_title}] Discount Sniper | Resting Limit BUY {target_side} @ ${discount_price_val:.2f} ($0.00 Fee) | "
+                f"T={int(time_to_expiry_s)}s left | Spot Diff: {spot_diff:+.2f} | "
+                f"Model Prob: {target_prob*100:.1f}% | Risk: ${discount_price_val:.2f} | "
+                f"Reward: +${potential_reward:.2f} ({payoff_mult:.2f}x) | Kelly: {ev_res.recommended_contracts} cts"
+            )
 
         return DominationDecision(
             strategy_id=self.STRATEGY_ID,
@@ -435,12 +476,14 @@ class ThreeStepDominationBot:
             edge_no=round(float(ev_res.statistical_edge) if is_no else 0.0, 4),
             kelly_f_yes=round(float(ev_res.kelly_fraction) if is_yes else 0.0, 4),
             kelly_f_no=round(float(ev_res.kelly_fraction) if is_no else 0.0, 4),
-            recommended_side=ev_res.recommended_side.value if ev_res.recommended_side else "wait",
+            recommended_side=chosen_side_str,
             recommended_contracts=ev_res.recommended_contracts,
             rationale=rationale,
             edge_pct=round(float(ev_res.statistical_edge) * 100.0, 2),
             time_to_expiry_s=round(time_to_expiry_s, 1),
             spot_diff=round(spot_diff, 2),
+            order_type="limit",
+            limit_price=discount_price_val,
         )
 
     def _build_wait_decision(
@@ -474,6 +517,8 @@ class ThreeStepDominationBot:
             edge_pct=0.0,
             time_to_expiry_s=round(time_to_expiry_s, 1),
             spot_diff=round(spot_diff, 2),
+            order_type="limit",
+            limit_price=float(self.discount_limit_price),
         )
 
     def evaluate_exit(

@@ -103,9 +103,9 @@ class MacroTrendDominionBot:
         fee_per_contract: Decimal = Decimal("0.01"),
         min_spot_diff: float = 35.0,
         chop_spot_diff: float = 50.0,
-        max_entry_price: float = 0.62,
-        hard_kill_price: float = 0.68,
-        min_entry_price: float = 0.30,
+        max_entry_price: Decimal = Decimal("0.62"),
+        hard_kill_price: Decimal = Decimal("0.68"),
+        min_entry_price: Decimal = Decimal("0.30"),
         macro_bull_threshold_pct: float = 0.15,  # +0.15% 1-hour return classifies as BULL
         macro_bear_threshold_pct: float = -0.15,  # -0.15% 1-hour return classifies as BEAR
         max_spot_history_seconds: float = 7200.0,  # 2 hours rolling buffer
@@ -124,9 +124,9 @@ class MacroTrendDominionBot:
         self.fee_per_contract = fee_per_contract
         self.min_spot_diff = min_spot_diff
         self.chop_spot_diff = chop_spot_diff
-        self.max_entry_price = max_entry_price
-        self.hard_kill_price = hard_kill_price
-        self.min_entry_price = min_entry_price
+        self.max_entry_price = Decimal(str(max_entry_price))
+        self.hard_kill_price = Decimal(str(hard_kill_price))
+        self.min_entry_price = Decimal(str(min_entry_price))
         self.macro_bull_threshold_pct = macro_bull_threshold_pct
         self.macro_bear_threshold_pct = macro_bear_threshold_pct
         self.max_spot_history_seconds = max_spot_history_seconds

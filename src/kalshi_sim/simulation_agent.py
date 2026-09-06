@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 import time
+import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from decimal import Decimal
@@ -21,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
+from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
 from kalshi_sim.db import DatabaseWriter, get_db_writer
 from kalshi_sim.execution_logger import ExecutionLogger
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
@@ -79,6 +82,7 @@ class SimulationAgent:
         spot_price_getter: Optional[Callable[[], Decimal]] = None,
         guardrails: Optional[AgentGuardrails] = None,
         btc_orderflow_feed: Optional[BtcOrderflowFeed] = None,
+        bot_auditor: Optional[BotDeploymentAuditor] = None,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
@@ -87,6 +91,7 @@ class SimulationAgent:
         self._spot_price_getter = spot_price_getter
         self._guardrails = guardrails or AgentGuardrails()
         self._btc_orderflow_feed = btc_orderflow_feed or BtcOrderflowFeed()
+        self.bot_auditor = bot_auditor or BotDeploymentAuditor(guardrails=self._guardrails)
 
         # Strategy Portfolios ($15 each starting capital)
         self._portfolio_macro_trend = Portfolio(starting_balance=starting_capital)
@@ -103,6 +108,15 @@ class SimulationAgent:
         self.active_strategy_bot: str = "3_step_domination_bot"
         self.execution_mode: str = "simulated"
         self._db_writer = db_writer or get_db_writer()
+
+        # Run Pre-Deployment Audit Certification Gate on all candidate bots
+        for b_id, b_inst in [
+            ("3_step_domination_bot", self._domination_bot),
+            ("dominion_2_bot", self._dominion2_bot),
+            ("macro_trend_dominion", self._macro_trend_bot),
+            ("macro_onnx", self._macro_trend_bot),
+        ]:
+            self.bot_auditor.audit_bot(b_id, b_inst, mode=self.execution_mode)
 
         # Market metadata cache (populated by ingestion agent)
         self._market_cache: dict[str, MarketInfo] = {}
@@ -203,9 +217,10 @@ class SimulationAgent:
             # Process and match any active resting limit orders on this book
             filled_resting = self._simulator.process_resting_orders(book)
             for ord, fill in filled_resting:
-                if self._portfolio.can_afford(fill.cost):
+                target_p = self._portfolio_domination if ("domination" in ord.reasoning.lower() or "3_step" in ord.reasoning.lower()) else self._portfolio
+                if target_p.can_afford(fill.cost):
                     tf = self._ticker_timeframe_map.get(ticker, Timeframe.FIFTEEN_MIN)
-                    self._portfolio.open_position(fill, tf)
+                    target_p.open_position(fill, tf)
                     if self._exec_logger:
                         self._exec_logger.log_execution(ord, fill)
 
@@ -214,19 +229,53 @@ class SimulationAgent:
         finally:
             self._evaluating_tickers.discard(ticker)
 
+    def get_bot_instance(self, bot_id: str) -> Any:
+        """Resolve bot instance for strategy identification and auditing."""
+        if bot_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend", "macro_trend_dominion", "macro_trend_dominion_bot"):
+            return self._macro_trend_bot
+        elif bot_id in ("dominion_2_bot", "dominion2", "dominion_v2"):
+            return self._dominion2_bot
+        elif bot_id == "3_step_domination_bot":
+            return self._domination_bot
+        elif bot_id == "onnx_microstructure_bot":
+            return self._onnx_engine
+        return None
+
     def set_active_strategy(self, strategy_id: str) -> None:
-        """Switch active strategy bot ('macro_onnx', 'macro_trend_dominion', '3_step_domination_bot', 'dominion_2_bot', or 'onnx_microstructure_bot')."""
-        if strategy_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
-            self.active_strategy_bot = "macro_onnx"
-            logger.info("SimulationAgent active strategy switched to: %s", self.active_strategy_bot)
-        elif strategy_id in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
-            self.active_strategy_bot = "macro_trend_dominion"
-            logger.info("SimulationAgent active strategy switched to: %s", self.active_strategy_bot)
-        elif strategy_id in ("dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot", "dominion2", "dominion_v2"):
-            if strategy_id in ("dominion2", "dominion_v2"):
-                strategy_id = "dominion_2_bot"
-            self.active_strategy_bot = strategy_id
-            logger.info("SimulationAgent active strategy switched to: %s", strategy_id)
+        """Switch active strategy bot with mandatory pre-deployment audit certification gate."""
+        target = strategy_id
+        if target in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+            target = "macro_onnx"
+        elif target in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
+            target = "macro_trend_dominion"
+        elif target in ("dominion2", "dominion_v2"):
+            target = "dominion_2_bot"
+
+        # Pre-Deployment Audit Certification Gate
+        if hasattr(self, "bot_auditor"):
+            if not self.bot_auditor.is_certified(target):
+                bot_inst = self.get_bot_instance(target)
+                if bot_inst:
+                    rep = self.bot_auditor.audit_bot(target, bot_inst, mode=getattr(self, "execution_mode", "simulated"))
+                    if not rep.is_certified:
+                        fail_reasons = rep.to_dict()["failure_reasons"]
+                        logger.critical(
+                            "❌ [DEPLOYMENT BLOCKED] Strategy bot '%s' failed pre-deployment audit: %s",
+                            target,
+                            fail_reasons,
+                        )
+                        raise ValueError(f"Strategy bot '{target}' failed pre-deployment audit: {fail_reasons}")
+                else:
+                    logger.critical("❌ [DEPLOYMENT BLOCKED] Strategy bot '%s' has no registered instance", target)
+                    raise ValueError(f"Strategy bot '{target}' has no registered instance")
+
+        self.active_strategy_bot = target
+        logger.info("SimulationAgent active strategy switched to certified bot: %s", target)
+
+    def set_domination_discount_price(self, price: Decimal | float | str) -> None:
+        """Dynamically update the maker discount limit price ceiling on the domination bot."""
+        if hasattr(self, "_domination_bot") and hasattr(self._domination_bot, "set_discount_limit_price"):
+            self._domination_bot.set_discount_limit_price(price)
 
     async def _evaluate_market(self, ticker: str, book: OrderBook) -> None:
         """Evaluate trading decisions concurrently for both 3-Step Domination and ONNX Neural Net bots."""
@@ -244,6 +293,9 @@ class SimulationAgent:
             remaining_s = (market_info.expiration_time - now_utc).total_seconds()
             if remaining_s <= 0 or remaining_s > 930:
                 return
+            if remaining_s <= 45:
+                # Cycle closing window: cancel any resting maker orders on this ticker
+                self._simulator.cancel_resting_orders_for_ticker(ticker)
 
         # ===================================================================
         # STRICT ISOLATION: In LIVE mode, execute only active bot on active 15M contract; ALL secondary paper stops!
@@ -525,6 +577,8 @@ class SimulationAgent:
                             order_size,
                             " [OVERNIGHT CAUTIOUS]" if is_overnight_et else "",
                         )
+                        order_type_val = getattr(decision, "order_type", "limit")
+                        limit_price_val = Decimal(str(getattr(decision, "limit_price", self._domination_bot.discount_limit_price)))
                         await self._place_virtual_order(
                             book=book,
                             ticker=ticker,
@@ -534,6 +588,8 @@ class SimulationAgent:
                             reasoning=decision.rationale,
                             portfolio=self._portfolio_domination,
                             bot_type="3_step_domination_bot",
+                            order_type=order_type_val,
+                            limit_price=limit_price_val,
                         )
                 except Exception as exc:
                     logger.debug("Domination bot evaluation error: %s", exc)
@@ -871,15 +927,33 @@ class SimulationAgent:
         reasoning: str,
         portfolio: Optional[Portfolio] = None,
         bot_type: Optional[str] = None,
+        order_type: str = "market",
+        limit_price: Optional[Decimal] = None,
     ) -> None:
-        """Submit a virtual market order against the L2 book."""
+        """Submit a virtual market or resting limit order against the L2 book."""
         active_p = portfolio or self.portfolio
         b_type = bot_type or self.active_strategy_bot
+
+        # Pre-Trade Bot Certification Gate: Block any uncertified bot execution immediately
+        if hasattr(self, "bot_auditor") and not self.bot_auditor.is_certified(b_type):
+            now_mono = time.monotonic()
+            block_key = f"audit_blocked_{ticker}_{b_type}"
+            if not hasattr(self, "_last_guardrail_log"):
+                self._last_guardrail_log = {}
+            if now_mono - self._last_guardrail_log.get(block_key, 0.0) >= 5.0:
+                self._last_guardrail_log[block_key] = now_mono
+                logger.error(
+                    "❌ [PRE-TRADE BLOCKED] Bot '%s' is NOT CERTIFIED by the 4-pillar audit gate. Order aborted.",
+                    b_type,
+                )
+            return
 
         snapshot = active_p.get_pnl_snapshot()
         max_cost = snapshot.total_equity * MAX_POSITION_COST_PCT
 
-        if side == OrderSide.YES:
+        if order_type == "limit" and limit_price is not None:
+            est_price = limit_price
+        elif side == OrderSide.YES:
             ask = book.best_yes_ask
             est_price = ask if ask is not None else Decimal("0.50")
         else:
@@ -918,27 +992,69 @@ class SimulationAgent:
             if self._order_client is not None and b_type == self.active_strategy_bot:
                 try:
                     live_side = side.value if hasattr(side, "value") else str(side).lower()
-                    live_count = max(1, min(affordable_size, 4))  # Strict risk cap: 1-4 contracts for micro-bankroll
-                    
+                    live_count = max(1, min(affordable_size, 2))  # Strict hard cap: 1-2 contracts max for micro-bankroll
+
+                    # Check global dry-run protection
+                    live_enabled_env = os.getenv("KALSHI_LIVE_TRADING_ENABLED", "false").lower() in ("true", "1", "yes")
+                    if not live_enabled_env:
+                        dry_id = f"dry_run_{uuid.uuid4().hex[:8]}"
+                        logger.info(
+                            "[SAFETY DRY-RUN] Live trading disabled in .env. Simulating resting order %s (%s %d cts @ $%s). Cycle '%s' LOCKED.",
+                            dry_id, live_side.upper(), live_count, limit_price or est_price, ticker
+                        )
+                        self._guardrails.record_resting_order(
+                            order_id=dry_id,
+                            ticker=ticker,
+                            side=live_side,
+                            size=live_count,
+                            price=Decimal(str(limit_price if order_type == "limit" else est_price)),
+                            cycle_id=ticker,
+                            bot_type=b_type,
+                        )
+                        return
+
+                    # Anti-Burst Pre-Flight Check: Ensure no open resting order exists on Kalshi for this ticker
+                    try:
+                        open_exchange_orders = await self._order_client.get_open_orders()
+                        if open_exchange_orders:
+                            existing_ticker_orders = [o for o in open_exchange_orders if o.get("ticker") == ticker]
+                            if existing_ticker_orders:
+                                logger.warning(
+                                    "[PRE-TRADE VETO] %s already has %d resting order(s) active on Kalshi! Suppressing duplicate submission.",
+                                    ticker, len(existing_ticker_orders)
+                                )
+                                self._guardrails.record_resting_order(
+                                    order_id=existing_ticker_orders[0].get("order_id", "ext_rest"),
+                                    ticker=ticker,
+                                    side=live_side,
+                                    size=live_count,
+                                    price=Decimal(str(limit_price if order_type == "limit" else est_price)),
+                                    cycle_id=ticker,
+                                    bot_type=b_type,
+                                )
+                                return
+                    except Exception as chk_exc:
+                        logger.debug("Failed pre-flight open order query: %s", chk_exc)
+
                     market_info = self._market_cache.get(ticker)
                     live_exchange_index = getattr(market_info, "exchange_index", None)
                     if live_exchange_index is None and ticker.startswith("KXBTC"):
                         live_exchange_index = 2
-                        
+
                     live_order = await self._order_client.place_order(
                         ticker=ticker,
                         side=live_side,
                         count=live_count,
                         action="buy",
-                        order_type="market",
-                        price_dollars=est_price,
+                        order_type=order_type,
+                        price_dollars=limit_price if order_type == "limit" else est_price,
                         exchange_index=live_exchange_index,
                     )
                     if live_order:
                         order_id = live_order.get("order_id", "live_ord")
                         fill_count_str = live_order.get("fill_count", "0.00")
                         actual_fills = int(float(fill_count_str))
-                        
+
                         if actual_fills > 0:
                             avg_price = float(live_order.get("average_fill_price", "0.50"))
                             fee = float(live_order.get("average_fee_paid", "0.0007"))
@@ -1008,11 +1124,27 @@ class SimulationAgent:
                                 except Exception as exc:
                                     logger.debug("Failed to dispatch live order telemetry: %s", exc)
                         else:
-                            self._guardrails.record_order_attempt(ticker)
-                            logger.info(
-                                "[KALSHI LIVE PRODUCTION EXCHANGE] IOC Order %s had 0 fills (unmatched in orderbook). Cooldown enforced.",
-                                order_id,
-                            )
+                            # 0 Fills: Either a resting maker limit order or unmatched IOC
+                            if order_type == "limit":
+                                self._guardrails.record_resting_order(
+                                    order_id=f"live_{order_id}",
+                                    ticker=ticker,
+                                    side=live_side,
+                                    size=live_count,
+                                    price=Decimal(str(limit_price if limit_price else est_price)),
+                                    cycle_id=ticker,
+                                    bot_type=b_type,
+                                )
+                                logger.info(
+                                    "[KALSHI LIVE PRODUCTION EXCHANGE] Resting Maker Limit Order %s PLACED on book (%d cts @ $%s). Cycle '%s' LOCKED to prevent duplicate entries.",
+                                    order_id, live_count, limit_price or est_price, ticker,
+                                )
+                            else:
+                                self._guardrails.record_order_attempt(ticker)
+                                logger.info(
+                                    "[KALSHI LIVE PRODUCTION EXCHANGE] IOC Order %s had 0 fills (unmatched in orderbook). Cooldown enforced.",
+                                    order_id,
+                                )
                     else:
                         self._guardrails.record_order_attempt(ticker)
                         logger.warning(
@@ -1025,6 +1157,26 @@ class SimulationAgent:
 
         # Micro-bankroll protection & realism: cap simulated size to live risk limits (1-4 contracts)
         sim_size = max(1, min(affordable_size, 4))
+
+        if order_type == "limit" and limit_price is not None:
+            est_cost = limit_price * sim_size
+            if not active_p.can_afford(est_cost):
+                logger.warning("[%s] Cannot afford resting limit order: $%s > balance $%s", b_type, est_cost, active_p.balance)
+                return
+            l2_book = book.get_state() if hasattr(book, "get_state") else book
+            resting_ord = self._simulator.simulate_limit_order(
+                book=l2_book,
+                side=side,
+                size=sim_size,
+                limit_price=limit_price,
+                timeframe=timeframe,
+                reasoning=reasoning,
+            )
+            logger.info(
+                "[%s RESTING MAKER LIMIT ORDER PLACED] %s %d cts @ $%s on %s ($0.00 Fee) | OrderID: %s",
+                b_type, side.value.upper(), sim_size, limit_price, ticker, resting_ord.order_id,
+            )
+            return
 
         # Calculate recent spot velocity for adverse selection modeling
         velocity = 0.0

@@ -110,6 +110,13 @@ class OrderSimulator:
                     return True
         return False
 
+    def cancel_resting_orders_for_ticker(self, ticker: str) -> int:
+        """Cancel all resting limit orders for a given ticker."""
+        orders = self._resting_orders.pop(ticker, [])
+        if orders:
+            logger.info("CANCELLED ALL %d RESTING ORDERS for %s", len(orders), ticker)
+        return len(orders)
+
     def get_all_resting_orders(self) -> list[SimulatedOrder]:
         """Return all currently active resting limit orders."""
         all_orders = []

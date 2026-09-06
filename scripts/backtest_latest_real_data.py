@@ -410,6 +410,163 @@ def evaluate_strategy_domination_2(cycles: List[CycleData]) -> List[StrategyTrad
     return records
 
 
+def load_stream_profiles() -> Dict[str, Any]:
+    """Load pre-computed tick and depth price profiles from data/stream_profiles_cache.json."""
+    cache_path = Path("data/stream_profiles_cache.json")
+    if cache_path.exists():
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def evaluate_strategy_domination_rev3(
+    cycles: List[CycleData],
+    discount_price: float = 0.48,
+    contracts: int = 1,
+    strategy_label: Optional[str] = None,
+    profiles_cache: Optional[Dict[str, Any]] = None,
+) -> List[StrategyTradeRecord]:
+    """Replay 3-Step Domination Bot Rev 3 (Option B - Resting Maker Discount Sniper).
+
+    Guarantees:
+    1. $0.00 Maker fee (Kalshi resting limit order on CLOB).
+    2. Asymmetric Risk/Reward: Max risk = discount_price, Reward = (1.00 - discount_price).
+    3. Pre-trade filters: VPIN <= 0.40 and |Spot - Strike| >= $35 (skips coin-flip territory near strike).
+    4. Fill Invariant: Only filled if market traded at or through the limit price in real recordings.
+       If market never traded down to the discount, the resting order is auto-cancelled at 45s cutoff ($0.00 PnL, $0.00 fee).
+    """
+    disc_dec = _d(str(discount_price))
+    fee = Decimal("0.00")  # Free maker order on Kalshi
+    label = strategy_label or f"Domination Rev 3 (${discount_price:.2f})"
+    profiles = profiles_cache or {}
+    records: List[StrategyTradeRecord] = []
+
+    for c in cycles:
+        side = c.actual_side
+
+        # 1. Pre-trade guardrail checks
+        if c.vpin_score > 0.40:
+            records.append(
+                StrategyTradeRecord(
+                    cycle_index=c.cycle_index,
+                    cycle_time=c.cycle_time,
+                    ticker=c.ticker,
+                    strategy_name=label,
+                    action="VETO",
+                    side=side,
+                    entry_price=c.actual_entry,
+                    contracts=0,
+                    outcome="vetoed",
+                    pnl=Decimal("0.0"),
+                    gross_win=Decimal("0.0"),
+                    gross_loss=Decimal("0.0"),
+                    rationale=f"VPIN Toxicity Veto ({c.vpin_score:.2f} > 0.40)",
+                    macro_regime=c.macro_regime,
+                    spot_diff=c.spot_diff,
+                )
+            )
+            continue
+
+        if abs(c.spot_diff) < Decimal("35.0"):
+            records.append(
+                StrategyTradeRecord(
+                    cycle_index=c.cycle_index,
+                    cycle_time=c.cycle_time,
+                    ticker=c.ticker,
+                    strategy_name=label,
+                    action="VETO",
+                    side=side,
+                    entry_price=c.actual_entry,
+                    contracts=0,
+                    outcome="vetoed",
+                    pnl=Decimal("0.0"),
+                    gross_win=Decimal("0.0"),
+                    gross_loss=Decimal("0.0"),
+                    rationale=f"Spot-Strike Proximity Veto (|Diff|=${abs(c.spot_diff):.1f} < $35)",
+                    macro_regime=c.macro_regime,
+                    spot_diff=c.spot_diff,
+                )
+            )
+            continue
+
+        # 2. Maker Resting Fill check against real L2 orderbook & trade tape
+        prof = profiles.get(c.ticker)
+        filled = False
+        if prof:
+            if side == "yes":
+                min_p = prof.get("min_trade_yes") or prof.get("min_yes_ask")
+            else:
+                min_p = prof.get("min_trade_no") or prof.get("min_no_ask")
+
+            if min_p is not None and Decimal(str(round(min_p, 2))) <= disc_dec:
+                filled = True
+        else:
+            if c.actual_entry <= disc_dec:
+                filled = True
+
+        if not filled:
+            records.append(
+                StrategyTradeRecord(
+                    cycle_index=c.cycle_index,
+                    cycle_time=c.cycle_time,
+                    ticker=c.ticker,
+                    strategy_name=label,
+                    action="UNFILLED",
+                    side=side,
+                    entry_price=disc_dec,
+                    contracts=0,
+                    outcome="unfilled",
+                    pnl=Decimal("0.0"),
+                    gross_win=Decimal("0.0"),
+                    gross_loss=Decimal("0.0"),
+                    rationale=f"Maker Order @ ${discount_price:.2f} never reached (Auto-cancelled @ 45s)",
+                    macro_regime=c.macro_regime,
+                    spot_diff=c.spot_diff,
+                )
+            )
+            continue
+
+        # 3. Settlement evaluation
+        cycle_yes_won = c.settlement_spot >= c.strike_price
+        bot_won = (side == "yes" and cycle_yes_won) or (side == "no" and not cycle_yes_won)
+
+        if bot_won:
+            outcome = "win"
+            pnl = (Decimal("1.00") - disc_dec - fee) * Decimal(contracts)
+            gross_w = pnl
+            gross_l = Decimal("0.0")
+        else:
+            outcome = "loss"
+            pnl = (-disc_dec - fee) * Decimal(contracts)
+            gross_w = Decimal("0.0")
+            gross_l = abs(pnl)
+
+        records.append(
+            StrategyTradeRecord(
+                cycle_index=c.cycle_index,
+                cycle_time=c.cycle_time,
+                ticker=c.ticker,
+                strategy_name=label,
+                action="TAKE",
+                side=side,
+                entry_price=disc_dec,
+                contracts=contracts,
+                outcome=outcome,
+                pnl=pnl,
+                gross_win=gross_w,
+                gross_loss=gross_l,
+                rationale=f"Maker Discount Fill @ ${discount_price:.2f} ($0.00 fee) | Diff: {c.spot_diff:+.1f}",
+                macro_regime=c.macro_regime,
+                spot_diff=c.spot_diff,
+            )
+        )
+
+    return records
+
+
 def evaluate_strategy_macro_trend(cycles: List[CycleData]) -> List[StrategyTradeRecord]:
     """Replay Macro Trend Dominion (Macro Momentum + Price Corridor $0.30-$0.62 + Salvage)."""
     records: List[StrategyTradeRecord] = []
@@ -682,6 +839,8 @@ def compute_metrics(name: str, records: List[StrategyTradeRecord]) -> StrategyMe
         downside = [p for p in pnl_series if p < 0]
         if downside:
             down_std = float(np.std(downside, ddof=1)) if len(downside) > 1 else abs(downside[0])
+            if down_std <= 1e-6:
+                down_std = abs(float(np.mean(downside)))
             sortino = (mean_r / down_std * math.sqrt(len(pnl_series))) if down_std > 1e-6 else 0.0
         else:
             sortino = 99.0
@@ -743,6 +902,7 @@ def compute_regime_breakdown(records: List[StrategyTradeRecord]) -> Dict[str, Di
 def run_full_backtest() -> Dict[str, Any]:
     cycles = load_production_cycles()
     predictor = ONNXMicrostructurePredictor()
+    profiles = load_stream_profiles()
 
     base_records = evaluate_strategy_baseline(cycles)
     dom1_records = evaluate_strategy_domination_1(cycles)
@@ -754,6 +914,12 @@ def run_full_backtest() -> Dict[str, Any]:
     fusion_balanced_records = evaluate_strategy_macro_trend_onnx_fusion(
         cycles, predictor, uncertainty_distance_threshold=40.0, strategy_label="Macro+ONNX (Balanced $40)"
     )
+    rev3_48_records = evaluate_strategy_domination_rev3(
+        cycles, discount_price=0.48, strategy_label="Domination Rev 3 ($0.48)", profiles_cache=profiles
+    )
+    rev3_35_records = evaluate_strategy_domination_rev3(
+        cycles, discount_price=0.35, strategy_label="Domination Rev 3 ($0.35)", profiles_cache=profiles
+    )
 
     base_m = compute_metrics("Baseline (Historical)", base_records)
     dom1_m = compute_metrics("Domination Bot 1 (Legacy)", dom1_records)
@@ -761,6 +927,24 @@ def run_full_backtest() -> Dict[str, Any]:
     macro_m = compute_metrics("Macro Trend Dominion", macro_records)
     fusion_strict_m = compute_metrics("Macro+ONNX (Strict $50)", fusion_strict_records)
     fusion_balanced_m = compute_metrics("Macro+ONNX (Balanced $40)", fusion_balanced_records)
+    rev3_48_m = compute_metrics("Domination Rev 3 ($0.48)", rev3_48_records)
+    rev3_35_m = compute_metrics("Domination Rev 3 ($0.35)", rev3_35_records)
+
+    # Multi-level sensitivity matrix for Rev 3 Maker Discount Sniper
+    rev3_sensitivity = {}
+    for disc in [0.48, 0.45, 0.40, 0.35, 0.30]:
+        recs = evaluate_strategy_domination_rev3(
+            cycles, discount_price=disc, strategy_label=f"Domination Rev 3 (${disc:.2f})", profiles_cache=profiles
+        )
+        unfilled_cnt = sum(1 for r in recs if r.action == "UNFILLED")
+        vetoed_cnt = sum(1 for r in recs if r.action == "VETO")
+        m_obj = compute_metrics(f"Rev 3 (${disc:.2f})", recs)
+        rev3_sensitivity[disc] = {
+            "metrics": m_obj,
+            "unfilled": unfilled_cnt,
+            "vetoed": vetoed_cnt,
+            "records": recs,
+        }
 
     return {
         "cycles_count": len(cycles),
@@ -775,15 +959,20 @@ def run_full_backtest() -> Dict[str, Any]:
             "macro_trend": macro_m,
             "macro_onnx_strict": fusion_strict_m,
             "macro_onnx_balanced": fusion_balanced_m,
+            "domination_rev3_48": rev3_48_m,
+            "domination_rev3_35": rev3_35_m,
         },
+        "rev3_sensitivity": rev3_sensitivity,
         "regimes": {
             "baseline": compute_regime_breakdown(base_records),
             "macro_trend": compute_regime_breakdown(macro_records),
             "macro_onnx_strict": compute_regime_breakdown(fusion_strict_records),
             "macro_onnx_balanced": compute_regime_breakdown(fusion_balanced_records),
+            "domination_rev3_35": compute_regime_breakdown(rev3_35_records),
         },
         "recent_trades_strict": fusion_strict_records[-15:],
         "recent_trades_balanced": fusion_balanced_records[-15:],
+        "recent_trades_rev3_35": rev3_35_records[-15:],
     }
 
 
@@ -793,62 +982,72 @@ def print_comparison_table(results: Dict[str, Any]):
     dom1: StrategyMetrics = m["domination_1"]
     dom2: StrategyMetrics = m["domination_2"]
     macro: StrategyMetrics = m["macro_trend"]
-    f_strict: StrategyMetrics = m["macro_onnx_strict"]
     f_bal: StrategyMetrics = m["macro_onnx_balanced"]
+    r3_48: StrategyMetrics = m["domination_rev3_48"]
+    r3_35: StrategyMetrics = m["domination_rev3_35"]
 
-    print("=" * 138)
-    print("KALSHI BTC 15M INSTITUTIONAL BACKTEST: COMPREHENSIVE REAL PRODUCTION DATA REPLAY (SEPT 2 - SEPT 4, 2026)")
-    print("=" * 138)
+    print("=" * 162)
+    print("KALSHI BTC 15M INSTITUTIONAL BACKTEST: COMPREHENSIVE REAL PRODUCTION DATA REPLAY (SEPT 4 - SEPT 5, 2026)")
+    print("=" * 162)
     print(f"Total Evaluated Production Cycles: {results['cycles_count']}")
     print(f"Time Horizon: {results['oldest_cycle']} ({results['oldest_ts'][:19]}Z) -> {results['newest_cycle']} ({results['newest_ts'][:19]}Z)")
-    print("-" * 138)
+    print("-" * 162)
 
-    col_fmt = "{:<24} | {:<16} | {:<16} | {:<16} | {:<16} | {:<17} | {:<17}"
-    print(col_fmt.format("METRIC", "BASELINE (HIST)", "DOMINATION 1", "DOMINATION 2", "MACRO TREND", "ONNX (BAL $40)", "ONNX (STRICT $50)"))
-    print("-" * 138)
+    col_fmt = "{:<24} | {:<16} | {:<16} | {:<16} | {:<16} | {:<17} | {:<18} | {:<18}"
+    print(col_fmt.format("METRIC", "BASELINE (HIST)", "DOMINATION 1", "DOMINATION 2", "MACRO TREND", "ONNX (BAL $40)", "REV 3 ($0.48 DEF)", "REV 3 ($0.35 SNIPER)"))
+    print("-" * 162)
 
-    print(col_fmt.format("Trades Taken / Vetoed", f"{base.trades_taken} / {base.trades_vetoed}", f"{dom1.trades_taken} / {dom1.trades_vetoed}", f"{dom2.trades_taken} / {dom2.trades_vetoed}", f"{macro.trades_taken} / {macro.trades_vetoed}", f"{f_bal.trades_taken} / {f_bal.trades_vetoed}", f"{f_strict.trades_taken} / {f_strict.trades_vetoed}"))
-    print(col_fmt.format("Win Rate (%)", f"{base.win_rate_pct:.1f}% ({base.wins}W/{base.losses}L)", f"{dom1.win_rate_pct:.1f}% ({dom1.wins}W/{dom1.losses}L)", f"{dom2.win_rate_pct:.1f}% ({dom2.wins}W/{dom2.losses}L)", f"{macro.win_rate_pct:.1f}% ({macro.wins}W/{macro.losses}L)", f"{f_bal.win_rate_pct:.1f}% ({f_bal.wins}W/{f_bal.losses}L)", f"{f_strict.win_rate_pct:.1f}% ({f_strict.wins}W/{f_strict.losses}L)"))
-    print(col_fmt.format("Net Realized PnL ($)", f"${base.net_pnl}", f"${dom1.net_pnl}", f"${dom2.net_pnl}", f"${macro.net_pnl}", f"${f_bal.net_pnl}", f"${f_strict.net_pnl}"))
-    print(col_fmt.format("Profit Factor", f"{base.profit_factor:.2f}", f"{dom1.profit_factor:.2f}", f"{dom2.profit_factor:.2f}", f"{macro.profit_factor:.2f}", f"{f_bal.profit_factor:.2f}", f"{f_strict.profit_factor:.2f}"))
-    print(col_fmt.format("Gross Profit ($)", f"${base.gross_profit}", f"${dom1.gross_profit}", f"${dom2.gross_profit}", f"${macro.gross_profit}", f"${f_bal.gross_profit}", f"${f_strict.gross_profit}"))
-    print(col_fmt.format("Gross Loss Drag ($)", f"${base.gross_loss}", f"${dom1.gross_loss}", f"${dom2.gross_loss}", f"${macro.gross_loss}", f"${f_bal.gross_loss}", f"${f_strict.gross_loss}"))
-    print(col_fmt.format("Avg Win / Avg Loss ($)", f"${base.avg_win} / ${base.avg_loss}", f"${dom1.avg_win} / ${dom1.avg_loss}", f"${dom2.avg_win} / ${dom2.avg_loss}", f"${macro.avg_win} / ${macro.avg_loss}", f"${f_bal.avg_win} / ${f_bal.avg_loss}", f"${f_strict.avg_win} / ${f_strict.avg_loss}"))
-    print(col_fmt.format("Payoff Ratio", f"{base.payoff_ratio:.2f}", f"{dom1.payoff_ratio:.2f}", f"{dom2.payoff_ratio:.2f}", f"{macro.payoff_ratio:.2f}", f"{f_bal.payoff_ratio:.2f}", f"{f_strict.payoff_ratio:.2f}"))
-    print(col_fmt.format("Expectancy / Trade ($)", f"${base.expectancy_per_trade}", f"${dom1.expectancy_per_trade}", f"${dom2.expectancy_per_trade}", f"${macro.expectancy_per_trade}", f"${f_bal.expectancy_per_trade}", f"${f_strict.expectancy_per_trade}"))
-    print(col_fmt.format("Max Drawdown ($)", f"${base.max_drawdown_dollars} ({base.max_drawdown_pct:.1f}%)", f"${dom1.max_drawdown_dollars} ({dom1.max_drawdown_pct:.1f}%)", f"${dom2.max_drawdown_dollars} ({dom2.max_drawdown_pct:.1f}%)", f"${macro.max_drawdown_dollars} ({macro.max_drawdown_pct:.1f}%)", f"${f_bal.max_drawdown_dollars} ({f_bal.max_drawdown_pct:.1f}%)", f"${f_strict.max_drawdown_dollars} ({f_strict.max_drawdown_pct:.1f}%)"))
-    print(col_fmt.format("Max Loss Streak", f"{base.max_loss_streak} losses", f"{dom1.max_loss_streak} losses", f"{dom2.max_loss_streak} losses", f"{macro.max_loss_streak} losses", f"{f_bal.max_loss_streak} losses", f"{f_strict.max_loss_streak} losses"))
-    print(col_fmt.format("Sharpe Ratio", f"{base.sharpe_ratio:.2f}", f"{dom1.sharpe_ratio:.2f}", f"{dom2.sharpe_ratio:.2f}", f"{macro.sharpe_ratio:.2f}", f"{f_bal.sharpe_ratio:.2f}", f"{f_strict.sharpe_ratio:.2f}"))
-    print(col_fmt.format("Sortino Ratio", f"{base.sortino_ratio:.2f}", f"{dom1.sortino_ratio:.2f}", f"{dom2.sortino_ratio:.2f}", f"{macro.sortino_ratio:.2f}", f"{f_bal.sortino_ratio:.2f}", f"{f_strict.sortino_ratio:.2f}"))
-    print("-" * 138)
+    print(col_fmt.format("Trades Taken / Vetoed", f"{base.trades_taken} / {base.trades_vetoed}", f"{dom1.trades_taken} / {dom1.trades_vetoed}", f"{dom2.trades_taken} / {dom2.trades_vetoed}", f"{macro.trades_taken} / {macro.trades_vetoed}", f"{f_bal.trades_taken} / {f_bal.trades_vetoed}", f"{r3_48.trades_taken} / {r3_48.trades_vetoed}", f"{r3_35.trades_taken} / {r3_35.trades_vetoed}"))
+    print(col_fmt.format("Win Rate (%)", f"{base.win_rate_pct:.1f}% ({base.wins}W/{base.losses}L)", f"{dom1.win_rate_pct:.1f}% ({dom1.wins}W/{dom1.losses}L)", f"{dom2.win_rate_pct:.1f}% ({dom2.wins}W/{dom2.losses}L)", f"{macro.win_rate_pct:.1f}% ({macro.wins}W/{macro.losses}L)", f"{f_bal.win_rate_pct:.1f}% ({f_bal.wins}W/{f_bal.losses}L)", f"{r3_48.win_rate_pct:.1f}% ({r3_48.wins}W/{r3_48.losses}L)", f"{r3_35.win_rate_pct:.1f}% ({r3_35.wins}W/{r3_35.losses}L)"))
+    print(col_fmt.format("Net Realized PnL ($)", f"${base.net_pnl}", f"${dom1.net_pnl}", f"${dom2.net_pnl}", f"${macro.net_pnl}", f"${f_bal.net_pnl}", f"${r3_48.net_pnl}", f"${r3_35.net_pnl}"))
+    print(col_fmt.format("Profit Factor", f"{base.profit_factor:.2f}", f"{dom1.profit_factor:.2f}", f"{dom2.profit_factor:.2f}", f"{macro.profit_factor:.2f}", f"{f_bal.profit_factor:.2f}", f"{r3_48.profit_factor:.2f}", f"{r3_35.profit_factor:.2f}"))
+    print(col_fmt.format("Gross Profit ($)", f"${base.gross_profit}", f"${dom1.gross_profit}", f"${dom2.gross_profit}", f"${macro.gross_profit}", f"${f_bal.gross_profit}", f"${r3_48.gross_profit}", f"${r3_35.gross_profit}"))
+    print(col_fmt.format("Gross Loss Drag ($)", f"${base.gross_loss}", f"${dom1.gross_loss}", f"${dom2.gross_loss}", f"${macro.gross_loss}", f"${f_bal.gross_loss}", f"${r3_48.gross_loss}", f"${r3_35.gross_loss}"))
+    print(col_fmt.format("Avg Win / Avg Loss ($)", f"${base.avg_win} / ${base.avg_loss}", f"${dom1.avg_win} / ${dom1.avg_loss}", f"${dom2.avg_win} / ${dom2.avg_loss}", f"${macro.avg_win} / ${macro.avg_loss}", f"${f_bal.avg_win} / ${f_bal.avg_loss}", f"${r3_48.avg_win} / ${r3_48.avg_loss}", f"${r3_35.avg_win} / ${r3_35.avg_loss}"))
+    print(col_fmt.format("Payoff Ratio", f"{base.payoff_ratio:.2f}", f"{dom1.payoff_ratio:.2f}", f"{dom2.payoff_ratio:.2f}", f"{macro.payoff_ratio:.2f}", f"{f_bal.payoff_ratio:.2f}", f"{r3_48.payoff_ratio:.2f}", f"{r3_35.payoff_ratio:.2f}"))
+    print(col_fmt.format("Expectancy / Trade ($)", f"${base.expectancy_per_trade}", f"${dom1.expectancy_per_trade}", f"${dom2.expectancy_per_trade}", f"${macro.expectancy_per_trade}", f"${f_bal.expectancy_per_trade}", f"${r3_48.expectancy_per_trade}", f"${r3_35.expectancy_per_trade}"))
+    print(col_fmt.format("Max Drawdown ($)", f"${base.max_drawdown_dollars} ({base.max_drawdown_pct:.1f}%)", f"${dom1.max_drawdown_dollars} ({dom1.max_drawdown_pct:.1f}%)", f"${dom2.max_drawdown_dollars} ({dom2.max_drawdown_pct:.1f}%)", f"${macro.max_drawdown_dollars} ({macro.max_drawdown_pct:.1f}%)", f"${f_bal.max_drawdown_dollars} ({f_bal.max_drawdown_pct:.1f}%)", f"${r3_48.max_drawdown_dollars} ({r3_48.max_drawdown_pct:.1f}%)", f"${r3_35.max_drawdown_dollars} ({r3_35.max_drawdown_pct:.1f}%)"))
+    print(col_fmt.format("Max Loss Streak", f"{base.max_loss_streak} losses", f"{dom1.max_loss_streak} losses", f"{dom2.max_loss_streak} losses", f"{macro.max_loss_streak} losses", f"{f_bal.max_loss_streak} losses", f"{r3_48.max_loss_streak} losses", f"{r3_35.max_loss_streak} losses"))
+    print(col_fmt.format("Sharpe Ratio", f"{base.sharpe_ratio:.2f}", f"{dom1.sharpe_ratio:.2f}", f"{dom2.sharpe_ratio:.2f}", f"{macro.sharpe_ratio:.2f}", f"{f_bal.sharpe_ratio:.2f}", f"{r3_48.sharpe_ratio:.2f}", f"{r3_35.sharpe_ratio:.2f}"))
+    print(col_fmt.format("Sortino Ratio", f"{base.sortino_ratio:.2f}", f"{dom1.sortino_ratio:.2f}", f"{dom2.sortino_ratio:.2f}", f"{macro.sortino_ratio:.2f}", f"{f_bal.sortino_ratio:.2f}", f"{r3_48.sortino_ratio:.2f}", f"{r3_35.sortino_ratio:.2f}"))
+    print("-" * 162)
 
-    print("\n" + "=" * 138)
-    print("MARKET REGIME PERFORMANCE BREAKDOWN (ONNX BALANCED $40 GATE)")
-    print("=" * 138)
-    reg_fmt = "{:<16} | {:<10} | {:<12} | {:<12} | {:<12} | {:<12} | {:<14}"
-    print(reg_fmt.format("REGIME", "CYCLES", "TAKEN", "VETOED", "WIN RATE", "NET PNL", "PNL/TRADE"))
-    print("-" * 138)
-    bal_reg = results["regimes"]["macro_onnx_balanced"]
-    for reg_name, r in bal_reg.items():
-        pnl_per_trade = (r["net_pnl"] / r["trades_taken"]) if r["trades_taken"] > 0 else 0.0
-        print(reg_fmt.format(
-            reg_name,
-            str(r["total_cycles"]),
-            str(r["trades_taken"]),
-            str(r["trades_vetoed"]),
-            f"{r['win_rate_pct']:.1f}%",
-            f"${r['net_pnl']:.2f}",
-            f"${pnl_per_trade:+.2f}",
+    # 3-Step Domination Rev 3 Maker Discount Sensitivity Table
+    print("\n" + "=" * 162)
+    print("3-STEP DOMINATION BOT REV 3 ('MAKER DISCOUNT SNIPER') SENSITIVITY MATRIX ACROSS CEILING PRICES ($0.00 MAKER FEES)")
+    print("=" * 162)
+    sens_fmt = "{:<12} | {:<18} | {:<16} | {:<12} | {:<12} | {:<14} | {:<14} | {:<14} | {:<16}"
+    print(sens_fmt.format("DISCOUNT", "FILLED/VETO/UNFILL", "WIN RATE (%)", "NET PNL ($)", "PROFIT FACT", "PAYOFF RATIO", "AVG WIN/LOSS", "EXPECTANCY", "MAX DRAWDOWN"))
+    print("-" * 162)
+
+    for disc, item in results["rev3_sensitivity"].items():
+        sm: StrategyMetrics = item["metrics"]
+        unfilled = item["unfilled"]
+        vetoed = item["vetoed"]
+        ratio_str = f"{sm.trades_taken} / {vetoed} / {unfilled}"
+        wr_str = f"{sm.win_rate_pct:.1f}% ({sm.wins}W/{sm.losses}L)"
+        wl_str = f"${sm.avg_win:.2f} / ${sm.avg_loss:.2f}"
+        dd_str = f"${sm.max_drawdown_dollars:.2f} ({sm.max_drawdown_pct:.1f}%)"
+        print(sens_fmt.format(
+            f"${disc:.2f}",
+            ratio_str,
+            wr_str,
+            f"${sm.net_pnl:+.2f}",
+            f"{sm.profit_factor:.2f}",
+            f"{sm.payoff_ratio:.2f}x",
+            wl_str,
+            f"${sm.expectancy_per_trade:+.2f}/trade",
+            dd_str,
         ))
-    print("-" * 138)
+    print("=" * 162)
 
-    print("\n" + "=" * 138)
-    print("LATEST 15 PRODUCTION REPLAY EXECUTIONS (CHRONOLOGICAL: SEPT 3 - SEPT 4, 2026 - BALANCED $40 GATE)")
-    print("=" * 138)
-    trade_fmt = "{:<26} | {:<8} | {:<7} | {:<6} | {:<9} | {:<14} | {:<42}"
+    print("\n" + "=" * 162)
+    print("LATEST 15 PRODUCTION REPLAY EXECUTIONS (CHRONOLOGICAL: REV 3 MAKER DISCOUNT SNIPER @ $0.35)")
+    print("=" * 162)
+    trade_fmt = "{:<26} | {:<8} | {:<8} | {:<6} | {:<9} | {:<16} | {:<52}"
     print(trade_fmt.format("CYCLE TIME", "REGIME", "ACTION", "SIDE", "ENTRY", "OUTCOME", "RATIONALE / VETO REASON"))
-    print("-" * 138)
-    for t in results["recent_trades_balanced"]:
+    print("-" * 162)
+    for t in results["recent_trades_rev3_35"]:
         pnl_str = f"${t.pnl:+.2f}" if t.action == "TAKE" else "$0.00"
         print(trade_fmt.format(
             t.cycle_time[:26],
@@ -857,9 +1056,9 @@ def print_comparison_table(results: Dict[str, Any]):
             t.side.upper(),
             f"${t.entry_price:.2f}",
             f"{t.outcome.upper()} ({pnl_str})",
-            t.rationale[:42],
+            t.rationale[:52],
         ))
-    print("=" * 138)
+    print("=" * 162)
 
 
 if __name__ == "__main__":

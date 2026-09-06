@@ -22,7 +22,7 @@ class DummyRecord(BaseModel):
     timestamp: datetime
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_tick_writer_write_raw_queue_full(tmp_path: Path) -> None:
     """Verify write_raw handles QueueFull exception gracefully when queue is full."""
     # Create writer with max_queue_size=1
@@ -39,7 +39,7 @@ async def test_tick_writer_write_raw_queue_full(tmp_path: Path) -> None:
     assert writer._queue.qsize() == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_tick_writer_write_pydantic_queue_full(tmp_path: Path) -> None:
     """Verify write handles QueueFull exception gracefully when queue is full."""
     writer = TickWriter(data_dir=tmp_path, max_queue_size=1)
@@ -64,7 +64,7 @@ async def test_tick_writer_write_pydantic_queue_full(tmp_path: Path) -> None:
     assert writer._queue.qsize() == 1
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_tick_writer_explicit_mock_queue_full(tmp_path: Path) -> None:
     """Explicitly mock put_nowait to raise asyncio.QueueFull to verify exception path."""
     writer = TickWriter(data_dir=tmp_path)
@@ -76,7 +76,7 @@ async def test_tick_writer_explicit_mock_queue_full(tmp_path: Path) -> None:
     await writer.write(record)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_tick_writer_write_and_flush_lifecycle(tmp_path: Path) -> None:
     """Test full open, write (Pydantic and raw), drain, flush, and close lifecycle."""
     async with TickWriter(data_dir=tmp_path, timeframe="15m", flush_interval=2) as writer:
@@ -118,7 +118,7 @@ async def test_tick_writer_write_and_flush_lifecycle(tmp_path: Path) -> None:
     assert data2["bid"] == "0.44"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_tick_writer_closed_ignore(tmp_path: Path) -> None:
     """Verify write and write_raw return immediately when writer is closed."""
     writer = TickWriter(data_dir=tmp_path)

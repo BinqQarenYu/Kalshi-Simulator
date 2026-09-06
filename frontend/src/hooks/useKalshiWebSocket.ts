@@ -365,6 +365,25 @@ export function useKalshiWebSocket() {
     }
   };
 
+  const updateDominationDiscountPrice = async (price: number) => {
+    try {
+      setData((prev) => ({
+        ...prev,
+        settings: { ...prev.settings, domination_discount_price: price },
+        ai_signals: { ...prev.ai_signals, discount_limit_price: price },
+      }));
+      const resp = await fetch('/api/bot/domination/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ discount_limit_price: price }),
+      });
+      return await resp.json();
+    } catch (err) {
+      console.error('Failed to update domination discount price:', err);
+      return { success: false, error: String(err) };
+    }
+  };
+
   return {
     data,
     isConnected,
@@ -380,6 +399,7 @@ export function useKalshiWebSocket() {
     selectStrategyBot,
     testBotTrade,
     fetchWinLossReports,
+    updateDominationDiscountPrice,
   };
 }
 

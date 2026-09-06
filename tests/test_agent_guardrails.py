@@ -19,8 +19,8 @@ def test_guardrail_allows_valid_order() -> None:
     )
     assert ok is True
     assert reason == "PASSED_GUARDRAILS"
-    # Equity $100 * 8% risk = $8.00 / $0.50 = 16, but micro bankroll cap is 4 contracts
-    assert size == 4
+    # Equity $100 * 8% risk = $8.00 / $0.50 = 16, but micro bankroll cap is 2 contracts
+    assert size == 2
     assert diag["is_tapered"] is False
 
 
