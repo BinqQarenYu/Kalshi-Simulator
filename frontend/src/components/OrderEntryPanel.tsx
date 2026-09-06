@@ -100,24 +100,34 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
         </button>
 
         <div className="flex items-center gap-3">
-          <div className="flex items-center bg-[#161b22] p-0.5 rounded-lg border border-[#30363d] text-xs font-bold">
+          <div
+            role="group"
+            aria-label="Trade action"
+            className="flex items-center bg-[#161b22] p-0.5 rounded-lg border border-[#30363d] text-xs font-bold"
+          >
             <button
+              type="button"
+              aria-pressed={tradeMode === 'BUY'}
+              aria-label="Buy contracts"
               onClick={() => {
                 soundFX.playClickSound();
                 setTradeMode('BUY');
               }}
-              className={`px-3 py-1 rounded-md transition-all ${
+              className={`px-3 py-1 rounded-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
                 tradeMode === 'BUY' ? 'bg-[#30363d] text-white' : 'text-[#8b949e] hover:text-white'
               }`}
             >
               BUY
             </button>
             <button
+              type="button"
+              aria-pressed={tradeMode === 'SELL'}
+              aria-label="Sell contracts"
               onClick={() => {
                 soundFX.playClickSound();
                 setTradeMode('SELL');
               }}
-              className={`px-3 py-1 rounded-md transition-all ${
+              className={`px-3 py-1 rounded-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
                 tradeMode === 'SELL' ? 'bg-[#30363d] text-white' : 'text-[#8b949e] hover:text-white'
               }`}
             >
@@ -150,17 +160,19 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       </div>
 
       {/* Big UP / DOWN Option Buttons (exact Kalshi UI) */}
-      <div className="grid grid-cols-2 gap-2.5">
+      <div role="group" aria-label="Contract direction" className="grid grid-cols-2 gap-2.5">
         {/* UP Button */}
         <button
           type="button"
+          aria-pressed={side === 'yes'}
+          aria-label={`Trade UP at ${market.yes_cents_str}`}
           onClick={() => {
             soundFX.playClickSound();
             setSide('yes');
             const askCents = parseFloat(((market.best_yes_ask ?? 0.5) * 100).toFixed(1));
             setLimitPriceCents(askCents || 50.0);
           }}
-          className={`flex items-center justify-between p-3 rounded-xl border transition-all text-left ${
+          className={`flex items-center justify-between p-3 rounded-xl border transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
             side === 'yes'
               ? 'bg-[#00d084] text-black border-[#00d084] font-black shadow-lg shadow-[#00d084]/20 scale-[1.01]'
               : 'bg-[#161b22] text-white border-[#30363d] hover:border-[#00d084]/50'
@@ -175,13 +187,15 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
         {/* DOWN Button */}
         <button
           type="button"
+          aria-pressed={side === 'no'}
+          aria-label={`Trade DOWN at ${market.no_cents_str}`}
           onClick={() => {
             soundFX.playClickSound();
             setSide('no');
             const askCents = parseFloat(((market.best_no_ask ?? 0.5) * 100).toFixed(1));
             setLimitPriceCents(askCents || 50.0);
           }}
-          className={`flex items-center justify-between p-3 rounded-xl border transition-all text-left ${
+          className={`flex items-center justify-between p-3 rounded-xl border transition-all text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff4d4d] ${
             side === 'no'
               ? 'bg-[#ff4d4d] text-white border-[#ff4d4d] font-black shadow-lg shadow-[#ff4d4d]/20 scale-[1.01]'
               : 'bg-[#161b22] text-white border-[#30363d] hover:border-[#ff4d4d]/50'
@@ -224,16 +238,18 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
         </div>
         {/* Quick Share Chips */}
         <div className="flex items-center justify-between gap-1.5 mt-1.5">
-          <div className="flex gap-1.5">
+          <div role="group" aria-label="Quick share selection" className="flex gap-1.5">
             {(isLive ? [1, 2] : [5, 10, 20, 50]).map((count) => (
               <button
                 key={count}
                 type="button"
+                aria-pressed={shares === count}
+                aria-label={`Set ${count} shares`}
                 onClick={() => {
                   soundFX.playClickSound();
                   setShares(count);
                 }}
-                className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all ${
+                className={`px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${
                   shares === count
                     ? isLive ? 'bg-rose-500/30 text-rose-300 border-rose-500/50' : 'bg-[#30363d] text-white border-gray-500'
                     : 'bg-[#161b22] text-[#8b949e] border-[#30363d] hover:text-white'
