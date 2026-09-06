@@ -22,9 +22,9 @@ class AgentGuardrails:
         self,
         min_order_interval_seconds: float = 45.0,
         max_risk_pct_per_trade: Decimal = Decimal("0.08"),  # Max 8% of equity per trade
-        max_micro_bankroll_contracts: int = 2,  # Hard cap: Max 1-2 contracts for equity <= $100
-        max_nano_bankroll_contracts: int = 2,   # Max contracts for equity <= $25
-        max_other_bots_contracts: int = 1,      # Rule: 1 contract for other bots only
+        max_micro_bankroll_contracts: int = 1,  # Hard cap: Strictly 1 contract per trade for each asset
+        max_nano_bankroll_contracts: int = 1,   # Strictly 1 contract max
+        max_other_bots_contracts: int = 0,      # Rule: Only 3-Step Dominion is authorized to trade (other bots 0)
         consecutive_loss_taper_threshold: int = 2,
         drawdown_taper_threshold: Decimal = Decimal("0.15"),  # 15% drawdown activates taper
         emergency_drawdown_limit: Decimal = Decimal("0.25"),  # 25% drawdown halts all trading
@@ -146,19 +146,20 @@ class AgentGuardrails:
         else:
             bankroll_cap = max(self.max_micro_bankroll_contracts, int(total_equity / Decimal("25.00")))
 
-        # Rule: "1 contract for other bots only"
-        # Primary live domination bot (3-Step Domination) uses Quarter-Kelly sizing (1-2 contracts, max 4).
-        # All other bots (incubator, shadow, candidate, or secondary bots) are strictly capped at 1 contract.
+        # Rule: Strictly 1 contract for each asset; only 3-Step Dominion authorized to trade
+        # All other paper/simulation bots (Dominion 2, ONNX Microstructure, Scalp, Momentum, etc.) are prohibited.
         is_primary_domination = (
             bot_type in ("3_step_domination_bot", "3_step_domination", "domination", "3step_dominion", "three_step_domination")
             or bot_type is None
         )
         if is_bot:
             if not is_primary_domination:
-                bankroll_cap = min(bankroll_cap, self.max_other_bots_contracts)
+                msg = f"BOT TRADING PROHIBITED: Only 3-Step Dominion bot is authorized to trade. Bot '{bot_type}' is deactivated."
+                self._record_rejection("bot_prohibited", msg, ticker, now_utc)
+                return False, msg, 0, {"bot_type": bot_type}
             else:
-                # Primary bot hard cap: max 4 contracts per institutional rule
-                bankroll_cap = min(bankroll_cap, 4)
+                # Strictly 1 contract for each asset
+                bankroll_cap = 1
 
         approved_size = min(requested_size, budget_contracts, bankroll_cap)
 

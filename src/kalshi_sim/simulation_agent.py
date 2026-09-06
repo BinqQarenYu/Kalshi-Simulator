@@ -317,16 +317,16 @@ class SimulationAgent:
             return
 
         # ===================================================================
-        # BOT: Macro ONNX & Macro Trend Dominion (Evaluated against _portfolio_macro_trend)
+        # BOT: Macro ONNX & Macro Trend Dominion (DISABLED: Only 3-Step Dominion allowed to trade)
         # ===================================================================
-        if not is_live or self.active_strategy_bot in (
+        if False and (not is_live or self.active_strategy_bot in (
             "macro_onnx",
             "macro_onnx_bot",
             "macro_trend_onnx_fusion",
             "macro_trend_dominion",
             "macro_trend",
             "macro_trend_dominion_bot",
-        ):
+        )):
             if (
                 not self._portfolio_macro_trend.circuit_breaker_tripped
                 and len(self._portfolio_macro_trend.open_positions) < MAX_CONCURRENT_POSITIONS
@@ -419,9 +419,9 @@ class SimulationAgent:
                         logger.debug("Macro ONNX / Trend bot evaluation error: %s", exc)
 
         # ===================================================================
-        # BOT 0: Dominion 2 Bot (Evaluated against _portfolio_dominion2)
+        # BOT 0: Dominion 2 Bot (DISABLED: Only 3-Step Dominion allowed to trade)
         # ===================================================================
-        if not is_live or self.active_strategy_bot in ("dominion_2_bot", "dominion2", "dominion_v2"):
+        if False and (not is_live or self.active_strategy_bot in ("dominion_2_bot", "dominion2", "dominion_v2")):
             if (
                 not self._portfolio_dominion2.circuit_breaker_tripped
                 and len(self._portfolio_dominion2.open_positions) < MAX_CONCURRENT_POSITIONS
@@ -571,7 +571,7 @@ class SimulationAgent:
                                 )
                                 return
 
-                        order_size = 1 if is_overnight_et else decision.recommended_contracts
+                        order_size = 1  # Strictly 1 contract for each asset
                         side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
                         logger.info(
                             "[%s] %-18s | %-3s (%s) | Edge=%+.1f%% | EV=+%s/ct | Size=%d cts%s",
@@ -601,9 +601,8 @@ class SimulationAgent:
                 except Exception as exc:
                     logger.debug("Domination bot evaluation error: %s", exc)
 
-        # In LIVE mode, secondary paper bots STOP completely!
-        if is_live:
-            return
+        # Paper bots disabled: only 3-Step Dominion is authorized to trade!
+        return
 
         # ===================================================================
         # BOT 2: ONNX Microstructure Neural Net Bot (Evaluated against _portfolio_onnx)
@@ -824,13 +823,7 @@ class SimulationAgent:
         self._onnx_engine.extractor.process_trade(trade)
 
     def _get_max_size_for_tf(self, timeframe: Timeframe) -> int:
-        if getattr(self, "execution_mode", "simulated") == "live":
-            # Live Trading Exclusivity: Strict micro-contract cap (1-2 contracts for primary 3-Step Dominion bot, 1 contract for other bots)
-            if self.active_strategy_bot in ("3_step_domination_bot", "3_step_domination", "domination"):
-                return 2
-            return 1  # 1 contract for other bots only
-        # Other bots capped at 1 contract
-        return 1
+        return 1  # Strictly 1 contract for each asset
 
     # -- Strategy Modes ------------------------------------------------------
 
@@ -998,8 +991,7 @@ class SimulationAgent:
             if self._order_client is not None and b_type == self.active_strategy_bot:
                 try:
                     live_side = side.value if hasattr(side, "value") else str(side).lower()
-                    is_primary = b_type in ("3_step_domination_bot", "3_step_domination", "domination")
-                    live_count = max(1, min(affordable_size, 2)) if is_primary else 1  # 1-2 contracts for primary, 1 contract only for other bots
+                    live_count = 1  # Strictly 1 contract for each asset
 
                     # Check if standalone trading engine holds exclusive lock
                     holder = get_active_lock_holder()

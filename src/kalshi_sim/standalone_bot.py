@@ -651,7 +651,7 @@ class StandaloneBotEngine:
 
         # 4. Institutional Pre-Trade Guardrail Check
         rec_side = decision.recommended_side
-        rec_size = min(decision.recommended_contracts, 2)  # Cap strictly to 1-2 contracts
+        rec_size = min(decision.recommended_contracts, 1)  # Strictly 1 contract for each asset
         est_price = Decimal(str(decision.limit_price))
 
         is_allowed, g_reason, approved_size, _ = self.guardrails.validate_pre_trade_intent(
@@ -663,6 +663,7 @@ class StandaloneBotEngine:
             vpin=decision.vpin,
             cycle_id=self.active_ticker,
             is_bot=True,
+            bot_type="3_step_domination_bot",
         )
 
         if not is_allowed or approved_size <= 0:

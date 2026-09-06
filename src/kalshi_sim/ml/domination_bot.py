@@ -192,7 +192,7 @@ class ThreeStepDominationBot:
         time_to_expiry_s: float,
         recent_trades: Optional[List[TradeEvent]] = None,
         total_equity: Decimal = Decimal("100.00"),
-        max_position_size: int = 10,
+        max_position_size: int = 1,
         estimated_vpin: float = 0.15,
     ) -> DominationDecision:
         """Execute 3-step cycle analysis and determine optimal playbook execution."""
@@ -542,7 +542,7 @@ class ThreeStepDominationBot:
             kelly_f_yes=round(float(ev_res.kelly_fraction) if is_yes else 0.0, 4),
             kelly_f_no=round(float(ev_res.kelly_fraction) if is_no else 0.0, 4),
             recommended_side=chosen_side_str,
-            recommended_contracts=ev_res.recommended_contracts,
+            recommended_contracts=min(ev_res.recommended_contracts, 1),
             rationale=rationale,
             edge_pct=round(float(ev_res.statistical_edge) * 100.0, 2),
             time_to_expiry_s=round(time_to_expiry_s, 1),
