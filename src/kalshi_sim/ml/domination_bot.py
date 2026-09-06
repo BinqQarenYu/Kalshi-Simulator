@@ -119,6 +119,55 @@ class ThreeStepDominationBot:
         self.discount_limit_price = clamped
         logger.info("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
 
+    def get_parameters(self) -> Dict[str, Any]:
+        """Return current live strategy parameters."""
+        return {
+            "discount_limit_price": float(self.discount_limit_price),
+            "min_edge_pct": round(float(self.min_edge_pct) * 100.0, 1),
+            "min_ev_dollars": float(self.min_ev_dollars),
+            "min_spot_diff": float(self.min_spot_diff),
+            "vpin_toxic_threshold": round(float(self.vpin_toxic_threshold), 2),
+            "take_profit_price_threshold": float(self.take_profit_price_threshold),
+            "min_take_profit_roi": round(float(self.min_take_profit_roi) * 100.0, 1),
+        }
+
+    def update_parameters(
+        self,
+        discount_limit_price: Optional[float] = None,
+        min_edge_pct: Optional[float] = None,
+        min_ev_dollars: Optional[float] = None,
+        min_spot_diff: Optional[float] = None,
+        vpin_toxic_threshold: Optional[float] = None,
+        take_profit_price_threshold: Optional[float] = None,
+        min_take_profit_roi: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Dynamically update strategy parameters on the fly."""
+        if discount_limit_price is not None:
+            self.set_discount_limit_price(discount_limit_price)
+        if min_edge_pct is not None:
+            val = float(min_edge_pct)
+            if val > 1.0:
+                val = val / 100.0
+            self.min_edge_pct = max(0.01, min(0.50, val))
+            self._ev_engine.min_edge_pct = self.min_edge_pct
+        if min_ev_dollars is not None:
+            self.min_ev_dollars = Decimal(str(max(0.005, min(0.50, float(min_ev_dollars)))))
+            self._ev_engine.min_ev_threshold = self.min_ev_dollars
+        if min_spot_diff is not None:
+            self.min_spot_diff = max(0.0, float(min_spot_diff))
+        if vpin_toxic_threshold is not None:
+            self.vpin_toxic_threshold = max(0.10, min(0.95, float(vpin_toxic_threshold)))
+            self._ev_engine.vpin_toxic_threshold = self.vpin_toxic_threshold
+        if take_profit_price_threshold is not None:
+            self.take_profit_price_threshold = Decimal(str(max(0.50, min(0.99, float(take_profit_price_threshold)))))
+        if min_take_profit_roi is not None:
+            val = float(min_take_profit_roi)
+            if val > 1.0:
+                val = val / 100.0
+            self.min_take_profit_roi = max(0.05, min(1.0, val))
+        logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
+        return self.get_parameters()
+
     def evaluate(
         self,
         book: Optional[L2BookState],

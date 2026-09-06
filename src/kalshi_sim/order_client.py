@@ -155,20 +155,25 @@ class KalshiLiveOrderClient:
             data = await resp.json()
             return data.get("market_positions", [])
 
-    async def get_open_orders(self) -> List[Dict[str, Any]]:
-        """Fetch all resting limit orders currently active on Kalshi Demo."""
+    async def get_open_orders(self, ticker: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Fetch all resting limit orders currently active on Kalshi."""
         endpoint = "/trade-api/v2/portfolio/orders"
         url = f"{self.base_url}/portfolio/orders"
         headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
+        params: Dict[str, Any] = {"status": "resting"}
+        if ticker:
+            params["ticker"] = ticker
 
         session = await self._get_session()
-        async with session.get(url, headers=headers) as resp:
+        async with session.get(url, headers=headers, params=params) as resp:
             if resp.status != 200:
                 err_text = await resp.text()
                 logger.error("Failed to fetch open orders (HTTP %d): %s", resp.status, err_text)
                 return []
             data = await resp.json()
-            return data.get("orders", [])
+            orders = data.get("orders", [])
+            # Defensively ensure only active resting orders are returned
+            return [o for o in orders if o.get("status") in ("resting", None)]
 
     async def get_settlements(
         self,
@@ -354,15 +359,18 @@ class KalshiLiveOrderClient:
 
     async def cancel_order(self, order_id: str, ticker: Optional[str] = None) -> bool:
         """Cancel a resting order on Kalshi using V2 Trade API."""
-        endpoint = f"/trade-api/v2/portfolio/events/orders/{order_id}"
-        query_suffix = f"?market_ticker={ticker}" if ticker else ""
-        url = f"{self.base_url}/portfolio/events/orders/{order_id}{query_suffix}"
+        endpoint = f"/trade-api/v2/portfolio/orders/{order_id}"
+        url = f"{self.base_url}/portfolio/orders/{order_id}"
         headers = get_auth_headers(self.api_key_id, self.private_key, "DELETE", endpoint)
 
         session = await self._get_session()
         async with session.delete(url, headers=headers) as resp:
             if resp.status in (200, 204):
                 logger.info("Successfully cancelled order: %s", order_id)
+                return True
+            if resp.status == 404:
+                # Order is already filled, cancelled, or expired on exchange
+                logger.debug("Order %s already cancelled or not found (HTTP 404)", order_id)
                 return True
             err_text = await resp.text()
             logger.error("Failed to cancel order %s (HTTP %d): %s", order_id, resp.status, err_text)

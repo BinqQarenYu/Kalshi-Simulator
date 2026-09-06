@@ -305,6 +305,12 @@ class SimulationAgent:
         if is_live and not ticker.startswith("KXBTC15M"):
             return
 
+        # If another engine (e.g. Standalone Bot) holds the exclusive live lock, silence Mother evaluations
+        if is_live:
+            holder = get_active_lock_holder()
+            if holder and holder[1] != os.getpid():
+                return
+
         # If this cycle is already locked by guardrails, skip evaluation immediately
         cycle_key = market_info.event_ticker if (market_info and market_info.event_ticker) else ticker
         if is_live and (cycle_key in self._guardrails._cycle_locks or ticker in self._guardrails._cycle_locks):
