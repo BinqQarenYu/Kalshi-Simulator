@@ -11,7 +11,7 @@
  * - Dotted threshold guidelines and authentic "⌄ Past | ▼ ▲ ▼" capsule pill.
  */
 
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { ChartPoint, MarketState, TradeTapeItem, WinLossEventReport } from '../types';
 import { ChevronDown, Crosshair, Trophy, ArrowUpRight, ArrowDownRight, TrendingUp, TrendingDown } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
@@ -114,6 +114,21 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
     dpr: window.devicePixelRatio || 1,
   });
 
+  // Memoize trajectory points with pre-parsed seconds to eliminate ~216,000 string splits/min and 3,600 array allocations/sec in 60FPS RAF loop
+  const processedPoints = useMemo<(ChartPoint & { secs: number })[]>(() => {
+    const raw: ChartPoint[] = chart.length >= 2 ? chart : [
+      { time: '00:00:01', price: market.target_strike - 10, target: market.target_strike },
+      { time: '00:00:05', price: market.target_strike - 25, target: market.target_strike },
+      { time: '00:00:10', price: market.target_strike - 40, target: market.target_strike },
+      { time: '00:00:15', price: market.target_strike - 60, target: market.target_strike },
+      { time: '00:00:20', price: market.current_btc_price, target: market.target_strike },
+    ];
+    return raw.map((p) => ({
+      ...p,
+      secs: parseTimeToSeconds(p.time),
+    }));
+  }, [chart, market.target_strike, market.current_btc_price]);
+
   // Track container resize with ResizeObserver
   useEffect(() => {
     const container = containerRef.current;
@@ -172,10 +187,14 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       let rawMin = Math.min(targetStrike, currentPrice) - 30;
       let rawMax = Math.max(targetStrike, currentPrice) + 30;
 
-      if (chart && chart.length > 0) {
-        const prices = chart.map((c) => c.price);
-        rawMin = Math.min(rawMin, ...prices) - 10;
-        rawMax = Math.max(rawMax, ...prices) + 15;
+      if (processedPoints.length > 0) {
+        for (let i = 0; i < processedPoints.length; i++) {
+          const p = processedPoints[i].price;
+          if (p < rawMin) rawMin = p;
+          if (p > rawMax) rawMax = p;
+        }
+        rawMin -= 10;
+        rawMax += 15;
       }
 
       // Proportional vertical span calculation (snapping to .5 unit increments)
@@ -302,24 +321,16 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       ctx.fillText(targetLabel, pillX, pillY + 1.5);
 
       // 5. Trajectory Points & Live Leftward Motion Stream
-      const points = chart.length >= 2 ? chart : [
-        { time: '00:00:01', price: targetStrike - 10, target: targetStrike },
-        { time: '00:00:05', price: targetStrike - 25, target: targetStrike },
-        { time: '00:00:10', price: targetStrike - 40, target: targetStrike },
-        { time: '00:00:15', price: targetStrike - 60, target: targetStrike },
-        { time: '00:00:20', price: currentPrice, target: targetStrike },
-      ];
+      const points = processedPoints;
 
-      // Convert timestamps to continuous seconds
-      const pointSecs = points.map((p) => parseTimeToSeconds(p.time));
-      const tStart = pointSecs[0];
-      const tEnd = pointSecs[pointSecs.length - 1];
+      const tStart = points[0].secs;
+      const tEnd = points[points.length - 1].secs;
       const timeSpanSecs = tEnd > tStart ? tEnd - tStart : points.length * 2;
 
       // Map time or index to smooth continuous X
       const getX = (idx: number) => {
         if (timeSpanSecs > 0 && tEnd > tStart) {
-          const t = pointSecs[idx];
+          const t = points[idx].secs;
           const frac = (t - tStart) / timeSpanSecs;
           return chartStartX + Math.max(0, Math.min(1, frac)) * (chartEndX - chartStartX);
         }
@@ -490,7 +501,7 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [chart, market]);
+  }, [processedPoints, market]);
 
   /**
    * Handle Mouse Movement across Canvas to calculate nearest snap point.
