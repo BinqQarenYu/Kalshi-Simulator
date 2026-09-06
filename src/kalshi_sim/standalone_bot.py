@@ -154,8 +154,8 @@ class StandaloneBotEngine:
         self.bot = ThreeStepDominationBot(asset=asset)
         self.guardrails = AgentGuardrails(
             min_order_interval_seconds=45.0,
-            max_micro_bankroll_contracts=2,
-            max_nano_bankroll_contracts=2,
+            max_micro_bankroll_contracts=1,
+            max_nano_bankroll_contracts=1,
             vpin_toxic_threshold=0.60,
         )
         self.auditor = BotDeploymentAuditor()
@@ -258,7 +258,7 @@ class StandaloneBotEngine:
         """Dynamically update strategy parameters and guardrail caps."""
         max_contracts = kwargs.pop("max_contracts", None)
         if max_contracts is not None:
-            clamped_size = max(1, min(4, int(max_contracts)))
+            clamped_size = max(1, min(1, int(max_contracts)))
             self.guardrails.max_micro_bankroll_contracts = clamped_size
             self.guardrails.max_nano_bankroll_contracts = clamped_size
             logger.info("🛡️ [GUARDRAIL PARAM UPDATE] Max contracts updated to: %d", clamped_size)
