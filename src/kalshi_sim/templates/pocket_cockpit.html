@@ -101,7 +101,7 @@
       <div class="kpi-card">
         <div class="kpi-label">Kalshi Live Balance</div>
         <div id="balVal" class="kpi-val text-green">$0.00</div>
-        <div id="balSub" class="kpi-sub">Portfolio Shard 2</div>
+        <div id="balSub" class="kpi-sub">Portfolio Shard 2: $0.00</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Today's Realized PnL</div>
@@ -109,14 +109,14 @@
         <div id="pnlSub" class="kpi-sub">0 settled cycles</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Active 15M Cycle</div>
-        <div id="cycleVal" class="kpi-val">--:--</div>
-        <div id="cycleSub" class="kpi-sub">Waiting for event...</div>
+        <div class="kpi-label">Target Strike (TO BEAT)</div>
+        <div id="strikeHeroVal" class="kpi-val text-amber">$0.00</div>
+        <div id="strikeHeroSub" class="kpi-sub">Target Expiry: --:--</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Current Position</div>
-        <div id="posVal" class="kpi-val">FLAT</div>
-        <div id="posSub" class="kpi-sub">0 contracts</div>
+        <div class="kpi-label">Active 15M Countdown</div>
+        <div id="cycleVal" class="kpi-val">--:--</div>
+        <div id="cycleSub" class="kpi-sub">Waiting for event...</div>
       </div>
     </div>
 
@@ -125,6 +125,14 @@
       <div class="panel-title">
         <span>Microstructure Telemetry</span>
         <span id="playbookBadge" style="color: var(--blue);">PLAYBOOK: NONE</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Active Position</span>
+        <span id="posVal" class="metric-data">FLAT (0 contracts active)</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Kalshi Inside Touch</span>
+        <span id="touchVal" class="metric-data" style="color: #60a5fa;">YES: -- / -- | NO: -- / --</span>
       </div>
       <div class="metric-row">
         <span class="metric-name">BTC Spot Index (NOW)</span>
@@ -152,6 +160,17 @@
       </div>
     </div>
 
+    <!-- Recent Settled Cycles -->
+    <div class="panel" id="recentSettlementsPanel">
+      <div class="panel-title">
+        <span>Today's Settled Cycles</span>
+        <span id="settledSummaryBadge" style="color: var(--green);">+$0.00</span>
+      </div>
+      <div id="settlementsTable" style="display: flex; flex-direction: column; gap: 6px; font-size: 0.78rem; font-family: monospace;">
+        <div style="color: var(--muted); padding: 4px 0;">Loading today's settlement records...</div>
+      </div>
+    </div>
+
     <!-- Live Event Log -->
     <div class="panel">
       <div class="panel-title">Live Execution Log</div>
@@ -162,11 +181,11 @@
 
     <!-- Health Badges -->
     <div class="health-bar">
-      <div class="health-tag"><div id="dotWs" class="dot"></div> Kalshi WS</div>
-      <div class="health-tag"><div id="dotSpot" class="dot"></div> Spot Index (Coinbase/Binance)</div>
-      <div class="health-tag"><div class="dot"></div> Guardrails (1-2 Sizing Cap)</div>
+      <div class="health-tag"><div id="dotWs" class="dot"></div> Kalshi L2 Book</div>
+      <div class="health-tag"><div id="dotSpot" class="dot"></div> Spot Index (Coinbase Pro)</div>
+      <div class="health-tag"><div class="dot"></div> Guardrails (1-2 Cts Cap)</div>
       <div class="health-tag"><div class="dot"></div> Token Bucket (20/s)</div>
-      <div class="health-tag"><div class="dot"></div> Windows Sleep Prevented</div>
+      <div class="health-tag"><div class="dot"></div> 24/7 Away Mode Active</div>
     </div>
 
   </div>
@@ -208,29 +227,54 @@
           btnDisarm.className = 'btn btn-disarm disarmed';
         }
 
-        // KPIs
+        // 1. Balance
         document.getElementById('balVal').textContent = `$${parseFloat(data.balance || 0).toFixed(2)}`;
+        if (data.shard2_balance !== undefined) {
+          document.getElementById('balSub').textContent = `Shard 2: $${parseFloat(data.shard2_balance).toFixed(2)} Available`;
+        }
         
+        // 2. Realized PnL
         const pnl = parseFloat(data.today_pnl || 0);
         const pnlEl = document.getElementById('pnlVal');
         pnlEl.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
         pnlEl.className = 'kpi-val ' + (pnl >= 0 ? 'text-green' : 'text-red');
-        document.getElementById('pnlSub').textContent = `${data.settled_cycles || 0} settled cycles`;
+        const wr = data.today_win_rate !== undefined && data.settled_cycles > 0 
+          ? ` (${data.today_wins}W/${data.today_losses}L • ${data.today_win_rate}%)` 
+          : '';
+        document.getElementById('pnlSub').textContent = `${data.settled_cycles || 0} settled cycles${wr}`;
 
+        // 3. Target Strike (TO BEAT)
+        const strike = parseFloat(data.target_strike || 0);
+        document.getElementById('strikeHeroVal').textContent = strike > 0 
+          ? `$${strike.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` 
+          : '$0.00';
+        document.getElementById('strikeHeroSub').textContent = data.target_time_str 
+          ? `Target Expiry: ${data.target_time_str}` 
+          : 'Target Expiry: --:--';
+
+        // 4. Active Cycle Countdown
         document.getElementById('cycleVal').textContent = data.time_remaining_str || '--:--';
         document.getElementById('cycleSub').textContent = data.active_ticker || 'No active cycle';
 
-        document.getElementById('posVal').textContent = data.position_str || 'FLAT';
-        document.getElementById('posSub').textContent = data.position_sub || '0 contracts';
+        // 5. Active Position
+        document.getElementById('posVal').textContent = `${data.position_str || 'FLAT'} (${data.position_sub || '0 contracts active'})`;
 
-        // Telemetry
+        // 5. Inside Touch Quotes
+        const yBid = data.best_yes_bid !== null && data.best_yes_bid !== undefined ? (data.best_yes_bid * 100).toFixed(0) + '¢' : '--';
+        const yAsk = data.best_yes_ask !== null && data.best_yes_ask !== undefined ? (data.best_yes_ask * 100).toFixed(0) + '¢' : '--';
+        const nBid = data.best_no_bid !== null && data.best_no_bid !== undefined ? (data.best_no_bid * 100).toFixed(0) + '¢' : '--';
+        const nAsk = data.best_no_ask !== null && data.best_no_ask !== undefined ? (data.best_no_ask * 100).toFixed(0) + '¢' : '--';
+        document.getElementById('touchVal').textContent = `YES: ${yBid} / ${yAsk} | NO: ${nBid} / ${nAsk}`;
+
+        // 6. Spot & Strike
         document.getElementById('playbookBadge').textContent = `PLAYBOOK: ${(data.playbook || 'NONE').toUpperCase()}`;
         document.getElementById('spotVal').textContent = `$${parseFloat(data.spot_price || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
         document.getElementById('strikeVal').textContent = `$${parseFloat(data.target_strike || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
         
         const diff = parseFloat(data.spot_diff || 0);
+        const diffPct = parseFloat(data.spot_diff_pct || 0);
         const diffEl = document.getElementById('diffVal');
-        diffEl.textContent = (diff >= 0 ? '+$' : '-$') + Math.abs(diff).toFixed(2);
+        diffEl.textContent = (diff >= 0 ? '+$' : '-$') + Math.abs(diff).toFixed(2) + ` (${(diffPct >= 0 ? '+' : '')}${diffPct.toFixed(3)}%)`;
         diffEl.className = 'metric-data ' + (diff >= 0 ? 'text-green' : 'text-red');
 
         document.getElementById('edgeVal').textContent = `${(data.edge_pct * 100).toFixed(1)}% / $${parseFloat(data.ev || 0).toFixed(2)}`;
@@ -242,7 +286,24 @@
 
         document.getElementById('rationaleVal').textContent = data.rationale || 'Scanning cycle dynamics...';
 
-        // Health
+        // 7. Recent Settled Cycles Mini-Table
+        if (data.recent_reports && data.recent_reports.length > 0) {
+          const container = document.getElementById('settlementsTable');
+          container.innerHTML = data.recent_reports.map(r => {
+            const isWin = r.outcome === 'WIN';
+            const color = isWin ? 'var(--green)' : 'var(--red)';
+            const pnlStr = (r.pnl >= 0 ? '+$' : '-$') + Math.abs(r.pnl).toFixed(2);
+            return `
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; background: rgba(255,255,255,0.02); border-radius: 4px; border: 1px solid var(--border);">
+                <span><strong style="color: ${color};">${r.outcome}</strong> ${r.ticker.split('-')[1] || r.ticker} (${r.side} ${r.contracts}ct)</span>
+                <span style="color: ${color}; font-weight: bold;">${pnlStr}</span>
+              </div>
+            `;
+          }).join('');
+          document.getElementById('settledSummaryBadge').textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2) + ` (${data.settled_cycles} Cycles)`;
+        }
+
+        // 8. Health Badges
         document.getElementById('dotWs').className = data.kalshi_ws_connected ? 'dot' : 'dot dot-err';
         document.getElementById('dotSpot').className = data.spot_connected ? 'dot' : 'dot dot-err';
 

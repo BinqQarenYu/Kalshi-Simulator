@@ -8,6 +8,7 @@ Verifies:
 - Main server rejects live order routing with HTTP 409 when standalone bot holds lock
 """
 
+from datetime import datetime, timezone
 from decimal import Decimal
 import json
 import os
@@ -108,11 +109,16 @@ def test_standalone_bot_vpin_veto(tmp_path: Path):
     assert "VPIN TOXICITY VETO" in reason
 
 
-def test_pocket_cockpit_api(tmp_path: Path):
+def test_pocket_cockpit_api(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("TESTING", "true")
     # Initialize engine mock inside standalone app
     engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
+    engine.order_client = None
     engine.balance_dollars = Decimal("21.09")
+    engine.total_balance_dollars = Decimal("21.09")
+    engine.shard2_balance_dollars = Decimal("17.81")
     engine.today_pnl = Decimal("1.85")
+    engine.settled_cycles = 19
     engine.active_ticker = "KXBTC15M-T86500"
     engine.current_btc_spot = Decimal("86450.00")
     engine.target_strike = Decimal("86400.00")
@@ -130,7 +136,9 @@ def test_pocket_cockpit_api(tmp_path: Path):
         assert resp_state.status_code == 200
         data = resp_state.json()
         assert data["balance"] == 21.09
+        assert data["shard2_balance"] == 17.81
         assert data["today_pnl"] == 1.85
+        assert data["settled_cycles"] == 19
         assert data["spot_price"] == 86450.00
         assert data["target_strike"] == 86400.00
         assert data["spot_diff"] == 50.00
@@ -153,6 +161,23 @@ def test_pocket_cockpit_api(tmp_path: Path):
         assert resp_panic.status_code == 200
         assert resp_panic.json()["status"] == "PANIC_EXECUTED"
         assert engine.is_armed is False
+
+
+def test_standalone_bot_sync_pnl_reports(tmp_path: Path):
+    engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
+    now_utc = datetime.now(timezone.utc)
+    today_prefix = now_utc.strftime("%y%b%d").upper()
+    reports = [
+        {"report_id": "WLR-1", "ticker": f"KXBTC15M-{today_prefix}1000-00", "pnl": 1.04, "outcome": "win", "execution_mode": "live", "timestamp_utc": now_utc.isoformat()},
+        {"report_id": "WLR-2", "ticker": f"KXBTC15M-{today_prefix}1015-15", "pnl": -0.96, "outcome": "loss", "execution_mode": "live", "timestamp_utc": now_utc.isoformat()},
+    ]
+    (tmp_path / "win_loss_reports.json").write_text(json.dumps(reports), encoding="utf-8")
+    engine.sync_pnl_reports()
+    assert engine.settled_cycles == 2
+    assert engine.today_pnl == Decimal("0.08")
+    assert engine.today_wins == 1
+    assert engine.today_losses == 1
+    assert engine.today_win_rate == 50.0
 
 
 def test_main_server_lockout_when_standalone_active(tmp_path: Path):

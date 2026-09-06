@@ -15,7 +15,7 @@ import argparse
 import asyncio
 from contextlib import asynccontextmanager
 import ctypes
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import json
 import logging
@@ -157,9 +157,28 @@ class StandaloneBotEngine:
         self.target_strike: Decimal = Decimal("0.00")
         self.active_ticker: str = ""
         self.active_market_close_dt: Optional[datetime] = None
+        self.target_time_str: str = ""
+        self.time_window_str: str = ""
+
+        # Live Inside-Touch Quotes
+        self.best_yes_bid: Optional[Decimal] = None
+        self.best_yes_ask: Optional[Decimal] = None
+        self.best_no_bid: Optional[Decimal] = None
+        self.best_no_ask: Optional[Decimal] = None
+
+        # Balances (Total Portfolio & Active Execution Shard)
+        self.total_balance_dollars: Decimal = Decimal("0.00")
+        self.shard2_balance_dollars: Decimal = Decimal("0.00")
         self.balance_dollars: Decimal = Decimal("0.00")
+
+        # Settlement & PnL Tracking
         self.today_pnl: Decimal = Decimal("0.00")
         self.settled_cycles: int = 0
+        self.today_wins: int = 0
+        self.today_losses: int = 0
+        self.today_win_rate: float = 0.0
+        self.recent_reports: List[Dict[str, Any]] = []
+
         self.last_decision: Optional[DominationDecision] = None
         self.last_eval_time: float = 0.0
 
@@ -174,7 +193,8 @@ class StandaloneBotEngine:
         self._running = True
         prevent_windows_sleep()
 
-        # Initial balance sync
+        # Initial PnL and balance sync
+        self.sync_pnl_reports()
         await self.sync_balance()
 
         # Start background workers
@@ -195,25 +215,71 @@ class StandaloneBotEngine:
             await self.order_client.close()
         logger.info("🛑 [STANDALONE BOT STOPPED] Engine shut down cleanly.")
 
+    def sync_pnl_reports(self) -> None:
+        """Sync realized PnL and settled cycles from persisted win_loss_reports.json."""
+        reports_file = self.data_dir / "win_loss_reports.json"
+        if not reports_file.exists():
+            return
+        try:
+            content = reports_file.read_text(encoding="utf-8")
+            all_reports = json.loads(content)
+            now_utc = datetime.now(timezone.utc)
+            today_prefix = now_utc.strftime("%y%b%d").upper()
+            today_iso = now_utc.strftime("%Y-%m-%d")
+
+            today_reports = [
+                r for r in all_reports
+                if (r.get("execution_mode") == "live" or r.get("bot_type") == "live")
+                and (today_prefix in r.get("ticker", "") or today_iso in str(r.get("timestamp_utc", "")))
+            ]
+            self.settled_cycles = len(today_reports)
+            pnl_sum = sum(float(r.get("pnl", 0.0)) for r in today_reports)
+            self.today_pnl = Decimal(str(round(pnl_sum, 2)))
+
+            wins = sum(1 for r in today_reports if r.get("outcome") == "win")
+            self.today_wins = wins
+            self.today_losses = self.settled_cycles - wins
+            self.today_win_rate = (wins / self.settled_cycles * 100.0) if self.settled_cycles > 0 else 0.0
+
+            # Store recent 5 settlements for display
+            self.recent_reports = [
+                {
+                    "ticker": r.get("ticker", ""),
+                    "side": r.get("bot_side", "").upper(),
+                    "outcome": r.get("outcome", "").upper(),
+                    "pnl": float(r.get("pnl", 0.0)),
+                    "strike": float(r.get("strike_price", 0.0)),
+                    "settle_price": float(r.get("settlement_btc_price", 0.0)),
+                    "contracts": r.get("contracts", 1),
+                    "time": r.get("timestamp_utc", "")[:19].replace("T", " "),
+                }
+                for r in today_reports[:5]
+            ]
+        except Exception as exc:
+            logger.debug("Error syncing PnL reports: %s", exc)
+
     async def sync_balance(self) -> None:
         """Sync live account balance from Kalshi portfolio."""
         if self.order_client:
             try:
                 data = await self.order_client.get_balance()
+                b_all = data.get("balance_dollars")
+                if b_all is not None:
+                    self.total_balance_dollars = Decimal(str(b_all))
                 b2 = self.order_client.shard_balances.get(2)
                 if b2 is not None:
-                    self.balance_dollars = b2
+                    self.shard2_balance_dollars = b2
                 else:
-                    b_all = data.get("balance_dollars")
-                    if b_all:
-                        self.balance_dollars = Decimal(str(b_all))
+                    self.shard2_balance_dollars = self.total_balance_dollars
+                self.balance_dollars = self.total_balance_dollars
             except Exception as e:
                 logger.debug("Balance sync error: %s", e)
 
     async def _balance_polling_loop(self) -> None:
-        """Poll balance every 5 seconds."""
+        """Poll balance and PnL settlements every 5 seconds."""
         while self._running:
             await self.sync_balance()
+            self.sync_pnl_reports()
             await asyncio.sleep(5.0)
 
     async def _spot_feed_loop(self) -> None:
@@ -247,7 +313,11 @@ class StandaloneBotEngine:
     async def _market_discovery_and_book_loop(self) -> None:
         """Discover active KXBTC15M contracts and sync L2 orderbook every 500ms."""
         connector = create_aiohttp_connector()
-        async with aiohttp.ClientSession(connector=connector) as session:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        }
+        async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
             while self._running:
                 try:
                     # 1. Discover current open contract
@@ -275,25 +345,53 @@ class StandaloneBotEngine:
                                     if floor is not None:
                                         self.target_strike = Decimal(str(floor))
 
+                                    # ET time formatting
+                                    et_zone = ZoneInfo("America/New_York")
+                                    close_et = active_close.astimezone(et_zone)
+                                    start_et = close_et - timedelta(minutes=15)
+                                    self.target_time_str = close_et.strftime("%I:%M%p").lower() + " ET"
+                                    self.time_window_str = f"{start_et.strftime('%B %d, %I:%M')} - {close_et.strftime('%I:%M %p')} ET"
+
                     # 2. Ingest orderbook for active contract
                     if self.active_ticker:
                         ob_url = f"{self.rest_base}/markets/{self.active_ticker}/orderbook"
                         async with session.get(ob_url, timeout=aiohttp.ClientTimeout(total=2.0)) as ob_resp:
                             if ob_resp.status == 200:
                                 ob_data = await ob_resp.json()
-                                raw_book = ob_data.get("orderbook", {})
-                                bids = raw_book.get("yes", [])
-                                asks = raw_book.get("no", [])
+                                raw_book = ob_data.get("orderbook_fp") or ob_data.get("orderbook") or {}
+                                bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []
+                                asks = raw_book.get("no_dollars") or raw_book.get("no") or []
 
                                 book = self.orderbook.get_book(self.active_ticker)
                                 if not book:
                                     book = L2BookState(self.active_ticker)
                                     self.orderbook.set_book(self.active_ticker, book)
 
-                                new_yes = {Decimal(str(p/100.0 if p > 1 else p)): Decimal(str(q)) for p, q in bids}
-                                new_no = {Decimal(str(p/100.0 if p > 1 else p)): Decimal(str(q)) for p, q in asks}
+                                new_yes: Dict[Decimal, Decimal] = {}
+                                for item in bids:
+                                    p, q = item[0], item[1]
+                                    p_dec = Decimal(str(p))
+                                    if p_dec > 1:
+                                        p_dec = p_dec / Decimal("100")
+                                    new_yes[p_dec] = Decimal(str(q))
+
+                                new_no: Dict[Decimal, Decimal] = {}
+                                for item in asks:
+                                    p, q = item[0], item[1]
+                                    p_dec = Decimal(str(p))
+                                    if p_dec > 1:
+                                        p_dec = p_dec / Decimal("100")
+                                    new_no[p_dec] = Decimal(str(q))
+
                                 book.yes_book = new_yes
                                 book.no_book = new_no
+
+                                # Extract inside touch quotes
+                                self.best_yes_bid = book.best_yes_bid
+                                self.best_yes_ask = book.best_yes_ask
+                                self.best_no_bid = book.best_no_bid
+                                self.best_no_ask = book.best_no_ask
+
                                 self.kalshi_ws_connected = True
                                 await self.evaluate_and_execute()
 
@@ -447,6 +545,10 @@ engine_lock: Optional[TradingEngineLock] = None
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     global app_engine, engine_lock
+    if os.getenv("TESTING") == "true":
+        yield
+        return
+
     # 1. Acquire Engine Lock
     engine_lock = TradingEngineLock()
     engine_lock.acquire(force=False)
@@ -485,11 +587,12 @@ async def get_state() -> Dict[str, Any]:
     t_rem = app_engine.get_time_to_expiry()
     mins = int(t_rem // 60)
     secs = int(t_rem % 60)
-    t_str = f"{mins:02d}:{secs:02d} ET" if t_rem > 0 else "EXPIRED"
+    t_str = f"{mins:02d}:{secs:02d}" if t_rem > 0 else "00:00"
 
     spot = float(app_engine.current_btc_spot)
     strike = float(app_engine.target_strike)
     diff = spot - strike if strike > 0 else 0.0
+    diff_pct = (diff / strike * 100.0) if strike > 0 else 0.0
 
     dec = app_engine.last_decision
     playbook = dec.active_playbook if dec else "none"
@@ -504,24 +607,41 @@ async def get_state() -> Dict[str, Any]:
     pos_str = "IN CYCLE TRADE" if locked else "FLAT"
     pos_sub = "1 cycle entry active" if locked else "0 contracts active"
 
+    # Default to total balance or fallback
+    bal = float(app_engine.total_balance_dollars) if app_engine.total_balance_dollars > 0 else float(app_engine.balance_dollars)
+    shard2_bal = float(app_engine.shard2_balance_dollars) if app_engine.shard2_balance_dollars > 0 else bal
+
     return {
         "armed": app_engine.is_armed,
-        "balance": float(app_engine.balance_dollars),
+        "balance": bal,
+        "shard2_balance": shard2_bal,
         "today_pnl": float(app_engine.today_pnl),
         "settled_cycles": app_engine.settled_cycles,
+        "today_wins": app_engine.today_wins,
+        "today_losses": app_engine.today_losses,
+        "today_win_rate": round(app_engine.today_win_rate, 1),
         "active_ticker": app_engine.active_ticker,
         "time_remaining_str": t_str,
+        "target_time_str": app_engine.target_time_str,
+        "time_window_str": app_engine.time_window_str,
+        "expiry_countdown_seconds": int(t_rem),
         "position_str": pos_str,
         "position_sub": pos_sub,
         "spot_price": spot,
         "target_strike": strike,
-        "spot_diff": diff,
+        "spot_diff": round(diff, 2),
+        "spot_diff_pct": round(diff_pct, 3),
+        "best_yes_bid": float(app_engine.best_yes_bid) if app_engine.best_yes_bid is not None else None,
+        "best_yes_ask": float(app_engine.best_yes_ask) if app_engine.best_yes_ask is not None else None,
+        "best_no_bid": float(app_engine.best_no_bid) if app_engine.best_no_bid is not None else None,
+        "best_no_ask": float(app_engine.best_no_ask) if app_engine.best_no_ask is not None else None,
         "playbook": playbook,
         "edge_pct": edge,
         "ev": ev,
         "vpin": vpin,
         "vpin_is_safe": vpin_safe,
         "rationale": rationale,
+        "recent_reports": app_engine.recent_reports,
         "kalshi_ws_connected": app_engine.kalshi_ws_connected,
         "spot_connected": app_engine.spot_connected,
     }
