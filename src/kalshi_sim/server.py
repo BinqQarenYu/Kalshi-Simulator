@@ -51,7 +51,7 @@ from kalshi_sim.system_governor import get_system_governor, SystemResourceGovern
 from kalshi_sim.mock_feed import MockKalshiFeed
 
 
-from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync
+from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
 from kalshi_sim.ml.ai_worker import AIWorker
 from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
@@ -63,9 +63,14 @@ from kalshi_sim.ohlcv_aggregator import OHLCVAggregator
 from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
+from kalshi_sim.portfolio import Portfolio
 from kalshi_sim.rate_limiter import kalshi_rate_limiter
 from kalshi_sim.schemas import (
+    CRYPTO_ASSETS,
     CandleInterval,
+    CryptoAsset,
+    get_asset_config,
+
     IntegrityCheckSchema,
     IntegrityStatusResponse,
     L2BookState,
@@ -137,6 +142,7 @@ class ServerState:
     def __init__(self) -> None:
         self.orderbook = OrderBookManager(enforce_consecutive_seq=False)
         self.starting_capital = Decimal("25.00") if os.environ.get("KALSHI_MODE", "live").lower() == "live" else Decimal("100.00")
+        self.portfolio: Portfolio = Portfolio(starting_balance=self.starting_capital)
         self.data_dir = Path("data")
         self.timeframes = [Timeframe.FIFTEEN_MIN, Timeframe.ONE_HOUR, Timeframe.DAILY]
         self.active_timeframe = Timeframe.FIFTEEN_MIN
@@ -188,6 +194,9 @@ class ServerState:
         self.twap_60s_samples: list[Decimal] = []
         self.twap_60s_price: Optional[Decimal] = None
         self.last_twap_second: int = -1
+        self.active_asset: CryptoAsset = CryptoAsset.BTC
+        self.cf_sync: Optional[CFBenchmarksSync] = None
+
 
         # Real-time Institutional Bitcoin Orderflow Feed (Binance / Coinbase L2)
         self.btc_orderflow_feed = BtcOrderflowFeed()
@@ -428,9 +437,10 @@ async def live_kalshi_public_sync_loop() -> None:
                 now_utc = datetime.now(timezone.utc)
 
                 # 1. Discover active live Kalshi 15M open markets every 2.0s
+                active_cfg = get_asset_config(state.active_asset)
                 if now_mono - last_market_poll >= 2.0:
                     last_market_poll = now_mono
-                    url = f"{PROD_REST_BASE}/markets?series_ticker=KXBTC15M&status=open&limit=10"
+                    url = f"{PROD_REST_BASE}/markets?series_ticker={active_cfg.series_ticker_15m}&status=open&limit=10"
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
@@ -448,7 +458,7 @@ async def live_kalshi_public_sync_loop() -> None:
                                 
                                 minfo = MarketInfo(
                                     ticker=ticker,
-                                    series_ticker=m.get("series_ticker", "KXBTC15M"),
+                                    series_ticker=m.get("series_ticker", active_cfg.series_ticker_15m),
                                     title=m.get("title", ""),
                                     subtitle=m.get("subtitle", ""),
                                     status=MarketStatus.OPEN,
@@ -468,7 +478,7 @@ async def live_kalshi_public_sync_loop() -> None:
 
                 # 2. Fetch live Level-2 Orderbook Snapshot from Kalshi public API every 500ms
                 active_ticker = state.active_ticker
-                if active_ticker and active_ticker.startswith("KXBTC"):
+                if active_ticker and any(active_ticker.startswith(pfx) for pfx in ["KXBTC", "KXETH", "KXSOL", "KXDOGE"]):
                     ob_url = f"{PROD_REST_BASE}/markets/{active_ticker}/orderbook"
                     async with session.get(ob_url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
                         if resp2.status == 200:
@@ -559,39 +569,39 @@ def fast_dumps(obj: Any) -> str:
 
 
 async def live_btc_spot_ws_loop() -> None:
-    """Streams real-time BTC spot price ticks prioritizing official CF Benchmarks BRTI 5Hz feed."""
-    def _on_brti(price: Decimal, twap: Optional[Decimal], source: str) -> None:
-        if price != state.current_btc_price:
-            state.current_btc_price = price
-            if twap is not None:
-                state.twap_60s_price = twap
-            state.coinbase_connected = True  # Marks spot feed healthy
-            now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
-            state.price_history.append({
-                "time": now_t,
-                "price": float(price),
-                "target": float(state.target_strike),
-            })
-            if state.mode != "live":
-                update_dynamic_clob_ladder(price, state.target_strike, state.active_ticker)
-            state.is_dirty = True
-            if state.connected_websockets:
-                asyncio.create_task(trigger_instant_broadcast())
+    """Streams real-time crypto spot price ticks prioritizing official CF Benchmarks 5Hz feed."""
+    def _on_cf_asset(asset: CryptoAsset, price: Decimal, twap: Optional[Decimal], source: str) -> None:
+        if asset == state.active_asset:
+            if price != state.current_btc_price:
+                state.current_btc_price = price
+                if twap is not None:
+                    state.twap_60s_price = twap
+                state.coinbase_connected = True  # Marks spot feed healthy
+                now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                state.price_history.append({
+                    "time": now_t,
+                    "price": float(price),
+                    "target": float(state.target_strike),
+                })
+                if state.mode != "live":
+                    update_dynamic_clob_ladder(price, state.target_strike, state.active_ticker)
+                state.is_dirty = True
+                if state.connected_websockets:
+                    asyncio.create_task(trigger_instant_broadcast())
 
-    brti_sync: Optional[CFBenchmarksBRTISync] = None
     api_key_id = os.getenv("KALSHI_API_KEY_ID", "")
     priv_key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "")
     if api_key_id and priv_key_path:
         try:
-            brti_sync = CFBenchmarksBRTISync(
+            state.cf_sync = CFBenchmarksSync(
                 api_key_id=api_key_id,
                 private_key_path=priv_key_path,
-                on_price_update=_on_brti,
+                on_asset_price_update=_on_cf_asset,
             )
-            await brti_sync.start()
-            logger.info("[SPOT FEED] Official CF Benchmarks BRTI 5Hz active on Mother server.")
+            await state.cf_sync.start()
+            logger.info("[SPOT FEED] Official CF Benchmarks Multi-Asset 5Hz active on Mother server.")
         except Exception as e:
-            logger.warning("[SPOT FEED] Could not start BRTI sync: %s", e)
+            logger.warning("[SPOT FEED] Could not start CF Benchmarks sync: %s", e)
 
     async def _coinbase_worker(session: aiohttp.ClientSession) -> None:
         while True:
@@ -599,7 +609,7 @@ async def live_btc_spot_ws_loop() -> None:
                 async with session.ws_connect("wss://ws-feed.exchange.coinbase.com", timeout=5.0) as ws:
                     sub_msg = {
                         "type": "subscribe",
-                        "product_ids": ["BTC-USD"],
+                        "product_ids": ["BTC-USD", "ETH-USD", "SOL-USD", "DOGE-USD"],
                         "channels": ["ticker"]
                     }
                     await ws.send_json(sub_msg)
@@ -608,7 +618,7 @@ async def live_btc_spot_ws_loop() -> None:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             data = json.loads(msg.data)
                             if data.get("type") == "ticker" and "price" in data:
-                                if not (brti_sync and brti_sync.brti_connected):
+                                if not (state.cf_sync and state.cf_sync.is_connected):
                                     p = Decimal(str(data["price"]))
                                     if p != state.current_btc_price:
                                         state.current_btc_price = p
@@ -639,7 +649,7 @@ async def live_btc_spot_ws_loop() -> None:
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             data = json.loads(msg.data)
-                            if "c" in data and not (brti_sync and brti_sync.brti_connected) and not state.coinbase_connected:
+                            if "c" in data and not (state.cf_sync and state.cf_sync.is_connected) and not state.coinbase_connected:
                                 p = Decimal(str(data["c"]))
                                 if p != state.current_btc_price:
                                     state.current_btc_price = p
@@ -674,8 +684,8 @@ async def live_btc_spot_ws_loop() -> None:
             bn_task.cancel()
             await asyncio.gather(cb_task, bn_task, return_exceptions=True)
         finally:
-            if brti_sync:
-                await brti_sync.stop()
+            if state.cf_sync:
+                await state.cf_sync.stop()
 
 
 
@@ -1531,7 +1541,7 @@ async def integrity_audit_loop() -> None:
     """Periodic background guardian loop auditing math, code, latency, and truth invariants."""
     while True:
         try:
-            p = state.sim_agent._portfolio if state.sim_agent else None
+            p = (state.sim_agent._portfolio if state.sim_agent else None) or state.portfolio
             res = state.integrity_agent.run_full_audit(
                 portfolio=p,
                 orderbook=state.orderbook,
@@ -3071,8 +3081,103 @@ async def update_domination_config_endpoint(req: DominationConfigRequest) -> dic
     }
 
 
+class AssetSelectRequest(BaseModel):
+    asset: str
+
+
+@app.get("/api/assets")
+async def get_supported_assets() -> dict[str, Any]:
+    """Return all supported cryptocurrency underlying assets and live CF Benchmarks quotes."""
+    cf_data = state.cf_sync.get_all_state() if state.cf_sync else {}
+    assets_list = []
+    for a in CryptoAsset:
+        cfg = get_asset_config(a)
+        quote = cf_data.get(a.value, {})
+        assets_list.append({
+            "id": a.value,
+            "name": cfg.name,
+            "series_15m": cfg.series_ticker_15m,
+            "cf_index_id": cfg.cf_index_id,
+            "price_decimals": cfg.price_decimals,
+            "min_spot_diff": float(cfg.min_spot_diff),
+            "spot_price": quote.get("price"),
+            "spot_price_str": quote.get("price_str"),
+            "twap_60s": quote.get("twap_60s"),
+            "twap_60s_str": quote.get("twap_60s_str"),
+            "is_active": a == state.active_asset,
+        })
+    return {
+        "active_asset": state.active_asset.value,
+        "assets": assets_list,
+    }
+
+
+@app.post("/api/assets/select")
+async def select_active_asset(req: AssetSelectRequest) -> dict[str, Any]:
+    """Switch active underlying asset (BTC, ETH, SOL, DOGE)."""
+    try:
+        new_asset = CryptoAsset(req.asset.upper().strip())
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported asset: {req.asset}. Supported: {[a.value for a in CryptoAsset]}"
+        )
+
+    state.active_asset = new_asset
+    cfg = get_asset_config(new_asset)
+
+    # Update current spot price from CFBenchmarks sync if available
+    if state.cf_sync:
+        p = state.cf_sync.get_price(new_asset)
+        if p > Decimal("0.00"):
+            state.current_btc_price = p
+            state.twap_60s_price = state.cf_sync.get_twap(new_asset)
+
+    # Recalibrate domination bot if active
+    if state.sim_agent and hasattr(state.sim_agent, "bot") and hasattr(state.sim_agent.bot, "set_asset"):
+        state.sim_agent.bot.set_asset(new_asset)
+
+    # Immediately point active_ticker to this asset's 15m contract
+    found_market = False
+    if state.sim_agent and state.sim_agent._market_cache:
+        for ticker, minfo in state.sim_agent._market_cache.items():
+            if minfo.series_ticker == cfg.series_ticker_15m and minfo.status == MarketStatus.OPEN:
+                state.active_ticker = ticker
+                if minfo.floor_strike:
+                    state.target_strike = minfo.floor_strike
+                found_market = True
+                break
+
+    if not found_market:
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                url = f"{PROD_REST_BASE}/markets?series_ticker={cfg.series_ticker_15m}&status=open&limit=5"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        markets = data.get("markets", [])
+                        if markets:
+                            m = markets[0]
+                            t = m.get("ticker")
+                            if t:
+                                state.active_ticker = t
+                                fl = m.get("floor_strike")
+                                if fl is not None:
+                                    state.target_strike = Decimal(str(fl))
+        except Exception as e:
+            logger.debug("Failed to quick-fetch market for %s: %s", new_asset.value, e)
+
+    state.is_dirty = True
+    logger.info("Switched active asset to %s (%s)", cfg.name, new_asset.value)
+    if state.connected_websockets:
+        asyncio.create_task(trigger_instant_broadcast())
+    return {"status": "SUCCESS", "active_asset": new_asset.value, "config": cfg.model_dump()}
+
+
 @app.get("/api/bot/strategies")
 async def get_bot_strategies() -> dict[str, Any]:
+
     """Retrieve list of available quantitative trading strategy bots with full metadata."""
     return {
         "active_strategy": state.active_strategy_bot,
@@ -3423,7 +3528,7 @@ async def get_forward_validation_status_endpoint(
     drawdown_ok = metrics.get("max_drawdown_pct", 0.0) < 15.0
     cycles_ok = total_cycles >= target_cycles
     
-    p = state.sim_agent._portfolio if state.sim_agent else None
+    p = (state.sim_agent._portfolio if state.sim_agent else None) or state.portfolio
     state.integrity_agent.run_full_audit(
         portfolio=p,
         orderbook=state.orderbook,
@@ -4465,7 +4570,7 @@ async def get_integrity_status() -> dict[str, Any]:
 @app.post("/api/integrity/audit-now", response_model=IntegrityStatusResponse)
 async def run_integrity_audit_now() -> dict[str, Any]:
     """Execute an immediate comprehensive invariant scan across all subsystems."""
-    p = state.sim_agent._portfolio if state.sim_agent else None
+    p = (state.sim_agent._portfolio if state.sim_agent else None) or state.portfolio
     report = state.integrity_agent.run_full_audit(
         portfolio=p,
         orderbook=state.orderbook,
@@ -4806,23 +4911,29 @@ def _build_full_state_payload() -> dict[str, Any]:
     diff_pct = (diff / float(strike_dec)) * 100.0
 
     cfg = TIMEFRAME_CONFIGS.get(state.active_timeframe, {})
-    title = cfg.get("title", f"BTC {state.active_timeframe.value}")
-    series = cfg.get("series", "KXBTC15M")
+    asset_cfg = get_asset_config(state.active_asset)
+    title = f"{asset_cfg.name} {state.active_timeframe.value}"
+    series = asset_cfg.series_ticker_15m
 
     return {
         "timestamp": now_utc.isoformat(),
         "market": {
+            "active_asset": state.active_asset.value,
+            "active_asset_name": asset_cfg.name,
+            "active_asset_decimals": asset_cfg.price_decimals,
+            "cf_indices": state.cf_sync.get_all_state() if state.cf_sync else {},
             "title": title,
             "series": series,
             "ticker": state.active_ticker,
             "target_strike": float(strike_dec),
-            "target_strike_str": f"${float(strike_dec):,.2f}",
+            "target_strike_str": asset_cfg.format_price(strike_dec),
             "target_time_str": target_time_str,
             "time_window_str": time_window_str,
             "current_btc_price": btc_spot,
-            "current_btc_price_str": f"${btc_spot:,.2f}",
-            "diff": round(diff, 2),
+            "current_btc_price_str": asset_cfg.format_price(btc_spot),
+            "diff": round(diff, asset_cfg.price_decimals),
             "diff_pct": round(diff_pct, 3),
+            "diff_str": asset_cfg.format_diff(diff, diff_pct),
             "expiry_countdown_seconds": remaining_secs,
             "expiry_countdown_str": f"{remaining_secs // 60:02d}:{remaining_secs % 60:02d}",
             "market_chance_pct": market_chance_pct,
@@ -4836,6 +4947,7 @@ def _build_full_state_payload() -> dict[str, Any]:
             "twap_60s_price": float(state.twap_60s_price) if state.twap_60s_price is not None else None,
             "is_twap_active": bool(state.twap_60s_price is not None),
         },
+
         "chart": list(state.price_history)[-60:],
         "trade_tape": list(state.trade_tape)[-15:],
         "orderbook_ladder": ladder,

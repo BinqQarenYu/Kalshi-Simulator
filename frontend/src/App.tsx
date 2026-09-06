@@ -39,6 +39,7 @@ export function App() {
     selectStrategyBot,
     testBotTrade,
     updateDominationDiscountPrice,
+    selectAsset,
   } = useKalshiWebSocket();
 
   const [mainView, setMainView] = useState<'trading' | 'analytics'>('trading');
@@ -162,6 +163,7 @@ export function App() {
         tradingMode={tradingMode}
         activeStrategyBot={data.settings?.active_strategy_bot || '3_step_domination_bot'}
         onSelectStrategy={selectStrategyBot}
+        onSelectAsset={selectAsset}
         mainView={mainView}
         onSelectMainView={(v) => setMainView(v)}
         isKillSwitchTripped={isKillSwitchTripped}

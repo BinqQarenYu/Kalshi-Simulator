@@ -85,6 +85,12 @@
     .health-tag { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.03); padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); }
     .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
     .dot-err { background: var(--red); }
+
+    /* Multi-Asset Selector Bar */
+    .asset-bar { display: flex; gap: 8px; justify-content: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
+    .asset-btn { flex: 1; padding: 8px 10px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--muted); font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .asset-btn:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+    .asset-btn.active { background: #1e2230; color: #fff; border: 1px solid #30363d; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
   </style>
 </head>
 <body>
@@ -97,6 +103,22 @@
         <span style="font-size: 0.8rem; color: var(--muted); font-weight: 400;">(24/7 Standalone Engine)</span>
       </div>
       <div id="liveStatusBadge" class="status-badge badge-standby">STANDBY</div>
+    </div>
+
+    <!-- Multi-Asset Switcher Bar -->
+    <div class="asset-bar">
+      <button id="assetBtn-BTC" class="asset-btn active" onclick="switchAsset('BTC')">
+        <span style="color: #f7931a;">₿</span> BTC
+      </button>
+      <button id="assetBtn-ETH" class="asset-btn" onclick="switchAsset('ETH')">
+        <span style="color: #627eea;">Ξ</span> ETH
+      </button>
+      <button id="assetBtn-SOL" class="asset-btn" onclick="switchAsset('SOL')">
+        <span style="color: #14f195;">◎</span> SOL
+      </button>
+      <button id="assetBtn-DOGE" class="asset-btn" onclick="switchAsset('DOGE')">
+        <span style="color: #e1b303;">Ð</span> DOGE
+      </button>
     </div>
 
     <!-- Master Controls -->
@@ -132,7 +154,7 @@
         <div id="strikeHeroSub" class="kpi-sub">Target Expiry: --:--</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">BRTI Spot Index (NOW)</div>
+        <div class="kpi-label" id="spotLabel">Spot Index (NOW)</div>
         <div id="spotHeroVal" class="kpi-val text-green">$0.00</div>
         <div id="spotHeroSub" class="kpi-sub">Diff: +$0.00 (+0.00%)</div>
       </div>
@@ -300,6 +322,7 @@
   <script>
     let isArmed = false;
     let paramsLoaded = false;
+    let currentAsset = 'BTC';
     const logBox = document.getElementById('logBox');
 
     function appendLog(msg) {
@@ -309,6 +332,40 @@
       div.innerHTML = `<span class="log-time">[${timeStr}]</span> ${msg}`;
       logBox.appendChild(div);
       logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    async function switchAsset(asset) {
+      currentAsset = asset;
+      ['BTC', 'ETH', 'SOL', 'DOGE'].forEach(a => {
+        const btn = document.getElementById(`assetBtn-${a}`);
+        if (btn) {
+          if (a === asset) {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        }
+      });
+      const spotLabel = document.getElementById('spotLabel');
+      if (spotLabel) spotLabel.textContent = `${asset} Spot Index (NOW)`;
+      appendLog(`🔄 Switching active asset to ${asset}...`);
+      try {
+        const res = await fetch('/api/assets/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset })
+        });
+        if (res.ok) {
+          const d = await res.json();
+          appendLog(`✅ Active asset is now ${asset}`);
+          await fetchState();
+          await loadParameters();
+        } else {
+          appendLog(`❌ Failed to switch asset to ${asset}`);
+        }
+      } catch (err) {
+        appendLog(`❌ Error switching asset: ${err}`);
+      }
     }
 
     async function loadParameters() {
@@ -384,6 +441,18 @@
         const res = await fetch('/api/state');
         if (!res.ok) return;
         const data = await res.json();
+
+        // Sync active asset
+        const serverAsset = data.active_asset || (data.market && data.market.active_asset);
+        if (serverAsset && serverAsset !== currentAsset) {
+          currentAsset = serverAsset;
+          ['BTC', 'ETH', 'SOL', 'DOGE'].forEach(a => {
+            const btn = document.getElementById(`assetBtn-${a}`);
+            if (btn) btn.classList.toggle('active', a === currentAsset);
+          });
+          const spotLabel = document.getElementById('spotLabel');
+          if (spotLabel) spotLabel.textContent = `${currentAsset} Spot Index (NOW)`;
+        }
 
         // Arming status
         isArmed = data.armed;

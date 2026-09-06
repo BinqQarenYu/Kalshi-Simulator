@@ -15,7 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync
+from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
+from kalshi_sim.schemas import CryptoAsset
 
 
 def test_cfbenchmarks_initial_state():
@@ -139,8 +140,59 @@ async def test_cfbenchmarks_rest_payload_extraction():
     sync.private_key = MagicMock()
 
     with patch("kalshi_sim.cfbenchmarks_sync.get_auth_headers", return_value={"test": "header"}):
-        res = await sync._poll_kalshi_brti_rest()
+        res = await sync._poll_kalshi_rest("BRTI", CryptoAsset.BTC)
         assert res is True
         assert sync.current_price == Decimal("79742.40")
         assert sync.source == "CF Benchmarks BRTI (REST)"
         assert sync.brti_connected is True
+
+
+def test_cfbenchmarks_multi_asset_parsing():
+    asset_updates = []
+
+    def asset_callback(asset, price, twap, source):
+        asset_updates.append((asset, price, twap, source))
+
+    sync = CFBenchmarksSync(
+        api_key_id="test_key",
+        private_key_path="dummy_path",
+        on_asset_price_update=asset_callback,
+    )
+
+    # 1. Update ETH
+    sync._update_asset_price(
+        asset=CryptoAsset.ETH,
+        price_dec=Decimal("2491.92"),
+        twap_dec=Decimal("2490.50"),
+        source_label="CF Benchmarks ETHUSD_RTI (5Hz WS)",
+    )
+    assert sync.get_price(CryptoAsset.ETH) == Decimal("2491.92")
+    assert sync.get_twap(CryptoAsset.ETH) == Decimal("2490.50")
+    assert sync.get_source(CryptoAsset.ETH) == "CF Benchmarks ETHUSD_RTI (5Hz WS)"
+
+    # 2. Update SOL
+    sync._update_asset_price(
+        asset=CryptoAsset.SOL,
+        price_dec=Decimal("105.82"),
+        twap_dec=Decimal("105.75"),
+        source_label="CF Benchmarks SOLUSD_RTI (5Hz WS)",
+    )
+    assert sync.get_price(CryptoAsset.SOL) == Decimal("105.82")
+    assert sync.get_twap(CryptoAsset.SOL) == Decimal("105.75")
+
+    # 3. Update DOGE (6 decimals)
+    sync._update_asset_price(
+        asset=CryptoAsset.DOGE,
+        price_dec=Decimal("0.089447"),
+        twap_dec=Decimal("0.089420"),
+        source_label="CF Benchmarks DOGEUSD_RTI (5Hz WS)",
+    )
+    assert sync.get_price(CryptoAsset.DOGE) == Decimal("0.089447")
+    assert sync.get_twap(CryptoAsset.DOGE) == Decimal("0.089420")
+
+    assert len(asset_updates) == 3
+    state = sync.get_all_state()
+    assert state["ETH"]["price"] == 2491.92
+    assert state["SOL"]["price"] == 105.82
+    assert state["DOGE"]["price"] == 0.089447
+

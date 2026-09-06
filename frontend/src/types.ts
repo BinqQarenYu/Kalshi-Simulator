@@ -1,3 +1,19 @@
+export type CryptoAsset = 'BTC' | 'ETH' | 'SOL' | 'DOGE';
+
+export interface SupportedAssetInfo {
+  id: CryptoAsset;
+  name: string;
+  series_15m: string;
+  cf_index_id: string;
+  price_decimals: number;
+  min_spot_diff: number;
+  spot_price: number | null;
+  spot_price_str: string;
+  twap_60s: number | null;
+  twap_60s_str: string;
+  is_active: boolean;
+}
+
 export interface MarketState {
   title: string;
   series: string;
@@ -8,6 +24,7 @@ export interface MarketState {
   current_btc_price_str: string;
   diff: number;
   diff_pct: number;
+  diff_str?: string;
   expiry_countdown_seconds: number;
   expiry_countdown_str: string;
   market_chance_pct: number;
@@ -20,6 +37,17 @@ export interface MarketState {
   time_window_str?: string;
   yes_cents_str: string;
   no_cents_str: string;
+  active_asset?: CryptoAsset;
+  active_asset_name?: string;
+  active_asset_decimals?: number;
+  cf_indices?: Record<string, {
+    price: number | null;
+    price_str: string;
+    twap_60s: number | null;
+    twap_60s_str: string;
+    source_ts_ms?: number;
+    updated_at?: number;
+  }>;
 }
 
 export interface ChartPoint {

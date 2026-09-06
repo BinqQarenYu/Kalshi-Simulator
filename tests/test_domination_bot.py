@@ -149,3 +149,31 @@ def test_domination_bot_dynamic_discount_update() -> None:
 
     bot.set_discount_limit_price(0.75)
     assert bot.discount_limit_price == Decimal("0.50")
+
+
+def test_domination_bot_asset_calibration() -> None:
+    """Verify that ThreeStepDominationBot dynamically scales min_spot_diff across BTC, ETH, SOL, DOGE."""
+    from kalshi_sim.schemas import CryptoAsset
+
+    bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    assert bot.asset == CryptoAsset.BTC
+    assert bot.min_spot_diff == 35.0
+
+    # Calibrate to ETH ($2.50 threshold)
+    bot.set_asset(CryptoAsset.ETH)
+    assert bot.asset == CryptoAsset.ETH
+    assert bot.min_spot_diff == 2.50
+    params = bot.get_parameters()
+    assert params["asset"] == "ETH"
+    assert params["min_spot_diff"] == 2.50
+
+    # Calibrate to SOL ($0.50 threshold)
+    bot.set_asset(CryptoAsset.SOL)
+    assert bot.asset == CryptoAsset.SOL
+    assert bot.min_spot_diff == 0.50
+
+    # Calibrate to DOGE ($0.0005 threshold)
+    bot.set_asset(CryptoAsset.DOGE)
+    assert bot.asset == CryptoAsset.DOGE
+    assert bot.min_spot_diff == 0.0005
+

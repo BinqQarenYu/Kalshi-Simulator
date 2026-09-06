@@ -212,3 +212,54 @@ def test_settlement_unlocks_cycle() -> None:
         vpin=0.10,
     )
     assert ok is True
+
+
+def test_multi_asset_cycle_lock_isolation() -> None:
+    """Verify that 1-trade-per-cycle lock on one asset (e.g. BTC) does not block trades on other assets (ETH, SOL, DOGE)."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    btc_ticker = "KXBTC15M-26AUG290315-15"
+    eth_ticker = "KXETH15M-26AUG290315-15"
+    sol_ticker = "KXSOL15M-26AUG290315-15"
+    doge_ticker = "KXDOGE15M-26AUG290315-15"
+
+    # Inception on BTC
+    guardrails.record_trade_inception(
+        trade_id="tr_btc_1",
+        ticker=btc_ticker,
+        side="yes",
+        size=2,
+        price=Decimal("0.45"),
+        cost=Decimal("0.90"),
+        fee=Decimal("0.02"),
+        bot_type="3_step_domination_bot",
+        execution_mode="simulated",
+        rationale="BTC Momentum",
+        vpin=0.12,
+        ai_prob=0.70,
+    )
+
+    # BTC is now locked
+    ok_btc, reason_btc, _, _ = guardrails.validate_pre_trade_intent(
+        ticker=btc_ticker,
+        side="yes",
+        requested_size=2,
+        est_price=Decimal("0.45"),
+        total_equity=Decimal("100.00"),
+        vpin=0.12,
+    )
+    assert ok_btc is False
+    assert "1-TRADE-PER-CYCLE LOCKOUT" in reason_btc
+
+    # ETH, SOL, DOGE are NOT locked and can enter
+    for ticker in [eth_ticker, sol_ticker, doge_ticker]:
+        ok, reason, size, _ = guardrails.validate_pre_trade_intent(
+            ticker=ticker,
+            side="yes",
+            requested_size=2,
+            est_price=Decimal("0.45"),
+            total_equity=Decimal("100.00"),
+            vpin=0.12,
+        )
+        assert ok is True, f"Expected {ticker} to be allowed, but rejected: {reason}"
+        assert size == 2
+

@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
-from kalshi_sim.schemas import L2BookState, OrderSide, TradeEvent
+from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, get_asset_config
 
 logger = logging.getLogger("kalshi_sim.domination_bot")
 
@@ -84,10 +84,14 @@ class ThreeStepDominationBot:
         min_take_profit_roi: float = 0.20,  # +20% minimum ROI for early exit
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
         fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
-        min_spot_diff: float = 35.0,  # $35 minimum spot-strike distance (skip coin-flip territory)
+        min_spot_diff: Optional[float] = None,  # Scaled by asset if None
         max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
         discount_limit_price: Decimal = Decimal("0.48"),  # Configurable discount sniper ceiling
+        asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
+        self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
+        cfg = get_asset_config(self.asset)
+
         self.min_edge_pct = min_edge_pct
         self.min_ev_dollars = min_ev_dollars
         self.vpin_toxic_threshold = vpin_toxic_threshold
@@ -97,7 +101,7 @@ class ThreeStepDominationBot:
         self.min_take_profit_roi = min_take_profit_roi
         self.late_cycle_roi = late_cycle_roi
         self.fee_per_contract = fee_per_contract
-        self.min_spot_diff = min_spot_diff
+        self.min_spot_diff = min_spot_diff if min_spot_diff is not None else float(cfg.min_spot_diff)
         self.max_entry_price = Decimal(str(max_entry_price))
         self.discount_limit_price = max(Decimal("0.10"), min(Decimal("0.50"), discount_limit_price))
 
@@ -112,6 +116,13 @@ class ThreeStepDominationBot:
             vpin_toxic_threshold=vpin_toxic_threshold,
         )
 
+    def set_asset(self, asset: CryptoAsset | str) -> None:
+        """Calibrate bot parameters for a specific crypto asset."""
+        self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
+        cfg = get_asset_config(self.asset)
+        self.min_spot_diff = float(cfg.min_spot_diff)
+        logger.info("[DOMINATION BOT] Calibrated for %s: min_spot_diff=%.6f", cfg.name, self.min_spot_diff)
+
     def set_discount_limit_price(self, new_price: Decimal | float | str) -> None:
         """Dynamically update the maker discount limit price ceiling."""
         dec_price = Decimal(str(new_price))
@@ -122,6 +133,7 @@ class ThreeStepDominationBot:
     def get_parameters(self) -> Dict[str, Any]:
         """Return current live strategy parameters."""
         return {
+            "asset": self.asset.value if hasattr(self, "asset") else "BTC",
             "discount_limit_price": float(self.discount_limit_price),
             "min_edge_pct": round(float(self.min_edge_pct) * 100.0, 1),
             "min_ev_dollars": float(self.min_ev_dollars),
@@ -133,6 +145,7 @@ class ThreeStepDominationBot:
 
     def update_parameters(
         self,
+        asset: Optional[str | CryptoAsset] = None,
         discount_limit_price: Optional[float] = None,
         min_edge_pct: Optional[float] = None,
         min_ev_dollars: Optional[float] = None,
@@ -142,6 +155,8 @@ class ThreeStepDominationBot:
         min_take_profit_roi: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Dynamically update strategy parameters on the fly."""
+        if asset is not None:
+            self.set_asset(asset)
         if discount_limit_price is not None:
             self.set_discount_limit_price(discount_limit_price)
         if min_edge_pct is not None:
@@ -167,6 +182,7 @@ class ThreeStepDominationBot:
             self.min_take_profit_roi = max(0.05, min(1.0, val))
         logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
+
 
     def evaluate(
         self,
