@@ -1625,7 +1625,8 @@ async def start_background_simulation() -> None:
     state.data_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize live exchange execution client if credentials exist
-    key_id = os.getenv("KALSHI_API_KEY_ID", "50fb3c25-3ff5-4dd1-8edd-d0ff9185f181")
+    # SECURITY: Do not use hardcoded fallback API key IDs or secrets in source code
+    key_id = os.getenv("KALSHI_API_KEY_ID")
     key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "./keys/kalshi_demo.pem")
     if not os.path.exists(key_path) and os.path.exists("./kalshi_demo.pem"):
         key_path = "./kalshi_demo.pem"

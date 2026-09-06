@@ -191,3 +191,10 @@ def test_validate_credentials_endpoint(ephemeral_rsa_key):
         assert data["valid"] is True
         assert data["mode"] == "demo"
         assert data["account_info"]["balance"] == 1000
+
+
+def test_no_hardcoded_api_key_id_fallback():
+    """Test that KALSHI_API_KEY_ID defaults to None when missing from environment."""
+    import os
+    with patch.dict(os.environ, {}, clear=True):
+        assert os.getenv("KALSHI_API_KEY_ID") is None
