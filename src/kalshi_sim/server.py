@@ -38,6 +38,7 @@ import uvicorn
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
+from kalshi_sim.process_lock import get_active_lock_holder
 from kalshi_sim.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, async_validate_credentials, create_aiohttp_connector, load_private_key
 from kalshi_sim.data_memory_manager import MarketDataMemoryManager, MemoryProfile
 from kalshi_sim.db import HistoricalQueryService, get_db, get_db_writer
@@ -2283,6 +2284,15 @@ async def place_kalshi_live_order(req: LiveOrderRequest) -> LiveOrderResponse:
             fill_price=est_price,
             is_dry_run=True,
             message="Order passed all pre-flight validation rules in Safety Dry-Run mode.",
+        )
+
+    # Ensure Standalone Bot does not hold the trading lock
+    holder = get_active_lock_holder()
+    if holder and holder[1] != os.getpid():
+        logger.warning("🛑 [LOCKOUT] Live order blocked: %s holds trading lock (PID: %d)", holder[0], holder[1])
+        raise HTTPException(
+            status_code=409,
+            detail=f"Live orders blocked: 24/7 Standalone Bot ({holder[0]}, PID: {holder[1]}) is currently running."
         )
 
     # Acquire rate limiter token before exchange communication

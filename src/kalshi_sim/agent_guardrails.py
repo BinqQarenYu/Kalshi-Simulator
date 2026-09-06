@@ -315,6 +315,10 @@ class AgentGuardrails:
         """Manually unlock a cycle if needed."""
         self._cycle_locks.pop(cycle_key, None)
 
+    def is_cycle_locked(self, cycle_key: str) -> bool:
+        """Check whether a cycle currently has an active trade lockout."""
+        return cycle_key in self._cycle_locks
+
     def reset_circuit_breaker(self, current_balance: Decimal) -> None:
         """Reset emergency circuit breaker and re-anchor peak equity."""
         self._circuit_breaker_tripped = False

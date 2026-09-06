@@ -35,6 +35,7 @@ from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
 from kalshi_sim.notifications import TelemetryAlertDispatcher
 from kalshi_sim.order_client import KalshiDemoOrderClient
 from kalshi_sim.order_simulator import OrderSimulator
+from kalshi_sim.process_lock import get_active_lock_holder
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.portfolio import Portfolio
 from kalshi_sim.schemas import (
@@ -993,6 +994,15 @@ class SimulationAgent:
                 try:
                     live_side = side.value if hasattr(side, "value") else str(side).lower()
                     live_count = max(1, min(affordable_size, 2))  # Strict hard cap: 1-2 contracts max for micro-bankroll
+
+                    # Check if standalone trading engine holds exclusive lock
+                    holder = get_active_lock_holder()
+                    if holder and holder[1] != os.getpid():
+                        logger.warning(
+                            "🛑 [LOCKOUT] Standalone engine holds lock (%s, PID: %d). Suppressing main dash live order.",
+                            holder[0], holder[1]
+                        )
+                        return
 
                     # Check global dry-run protection
                     live_enabled_env = os.getenv("KALSHI_LIVE_TRADING_ENABLED", "false").lower() in ("true", "1", "yes")

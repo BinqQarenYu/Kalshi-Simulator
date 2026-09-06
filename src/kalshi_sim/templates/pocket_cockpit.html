@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kalshi 3-Step Dominion — Pocket Cockpit</title>
+  <style>
+    :root {
+      --bg: #090a0f;
+      --card: #12141c;
+      --border: #1e2230;
+      --text: #f0f2f5;
+      --muted: #8b949e;
+      --green: #10b981;
+      --green-glow: rgba(16, 185, 129, 0.2);
+      --red: #ef4444;
+      --red-glow: rgba(239, 68, 68, 0.2);
+      --amber: #f59e0b;
+      --blue: #3b82f6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", monospace; }
+    body { background-color: var(--bg); color: var(--text); padding: 16px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+    .container { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 14px; }
+    
+    /* Header */
+    .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .title { font-size: 1.1rem; font-weight: 700; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; }
+    .status-badge { font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+    .badge-live { background: rgba(16, 185, 129, 0.15); color: var(--green); border: 1px solid var(--green); }
+    .badge-standby { background: rgba(139, 148, 158, 0.15); color: var(--muted); border: 1px solid var(--muted); }
+
+    /* Master Controls */
+    .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn { padding: 14px; border-radius: 8px; border: none; font-size: 0.95rem; font-weight: 700; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+    .btn-arm { background: #064e3b; color: #a7f3d0; border: 1px solid var(--green); box-shadow: 0 0 15px var(--green-glow); }
+    .btn-arm.armed { background: var(--green); color: #022c22; }
+    .btn-disarm { background: #1c1917; color: #a8a29e; border: 1px solid #44403c; }
+    .btn-disarm.disarmed { background: #44403c; color: #fafaf9; }
+    .btn-panic { background: #450a0a; color: #fecaca; border: 1px solid var(--red); grid-column: span 2; padding: 12px; }
+    .btn-panic:hover { background: var(--red); color: #fff; box-shadow: 0 0 20px var(--red-glow); }
+
+    /* KPI Grid */
+    .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .kpi-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
+    .kpi-val { font-size: 1.3rem; font-weight: 700; font-family: monospace; }
+    .kpi-sub { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    .text-green { color: var(--green); }
+    .text-red { color: var(--red); }
+    .text-amber { color: var(--amber); }
+
+    /* Telemetry Panel */
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+    .panel-title { font-size: 0.8rem; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; display: flex; justify-content: space-between; }
+    .metric-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.85rem; }
+    .metric-row:last-child { border-bottom: none; }
+    .metric-name { color: var(--muted); }
+    .metric-data { font-family: monospace; font-weight: 600; }
+
+    /* Event Log */
+    .log-box { background: #07080c; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 0.75rem; color: #a1a1aa; max-height: 140px; overflow-y: auto; }
+    .log-line { margin-bottom: 4px; word-break: break-all; }
+    .log-time { color: var(--muted); margin-right: 6px; }
+
+    /* Footer & Health */
+    .health-bar { display: flex; gap: 8px; font-size: 0.72rem; color: var(--muted); flex-wrap: wrap; justify-content: center; padding-top: 4px; }
+    .health-tag { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.03); padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+    .dot-err { background: var(--red); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    
+    <!-- Top Header -->
+    <div class="header">
+      <div class="title">
+        <span>⚡ 3-STEP DOMINION</span>
+        <span style="font-size: 0.8rem; color: var(--muted); font-weight: 400;">(24/7 Standalone Engine)</span>
+      </div>
+      <div id="liveStatusBadge" class="status-badge badge-standby">STANDBY</div>
+    </div>
+
+    <!-- Master Controls -->
+    <div class="controls-grid">
+      <button id="btnArm" class="btn btn-arm" onclick="armBot()">
+        <span>● ARMED</span>
+        <span style="font-size: 0.72rem; font-weight: 400;">EXECUTE LIVE ORDERS</span>
+      </button>
+      <button id="btnDisarm" class="btn btn-disarm disarmed" onclick="disarmBot()">
+        <span>○ DISARMED</span>
+        <span style="font-size: 0.72rem; font-weight: 400;">STANDBY / SAFE MODE</span>
+      </button>
+      <button class="btn btn-panic" onclick="panicHalt()">
+        🛑 EMERGENCY PANIC: CANCEL ALL ORDERS & STOP
+      </button>
+    </div>
+
+    <!-- 4 Primary KPI Cards -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Kalshi Live Balance</div>
+        <div id="balVal" class="kpi-val text-green">$0.00</div>
+        <div id="balSub" class="kpi-sub">Portfolio Shard 2</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Today's Realized PnL</div>
+        <div id="pnlVal" class="kpi-val">$0.00</div>
+        <div id="pnlSub" class="kpi-sub">0 settled cycles</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Active 15M Cycle</div>
+        <div id="cycleVal" class="kpi-val">--:--</div>
+        <div id="cycleSub" class="kpi-sub">Waiting for event...</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Current Position</div>
+        <div id="posVal" class="kpi-val">FLAT</div>
+        <div id="posSub" class="kpi-sub">0 contracts</div>
+      </div>
+    </div>
+
+    <!-- Strategy & Microstructure Telemetry -->
+    <div class="panel">
+      <div class="panel-title">
+        <span>Microstructure Telemetry</span>
+        <span id="playbookBadge" style="color: var(--blue);">PLAYBOOK: NONE</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">BTC Spot Index (NOW)</span>
+        <span id="spotVal" class="metric-data">$0.00</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Target Strike (TO BEAT)</span>
+        <span id="strikeVal" class="metric-data">$0.00</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Moneyness Diff (Spot - Strike)</span>
+        <span id="diffVal" class="metric-data">$0.00</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Statistical Edge / Net EV</span>
+        <span id="edgeVal" class="metric-data">0.0% / $0.00</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">VPIN Adverse Selection Score</span>
+        <span id="vpinVal" class="metric-data">0.00 (SAFE)</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Last Strategy Rationale</span>
+        <span id="rationaleVal" class="metric-data" style="color: var(--muted); font-size: 0.78rem;">Initializing feeds...</span>
+      </div>
+    </div>
+
+    <!-- Live Event Log -->
+    <div class="panel">
+      <div class="panel-title">Live Execution Log</div>
+      <div id="logBox" class="log-box">
+        <div class="log-line"><span class="log-time">[INIT]</span> Pocket Cockpit connected to Standalone Engine.</div>
+      </div>
+    </div>
+
+    <!-- Health Badges -->
+    <div class="health-bar">
+      <div class="health-tag"><div id="dotWs" class="dot"></div> Kalshi WS</div>
+      <div class="health-tag"><div id="dotSpot" class="dot"></div> Spot Index (Coinbase/Binance)</div>
+      <div class="health-tag"><div class="dot"></div> Guardrails (1-2 Sizing Cap)</div>
+      <div class="health-tag"><div class="dot"></div> Token Bucket (20/s)</div>
+      <div class="health-tag"><div class="dot"></div> Windows Sleep Prevented</div>
+    </div>
+
+  </div>
+
+  <script>
+    let isArmed = false;
+    const logBox = document.getElementById('logBox');
+
+    function appendLog(msg) {
+      const timeStr = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.innerHTML = `<span class="log-time">[${timeStr}]</span> ${msg}`;
+      logBox.appendChild(div);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    async function fetchState() {
+      try {
+        const res = await fetch('/api/state');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Arming status
+        isArmed = data.armed;
+        const statusBadge = document.getElementById('liveStatusBadge');
+        const btnArm = document.getElementById('btnArm');
+        const btnDisarm = document.getElementById('btnDisarm');
+
+        if (isArmed) {
+          statusBadge.textContent = 'ARMED / LIVE';
+          statusBadge.className = 'status-badge badge-live';
+          btnArm.className = 'btn btn-arm armed';
+          btnDisarm.className = 'btn btn-disarm';
+        } else {
+          statusBadge.textContent = 'STANDBY / SAFE';
+          statusBadge.className = 'status-badge badge-standby';
+          btnArm.className = 'btn btn-arm';
+          btnDisarm.className = 'btn btn-disarm disarmed';
+        }
+
+        // KPIs
+        document.getElementById('balVal').textContent = `$${parseFloat(data.balance || 0).toFixed(2)}`;
+        
+        const pnl = parseFloat(data.today_pnl || 0);
+        const pnlEl = document.getElementById('pnlVal');
+        pnlEl.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+        pnlEl.className = 'kpi-val ' + (pnl >= 0 ? 'text-green' : 'text-red');
+        document.getElementById('pnlSub').textContent = `${data.settled_cycles || 0} settled cycles`;
+
+        document.getElementById('cycleVal').textContent = data.time_remaining_str || '--:--';
+        document.getElementById('cycleSub').textContent = data.active_ticker || 'No active cycle';
+
+        document.getElementById('posVal').textContent = data.position_str || 'FLAT';
+        document.getElementById('posSub').textContent = data.position_sub || '0 contracts';
+
+        // Telemetry
+        document.getElementById('playbookBadge').textContent = `PLAYBOOK: ${(data.playbook || 'NONE').toUpperCase()}`;
+        document.getElementById('spotVal').textContent = `$${parseFloat(data.spot_price || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+        document.getElementById('strikeVal').textContent = `$${parseFloat(data.target_strike || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+        
+        const diff = parseFloat(data.spot_diff || 0);
+        const diffEl = document.getElementById('diffVal');
+        diffEl.textContent = (diff >= 0 ? '+$' : '-$') + Math.abs(diff).toFixed(2);
+        diffEl.className = 'metric-data ' + (diff >= 0 ? 'text-green' : 'text-red');
+
+        document.getElementById('edgeVal').textContent = `${(data.edge_pct * 100).toFixed(1)}% / $${parseFloat(data.ev || 0).toFixed(2)}`;
+        
+        const vpin = parseFloat(data.vpin || 0);
+        const vpinEl = document.getElementById('vpinVal');
+        vpinEl.textContent = `${vpin.toFixed(2)} (${data.vpin_is_safe ? 'SAFE' : 'TOXIC VETO'})`;
+        vpinEl.className = 'metric-data ' + (data.vpin_is_safe ? 'text-green' : 'text-red');
+
+        document.getElementById('rationaleVal').textContent = data.rationale || 'Scanning cycle dynamics...';
+
+        // Health
+        document.getElementById('dotWs').className = data.kalshi_ws_connected ? 'dot' : 'dot dot-err';
+        document.getElementById('dotSpot').className = data.spot_connected ? 'dot' : 'dot dot-err';
+
+      } catch (err) {
+        console.error('State fetch error:', err);
+      }
+    }
+
+    async function armBot() {
+      try {
+        const res = await fetch('/api/bot/arm', { method: 'POST' });
+        if (res.ok) {
+          appendLog('🟢 [MASTER SWITCH] Bot ARMED for live execution.');
+          await fetchState();
+        }
+      } catch (err) {
+        appendLog('❌ Error arming bot: ' + err);
+      }
+    }
+
+    async function disarmBot() {
+      try {
+        const res = await fetch('/api/bot/disarm', { method: 'POST' });
+        if (res.ok) {
+          appendLog('⏸️ [MASTER SWITCH] Bot DISARMED. Standing by.');
+          await fetchState();
+        }
+      } catch (err) {
+        appendLog('❌ Error disarming bot: ' + err);
+      }
+    }
+
+    async function panicHalt() {
+      if (!confirm('EMERGENCY PANIC: Cancel all open orders on Kalshi and halt bot?')) return;
+      try {
+        const res = await fetch('/api/bot/panic', { method: 'POST' });
+        if (res.ok) {
+          appendLog('🛑 [PANIC] Emergency halt triggered. All open orders cancelled.');
+          await fetchState();
+        }
+      } catch (err) {
+        appendLog('❌ Panic request failed: ' + err);
+      }
+    }
+
+    // Poll state every 1 second
+    setInterval(fetchState, 1000);
+    fetchState();
+  </script>
+</body>
+</html>
