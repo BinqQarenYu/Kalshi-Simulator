@@ -42,13 +42,9 @@ interface HeaderProps {
   onOpenSystemResources?: () => void;
   onTestBot?: () => Promise<any>;
 }
+import { CRYPTO_ASSET_LIST } from '../utils/assets';
 
-const CRYPTO_ASSET_TABS: { id: CryptoAsset; symbol: string; label: string; color: string; bgGrad: string }[] = [
-  { id: 'BTC', symbol: '₿', label: 'BTC', color: '#f7931a', bgGrad: 'from-[#f7931a] to-[#e67e00]' },
-  { id: 'ETH', symbol: 'Ξ', label: 'ETH', color: '#627eea', bgGrad: 'from-[#627eea] to-[#3b5998]' },
-  { id: 'SOL', symbol: '◎', label: 'SOL', color: '#14f195', bgGrad: 'from-[#9945ff] to-[#14f195]' },
-  { id: 'DOGE', symbol: 'Ð', label: 'DOGE', color: '#e1b303', bgGrad: 'from-[#e1b303] to-[#c2a633]' },
-];
+const CRYPTO_ASSET_TABS = CRYPTO_ASSET_LIST;
 
 export const Header: React.FC<HeaderProps> = ({
   market,

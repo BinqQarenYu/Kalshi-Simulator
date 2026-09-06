@@ -182,12 +182,12 @@
         </div>
 
         <div class="param-item">
-          <label class="param-label">Max Contracts (Micro-Bankroll)</label>
+          <label class="param-label">Max Contracts (Strict Invariant)</label>
           <div class="input-wrap">
-            <input id="inputMaxContracts" type="number" step="1" min="1" max="4" value="2" />
+            <input id="inputMaxContracts" type="number" step="1" min="1" max="1" value="1" readonly title="Hard-capped to strictly 1 contract per asset" />
             <span class="suffix">cts</span>
           </div>
-          <span class="param-hint">Hard bankroll cap: 1-2 contracts (max 4)</span>
+          <span class="param-hint">1 contract / asset cap (Sole 3-Step Dominion)</span>
         </div>
 
         <div class="param-item">
@@ -212,9 +212,9 @@
           <label class="param-label">Min Spot Distance (|Spot - Strike|)</label>
           <div class="input-wrap">
             <span class="prefix">$</span>
-            <input id="inputMinSpotDiff" type="number" step="5" min="0" max="200" value="35.00" />
+            <input id="inputMinSpotDiff" type="number" step="1.0" min="0" max="200" value="35.00" />
           </div>
-          <span class="param-hint">Skip coin-flip chop near strike</span>
+          <span id="minSpotDiffHint" class="param-hint">Skip coin-flip chop near strike ($35.00 BTC)</span>
         </div>
 
         <div class="param-item">
@@ -334,8 +334,29 @@
       logBox.scrollTop = logBox.scrollHeight;
     }
 
+    const ASSET_SPECS = {
+      BTC: { minDiff: 35.0, step: '1.0', max: '200', decimals: 2, hint: 'Skip coin-flip chop near strike ($35.00 BTC)' },
+      ETH: { minDiff: 2.50, step: '0.1', max: '20', decimals: 2, hint: 'Skip coin-flip chop near strike ($2.50 ETH)' },
+      SOL: { minDiff: 0.50, step: '0.05', max: '10', decimals: 2, hint: 'Skip coin-flip chop near strike ($0.50 SOL)' },
+      DOGE: { minDiff: 0.0005, step: '0.0001', max: '0.05', decimals: 4, hint: 'Skip coin-flip chop near strike ($0.0005 DOGE)' }
+    };
+
+    function applyAssetInputConstraints(asset) {
+      const spec = ASSET_SPECS[asset] || ASSET_SPECS.BTC;
+      const diffInput = document.getElementById('inputMinSpotDiff');
+      const diffHint = document.getElementById('minSpotDiffHint');
+      if (diffInput) {
+        diffInput.step = spec.step;
+        diffInput.max = spec.max;
+      }
+      if (diffHint) {
+        diffHint.textContent = spec.hint;
+      }
+    }
+
     async function switchAsset(asset) {
       currentAsset = asset;
+      applyAssetInputConstraints(asset);
       ['BTC', 'ETH', 'SOL', 'DOGE'].forEach(a => {
         const btn = document.getElementById(`assetBtn-${a}`);
         if (btn) {
@@ -374,10 +395,13 @@
         if (!res.ok) return;
         const p = await res.json();
         if (p.discount_limit_price !== undefined) document.getElementById('inputDiscountPrice').value = p.discount_limit_price.toFixed(2);
-        if (p.max_contracts !== undefined) document.getElementById('inputMaxContracts').value = p.max_contracts;
+        if (p.max_contracts !== undefined) document.getElementById('inputMaxContracts').value = Math.min(p.max_contracts, 1);
         if (p.min_edge_pct !== undefined) document.getElementById('inputMinEdge').value = p.min_edge_pct.toFixed(1);
         if (p.min_ev_dollars !== undefined) document.getElementById('inputMinEv').value = p.min_ev_dollars.toFixed(2);
-        if (p.min_spot_diff !== undefined) document.getElementById('inputMinSpotDiff').value = p.min_spot_diff.toFixed(2);
+        if (p.min_spot_diff !== undefined) {
+          const spec = ASSET_SPECS[currentAsset] || ASSET_SPECS.BTC;
+          document.getElementById('inputMinSpotDiff').value = p.min_spot_diff.toFixed(spec.decimals);
+        }
         if (p.vpin_toxic_threshold !== undefined) document.getElementById('inputVpinThreshold').value = p.vpin_toxic_threshold.toFixed(2);
         if (p.take_profit_price_threshold !== undefined) document.getElementById('inputTakeProfitPrice').value = p.take_profit_price_threshold.toFixed(2);
         if (p.min_take_profit_roi !== undefined) document.getElementById('inputTakeProfitRoi').value = p.min_take_profit_roi.toFixed(1);
@@ -390,7 +414,7 @@
     async function saveParameters() {
       const payload = {
         discount_limit_price: parseFloat(document.getElementById('inputDiscountPrice').value),
-        max_contracts: parseInt(document.getElementById('inputMaxContracts').value, 10),
+        max_contracts: 1, // Strictly 1 contract per asset invariant
         min_edge_pct: parseFloat(document.getElementById('inputMinEdge').value),
         min_ev_dollars: parseFloat(document.getElementById('inputMinEv').value),
         min_spot_diff: parseFloat(document.getElementById('inputMinSpotDiff').value),
@@ -446,6 +470,7 @@
         const serverAsset = data.active_asset || (data.market && data.market.active_asset);
         if (serverAsset && serverAsset !== currentAsset) {
           currentAsset = serverAsset;
+          applyAssetInputConstraints(currentAsset);
           ['BTC', 'ETH', 'SOL', 'DOGE'].forEach(a => {
             const btn = document.getElementById(`assetBtn-${a}`);
             if (btn) btn.classList.toggle('active', a === currentAsset);
@@ -488,15 +513,19 @@
           : '';
         document.getElementById('pnlSub').textContent = `${data.settled_cycles || 0} settled cycles${wr}`;
 
+        const spec = ASSET_SPECS[currentAsset] || ASSET_SPECS.BTC;
+        const dec = spec.decimals >= 4 ? 6 : 2;
+        const minDec = spec.decimals >= 4 ? 4 : 2;
+
         // 3. Target Strike (TO BEAT)
-        document.getElementById('strikeHeroVal').textContent = data.target_strike_str || (parseFloat(data.target_strike || 0) > 0 ? `$${parseFloat(data.target_strike).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '$0.00');
+        document.getElementById('strikeHeroVal').textContent = data.target_strike_str || (parseFloat(data.target_strike || 0) > 0 ? `$${parseFloat(data.target_strike).toLocaleString('en-US', {minimumFractionDigits: minDec, maximumFractionDigits: dec})}` : '$0.00');
         document.getElementById('strikeHeroSub').textContent = data.target_time_str 
           ? `Target Expiry: ${data.target_time_str}` 
           : 'Target Expiry: --:--';
 
-        // 4. BTC Spot Index (NOW) & Moneyness Diff
+        // 4. Spot Index (NOW) & Moneyness Diff
         const spotHeroEl = document.getElementById('spotHeroVal');
-        spotHeroEl.textContent = data.spot_price_str || (parseFloat(data.spot_price || 0) > 0 ? `$${parseFloat(data.spot_price).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '$0.00');
+        spotHeroEl.textContent = data.spot_price_str || (parseFloat(data.spot_price || 0) > 0 ? `$${parseFloat(data.spot_price).toLocaleString('en-US', {minimumFractionDigits: minDec, maximumFractionDigits: dec})}` : '$0.00');
         spotHeroEl.className = 'kpi-val ' + (data.is_above_strike ? 'text-green' : 'text-red');
         
         const spotHeroSubEl = document.getElementById('spotHeroSub');
