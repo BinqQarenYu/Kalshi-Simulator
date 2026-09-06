@@ -63,8 +63,11 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
       </div>
 
       {/* Sub Tab Navigation */}
-      <div className="flex items-center gap-4 text-xs font-semibold border-t border-[#21262d] pt-2">
+      <div role="tablist" aria-label="Market view navigation" className="flex items-center gap-4 text-xs font-semibold border-t border-[#21262d] pt-2">
         <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'trade_up'}
           onClick={() => onSelectTab('trade_up')}
           className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
             activeTab === 'trade_up'
@@ -75,6 +78,9 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
           Trade Up
         </button>
         <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'trade_down'}
           onClick={() => onSelectTab('trade_down')}
           className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff4d4d] ${
             activeTab === 'trade_down'
@@ -85,6 +91,9 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
           Trade Down
         </button>
         <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'graph'}
           onClick={() => onSelectTab('graph')}
           className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${
             activeTab === 'graph'
@@ -95,6 +104,9 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
           Graph
         </button>
         <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'orderbook'}
           onClick={() => onSelectTab('orderbook')}
           className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
             activeTab === 'orderbook'
@@ -105,8 +117,11 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
           Level-2 Book
         </button>
         <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'ai'}
           onClick={() => onSelectTab('ai')}
-          className={`pb-1 border-b-2 flex items-center gap-1.5 transition-all ${
+          className={`pb-1 border-b-2 flex items-center gap-1.5 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
             activeTab === 'ai'
               ? 'border-purple-500 text-purple-300 font-bold'
               : 'border-transparent text-[#8b949e] hover:text-white'
