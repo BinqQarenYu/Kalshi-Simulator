@@ -329,7 +329,7 @@ def test_standalone_bot_parameters_and_endpoints(tmp_path):
     # Check default parameters
     p = engine.get_parameters()
     assert p["discount_limit_price"] == 0.48
-    assert p["max_contracts"] == 2
+    assert p["max_contracts"] == 1
     assert p["min_edge_pct"] == 6.0
     assert p["min_ev_dollars"] == 0.02
     assert p["min_spot_diff"] == 35.0
@@ -360,13 +360,13 @@ def test_standalone_bot_parameters_and_endpoints(tmp_path):
 
         r_post = client.post("/api/bot/parameters", json={
             "discount_limit_price": 0.42,
-            "max_contracts": 2,
+            "max_contracts": 1,
             "min_edge_pct": 10.0,
         })
         assert r_post.status_code == 200
         assert r_post.json()["status"] == "SUCCESS"
         assert r_post.json()["parameters"]["discount_limit_price"] == 0.42
-        assert r_post.json()["parameters"]["max_contracts"] == 2
+        assert r_post.json()["parameters"]["max_contracts"] == 1
 
 
 def test_standalone_bot_sweep_old_orders(tmp_path):
