@@ -40,7 +40,7 @@ from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
 from kalshi_sim.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, async_validate_credentials, create_aiohttp_connector, load_private_key
 from kalshi_sim.data_memory_manager import MarketDataMemoryManager, MemoryProfile
-from kalshi_sim.db import HistoricalQueryService, get_db_writer
+from kalshi_sim.db import HistoricalQueryService, get_db, get_db_writer
 from kalshi_sim.gdrive_sync import GDriveSyncDaemon
 from kalshi_sim.ingestion_agent import IngestionAgent, load_config
 from kalshi_sim.integrity_agent import get_integrity_agent, AgentIntegrityCheck
@@ -955,22 +955,22 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
         # Query local live trades from SQLite to reconcile attribution
         live_db_trades: dict[str, dict[str, Any]] = {}
         try:
-            import sqlite3
-            con = sqlite3.connect(str(state.data_dir / "kalshi_history.db"))
-            cur = con.cursor()
-            cur.execute("SELECT trade_id, ticker, side, size, price, gross_value, timestamp_utc, bot_type FROM trades WHERE execution_mode = 'live'")
-            for row in cur.fetchall():
-                live_db_trades[row[1]] = {
-                    "trade_id": row[0],
-                    "ticker": row[1],
-                    "side": row[2],
-                    "size": row[3],
-                    "price": Decimal(str(row[4])),
-                    "gross_value": Decimal(str(row[5])),
-                    "timestamp_utc": row[6],
-                    "bot_type": row[7] or "3_step_domination_bot",
-                }
-            con.close()
+            async with get_db(state.data_dir / "kalshi_history.db").get_connection() as conn:
+                async with conn.execute(
+                    "SELECT trade_id, ticker, side, size, price, gross_value, timestamp_utc, bot_type FROM trades WHERE execution_mode = 'live'"
+                ) as cursor:
+                    rows = await cursor.fetchall()
+                    for row in rows:
+                        live_db_trades[row[1]] = {
+                            "trade_id": row[0],
+                            "ticker": row[1],
+                            "side": row[2],
+                            "size": row[3],
+                            "price": Decimal(str(row[4])),
+                            "gross_value": Decimal(str(row[5])),
+                            "timestamp_utc": row[6],
+                            "bot_type": row[7] or "3_step_domination_bot",
+                        }
         except Exception as db_exc:
             logger.debug("Failed reading trades table in sync_live_settlements: %s", db_exc)
 
@@ -1130,65 +1130,62 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
 
             # Ensure SQLite store has all live records for historical query service
             try:
-                import sqlite3
-                con = sqlite3.connect(str(state.data_dir / "kalshi_history.db"))
-                cur = con.cursor()
-                for r in new_reports:
-                    ts_str = str(r.get("timestamp_utc", ""))
-                    try:
-                        dt_val = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                        epoch_ms = int(dt_val.timestamp() * 1000)
-                    except Exception:
-                        epoch_ms = int(time.time() * 1000)
+                async with get_db(state.data_dir / "kalshi_history.db").get_connection() as conn:
+                    for r in new_reports:
+                        ts_str = str(r.get("timestamp_utc", ""))
+                        try:
+                            dt_val = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                            epoch_ms = int(dt_val.timestamp() * 1000)
+                        except Exception:
+                            epoch_ms = int(time.time() * 1000)
 
-                    cur.execute(
-                        """
-                        INSERT OR REPLACE INTO settlements (
-                            settlement_id, timestamp_utc, timestamp_epoch_ms, ticker, side, size,
-                            entry_price, settlement_price, outcome, pnl, balance_after, bot_type, execution_mode
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            r["report_id"],
-                            ts_str,
-                            epoch_ms,
-                            r["ticker"],
-                            r["bot_side"],
-                            r["contracts"],
-                            float(r["entry_price"]),
-                            float(r["settlement_price"]),
-                            r["outcome"],
-                            float(r.get("gross_pnl", r["pnl"])),
-                            float(r.get("balance_after", 21.97)),
-                            r.get("bot_type", "3_step_domination_bot"),
-                            "live",
+                        await conn.execute(
+                            """
+                            INSERT OR REPLACE INTO settlements (
+                                settlement_id, timestamp_utc, timestamp_epoch_ms, ticker, side, size,
+                                entry_price, settlement_price, outcome, pnl, balance_after, bot_type, execution_mode
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                r["report_id"],
+                                ts_str,
+                                epoch_ms,
+                                r["ticker"],
+                                r["bot_side"],
+                                r["contracts"],
+                                float(r["entry_price"]),
+                                float(r["settlement_price"]),
+                                r["outcome"],
+                                float(r.get("gross_pnl", r["pnl"])),
+                                float(r.get("balance_after", 21.97)),
+                                r.get("bot_type", "3_step_domination_bot"),
+                                "live",
+                            )
                         )
-                    )
-                    cur.execute(
-                        """
-                        INSERT OR REPLACE INTO trades (
-                            trade_id, timestamp_utc, timestamp_epoch_ms, ticker, timeframe, side,
-                            size, price, gross_value, fees, bot_type, execution_mode, status
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            f"live_tr_{r['ticker']}",
-                            ts_str,
-                            epoch_ms,
-                            r["ticker"],
-                            "15m",
-                            r["bot_side"],
-                            r["contracts"],
-                            float(r["entry_price"]),
-                            float(r["entry_price"]) * r["contracts"],
-                            float(r.get("fee", 0.0)),
-                            r.get("bot_type", "3_step_domination_bot"),
-                            "live",
-                            "filled",
+                        await conn.execute(
+                            """
+                            INSERT OR REPLACE INTO trades (
+                                trade_id, timestamp_utc, timestamp_epoch_ms, ticker, timeframe, side,
+                                size, price, gross_value, fees, bot_type, execution_mode, status
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                f"live_tr_{r['ticker']}",
+                                ts_str,
+                                epoch_ms,
+                                r["ticker"],
+                                "15m",
+                                r["bot_side"],
+                                r["contracts"],
+                                float(r["entry_price"]),
+                                float(r["entry_price"]) * r["contracts"],
+                                float(r.get("fee", 0.0)),
+                                r.get("bot_type", "3_step_domination_bot"),
+                                "live",
+                                "filled",
+                            )
                         )
-                    )
-                con.commit()
-                con.close()
+                    await conn.commit()
             except Exception as db_sync_exc:
                 logger.debug("Direct DB sync exception: %s", db_sync_exc)
 
