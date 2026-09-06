@@ -263,3 +263,77 @@ def test_multi_asset_cycle_lock_isolation() -> None:
         assert ok is True, f"Expected {ticker} to be allowed, but rejected: {reason}"
         assert size == 2
 
+
+def test_guardrail_one_contract_cap_for_other_bots() -> None:
+    """Verify that non-primary bots are strictly capped at 1 contract, while primary bot allows up to 2."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+
+    # 1. Non-domination bots: dominion_2_bot, onnx_microstructure_bot, scalp, etc.
+    other_bot_types = [
+        "dominion_2_bot",
+        "onnx_microstructure_bot",
+        "macro_trend_dominion",
+        "scalp",
+        "momentum",
+        "swing",
+        "experimental_candidate_bot",
+    ]
+
+    for b_type in other_bot_types:
+        ok, reason, size, diag = guardrails.validate_pre_trade_intent(
+            ticker=f"KXBTC15M-T-{b_type}",
+            side="yes",
+            requested_size=10,
+            est_price=Decimal("0.50"),
+            total_equity=Decimal("500.00"),  # Huge equity
+            vpin=0.10,
+            is_bot=True,
+            bot_type=b_type,
+        )
+        assert ok is True, f"Expected {b_type} to be approved, got reason: {reason}"
+        assert size == 1, f"Expected {b_type} to be strictly capped to 1 contract, got {size}"
+
+    # 2. Primary 3-Step Domination bot allows up to 2 contracts under micro-bankroll sizing ($100)
+    for primary_type in ["3_step_domination_bot", "3_step_domination", "domination", None]:
+        g_primary = AgentGuardrails(min_order_interval_seconds=0.0)
+        ok, reason, size, diag = g_primary.validate_pre_trade_intent(
+            ticker="KXBTC15M-T-PRIMARY-MICRO",
+            side="yes",
+            requested_size=10,
+            est_price=Decimal("0.50"),
+            total_equity=Decimal("100.00"),
+            vpin=0.10,
+            is_bot=True,
+            bot_type=primary_type,
+        )
+        assert ok is True
+        assert size == 2, f"Expected primary bot ({primary_type}) to receive 2 contracts under micro-bankroll, got {size}"
+
+    # 3. Primary bot is capped at max 4 contracts even with large bankroll ($500), while other bots remain strictly 1
+    g_large = AgentGuardrails(min_order_interval_seconds=0.0)
+    ok_p, _, size_p, _ = g_large.validate_pre_trade_intent(
+        ticker="KXBTC15M-T-PRIMARY-LARGE",
+        side="yes",
+        requested_size=10,
+        est_price=Decimal("0.50"),
+        total_equity=Decimal("500.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="3_step_domination_bot",
+    )
+    assert ok_p is True
+    assert size_p == 4, f"Expected primary bot to be capped at max 4 contracts, got {size_p}"
+
+    ok_o, _, size_o, _ = g_large.validate_pre_trade_intent(
+        ticker="KXBTC15M-T-OTHER-LARGE",
+        side="yes",
+        requested_size=10,
+        est_price=Decimal("0.50"),
+        total_equity=Decimal("500.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="dominion_2_bot",
+    )
+    assert ok_o is True
+    assert size_o == 1, f"Expected other bot to remain capped at 1 contract even with large bankroll, got {size_o}"
+

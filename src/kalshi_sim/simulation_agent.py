@@ -53,13 +53,13 @@ from kalshi_sim.settlement import run_settlement_cycle
 
 logger = logging.getLogger(__name__)
 
-# Strategy parameters
+# Strategy parameters (1 contract for other bots only)
 SCALP_IMBALANCE_THRESHOLD = Decimal("0.60")
-SCALP_MAX_POSITION_SIZE = 20
+SCALP_MAX_POSITION_SIZE = 1
 MOMENTUM_CONSECUTIVE_TICKS = 2
-MOMENTUM_MAX_POSITION_SIZE = 50
+MOMENTUM_MAX_POSITION_SIZE = 1
 SWING_DEPTH_RATIO_THRESHOLD = Decimal("1.8")
-SWING_MAX_POSITION_SIZE = 100
+SWING_MAX_POSITION_SIZE = 1
 
 PNL_REPORT_INTERVAL_S = 10.0
 SETTLEMENT_CHECK_INTERVAL_S = 10.0
@@ -458,7 +458,7 @@ class SimulationAgent:
                         time_to_expiry_s=time_to_expiry_s,
                         recent_trades=trades,
                         total_equity=self._portfolio_dominion2.equity,
-                        max_position_size=4,
+                        max_position_size=1,  # 1 contract for other bots only
                         estimated_vpin=vpin_score,
                     )
 
@@ -665,7 +665,7 @@ class SimulationAgent:
                         best_yes_ask=best_yes_ask,
                         best_no_ask=best_no_ask,
                         total_equity=self._portfolio_onnx.equity,
-                        max_position_size=self._get_max_size_for_tf(timeframe),
+                        max_position_size=1,  # 1 contract for other bots only
                         vpin=vpin_score,
                         prob_wait=prob_wait_in,
                     )
@@ -825,14 +825,12 @@ class SimulationAgent:
 
     def _get_max_size_for_tf(self, timeframe: Timeframe) -> int:
         if getattr(self, "execution_mode", "simulated") == "live":
-            # Live Trading Exclusivity: Strict micro-contract cap (1-2 contracts) for live bankroll protection ($30)
-            return 2
-        if timeframe == Timeframe.FIVE_MIN:
-            return SCALP_MAX_POSITION_SIZE
-        elif timeframe == Timeframe.FIFTEEN_MIN:
-            return MOMENTUM_MAX_POSITION_SIZE
-        else:
-            return SWING_MAX_POSITION_SIZE
+            # Live Trading Exclusivity: Strict micro-contract cap (1-2 contracts for primary 3-Step Dominion bot, 1 contract for other bots)
+            if self.active_strategy_bot in ("3_step_domination_bot", "3_step_domination", "domination"):
+                return 2
+            return 1  # 1 contract for other bots only
+        # Other bots capped at 1 contract
+        return 1
 
     # -- Strategy Modes ------------------------------------------------------
 
@@ -977,6 +975,7 @@ class SimulationAgent:
             vpin=0.15,
             cycle_id=ticker,
             is_bot=True,
+            bot_type=b_type,
         )
         if not is_ok or approved_size <= 0:
             now_mono = time.monotonic()
@@ -999,7 +998,8 @@ class SimulationAgent:
             if self._order_client is not None and b_type == self.active_strategy_bot:
                 try:
                     live_side = side.value if hasattr(side, "value") else str(side).lower()
-                    live_count = max(1, min(affordable_size, 2))  # Strict hard cap: 1-2 contracts max for micro-bankroll
+                    is_primary = b_type in ("3_step_domination_bot", "3_step_domination", "domination")
+                    live_count = max(1, min(affordable_size, 2)) if is_primary else 1  # 1-2 contracts for primary, 1 contract only for other bots
 
                     # Check if standalone trading engine holds exclusive lock
                     holder = get_active_lock_holder()

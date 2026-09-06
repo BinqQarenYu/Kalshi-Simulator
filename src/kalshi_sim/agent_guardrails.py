@@ -24,6 +24,7 @@ class AgentGuardrails:
         max_risk_pct_per_trade: Decimal = Decimal("0.08"),  # Max 8% of equity per trade
         max_micro_bankroll_contracts: int = 2,  # Hard cap: Max 1-2 contracts for equity <= $100
         max_nano_bankroll_contracts: int = 2,   # Max contracts for equity <= $25
+        max_other_bots_contracts: int = 1,      # Rule: 1 contract for other bots only
         consecutive_loss_taper_threshold: int = 2,
         drawdown_taper_threshold: Decimal = Decimal("0.15"),  # 15% drawdown activates taper
         emergency_drawdown_limit: Decimal = Decimal("0.25"),  # 25% drawdown halts all trading
@@ -33,6 +34,7 @@ class AgentGuardrails:
         self.max_risk_pct_per_trade = max_risk_pct_per_trade
         self.max_micro_bankroll_contracts = max_micro_bankroll_contracts
         self.max_nano_bankroll_contracts = max_nano_bankroll_contracts
+        self.max_other_bots_contracts = max_other_bots_contracts
         self.consecutive_loss_taper_threshold = consecutive_loss_taper_threshold
         self.drawdown_taper_threshold = drawdown_taper_threshold
         self.emergency_drawdown_limit = emergency_drawdown_limit
@@ -68,6 +70,7 @@ class AgentGuardrails:
         vpin: float = 0.0,
         cycle_id: Optional[str] = None,
         is_bot: bool = True,
+        bot_type: Optional[str] = None,
     ) -> Tuple[bool, str, int, Dict[str, Any]]:
         """Validate an order against all safety guardrails before placement.
 
@@ -142,6 +145,20 @@ class AgentGuardrails:
             bankroll_cap = self.max_micro_bankroll_contracts
         else:
             bankroll_cap = max(self.max_micro_bankroll_contracts, int(total_equity / Decimal("25.00")))
+
+        # Rule: "1 contract for other bots only"
+        # Primary live domination bot (3-Step Domination) uses Quarter-Kelly sizing (1-2 contracts, max 4).
+        # All other bots (incubator, shadow, candidate, or secondary bots) are strictly capped at 1 contract.
+        is_primary_domination = (
+            bot_type in ("3_step_domination_bot", "3_step_domination", "domination", "3step_dominion", "three_step_domination")
+            or bot_type is None
+        )
+        if is_bot:
+            if not is_primary_domination:
+                bankroll_cap = min(bankroll_cap, self.max_other_bots_contracts)
+            else:
+                # Primary bot hard cap: max 4 contracts per institutional rule
+                bankroll_cap = min(bankroll_cap, 4)
 
         approved_size = min(requested_size, budget_contracts, bankroll_cap)
 
