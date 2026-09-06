@@ -92,8 +92,10 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       {/* Top Header Mode Toggle */}
       <div className="flex items-center justify-between pb-2 border-b border-[#21262d]">
         <button
+          type="button"
+          aria-label="Combo order mode"
           onClick={() => soundFX.playClickSound()}
-          className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold text-purple-400 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 transition-all"
+          className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold text-purple-400 bg-purple-500/10 border border-purple-500/30 hover:bg-purple-500/20 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
         >
           <Sparkles className="h-3.5 w-3.5" />
           <span>COMBO</span>
@@ -137,11 +139,12 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
 
           <select
             value={orderType}
+            aria-label="Select order type"
             onChange={(e) => {
               soundFX.playClickSound();
               setOrderType(e.target.value as 'LIMIT' | 'MARKET');
             }}
-            className="bg-[#161b22] text-xs font-bold text-white border border-[#30363d] rounded-lg px-2 py-1 outline-none cursor-pointer"
+            className="bg-[#161b22] text-xs font-bold text-white border border-[#30363d] rounded-lg px-2 py-1 outline-none cursor-pointer focus-visible:ring-2 focus-visible:ring-purple-400"
           >
             <option value="LIMIT">LIMIT</option>
             <option value="MARKET">MARKET</option>
@@ -233,7 +236,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
             max={isLive ? 2 : 5000}
             value={shares}
             onChange={(e) => setShares(Math.max(1, parseInt(e.target.value) || 0))}
-            className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono text-sm font-bold text-white outline-none focus:border-[#00d084]"
+            className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono text-sm font-bold text-white outline-none focus:border-[#00d084] focus-visible:ring-2 focus-visible:ring-[#00d084]"
           />
         </div>
         {/* Quick Share Chips */}
@@ -291,7 +294,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
                 const parsed = parseFloat(e.target.value);
                 setLimitPriceCents(Number.isFinite(parsed) ? parseFloat(parsed.toFixed(1)) : 0);
               }}
-              className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono text-sm font-bold text-white outline-none focus:border-[#00d084] pr-8"
+              className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono text-sm font-bold text-white outline-none focus:border-[#00d084] focus-visible:ring-2 focus-visible:ring-[#00d084] pr-8"
             />
             <span className="absolute right-3 top-2.5 text-xs text-[#8b949e] font-mono">¢</span>
           </div>
