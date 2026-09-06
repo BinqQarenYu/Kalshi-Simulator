@@ -99,3 +99,26 @@ def test_binance_trade_aggressor_mapping():
     last_sell = feed.trades[-1]
     assert last_sell.taker_side == "sell"
     assert last_sell.count == Decimal("2.0000")
+
+
+def test_btc_orderflow_feed_callback_error_handling(caplog):
+    """Verify callbacks that raise exceptions are logged and do not prevent other callbacks from executing."""
+    feed = BtcOrderflowFeed()
+    received_prices = []
+
+    def failing_callback(p: Decimal) -> None:
+        raise ValueError("Simulated callback error")
+
+    def working_callback(p: Decimal) -> None:
+        received_prices.append(p)
+
+    feed.register_on_tick(failing_callback)
+    feed.register_on_tick(working_callback)
+
+    target_price = Decimal("88000.50")
+    with caplog.at_level("ERROR"):
+        feed._dispatch_on_tick(target_price)
+
+    assert len(received_prices) == 1
+    assert received_prices[0] == target_price
+    assert "Simulated callback error" in caplog.text
