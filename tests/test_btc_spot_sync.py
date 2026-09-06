@@ -8,7 +8,7 @@ import pytest
 import aiohttp
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_live_btc_spot_sync_loop_exception_logging(caplog):
     """Verify live_btc_spot_sync_loop logs exceptions for both Coinbase and Binance REST failures."""
     caplog.set_level(logging.DEBUG)
