@@ -414,3 +414,70 @@ def test_simulation_agent_live_lockout_suppression(tmp_path):
                 agent._domination_bot.evaluate.assert_not_called()
 
     asyncio.run(_run())
+
+
+def test_standalone_bot_multi_asset_switching(tmp_path: Path):
+    from kalshi_sim.schemas import CryptoAsset
+
+    # 1. Initialize engine with ETH
+    engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path, asset=CryptoAsset.ETH)
+    assert engine.active_asset == CryptoAsset.ETH
+    assert engine.active_cfg.series_ticker_15m == "KXETH15M"
+    assert engine.bot.asset == CryptoAsset.ETH
+    assert engine.bot.min_spot_diff == 2.50
+
+    # 2. Switch to SOL
+    engine.set_asset(CryptoAsset.SOL)
+    assert engine.active_asset == CryptoAsset.SOL
+    assert engine.active_cfg.series_ticker_15m == "KXSOL15M"
+    assert engine.bot.asset == CryptoAsset.SOL
+    assert engine.bot.min_spot_diff == 0.50
+
+    # 3. Switch to DOGE and verify sub-penny formatting in /api/state
+    engine.set_asset(CryptoAsset.DOGE)
+    assert engine.active_asset == CryptoAsset.DOGE
+    assert engine.active_cfg.series_ticker_15m == "KXDOGE15M"
+    assert engine.bot.asset == CryptoAsset.DOGE
+    assert engine.bot.min_spot_diff == 0.0005
+
+    engine.current_btc_spot = Decimal("0.245000")
+    engine.target_strike = Decimal("0.240000")
+
+    with patch("kalshi_sim.standalone_bot.app_engine", engine):
+        client = TestClient(app)
+
+        # Verify /api/state metadata and sub-penny precision
+        resp_state = client.get("/api/state")
+        assert resp_state.status_code == 200
+        s_data = resp_state.json()
+        assert s_data["active_asset"] == "DOGE"
+        assert s_data["active_asset_name"] == "Dogecoin"
+        assert s_data["series_ticker"] == "KXDOGE15M"
+        assert s_data["spot_price_str"] == "$0.245000"
+        assert s_data["target_strike_str"] == "$0.240000"
+        assert s_data["spot_diff"] == 0.005000
+
+        # Verify GET /api/assets
+        resp_assets = client.get("/api/assets")
+        assert resp_assets.status_code == 200
+        a_data = resp_assets.json()
+        assert a_data["active_asset"] == "DOGE"
+        assert len(a_data["assets"]) == 4
+        doge_asset = [a for a in a_data["assets"] if a["id"] == "DOGE"][0]
+        assert doge_asset["is_active"] is True
+        btc_asset = [a for a in a_data["assets"] if a["id"] == "BTC"][0]
+        assert btc_asset["is_active"] is False
+
+        # Verify POST /api/assets/select
+        resp_sel = client.post("/api/assets/select", json={"asset": "BTC"})
+        assert resp_sel.status_code == 200
+        sel_data = resp_sel.json()
+        assert sel_data["status"] == "SUCCESS"
+        assert sel_data["active_asset"] == "BTC"
+        assert sel_data["series_ticker"] == "KXBTC15M"
+        assert engine.active_asset == CryptoAsset.BTC
+
+        # Verify invalid asset returns 400
+        resp_inv = client.post("/api/assets/select", json={"asset": "INVALID_COIN"})
+        assert resp_inv.status_code == 400
+

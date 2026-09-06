@@ -45,6 +45,21 @@ class AssetConfig(BaseModel):
     typical_strike_step: Decimal
     display_prefix: str = "$"
 
+    @property
+    def symbol(self) -> str:
+        """Asset symbol shorthand (e.g. BTC, ETH)."""
+        return self.asset.value
+
+    @property
+    def strike_step(self) -> Decimal:
+        """Typical strike interval step."""
+        return self.typical_strike_step
+
+    @property
+    def coinbase_pair(self) -> str:
+        """Coinbase Pro trading pair (e.g. BTC-USD)."""
+        return f"{self.asset.value}-USD"
+
     def format_price(self, val: Decimal | float | None) -> str:
         """Format price according to asset decimal precision."""
         if val is None:
