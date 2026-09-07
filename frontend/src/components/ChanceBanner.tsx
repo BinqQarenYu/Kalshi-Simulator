@@ -63,8 +63,11 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
       </div>
 
       {/* Sub Tab Navigation */}
-      <div className="flex items-center gap-6 text-xs font-semibold border-t border-[#21262d] pt-2">
+      <div role="tablist" aria-label="Market view navigation" className="flex items-center gap-6 text-xs font-semibold border-t border-[#21262d] pt-2">
         <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'orderbook'}
           onClick={() => onSelectTab('orderbook')}
           className={`pb-1 border-b-2 transition-all rounded-sm flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
             activeTab === 'orderbook'
@@ -75,6 +78,9 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
           <span>📊 Level-2 CLOB Ladder</span>
         </button>
         <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === ('tape' as any)}
           onClick={() => onSelectTab('tape' as any)}
           className={`pb-1 border-b-2 transition-all rounded-sm flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
             activeTab === ('tape' as any)
@@ -85,6 +91,9 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
           <span>⚡ Live Trade Tape</span>
         </button>
         <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === ('positions' as any)}
           onClick={() => onSelectTab('positions' as any)}
           className={`pb-1 border-b-2 transition-all rounded-sm flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6] ${
             activeTab === ('positions' as any)

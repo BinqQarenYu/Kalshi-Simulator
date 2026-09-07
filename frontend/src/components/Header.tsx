@@ -123,17 +123,19 @@ export const Header: React.FC<HeaderProps> = ({
             {/* Breadcrumb Navigation: Asset Selector + Timeframe Selector */}
             <div className="flex items-center gap-1.5 text-xs text-[#8b949e] font-medium flex-wrap">
               {/* Asset Selector Pills */}
-              <div className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
+              <div role="group" aria-label="Crypto asset selection" className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
                 {CRYPTO_ASSET_TABS.map((a) => {
                   const isSel = activeAssetKey === a.id;
                   return (
                     <button
                       key={a.id}
+                      type="button"
+                      aria-pressed={isSel}
                       onClick={() => {
                         soundFX.playClickSound();
                         onSelectAsset?.(a.id);
                       }}
-                      className={`px-2 py-0.5 text-[11px] font-bold rounded-md transition-all flex items-center gap-1 ${
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded-md transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
                         isSel
                           ? 'bg-[#30363d] text-white shadow-sm ring-1 ring-white/20'
                           : 'text-[#8b949e] hover:text-white'
@@ -149,19 +151,20 @@ export const Header: React.FC<HeaderProps> = ({
 
               <span className="text-[#484f58]">/</span>
 
-              {/* Timeframe Selector Pills */}
-              <div className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
+              <div role="group" aria-label="Timeframe selection" className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
                 {['5m', '15m', '1h'].map((tf) => {
                   const is5m = tf === '5m';
                   const isSel = timeframe === tf;
                   return (
                     <button
                       key={tf}
+                      type="button"
+                      aria-pressed={isSel}
                       onClick={() => {
                         soundFX.playClickSound();
                         onSelectTimeframe(tf);
                       }}
-                      className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all flex items-center gap-1 ${
+                      className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
                         isSel
                           ? is5m
                             ? 'bg-amber-500 text-black shadow-sm font-extrabold'
@@ -209,13 +212,15 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Center: View Switcher (Trading Arena vs Institutional Analytics & Journal) */}
         {onSelectMainView && (
-          <div className="flex items-center bg-[#161b22] p-1 rounded-xl border border-[#30363d] text-xs font-bold shadow-md">
+          <div role="group" aria-label="Main view mode" className="flex items-center bg-[#161b22] p-1 rounded-xl border border-[#30363d] text-xs font-bold shadow-md">
             <button
+              type="button"
+              aria-pressed={mainView === 'trading'}
               onClick={() => {
                 soundFX.playClickSound();
                 onSelectMainView('trading');
               }}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
                 mainView === 'trading'
                   ? isLive
                     ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
@@ -227,11 +232,13 @@ export const Header: React.FC<HeaderProps> = ({
               <span>⚡ Trading Arena</span>
             </button>
             <button
+              type="button"
+              aria-pressed={mainView === 'analytics'}
               onClick={() => {
                 soundFX.playClickSound();
                 onSelectMainView('analytics');
               }}
-              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                 mainView === 'analytics'
                   ? 'bg-blue-500/25 text-blue-400 border border-blue-500/50 shadow-sm font-extrabold'
                   : 'text-[#8b949e] hover:text-white border border-transparent'
@@ -244,13 +251,15 @@ export const Header: React.FC<HeaderProps> = ({
         )}
 
         {/* Center/Right: Prominent PAPER vs LIVE Trading Mode Switcher */}
-        <div className="flex items-center bg-[#161b22] p-1 rounded-xl border border-[#30363d] text-xs font-bold shadow-md">
+        <div role="group" aria-label="Trading execution mode" className="flex items-center bg-[#161b22] p-1 rounded-xl border border-[#30363d] text-xs font-bold shadow-md">
           <button
+            type="button"
+            aria-pressed={!isLive}
             onClick={() => {
               soundFX.playClickSound();
               onSelectTradingMode?.('paper');
             }}
-            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
               !isLive
                 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40 shadow-sm'
                 : 'text-[#8b949e] hover:text-white border border-transparent'
@@ -259,6 +268,8 @@ export const Header: React.FC<HeaderProps> = ({
             <span>📄 Paper Trading {timeframe === '5m' && '(Active)'}</span>
           </button>
           <button
+            type="button"
+            aria-pressed={isLive}
             disabled={timeframe === '5m'}
             onClick={() => {
               if (timeframe === '5m') return;
@@ -266,7 +277,7 @@ export const Header: React.FC<HeaderProps> = ({
               onSelectTradingMode?.('live');
             }}
             title={timeframe === '5m' ? '5M contracts are strictly Paper Live only. Live real-money trading is disabled.' : 'Switch to Live Trading'}
-            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 ${
               timeframe === '5m'
                 ? 'opacity-40 cursor-not-allowed text-[#6e7681] border border-transparent select-none'
                 : isLive
@@ -353,6 +364,12 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Pre-Deployment 4-Pillar Audit Certification Badge */}
         <div
+          role="status"
+          aria-label={
+            botAuditStatus?.is_certified !== false
+              ? 'Pre-deployment audit certified'
+              : 'Pre-deployment audit blocked'
+          }
           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[11px] font-bold border shadow-sm transition-all cursor-help ${
             botAuditStatus?.is_certified !== false
               ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300 shadow-emerald-500/10'
@@ -416,13 +433,15 @@ export const Header: React.FC<HeaderProps> = ({
             /* In PAPER Mode: Show full simulation tools */
             <>
               {/* Feed Mode Switcher (Mock Sim vs Live Kalshi) */}
-              <div className="flex items-center bg-[#161b22] p-0.5 rounded-lg border border-[#30363d] text-xs font-semibold">
+              <div role="group" aria-label="Feed mode" className="flex items-center bg-[#161b22] p-0.5 rounded-lg border border-[#30363d] text-xs font-semibold">
                 <button
+                  type="button"
+                  aria-pressed={mode === 'mock'}
                   onClick={() => {
                     soundFX.playClickSound();
                     onToggleMode?.('mock');
                   }}
-                  className={`px-2.5 py-1 rounded-md transition-all ${
+                  className={`px-2.5 py-1 rounded-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-400 ${
                     mode === 'mock'
                       ? 'bg-[#30363d] text-white font-bold'
                       : 'text-[#8b949e] hover:text-white'
@@ -431,11 +450,13 @@ export const Header: React.FC<HeaderProps> = ({
                   Mock Sim
                 </button>
                 <button
+                  type="button"
+                  aria-pressed={mode === 'live'}
                   onClick={() => {
                     soundFX.playClickSound();
                     onToggleMode?.('live');
                   }}
-                  className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1 ${
+                  className={`px-2.5 py-1 rounded-md transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
                     mode === 'live'
                       ? 'bg-[#00d084]/20 text-[#00d084] font-bold border border-[#00d084]/40'
                       : 'text-[#8b949e] hover:text-white'
@@ -448,11 +469,15 @@ export const Header: React.FC<HeaderProps> = ({
 
               {/* AI Auto-Trade Toggle Pill */}
               <button
+                type="button"
+                role="switch"
+                aria-checked={aiAutoTrade}
+                aria-label="Toggle AI Auto-Trade"
                 onClick={() => {
                   soundFX.playClickSound();
                   onToggleAI(!aiAutoTrade);
                 }}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
                   aiAutoTrade
                     ? 'bg-[#00d084]/15 border-[#00d084]/50 text-[#00d084] shadow-sm shadow-[#00d084]/20'
                     : 'bg-[#161b22] border-[#30363d] text-[#8b949e] hover:text-white'

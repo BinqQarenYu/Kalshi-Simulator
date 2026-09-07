@@ -675,8 +675,10 @@ async def stop_current_feed() -> None:
         state.feed_task.cancel()
         try:
             await state.feed_task
-        except (asyncio.CancelledError, Exception):
-            pass
+        except asyncio.CancelledError:
+            logger.debug("Feed task cancelled successfully.")
+        except Exception as exc:
+            logger.warning("Unexpected error awaiting feed task: %s", exc)
         state.feed_task = None
 
 
@@ -1803,7 +1805,8 @@ async def start_background_simulation() -> None:
     state.data_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize live exchange execution client if credentials exist
-    key_id = os.getenv("KALSHI_API_KEY_ID", "50fb3c25-3ff5-4dd1-8edd-d0ff9185f181")
+    # SECURITY: Do not use hardcoded fallback API key IDs or secrets in source code
+    key_id = os.getenv("KALSHI_API_KEY_ID")
     key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "./keys/kalshi_demo.pem")
     if not os.path.exists(key_path) and os.path.exists("./kalshi_demo.pem"):
         key_path = "./kalshi_demo.pem"
@@ -4642,10 +4645,16 @@ class BatchDeleteRequest(BaseModel):
     ids: list[Any] = Field(..., description="List of IDs or keys to delete")
 
 
+ALLOWED_BATCH_DELETE_TABLES = {"trades", "settlements", "ai_predictions", "equity_snapshots", "win_loss_reports", "reports"}
+
+
 @app.post("/api/history/batch-delete")
 async def batch_delete_endpoint(req: BatchDeleteRequest) -> dict[str, Any]:
     """Batch delete records from a specified historical table or reports ledger."""
-    table_clean = req.table.lower()
+    table_clean = req.table.lower().strip()
+    if table_clean not in ALLOWED_BATCH_DELETE_TABLES:
+        raise HTTPException(status_code=400, detail=f"Invalid table name '{req.table}' for batch delete.")
+
     if table_clean in ("win_loss_reports", "reports"):
         id_set = {str(x) for x in req.ids}
         initial_len = len(state.win_loss_reports)
