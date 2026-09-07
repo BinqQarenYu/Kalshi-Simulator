@@ -17,11 +17,10 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
     return ladder.filter((r) => r.side === filterSide);
   }, [ladder, filterSide]);
 
-  const yesRows = useMemo(() => ladder.filter((r) => r.side === 'yes'), [ladder]);
-  const noRows = useMemo(() => ladder.filter((r) => r.side === 'no'), [ladder]);
-
-  const bestYes = yesRows[0];
-  const bestNo = noRows[0];
+  // Performance Optimization: Use find() short-circuit lookup to locate best YES/NO prices
+  // without allocating two intermediate filtered arrays on every L2 orderbook tick update.
+  const bestYes = useMemo(() => ladder.find((r) => r.side === 'yes'), [ladder]);
+  const bestNo = useMemo(() => ladder.find((r) => r.side === 'no'), [ladder]);
 
   const spreadCents = useMemo(() => {
     if (!bestYes || !bestNo) return null;
