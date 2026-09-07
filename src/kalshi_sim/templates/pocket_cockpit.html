@@ -87,10 +87,68 @@
     .dot-err { background: var(--red); }
 
     /* Multi-Asset Selector Bar */
-    .asset-bar { display: flex; gap: 8px; justify-content: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
+    .asset-bar { display: flex; gap: 8px; justify-content: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
     .asset-btn { flex: 1; padding: 8px 10px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--muted); font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
     .asset-btn:hover { color: var(--text); background: rgba(255,255,255,0.03); }
-    .asset-btn.active { background: #1e2230; color: #fff; border: 1px solid #30363d; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+    .asset-btn.active { background: #1c2233; color: #fff; border: 1px solid #334155; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+
+    /* Header Actions */
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .btn-view-toggle {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-view-toggle:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border-color: #3b82f6;
+    }
+
+    /* Minimized Mode (Exact Match to User Uploaded Compact Cockpit) */
+    body.minimized {
+      padding: 10px 12px;
+      min-height: auto;
+    }
+    .container.minimized {
+      max-width: 510px;
+      gap: 10px;
+    }
+    body.minimized .expandable {
+      display: none !important;
+    }
+
+    /* Drawer Toggle at bottom of controls */
+    .drawer-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 5px 10px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px dashed rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.7rem;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.2s ease;
+      margin-top: 2px;
+    }
+    .drawer-toggle:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
   </style>
 </head>
 <body>
@@ -99,10 +157,14 @@
     <!-- Top Header -->
     <div class="header">
       <div class="title">
-        <span>⚡ 3-STEP DOMINION</span>
+        <span style="color: #f59e0b;">⚡</span>
+        <span>3-STEP DOMINION</span>
         <span style="font-size: 0.8rem; color: var(--muted); font-weight: 400;">(24/7 Standalone Engine)</span>
       </div>
-      <div id="liveStatusBadge" class="status-badge badge-standby">STANDBY</div>
+      <div class="header-right">
+        <button id="viewToggleBtn" class="btn-view-toggle" onclick="toggleViewMode()" title="Toggle Minimized / Detailed View">⤢ Expand</button>
+        <div id="liveStatusBadge" class="status-badge badge-standby">STANDBY</div>
+      </div>
     </div>
 
     <!-- Multi-Asset Switcher Bar -->
@@ -114,7 +176,7 @@
         <span style="color: #627eea;">Ξ</span> ETH
       </button>
       <button id="assetBtn-SOL" class="asset-btn" onclick="switchAsset('SOL')">
-        <span style="color: #14f195;">◎</span> SOL
+        <span style="color: #10b981;">●</span> SOL
       </button>
       <button id="assetBtn-DOGE" class="asset-btn" onclick="switchAsset('DOGE')">
         <span style="color: #e1b303;">Ð</span> DOGE
@@ -132,12 +194,18 @@
         <span style="font-size: 0.72rem; font-weight: 400;">STANDBY / SAFE MODE</span>
       </button>
       <button class="btn btn-panic" onclick="panicHalt()">
-        🛑 EMERGENCY PANIC: CANCEL ALL ORDERS & STOP
+        🔴 EMERGENCY PANIC: CANCEL ALL ORDERS & STOP
       </button>
     </div>
 
+    <!-- Collapsible Drawer Toggle -->
+    <div id="drawerToggle" class="drawer-toggle" onclick="toggleViewMode()">
+      <span id="drawerToggleIcon">▾</span>
+      <span id="drawerToggleText">Show Institutional Telemetry & Parameters</span>
+    </div>
+
     <!-- 5 Primary KPI Cards (Full Kalshi Parity) -->
-    <div class="kpi-grid">
+    <div class="kpi-grid expandable">
       <div class="kpi-card">
         <div class="kpi-label">Kalshi Live Balance</div>
         <div id="balVal" class="kpi-val text-green">$0.00</div>
@@ -166,7 +234,7 @@
     </div>
 
     <!-- 3-Step Dominion Settings & Parameters Panel -->
-    <div class="panel">
+    <div class="panel expandable">
       <div class="panel-title">
         <span>⚙️ Strategy Parameters & Guardrails</span>
         <button onclick="saveParameters()" class="btn-save-sm">💾 Apply & Save</button>
@@ -250,7 +318,7 @@
     </div>
 
     <!-- Strategy & Microstructure Telemetry -->
-    <div class="panel">
+    <div class="panel expandable">
       <div class="panel-title">
         <span>Microstructure Telemetry</span>
         <span id="playbookBadge" style="color: var(--blue);">PLAYBOOK: NONE</span>
@@ -290,7 +358,7 @@
     </div>
 
     <!-- Recent Settled Cycles -->
-    <div class="panel" id="recentSettlementsPanel">
+    <div class="panel expandable" id="recentSettlementsPanel">
       <div class="panel-title">
         <span>Today's Settled Cycles</span>
         <span id="settledSummaryBadge" style="color: var(--green);">+$0.00</span>
@@ -301,7 +369,7 @@
     </div>
 
     <!-- Live Event Log -->
-    <div class="panel">
+    <div class="panel expandable">
       <div class="panel-title">Live Execution Log</div>
       <div id="logBox" class="log-box">
         <div class="log-line"><span class="log-time">[INIT]</span> Pocket Cockpit connected to Standalone Engine.</div>
@@ -309,7 +377,7 @@
     </div>
 
     <!-- Health Badges -->
-    <div class="health-bar">
+    <div class="health-bar expandable">
       <div class="health-tag"><div id="dotWs" class="dot"></div> Kalshi L2 Book</div>
       <div class="health-tag"><div id="dotSpot" class="dot"></div> BRTI Index (CF Benchmarks / Kalshi 5Hz)</div>
       <div class="health-tag"><div class="dot"></div> Guardrails (1-2 Cts Cap)</div>
@@ -633,7 +701,51 @@
       }
     }
 
-    // Load initial parameters and start polling
+    let isMinimized = true;
+
+    function toggleViewMode() {
+      setViewMode(!isMinimized);
+    }
+
+    function setViewMode(minimized) {
+      isMinimized = minimized;
+      localStorage.setItem('pocket_cockpit_minimized', isMinimized ? 'true' : 'false');
+
+      const body = document.body;
+      const container = document.querySelector('.container');
+      const toggleBtn = document.getElementById('viewToggleBtn');
+      const drawerIcon = document.getElementById('drawerToggleIcon');
+      const drawerText = document.getElementById('drawerToggleText');
+
+      if (isMinimized) {
+        body.classList.add('minimized');
+        container.classList.add('minimized');
+        if (toggleBtn) toggleBtn.innerHTML = '⤢ Expand';
+        if (drawerIcon) drawerIcon.textContent = '▾';
+        if (drawerText) drawerText.textContent = 'Show Institutional Telemetry & Parameters';
+      } else {
+        body.classList.remove('minimized');
+        container.classList.remove('minimized');
+        if (toggleBtn) toggleBtn.innerHTML = '⤡ Minimize';
+        if (drawerIcon) drawerIcon.textContent = '▴';
+        if (drawerText) drawerText.textContent = 'Collapse to Minimized Cockpit';
+      }
+    }
+
+    function initViewMode() {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('view') === 'expanded' || urlParams.get('expand') === 'true') {
+        setViewMode(false);
+      } else if (urlParams.get('view') === 'minimized' || urlParams.get('min') === '1') {
+        setViewMode(true);
+      } else {
+        const saved = localStorage.getItem('pocket_cockpit_minimized');
+        setViewMode(saved === null ? true : saved === 'true');
+      }
+    }
+
+    // Initialize view mode, load initial parameters and start polling
+    initViewMode();
     loadParameters();
     setInterval(fetchState, 1000);
     fetchState();
