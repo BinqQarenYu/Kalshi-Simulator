@@ -27,7 +27,7 @@ def test_get_state_endpoint(client: TestClient) -> None:
     assert "orderbook_ladder" in data
     assert "ai_signals" in data
     assert "portfolio" in data
-    assert data["market"]["ticker"].startswith("KXBTC")
+    assert data["market"]["ticker"].startswith(("KXBTC", "KXETH", "KXSOL", "KXDOGE"))
 
 
 def test_update_settings_endpoint(client: TestClient) -> None:

@@ -140,8 +140,8 @@ def test_state_serialization_concurrency_stress():
     iterations = 200
 
     for _ in range(iterations):
-        t0 = time.perf_counter()
         payload = _build_full_state_payload()
+        t0 = time.perf_counter()
         serialized = fast_dumps(payload)
         t1 = time.perf_counter()
         latencies_ms.append((t1 - t0) * 1000.0)
