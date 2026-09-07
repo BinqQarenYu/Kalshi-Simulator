@@ -237,6 +237,7 @@ class StandaloneBotEngine:
         self.spot_connected: bool = False
         self.tasks: List[asyncio.Task] = []
         self._running = False
+        self._eval_lock = asyncio.Lock()
 
     def set_asset(self, asset: CryptoAsset) -> None:
         """Switch active underlying asset in the standalone engine."""
@@ -617,132 +618,144 @@ class StandaloneBotEngine:
 
     async def evaluate_and_execute(self) -> None:
         """Evaluate 3-step domination logic and route live orders through guardrails."""
-        now_mono = time.monotonic()
-        if now_mono - self.last_eval_time < 0.25:
+        if self._eval_lock.locked():
             return
-        self.last_eval_time = now_mono
+        async with self._eval_lock:
+            now_mono = time.monotonic()
+            if now_mono - self.last_eval_time < 0.25:
+                return
+            self.last_eval_time = now_mono
 
-        if not self.active_ticker or self.target_strike <= 0 or self.current_btc_spot <= 0:
-            return
+            if not self.active_ticker or self.target_strike <= 0 or self.current_btc_spot <= 0:
+                return
 
-        book = self.orderbook.get_book(self.active_ticker)
-        if not book or (not book.yes_book and not book.no_book):
-            return
+            book = self.orderbook.get_book(self.active_ticker)
+            if not book or (not book.yes_book and not book.no_book):
+                return
 
-        t_rem = self.get_time_to_expiry()
-        if t_rem <= 0:
-            return
+            t_rem = self.get_time_to_expiry()
+            if t_rem <= 0:
+                return
 
-        # 1. Strategy Evaluation
-        decision = self.bot.evaluate(
-            book=book,
-            spot_price=float(self.current_btc_spot),
-            target_strike=float(self.target_strike),
-            time_to_expiry_s=t_rem,
-            total_equity=self.balance_dollars,
-            max_position_size=1,
-            estimated_vpin=0.15,
-        )
-        self.last_decision = decision
+            # 1. Strategy Evaluation
+            decision = self.bot.evaluate(
+                book=book,
+                spot_price=float(self.current_btc_spot),
+                target_strike=float(self.target_strike),
+                time_to_expiry_s=t_rem,
+                total_equity=self.balance_dollars,
+                max_position_size=1,
+                estimated_vpin=0.15,
+            )
+            self.last_decision = decision
 
-        # 2. Execution Gating: Check Arming
-        if not self.is_armed:
-            return
+            # 2. Execution Gating: Check Arming
+            if not self.is_armed:
+                return
 
-        # 3. Check Signal Recommendation
-        if decision.recommended_side not in ("yes", "no") or decision.recommended_contracts <= 0:
-            return
+            # 3. Check Signal Recommendation
+            if decision.recommended_side not in ("yes", "no") or decision.recommended_contracts <= 0:
+                return
 
-        # 4. Institutional Pre-Trade Guardrail Check
-        rec_side = decision.recommended_side
-        rec_size = min(decision.recommended_contracts, 1)  # Strictly 1 contract for each asset
-        est_price = Decimal(str(decision.limit_price))
+            # 4. Institutional Pre-Trade Guardrail Check
+            rec_side = decision.recommended_side
+            rec_size = min(decision.recommended_contracts, 1)  # Strictly 1 contract per trade, max 2 shares per cycle
+            est_price = Decimal(str(decision.limit_price))
+            target_ticker = self.active_ticker
 
-        is_allowed, g_reason, approved_size, _ = self.guardrails.validate_pre_trade_intent(
-            ticker=self.active_ticker,
-            side=rec_side,
-            requested_size=rec_size,
-            est_price=est_price,
-            total_equity=self.balance_dollars,
-            vpin=decision.vpin,
-            cycle_id=self.active_ticker,
-            is_bot=True,
-            bot_type="3_step_domination_bot",
-        )
+            is_allowed, g_reason, approved_size, _ = self.guardrails.validate_pre_trade_intent(
+                ticker=target_ticker,
+                side=rec_side,
+                requested_size=rec_size,
+                est_price=est_price,
+                total_equity=self.balance_dollars,
+                vpin=decision.vpin,
+                cycle_id=target_ticker,
+                is_bot=True,
+                bot_type="3_step_domination_bot",
+            )
 
-        if not is_allowed or approved_size <= 0:
-            logger.info("🛡️ [GUARDRAIL BLOCK] %s on %s: %s", rec_side.upper(), self.active_ticker, g_reason)
-            return
+            if not is_allowed or approved_size <= 0:
+                logger.info("🛡️ [GUARDRAIL BLOCK] %s on %s: %s", rec_side.upper(), target_ticker, g_reason)
+                return
 
-        # 5. Anti-Burst Pre-Flight Check on Kalshi Open Orders
-        if self.order_client:
-            try:
-                open_orders = await self.order_client.get_open_orders()
-                existing_for_ticker = [o for o in open_orders if o.get("ticker") == self.active_ticker]
-                if existing_for_ticker:
-                    logger.warning("⚠️ [ANTI-BURST] Resting order already active on Kalshi for %s. Suppressing duplicate.", self.active_ticker)
+            # 5. Anti-Burst Pre-Flight Check on Kalshi Open Orders
+            if self.order_client:
+                try:
+                    open_orders = await self.order_client.get_open_orders()
+                    existing_for_ticker = [o for o in open_orders if o.get("ticker") == target_ticker]
+                    if existing_for_ticker:
+                        logger.warning("⚠️ [ANTI-BURST] Resting order already active on Kalshi for %s. Suppressing duplicate.", target_ticker)
+                        self.guardrails.record_resting_order(
+                            order_id=existing_for_ticker[0].get("order_id", "ext_rest"),
+                            ticker=target_ticker,
+                            side=rec_side,
+                            size=approved_size,
+                            price=est_price,
+                            cycle_id=target_ticker,
+                            bot_type="3_step_domination_bot",
+                        )
+                        return
+                except Exception as e:
+                    logger.debug("Failed open order anti-burst check: %s", e)
+
+                # 6. Dispatch Live Order
+                logger.info(
+                    "🚀 [LIVE ORDER INCEPTION] %s %d contracts @ $%s on %s (Playbook: %s, Edge: +%.1f%%)",
+                    rec_side.upper(), approved_size, est_price, target_ticker, decision.active_playbook, decision.edge_pct * 100
+                )
+                try:
+                    order_res = await self.order_client.place_order(
+                        ticker=target_ticker,
+                        side=rec_side,
+                        count=approved_size,
+                        action="buy",
+                        order_type="limit",
+                        price_dollars=float(est_price),
+                        exchange_index=2,
+                    )
+                except Exception as exc:
+                    self.guardrails.release_in_flight_intent(target_ticker)
+                    logger.error("Failed to dispatch live order to Kalshi: %s", exc)
+                    return
+
+                if order_res:
+                    order_id = order_res.get("order_id", "live_ord")
+                    logger.info("✅ [ORDER PLACED] Order ID: %s", order_id)
                     self.guardrails.record_resting_order(
-                        order_id=existing_for_ticker[0].get("order_id", "ext_rest"),
-                        ticker=self.active_ticker,
+                        order_id=order_id,
+                        ticker=target_ticker,
                         side=rec_side,
                         size=approved_size,
                         price=est_price,
-                        cycle_id=self.active_ticker,
+                        cycle_id=target_ticker,
                         bot_type="3_step_domination_bot",
                     )
-                    return
-            except Exception as e:
-                logger.debug("Failed open order anti-burst check: %s", e)
-
-            # 6. Dispatch Live Order
-            logger.info(
-                "🚀 [LIVE ORDER INCEPTION] %s %d contracts @ $%s on %s (Playbook: %s, Edge: +%.1f%%)",
-                rec_side.upper(), approved_size, est_price, self.active_ticker, decision.active_playbook, decision.edge_pct * 100
-            )
-            order_res = await self.order_client.place_order(
-                ticker=self.active_ticker,
-                side=rec_side,
-                count=approved_size,
-                action="buy",
-                order_type="limit",
-                price_dollars=float(est_price),
-                exchange_index=2,
-            )
-            if order_res:
-                order_id = order_res.get("order_id", "live_ord")
-                logger.info("✅ [ORDER PLACED] Order ID: %s", order_id)
-                self.guardrails.record_resting_order(
-                    order_id=order_id,
-                    ticker=self.active_ticker,
-                    side=rec_side,
-                    size=approved_size,
-                    price=est_price,
-                    cycle_id=self.active_ticker,
-                    bot_type="3_step_domination_bot",
-                )
-                self.active_resting_orders[order_id] = {
-                    "ticker": self.active_ticker,
-                    "side": rec_side,
-                    "size": approved_size,
-                    "price": est_price,
-                    "placed_at": time.time(),
-                }
-                # Persist live trade to SQLite via DatabaseWriter
-                self.db_writer.enqueue_trade(
-                    trade_id=f"live_{order_id}",
-                    ticker=self.active_ticker,
-                    side=rec_side,
-                    size=approved_size,
-                    price=float(est_price),
-                    gross_value=float(est_price * Decimal(str(approved_size))),
-                    fees=0.0,
-                    vpin=decision.vpin,
-                    timeframe="15m",
-                    bot_type="3_step_domination_bot",
-                    execution_mode="live",
-                    status="resting",
-                )
-                await self.sync_balance()
+                    self.active_resting_orders[order_id] = {
+                        "ticker": target_ticker,
+                        "side": rec_side,
+                        "size": approved_size,
+                        "price": est_price,
+                        "placed_at": time.time(),
+                    }
+                    # Persist live trade to SQLite via DatabaseWriter
+                    self.db_writer.enqueue_trade(
+                        trade_id=f"live_{order_id}",
+                        ticker=target_ticker,
+                        side=rec_side,
+                        size=approved_size,
+                        price=float(est_price),
+                        gross_value=float(est_price * Decimal(str(approved_size))),
+                        fees=0.0,
+                        vpin=decision.vpin,
+                        timeframe="15m",
+                        bot_type="3_step_domination_bot",
+                        execution_mode="live",
+                        status="resting",
+                    )
+                    await self.sync_balance()
+                else:
+                    self.guardrails.release_in_flight_intent(target_ticker)
 
     async def panic_cancel_all(self) -> int:
         """Cancel all open resting orders on Kalshi exchange and disarm bot."""

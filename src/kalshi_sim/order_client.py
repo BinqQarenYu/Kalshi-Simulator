@@ -359,8 +359,8 @@ class KalshiLiveOrderClient:
 
     async def cancel_order(self, order_id: str, ticker: Optional[str] = None) -> bool:
         """Cancel a resting order on Kalshi using V2 Trade API."""
-        endpoint = f"/trade-api/v2/portfolio/orders/{order_id}"
-        url = f"{self.base_url}/portfolio/orders/{order_id}"
+        endpoint = f"/trade-api/v2/portfolio/events/orders/{order_id}"
+        url = f"{self.base_url}/portfolio/events/orders/{order_id}"
         headers = get_auth_headers(self.api_key_id, self.private_key, "DELETE", endpoint)
 
         session = await self._get_session()
@@ -372,6 +372,15 @@ class KalshiLiveOrderClient:
                 # Order is already filled, cancelled, or expired on exchange
                 logger.debug("Order %s already cancelled or not found (HTTP 404)", order_id)
                 return True
+            if resp.status in (400, 410):
+                # Fallback to non-event portfolio orders endpoint if required
+                fb_ep = f"/trade-api/v2/portfolio/orders/{order_id}"
+                fb_url = f"{self.base_url}/portfolio/orders/{order_id}"
+                fb_headers = get_auth_headers(self.api_key_id, self.private_key, "DELETE", fb_ep)
+                async with session.delete(fb_url, headers=fb_headers) as fb_resp:
+                    if fb_resp.status in (200, 204, 404):
+                        logger.info("Successfully cancelled order via fallback: %s", order_id)
+                        return True
             err_text = await resp.text()
             logger.error("Failed to cancel order %s (HTTP %d): %s", order_id, resp.status, err_text)
             return False
