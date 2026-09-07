@@ -1368,6 +1368,84 @@ async def sweep_orders() -> Dict[str, Any]:
     return {"status": "SWEEP_COMPLETE", "cancelled_orders": cancelled}
 
 
+from kalshi_sim.win32_window import (
+    find_cockpit_windows,
+    is_always_on_top,
+    launch_widget_window,
+    resize_window,
+    set_always_on_top,
+    WIDGET_HEIGHT_EXPANDED,
+    WIDGET_HEIGHT_MINIMIZED,
+    WIDGET_WIDTH_EXPANDED,
+    WIDGET_WIDTH_MINIMIZED,
+)
+
+
+class WindowPinRequest(BaseModel):
+    topmost: bool = True
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class WindowResizeRequest(BaseModel):
+    width: int
+    height: int
+    topmost: Optional[bool] = None
+
+
+@app.get("/api/window/status")
+async def get_window_status() -> Dict[str, Any]:
+    """Check if Cockpit window is found and pinned as Always on Top."""
+    windows = find_cockpit_windows()
+    if not windows:
+        return {"available": False, "is_topmost": False, "windows_count": 0}
+    hwnd, title = windows[0]
+    topmost = is_always_on_top(hwnd)
+    return {
+        "available": True,
+        "is_topmost": topmost,
+        "hwnd": hwnd,
+        "title": title,
+        "windows_count": len(windows),
+    }
+
+
+@app.post("/api/window/pin")
+async def pin_window(req: WindowPinRequest) -> Dict[str, Any]:
+    """Toggle Always on Top (HWND_TOPMOST) for Cockpit window."""
+    windows = find_cockpit_windows()
+    if not windows:
+        raise HTTPException(status_code=404, detail="No Pocket Cockpit window found")
+    results = []
+    for hwnd, title in windows:
+        ok = set_always_on_top(hwnd, req.topmost)
+        if req.width and req.height:
+            resize_window(hwnd, req.width, req.height, topmost=req.topmost)
+        results.append({"hwnd": hwnd, "title": title, "topmost": req.topmost, "success": ok})
+    return {"status": "SUCCESS", "topmost": req.topmost, "windows": results}
+
+
+@app.post("/api/window/resize")
+async def resize_cockpit_window(req: WindowResizeRequest) -> Dict[str, Any]:
+    """Resize Cockpit window (e.g. for Minimized widget or Expanded mode)."""
+    windows = find_cockpit_windows()
+    if not windows:
+        raise HTTPException(status_code=404, detail="No Pocket Cockpit window found")
+    results = []
+    for hwnd, title in windows:
+        ok = resize_window(hwnd, req.width, req.height, topmost=req.topmost)
+        results.append({"hwnd": hwnd, "success": ok})
+    return {"status": "SUCCESS", "width": req.width, "height": req.height, "windows": results}
+
+
+@app.post("/api/window/launch-widget")
+async def spawn_widget_window() -> Dict[str, Any]:
+    """Launch Microsoft Edge or Chrome in chromeless app mode pinned as a floating desktop widget."""
+    port = 8001
+    ok = launch_widget_window(port=port, view="minimized")
+    return {"status": "LAUNCHED" if ok else "FAILED", "success": ok}
+
+
 # ---------------------------------------------------------------------------
 # CLI Entrypoint
 # ---------------------------------------------------------------------------
@@ -1379,6 +1457,7 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", default=True, help="Enable live trading mode")
     parser.add_argument("--force", action="store_true", default=False, help="Force lock acquisition if stale")
     parser.add_argument("--no-browser", action="store_true", default=False, help="Do not open browser automatically")
+    parser.add_argument("--widget", action="store_true", default=False, help="Launch as a floating desktop widget (app mode + always on top)")
     parser.add_argument("--asset", type=str, default="BTC", choices=["BTC", "ETH", "SOL", "DOGE"], help="Active crypto asset (default: BTC)")
     args = parser.parse_args()
     if args.force:
@@ -1386,7 +1465,12 @@ def main() -> None:
     if args.asset:
         os.environ["KALSHI_ACTIVE_ASSET"] = args.asset.upper()
 
-    if not args.no_browser:
+    if args.widget:
+        def _delayed_widget():
+            time.sleep(1.2)
+            launch_widget_window(port=args.port, view="minimized")
+        threading.Thread(target=_delayed_widget, daemon=True).start()
+    elif not args.no_browser:
         def _delayed_open():
             time.sleep(1.2)
             try:

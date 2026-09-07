@@ -556,3 +556,59 @@ def test_standalone_bot_consecutive_loss_streak_breaker(tmp_path: Path):
         assert engine.is_armed is True
         assert engine.consecutive_losses == 0
 
+
+def test_standalone_bot_window_management_api():
+    """Test Win32 window management endpoints (status, pin, resize, launch-widget)."""
+    client = TestClient(app)
+
+    # 1. Test /api/window/status when no window found
+    with patch("kalshi_sim.standalone_bot.find_cockpit_windows", return_value=[]):
+        resp = client.get("/api/window/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["available"] is False
+        assert data["is_topmost"] is False
+
+    # 2. Test /api/window/status when window found and pinned
+    with patch("kalshi_sim.standalone_bot.find_cockpit_windows", return_value=[(99999, "Kalshi 3-Step Dominion — Pocket Cockpit")]):
+        with patch("kalshi_sim.standalone_bot.is_always_on_top", return_value=True):
+            resp = client.get("/api/window/status")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["available"] is True
+            assert data["is_topmost"] is True
+            assert data["hwnd"] == 99999
+
+    # 3. Test /api/window/pin
+    with patch("kalshi_sim.standalone_bot.find_cockpit_windows", return_value=[(99999, "Kalshi 3-Step Dominion — Pocket Cockpit")]):
+        with patch("kalshi_sim.standalone_bot.set_always_on_top", return_value=True) as mock_pin:
+            with patch("kalshi_sim.standalone_bot.resize_window", return_value=True) as mock_resize:
+                resp = client.post("/api/window/pin", json={"topmost": True, "width": 515, "height": 245})
+                assert resp.status_code == 200
+                data = resp.json()
+                assert data["status"] == "SUCCESS"
+                assert data["topmost"] is True
+                mock_pin.assert_called_once_with(99999, True)
+                mock_resize.assert_called_once_with(99999, 515, 245, topmost=True)
+
+    # 4. Test /api/window/resize
+    with patch("kalshi_sim.standalone_bot.find_cockpit_windows", return_value=[(99999, "Kalshi 3-Step Dominion — Pocket Cockpit")]):
+        with patch("kalshi_sim.standalone_bot.resize_window", return_value=True) as mock_resize:
+            resp = client.post("/api/window/resize", json={"width": 515, "height": 780, "topmost": True})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "SUCCESS"
+            assert data["width"] == 515
+            assert data["height"] == 780
+            mock_resize.assert_called_once_with(99999, 515, 780, topmost=True)
+
+    # 5. Test /api/window/launch-widget
+    with patch("kalshi_sim.standalone_bot.launch_widget_window", return_value=True) as mock_launch:
+        resp = client.post("/api/window/launch-widget")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "LAUNCHED"
+        assert data["success"] is True
+        mock_launch.assert_called_once()
+
+

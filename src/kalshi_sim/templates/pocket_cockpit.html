@@ -114,10 +114,19 @@
       border-color: #3b82f6;
     }
 
+    /* Active pinned style */
+    .btn-view-toggle.active-pin {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: var(--green);
+      color: var(--green);
+      box-shadow: 0 0 8px var(--green-glow);
+    }
+
     /* Minimized Mode (Exact Match to User Uploaded Compact Cockpit) */
     body.minimized {
-      padding: 10px 12px;
+      padding: 8px 10px;
       min-height: auto;
+      overflow: hidden;
     }
     .container.minimized {
       max-width: 510px;
@@ -162,6 +171,8 @@
         <span style="font-size: 0.8rem; color: var(--muted); font-weight: 400;">(24/7 Standalone Engine)</span>
       </div>
       <div class="header-right">
+        <button id="btnPinFloat" class="btn-view-toggle" onclick="togglePinFloat()" title="Float on Top of Desktop (Always-on-Top Widget)">📌 Float</button>
+        <button id="btnPopout" class="btn-view-toggle" onclick="launchPopoutWidget()" title="Open as Floating Desktop Widget">🗗 Popout</button>
         <button id="viewToggleBtn" class="btn-view-toggle" onclick="toggleViewMode()" title="Toggle Minimized / Detailed View">⤢ Expand</button>
         <div id="liveStatusBadge" class="status-badge badge-standby">STANDBY</div>
       </div>
@@ -702,6 +713,74 @@
     }
 
     let isMinimized = true;
+    let isPinned = false;
+
+    async function checkPinStatus() {
+      try {
+        const res = await fetch('/api/window/status');
+        if (res.ok) {
+          const d = await res.json();
+          if (d.available) {
+            isPinned = d.is_topmost;
+            updatePinUI();
+          }
+        }
+      } catch (err) {
+        console.debug('Window status check:', err);
+      }
+    }
+
+    function updatePinUI() {
+      const btn = document.getElementById('btnPinFloat');
+      if (!btn) return;
+      if (isPinned) {
+        btn.textContent = '📌 Pinned';
+        btn.classList.add('active-pin');
+        btn.title = 'Window is Floating on Top of Desktop (Click to Unpin)';
+      } else {
+        btn.textContent = '📌 Float';
+        btn.classList.remove('active-pin');
+        btn.title = 'Float on Top of Desktop (Always-on-Top Widget)';
+      }
+    }
+
+    async function togglePinFloat() {
+      const targetState = !isPinned;
+      try {
+        const res = await fetch('/api/window/pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topmost: targetState,
+            width: 515,
+            height: isMinimized ? 245 : 780
+          })
+        });
+        if (res.ok) {
+          isPinned = targetState;
+          updatePinUI();
+          appendLog(isPinned ? '📌 [WIDGET PINNED] Window is now floating on top of desktop.' : '📍 [WIDGET UNPINNED] Floating window unpinned.');
+        } else {
+          appendLog('❌ Failed to toggle floating window pin.');
+        }
+      } catch (err) {
+        appendLog('❌ Error toggling window pin: ' + err);
+      }
+    }
+
+    async function launchPopoutWidget() {
+      appendLog('🚀 Launching chromeless floating desktop widget...');
+      try {
+        const res = await fetch('/api/window/launch-widget', { method: 'POST' });
+        if (res.ok) {
+          appendLog('✅ Floating widget launched! Check your desktop.');
+        } else {
+          appendLog('❌ Failed to spawn widget.');
+        }
+      } catch (err) {
+        appendLog('❌ Error launching widget: ' + err);
+      }
+    }
 
     function toggleViewMode() {
       setViewMode(!isMinimized);
@@ -730,10 +809,30 @@
         if (drawerIcon) drawerIcon.textContent = '▴';
         if (drawerText) drawerText.textContent = 'Collapse to Minimized Cockpit';
       }
+
+      // Sync native OS window size if running as desktop widget or pinned
+      fetch('/api/window/resize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          width: 515,
+          height: isMinimized ? 245 : 780,
+          topmost: isPinned ? true : undefined
+        })
+      }).catch(() => {});
     }
 
     function initViewMode() {
       const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('widget') === '1') {
+        const pop = document.getElementById('btnPopout');
+        if (pop) pop.style.display = 'none';
+        isPinned = true;
+        updatePinUI();
+      } else {
+        checkPinStatus();
+      }
+
       if (urlParams.get('view') === 'expanded' || urlParams.get('expand') === 'true') {
         setViewMode(false);
       } else if (urlParams.get('view') === 'minimized' || urlParams.get('min') === '1') {

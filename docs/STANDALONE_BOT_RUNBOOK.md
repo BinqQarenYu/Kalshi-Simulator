@@ -48,6 +48,8 @@ Designed for distraction-free 24/7 monitoring in a tiny desktop window (~500px �
    - `⚡ 3-STEP DOMINION (24/7 Standalone Engine)`
    - View mode toggle button: `[⤢ Expand]`
    - Live status pill: `[ARMED / LIVE]` (green) vs `[STANDBY / SAFE]` (muted)
+   - `[📌 Float / 📌 Pinned]`: Instantly pins/unpins the window as Always on Top (`HWND_TOPMOST`).
+   - `[🗗 Popout]`: Detaches into a chromeless, floating desktop widget via Edge/Chrome app mode.
 2. **Multi-Asset Switcher Bar**:
    - Instant 1-click switching between `[₿ BTC]`, `[Ξ ETH]`, `[● SOL]`, and `[Ð DOGE]`.
    - Active asset is highlighted with dark elevated styling and asset-specific ticker branding.
@@ -87,6 +89,7 @@ Clicking `[⤢ Expand]` or the drawer handle reveals the full quantitative dashb
 
 ## 4. REST API Reference (Port 8001)
 
+### Core State & Trading Endpoints
 | Method | Endpoint | Description | Sample Request / Response |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/` | Serves the Pocket Cockpit HTML UI. | HTML content |
@@ -99,6 +102,14 @@ Clicking `[⤢ Expand]` or the drawer handle reveals the full quantitative dashb
 | `GET` | `/api/bot/parameters` | Returns active strategy parameters and risk thresholds. | `{"discount_limit_price": 0.48, ...}` |
 | `POST` | `/api/bot/parameters` | Dynamically updates parameters and guardrail thresholds. | `{"min_edge_pct": 6.5, "min_ev_dollars": 0.03}` |
 | `POST` | `/api/bot/sweep-orders` | Manually sweeps resting orders for finished events. | `{"status": "SWEEP_COMPLETE", "cancelled_orders": 1}` |
+
+### Floating Windows Desktop Widget Endpoints
+| Method | Endpoint | Description | Sample Request / Response |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/window/status` | Checks if the Cockpit window is discovered and pinned Always on Top. | `{"available": true, "is_topmost": true}` |
+| `POST` | `/api/window/pin` | Toggles Always on Top (`HWND_TOPMOST`) and optionally resizes. | `{"topmost": true, "width": 515, "height": 245}` |
+| `POST` | `/api/window/resize`| Resizes the OS window for minimized widget or expanded mode. | `{"width": 515, "height": 245, "topmost": true}` |
+| `POST` | `/api/window/launch-widget` | Spawns a chromeless, floating desktop widget via Edge/Chrome app mode. | `{"status": "LAUNCHED", "success": true}` |
 
 ---
 
