@@ -285,7 +285,10 @@ def test_standalone_bot_settlement_reconciliation(tmp_path: Path):
         # Run one pass of settlement loop
         engine._running = True
         settle_task = asyncio.create_task(engine._settlement_reconciliation_loop())
-        await asyncio.sleep(0.05)
+        for _ in range(30):
+            if not engine.guardrails.is_cycle_locked("KXBTC15M-SETTLE1"):
+                break
+            await asyncio.sleep(0.05)
         engine._running = False
         settle_task.cancel()
         try:

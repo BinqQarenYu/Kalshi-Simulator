@@ -9,9 +9,10 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 import pytest
 
+from datetime import datetime, timezone
 from kalshi_sim.order_client import KalshiLiveOrderClient
 from kalshi_sim.portfolio import Portfolio
-from kalshi_sim.schemas import OrderSide, Timeframe
+from kalshi_sim.schemas import OrderSide, Timeframe, LivePortfolioState
 from kalshi_sim.server import app, state
 
 
@@ -115,13 +116,26 @@ def test_server_portfolio_sync_endpoint():
 
 def test_server_live_balance_endpoint():
     """Test GET /api/kalshi/balance endpoint."""
-    with TestClient(app) as test_client:
-        res = test_client.get("/api/kalshi/balance")
-        assert res.status_code == 200
-        data = res.json()
-        assert "balance_dollars" in data
-        assert "available_margin" in data
-        assert "positions" in data
-        assert "is_authenticated" in data
+    mock_live_state = LivePortfolioState(
+        balance_dollars=Decimal("1500.00"),
+        available_margin=Decimal("1500.00"),
+        payout_pending=Decimal("0.00"),
+        positions=[],
+        updated_at=datetime.now(timezone.utc),
+        environment="demo",
+        is_authenticated=True,
+    )
+    with patch("kalshi_sim.server.KalshiLiveOrderClient") as mock_cls:
+        mock_client = AsyncMock()
+        mock_client.get_live_portfolio_state.return_value = mock_live_state
+        mock_cls.return_value = mock_client
+        with TestClient(app) as test_client:
+            res = test_client.get("/api/kalshi/balance")
+            assert res.status_code == 200
+            data = res.json()
+            assert "balance_dollars" in data
+            assert "available_margin" in data
+            assert "positions" in data
+            assert "is_authenticated" in data
 
 
