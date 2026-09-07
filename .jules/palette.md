@@ -18,3 +18,7 @@
 ## 2026-09-04 - Segmented View Mode Toggles & Metric Emphasis
 **Learning:** Segmented toggle button groups (such as `$` vs `%` price view mode) need explicit `role="group"`, `aria-label`, `type="button"`, and dynamic `aria-pressed` state attributes so assistive technology users understand the available selection group and current active filter state. In addition, changing view modes should dynamically adjust visual emphasis on the selected metric.
 **Action:** Wrap button toggle pairs in a `role="group"` element with a clear `aria-label`, supply `aria-pressed` and `focus-visible:ring-2` focus rings on each button, and wire state changes to dynamically highlight the active metric.
+
+## 2026-09-05 - Level-2 Order Book Ladder Rows & Depth Filter Controls
+**Learning:** Interactive financial table rows (such as Level-2 order book depth levels used for quick limit order price selection) implemented as `<div>` tags are inaccessible to keyboard users and screen readers.
+**Action:** Render order book depth rows as semantic `<button type="button">` elements with descriptive `aria-label` attributes detailing side, price, and available contracts, along with side-specific `focus-visible:ring-2` focus rings and filter group `role="group"` / `aria-pressed` states.
