@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from pathlib import Path
+import re
 from typing import Any, AsyncIterator, Literal, Optional
 from zoneinfo import ZoneInfo
 
@@ -2128,16 +2129,18 @@ async def get_hot_ticks(ticker: str, limit: int = 100) -> dict:
 @app.get("/api/export/ticks")
 async def export_ticks(timeframe: str = "mock") -> FileResponse:
     """Download the active session tick recording JSONL file."""
-    data_dir = state.data_dir
+    if not re.match(r"^[a-zA-Z0-9_\-]+$", timeframe):
+        raise HTTPException(status_code=400, detail="Invalid timeframe parameter format.")
+
+    data_dir = state.data_dir.resolve()
     files = sorted(data_dir.glob(f"ticks_{timeframe}_*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
     if not files:
-        # Fallback to any ticks file
-        files = sorted(data_dir.glob("ticks_*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
+        raise HTTPException(status_code=404, detail=f"No recorded tick files found for timeframe '{timeframe}'.")
 
-    if not files:
-        raise HTTPException(status_code=404, detail="No recorded tick files found.")
+    target_file = files[0].resolve()
+    if not target_file.is_relative_to(data_dir):
+        raise HTTPException(status_code=400, detail="Access denied: file is outside the data directory.")
 
-    target_file = files[0]
     return FileResponse(
         path=str(target_file),
         media_type="application/x-ndjson",

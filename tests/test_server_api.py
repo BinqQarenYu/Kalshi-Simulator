@@ -225,6 +225,22 @@ def test_export_pnl_csv_and_json(client: TestClient) -> None:
         assert "current_balance" in data
 
 
+def test_export_ticks_security_sanitization(client: TestClient) -> None:
+    with client:
+        # Malicious timeframe with path traversal sequence
+        resp_traversal = client.get("/api/export/ticks?timeframe=../../etc/passwd")
+        assert resp_traversal.status_code == 400
+        assert "Invalid timeframe parameter format" in resp_traversal.json()["detail"]
+
+        # Malicious timeframe with special characters
+        resp_invalid_chars = client.get("/api/export/ticks?timeframe=mock%00null")
+        assert resp_invalid_chars.status_code == 400
+
+        # Valid timeframe when no ticks exist should return 404 Not Found (safe fail)
+        resp_valid_empty = client.get("/api/export/ticks?timeframe=nonexistent_test_timeframe")
+        assert resp_valid_empty.status_code == 404
+
+
 def test_gdrive_status_endpoint(client: TestClient) -> None:
     with client:
         resp = client.get("/api/gdrive/status")
