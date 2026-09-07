@@ -231,18 +231,20 @@ class ThreeStepDominationBot:
 
         cfg = get_asset_config(self.asset)
 
-        # Step 0.5: Minimum Spot-Strike Distance Filter (skip coin-flip territory)
-        # Data shows entries within min_spot_diff have ~50% WR — pure coin flips.
-        # Only enter when the asset has meaningfully moved away from the strike.
-        if abs(spot_diff) < self.min_spot_diff:
+        # Step 0.5: Minimum Spot-Strike Distance Filter (HARDENED — never bet razor-tight events)
+        # Post-mortem: 9 consecutive losses from entries where spot was barely above strike.
+        # Doubled dead zone to 2x min_spot_diff to completely eliminate coin-flip territory.
+        # BTC: |diff| must be > $70. ETH: > $5. SOL: > $1. DOGE: > $0.001.
+        razor_tight_threshold = self.min_spot_diff * 2.0
+        if abs(spot_diff) < razor_tight_threshold:
             diff_str = cfg.format_diff(spot_diff)
-            thresh_str = cfg.format_price(self.min_spot_diff)
+            thresh_str = cfg.format_price(razor_tight_threshold)
             return self._build_wait_decision(
                 time_to_expiry_s=time_to_expiry_s,
                 spot_diff=spot_diff,
                 vpin=estimated_vpin,
-                rationale=f"Spot-Strike Proximity Veto: |Diff|={abs(spot_diff):.{cfg.price_decimals}f} < {thresh_str} threshold. "
-                          f"{cfg.name} is pinned near strike — coin-flip territory, skipping.",
+                rationale=f"Razor-Tight Proximity Veto: |Diff|={abs(spot_diff):.{cfg.price_decimals}f} < {thresh_str} threshold (2x min_spot_diff). "
+                          f"{cfg.name} is too close to strike — never bet razor-tight events, skipping.",
             )
 
         # Classify Active Playbook by Expiration Countdown Window
@@ -529,6 +531,25 @@ class ThreeStepDominationBot:
                         f"Momentum Alignment Veto: {ev_res.recommended_side.value.upper()} is contrarian "
                         f"(Diff={diff_str}). Edge={edge_pct:.1f}% < {contrarian_min_edge:.0f}% "
                         f"contrarian threshold. Bet WITH momentum, not against it."
+                    ),
+                )
+
+            # Marginal Zone Edge Boost (Post-Mortem Fix — 9 consecutive losses from thin-edge trades)
+            # Hard veto catches |spot_diff| < 2x min_spot_diff. This secondary filter catches
+            # the 2x-3x transition zone where signals exist but are still weak.
+            # Require 12% minimum edge to filter noise trades that don't survive reversals.
+            marginal_zone_upper = self.min_spot_diff * 3.0
+            marginal_min_edge = 12.0  # 12% minimum edge in marginal territory
+            if abs(spot_diff) < marginal_zone_upper and edge_pct < marginal_min_edge:
+                diff_str = cfg.format_diff(spot_diff)
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=vpin,
+                    rationale=(
+                        f"Marginal Zone Veto: |Diff|={abs(spot_diff):.{cfg.price_decimals}f} < {marginal_zone_upper:.{cfg.price_decimals}f} "
+                        f"(1.5x min_spot_diff). Edge={edge_pct:.1f}% < {marginal_min_edge:.0f}% "
+                        f"marginal threshold. Signal too weak to survive 15-min reversal risk."
                     ),
                 )
 
