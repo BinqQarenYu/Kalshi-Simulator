@@ -1384,7 +1384,7 @@ def resolve_active_market(now_utc: datetime) -> tuple[Any | None, int, Decimal, 
     """Resolve the currently active open market, remaining seconds, target strike, target time str, and window str."""
     # 0. Single Source of Truth: When 24/7 Standalone Bot is active, inherit its exact live market truth
     now_mono = time.monotonic()
-    if hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 3.0):
+    if hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 5.0):
         sd = state._standalone_data
         t_rem = int(sd.get("expiry_countdown_seconds", 0))
         st_dec = Decimal(str(sd.get("target_strike", "0.00")))
@@ -5270,7 +5270,7 @@ def _build_full_state_payload() -> dict[str, Any]:
 
     # Single Source of Truth: Merge Standalone ground truth if active
     now_mono = time.monotonic()
-    has_standalone = bool(hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 3.0))
+    has_standalone = bool(hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 5.0))
     if has_standalone:
         sd = state._standalone_data
         target_time_str = sd.get("target_time_str", target_time_str)
