@@ -11,6 +11,13 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market }) => {
 
   const isUp = market.diff >= 0;
   const deltaColor = isUp ? 'text-[#00d084]' : 'text-[#ff4d4d]';
+  const decimals = market.active_asset_decimals ?? 2;
+  const diffVal = market?.diff ?? 0;
+  const diffPctVal = market?.diff_pct ?? 0;
+  const formattedDiff = market.diff_str
+    ? market.diff_str.split(' ')[0]
+    : `${isUp ? '+' : ''}$${Math.abs(diffVal).toFixed(decimals)}`;
+  const formattedPct = `${isUp ? '+' : ''}${Math.abs(diffPctVal) < 0.1 ? diffPctVal.toFixed(3) : diffPctVal.toFixed(2)}%`;
 
   return (
     <div className="bg-[#111620] border-b border-[#21262d] px-4 py-4 sm:px-6">
@@ -28,10 +35,10 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market }) => {
             <div className="text-xs text-[#8b949e] font-medium">{market.target_time_str || 'Expiry Target'}</div>
           </div>
 
-          {/* NOW Spot BTC Price */}
+          {/* NOW Spot Price */}
           <div>
             <div className="flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider text-[#8b949e]">
-              <span>NOW</span>
+              <span>NOW {market.active_asset || 'BTC'}</span>
               <Info className="h-3 w-3 text-[#8b949e]" />
             </div>
             <div className={`text-2xl sm:text-3xl font-extrabold tracking-tight ${deltaColor}`}>
@@ -40,13 +47,13 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market }) => {
             <div className={`text-xs font-semibold flex items-center gap-1 ${deltaColor}`}>
               {viewMode === '$' ? (
                 <>
-                  <span className="font-bold">{isUp ? '+' : ''}${(market?.diff ?? 0).toFixed(2)}</span>
-                  <span className="opacity-75">({isUp ? '+' : ''}{Math.abs(market?.diff_pct ?? 0) < 0.1 ? (market?.diff_pct ?? 0).toFixed(3) : (market?.diff_pct ?? 0).toFixed(2)}%)</span>
+                  <span className="font-bold">{formattedDiff}</span>
+                  <span className="opacity-75">({formattedPct})</span>
                 </>
               ) : (
                 <>
-                  <span className="font-bold">{isUp ? '+' : ''}{Math.abs(market?.diff_pct ?? 0) < 0.1 ? (market?.diff_pct ?? 0).toFixed(3) : (market?.diff_pct ?? 0).toFixed(2)}%</span>
-                  <span className="opacity-75">({isUp ? '+' : ''}${(market?.diff ?? 0).toFixed(2)})</span>
+                  <span className="font-bold">{formattedPct}</span>
+                  <span className="opacity-75">({formattedDiff})</span>
                 </>
               )}
             </div>

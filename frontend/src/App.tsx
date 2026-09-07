@@ -39,6 +39,7 @@ export function App() {
     selectStrategyBot,
     testBotTrade,
     updateDominationDiscountPrice,
+    selectAsset,
   } = useKalshiWebSocket();
 
   const [mainView, setMainView] = useState<'trading' | 'analytics'>('trading');
@@ -162,6 +163,7 @@ export function App() {
         tradingMode={tradingMode}
         activeStrategyBot={data.settings?.active_strategy_bot || '3_step_domination_bot'}
         onSelectStrategy={selectStrategyBot}
+        onSelectAsset={selectAsset}
         mainView={mainView}
         onSelectMainView={(v) => setMainView(v)}
         isKillSwitchTripped={isKillSwitchTripped}
@@ -218,7 +220,7 @@ export function App() {
                 | Cash: ${(data.live_portfolio?.balance_dollars ?? 0.30).toFixed(2)}
               </span>
               <span className="text-[#8b949e] hidden md:inline font-mono">
-                | Single-Trade Cap: 1-2 Contracts ($1.50 Max Risk)
+                | Single-Trade Cap: 1 Contract / Asset ($1.00 Max Risk)
               </span>
             </div>
 
@@ -388,6 +390,7 @@ export function App() {
                 <div className="p-4">
                   <AIMicrostructureCard 
                     signals={data.ai_signals} 
+                    activeAsset={data.market.active_asset}
                     onSelectStrategy={selectStrategyBot}
                     onTestBot={!isLive ? handleTestBot : undefined}
                     onOpenReports={() => setIsReportsOpen(true)}
@@ -438,6 +441,7 @@ export function App() {
                 />
                 <AIMicrostructureCard 
                   signals={data.ai_signals} 
+                  activeAsset={data.market.active_asset}
                   onSelectStrategy={selectStrategyBot}
                   onTestBot={undefined}
                   onOpenReports={() => setIsReportsOpen(true)}
@@ -449,6 +453,7 @@ export function App() {
               /* In Paper Trading: Show AI Microstructure & ONNX Inferences */
               <AIMicrostructureCard 
                 signals={data.ai_signals} 
+                activeAsset={data.market.active_asset}
                 onSelectStrategy={selectStrategyBot}
                 onTestBot={handleTestBot}
                 onOpenReports={() => setIsReportsOpen(true)}

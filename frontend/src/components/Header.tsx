@@ -5,7 +5,7 @@
  */
 
 import React, { useState } from 'react';
-import { MarketState, MemoryProfileData, IntegrityStatus, ComplianceStatus, SystemResourceMetrics, LivePortfolioState } from '../types';
+import { MarketState, MemoryProfileData, IntegrityStatus, ComplianceStatus, SystemResourceMetrics, LivePortfolioState, CryptoAsset } from '../types';
 import { Bot, RefreshCw, Radio, Share2, ArrowDownToLine, MessageSquare, Volume2, VolumeX, Activity, Zap, Play, Award, Loader2, ShieldCheck, ShieldAlert, Scale, Cpu, Wallet, AlertOctagon, BarChart3 } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
 
@@ -18,6 +18,7 @@ interface HeaderProps {
   tradingMode?: 'paper' | 'live';
   activeStrategyBot?: string;
   onSelectStrategy?: (strategyId: string) => Promise<any>;
+  onSelectAsset?: (asset: CryptoAsset) => void;
   mainView?: 'trading' | 'analytics';
   onSelectMainView?: (view: 'trading' | 'analytics') => void;
   isKillSwitchTripped?: boolean;
@@ -41,6 +42,9 @@ interface HeaderProps {
   onOpenSystemResources?: () => void;
   onTestBot?: () => Promise<any>;
 }
+import { CRYPTO_ASSET_LIST } from '../utils/assets';
+
+const CRYPTO_ASSET_TABS = CRYPTO_ASSET_LIST;
 
 export const Header: React.FC<HeaderProps> = ({
   market,
@@ -51,6 +55,7 @@ export const Header: React.FC<HeaderProps> = ({
   tradingMode = 'paper',
   activeStrategyBot = '3_step_domination_bot',
   onSelectStrategy,
+  onSelectAsset,
   mainView = 'trading',
   onSelectMainView,
   isKillSwitchTripped = false,
@@ -76,6 +81,9 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [isMuted, setIsMuted] = useState<boolean>(soundFX.muted);
   const [isTesting, setIsTesting] = useState<boolean>(false);
+
+  const activeAssetKey = market.active_asset || 'BTC';
+  const currentAsset = CRYPTO_ASSET_TABS.find((a) => a.id === activeAssetKey) || CRYPTO_ASSET_TABS[0];
 
   const handleRunBotTest = async () => {
     if (!onTestBot || isTesting) return;
@@ -104,36 +112,45 @@ export const Header: React.FC<HeaderProps> = ({
       isLive ? 'bg-[#0e111a] border-rose-500/20' : 'bg-[#0d1117]'
     }`}>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        {/* Left: BTC Symbol + Title + Live Subtitle */}
+        {/* Left: Dynamic Asset Icon + Selector + Title + Live Subtitle */}
         <div className="flex items-center gap-3.5">
-          {/* Bitcoin Orange Icon */}
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#f7931a] to-[#e67e00] shadow-lg shadow-[#f7931a]/20">
-            <span className="text-2xl font-bold text-white leading-none">₿</span>
+          {/* Dynamic Asset Icon */}
+          <div className={`flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br ${currentAsset.bgGrad} shadow-lg shadow-black/40`}>
+            <span className="text-2xl font-bold text-white leading-none">{currentAsset.symbol}</span>
           </div>
 
           <div>
-            {/* Breadcrumb Navigation: BTC / 15 min */}
-            <div className="flex items-center gap-1.5 text-xs text-[#8b949e] font-medium">
-              <a
-                href="https://kalshi.com/category/crypto/btc"
-                target="_blank"
-                rel="noreferrer"
-                className="hover:text-[#f7931a] transition-colors text-white/90 font-semibold flex items-center gap-1"
-              >
-                BTC
-              </a>
+            {/* Breadcrumb Navigation: Asset Selector + Timeframe Selector */}
+            <div className="flex items-center gap-1.5 text-xs text-[#8b949e] font-medium flex-wrap">
+              {/* Asset Selector Pills */}
+              <div className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
+                {CRYPTO_ASSET_TABS.map((a) => {
+                  const isSel = activeAssetKey === a.id;
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={() => {
+                        soundFX.playClickSound();
+                        onSelectAsset?.(a.id);
+                      }}
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded-md transition-all flex items-center gap-1 ${
+                        isSel
+                          ? 'bg-[#30363d] text-white shadow-sm ring-1 ring-white/20'
+                          : 'text-[#8b949e] hover:text-white'
+                      }`}
+                      style={isSel ? { borderLeft: `3px solid ${a.color}` } : undefined}
+                    >
+                      <span style={{ color: a.color }}>{a.symbol}</span>
+                      <span>{a.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
               <span className="text-[#484f58]">/</span>
-              <a
-                href="https://kalshi.com/category/crypto/frequency/fifteen_min"
-                target="_blank"
-                rel="noreferrer"
-                className="hover:text-white transition-colors"
-              >
-                {timeframe === '15m' ? '15 min' : timeframe === '5m' ? '5 min' : '1 hour'}
-              </a>
 
               {/* Timeframe Selector Pills */}
-              <div className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d] ml-2">
+              <div className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
                 {['5m', '15m', '1h'].map((tf) => (
                   <button
                     key={tf}
@@ -155,7 +172,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             <div className="flex items-center gap-2.5 mt-0.5">
               <h1 className="text-xl font-bold text-white tracking-tight">
-                BTC {timeframe === '15m' ? '15 min' : timeframe === '5m' ? '5 min' : '1 hour'}
+                {market.active_asset_name || currentAsset.label} {timeframe === '15m' ? '15 min' : timeframe === '5m' ? '5 min' : '1 hour'}
               </h1>
               <div className="flex items-center gap-1.5 text-xs text-[#8b949e]">
                 <span className="text-white/90 font-medium">

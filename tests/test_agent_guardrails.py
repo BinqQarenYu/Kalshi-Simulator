@@ -19,8 +19,8 @@ def test_guardrail_allows_valid_order() -> None:
     )
     assert ok is True
     assert reason == "PASSED_GUARDRAILS"
-    # Equity $100 * 8% risk = $8.00 / $0.50 = 16, but micro bankroll cap is 2 contracts
-    assert size == 2
+    # Micro bankroll cap is strictly 1 contract for each asset
+    assert size == 1
     assert diag["is_tapered"] is False
 
 
@@ -212,3 +212,119 @@ def test_settlement_unlocks_cycle() -> None:
         vpin=0.10,
     )
     assert ok is True
+
+
+def test_multi_asset_cycle_lock_isolation() -> None:
+    """Verify that 1-trade-per-cycle lock on one asset (e.g. BTC) does not block trades on other assets (ETH, SOL, DOGE)."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    btc_ticker = "KXBTC15M-26AUG290315-15"
+    eth_ticker = "KXETH15M-26AUG290315-15"
+    sol_ticker = "KXSOL15M-26AUG290315-15"
+    doge_ticker = "KXDOGE15M-26AUG290315-15"
+
+    # Inception on BTC
+    guardrails.record_trade_inception(
+        trade_id="tr_btc_1",
+        ticker=btc_ticker,
+        side="yes",
+        size=2,
+        price=Decimal("0.45"),
+        cost=Decimal("0.90"),
+        fee=Decimal("0.02"),
+        bot_type="3_step_domination_bot",
+        execution_mode="simulated",
+        rationale="BTC Momentum",
+        vpin=0.12,
+        ai_prob=0.70,
+    )
+
+    # BTC is now locked
+    ok_btc, reason_btc, _, _ = guardrails.validate_pre_trade_intent(
+        ticker=btc_ticker,
+        side="yes",
+        requested_size=2,
+        est_price=Decimal("0.45"),
+        total_equity=Decimal("100.00"),
+        vpin=0.12,
+    )
+    assert ok_btc is False
+    assert "1-TRADE-PER-CYCLE LOCKOUT" in reason_btc
+
+    # ETH, SOL, DOGE are NOT locked and can enter
+    for ticker in [eth_ticker, sol_ticker, doge_ticker]:
+        ok, reason, size, _ = guardrails.validate_pre_trade_intent(
+            ticker=ticker,
+            side="yes",
+            requested_size=2,
+            est_price=Decimal("0.45"),
+            total_equity=Decimal("100.00"),
+            vpin=0.12,
+        )
+        assert ok is True, f"Expected {ticker} to be allowed, but rejected: {reason}"
+        assert size == 1
+
+
+def test_guardrail_3step_domination_sole_authorization_and_one_contract() -> None:
+    """Verify that only 3-Step Dominion is authorized to trade (strictly 1 contract per asset), and all other bots are rejected."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+
+    # 1. All other bots must be REJECTED (prohibited from trading)
+    other_bot_types = [
+        "dominion_2_bot",
+        "onnx_microstructure_bot",
+        "macro_trend_dominion",
+        "macro_onnx",
+        "scalp",
+        "momentum",
+        "swing",
+        "experimental_candidate_bot",
+    ]
+
+    for b_type in other_bot_types:
+        ok, reason, size, diag = guardrails.validate_pre_trade_intent(
+            ticker=f"KXBTC15M-T-{b_type}",
+            side="yes",
+            requested_size=1,
+            est_price=Decimal("0.50"),
+            total_equity=Decimal("500.00"),
+            vpin=0.10,
+            is_bot=True,
+            bot_type=b_type,
+        )
+        assert ok is False, f"Expected {b_type} to be prohibited, but was allowed!"
+        assert "BOT TRADING PROHIBITED" in reason
+        assert size == 0
+
+    # 2. 3-Step Domination bot is the ONLY authorized bot, strictly capped at 1 contract across equity tiers
+    for equity in [Decimal("20.00"), Decimal("50.00"), Decimal("100.00"), Decimal("500.00"), Decimal("10000.00")]:
+        for primary_type in ["3_step_domination_bot", "3_step_domination", "domination", None]:
+            g_test = AgentGuardrails(min_order_interval_seconds=0.0)
+            ok, reason, size, diag = g_test.validate_pre_trade_intent(
+                ticker="KXBTC15M-T-PRIMARY",
+                side="yes",
+                requested_size=10,
+                est_price=Decimal("0.50"),
+                total_equity=equity,
+                vpin=0.10,
+                is_bot=True,
+                bot_type=primary_type,
+            )
+            assert ok is True
+            assert size == 1, f"Expected 3-Step Dominion ({primary_type}) to receive strictly 1 contract, got {size}"
+
+    # 3. 3-Step Domination receives strictly 1 contract across all 4 crypto assets (BTC, ETH, SOL, DOGE)
+    for asset_ticker in ["KXBTC15M-T1", "KXETH15M-T1", "KXSOL15M-T1", "KXDOGE15M-T1"]:
+        g_asset = AgentGuardrails(min_order_interval_seconds=0.0)
+        ok, reason, size, diag = g_asset.validate_pre_trade_intent(
+            ticker=asset_ticker,
+            side="yes",
+            requested_size=5,
+            est_price=Decimal("0.50"),
+            total_equity=Decimal("100.00"),
+            vpin=0.10,
+            is_bot=True,
+            bot_type="3_step_domination_bot",
+        )
+        assert ok is True
+        assert size == 1, f"Expected 1 contract for {asset_ticker}, got {size}"
+

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { DashboardState } from '../types';
+import { DashboardState, CryptoAsset } from '../types';
 
 const INITIAL_STATE: DashboardState = {
   timestamp: new Date().toISOString(),
@@ -384,6 +384,37 @@ export function useKalshiWebSocket() {
     }
   };
 
+  const selectAsset = async (asset: CryptoAsset) => {
+    try {
+      setData((prev) => ({
+        ...prev,
+        market: {
+          ...prev.market,
+          active_asset: asset,
+        },
+      }));
+      const resp = await fetch('/api/assets/select', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset }),
+      });
+      return await resp.json();
+    } catch (err) {
+      console.error('Failed to select asset:', err);
+      return { success: false, error: String(err) };
+    }
+  };
+
+  const fetchSupportedAssets = async () => {
+    try {
+      const resp = await fetch('/api/assets');
+      return await resp.json();
+    } catch (err) {
+      console.error('Failed to fetch supported assets:', err);
+      return null;
+    }
+  };
+
   return {
     data,
     isConnected,
@@ -400,6 +431,8 @@ export function useKalshiWebSocket() {
     testBotTrade,
     fetchWinLossReports,
     updateDominationDiscountPrice,
+    selectAsset,
+    fetchSupportedAssets,
   };
 }
 

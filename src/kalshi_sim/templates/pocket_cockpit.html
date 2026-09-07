@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kalshi 3-Step Dominion — Pocket Cockpit</title>
+  <style>
+    :root {
+      --bg: #090a0f;
+      --card: #12141c;
+      --border: #1e2230;
+      --text: #f0f2f5;
+      --muted: #8b949e;
+      --green: #10b981;
+      --green-glow: rgba(16, 185, 129, 0.2);
+      --red: #ef4444;
+      --red-glow: rgba(239, 68, 68, 0.2);
+      --amber: #f59e0b;
+      --blue: #3b82f6;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", monospace; }
+    body { background-color: var(--bg); color: var(--text); padding: 16px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+    .container { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 14px; }
+    
+    /* Header */
+    .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .title { font-size: 1.1rem; font-weight: 700; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; }
+    .status-badge { font-size: 0.75rem; padding: 4px 8px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+    .badge-live { background: rgba(16, 185, 129, 0.15); color: var(--green); border: 1px solid var(--green); }
+    .badge-standby { background: rgba(139, 148, 158, 0.15); color: var(--muted); border: 1px solid var(--muted); }
+
+    /* Master Controls */
+    .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .btn { padding: 14px; border-radius: 8px; border: none; font-size: 0.95rem; font-weight: 700; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; }
+    .btn-arm { background: #064e3b; color: #a7f3d0; border: 1px solid var(--green); box-shadow: 0 0 15px var(--green-glow); }
+    .btn-arm.armed { background: var(--green); color: #022c22; }
+    .btn-disarm { background: #1c1917; color: #a8a29e; border: 1px solid #44403c; }
+    .btn-disarm.disarmed { background: #44403c; color: #fafaf9; }
+    .btn-panic { background: #450a0a; color: #fecaca; border: 1px solid var(--red); grid-column: span 2; padding: 12px; }
+    .btn-panic:hover { background: var(--red); color: #fff; box-shadow: 0 0 20px var(--red-glow); }
+
+    /* KPI Grid */
+    .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .kpi-card.span-2 { grid-column: span 2; }
+    .kpi-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 4px; }
+    .kpi-val { font-size: 1.3rem; font-weight: 700; font-family: monospace; }
+    .kpi-sub { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    .badge-diff { display: inline-block; padding: 1px 6px; border-radius: 4px; font-weight: 700; font-size: 0.75rem; }
+    .diff-up { background: rgba(34, 197, 94, 0.15); color: var(--green); border: 1px solid rgba(34, 197, 94, 0.3); }
+    .diff-down { background: rgba(239, 68, 68, 0.15); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.3); }
+    .text-green { color: var(--green); }
+    .text-red { color: var(--red); }
+    .text-amber { color: var(--amber); }
+
+    /* Telemetry Panel */
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
+    .panel-title { font-size: 0.8rem; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+    .metric-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.85rem; }
+    .metric-row:last-child { border-bottom: none; }
+    .metric-name { color: var(--muted); }
+    .metric-data { font-family: monospace; font-weight: 600; }
+
+    /* Parameters Grid */
+    .params-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .param-item { display: flex; flex-direction: column; gap: 3px; }
+    .param-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; font-weight: 600; }
+    .param-hint { font-size: 0.68rem; color: #64748b; }
+    .input-wrap { display: flex; align-items: center; background: #07080c; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; }
+    .input-wrap:focus-within { border-color: var(--blue); }
+    .input-wrap input { background: transparent; border: none; color: var(--text); font-family: monospace; font-size: 0.85rem; font-weight: 600; width: 100%; outline: none; }
+    .input-wrap .prefix, .input-wrap .suffix { color: var(--muted); font-size: 0.8rem; margin: 0 4px; }
+    .btn-save-sm { background: #064e3b; color: #a7f3d0; border: 1px solid var(--green); cursor: pointer; padding: 5px 12px; border-radius: 6px; font-weight: 700; font-size: 0.78rem; transition: all 0.2s; }
+    .btn-save-sm:hover { background: var(--green); color: #022c22; box-shadow: 0 0 10px var(--green-glow); }
+    .btn-sweep-sm { background: rgba(255,255,255,0.04); color: #cbd5e1; border: 1px solid var(--border); cursor: pointer; padding: 5px 10px; border-radius: 6px; font-size: 0.75rem; transition: all 0.2s; }
+    .btn-sweep-sm:hover { background: rgba(255,255,255,0.08); border-color: var(--muted); }
+
+    /* Event Log */
+    .log-box { background: #07080c; border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-family: monospace; font-size: 0.75rem; color: #a1a1aa; max-height: 140px; overflow-y: auto; }
+    .log-line { margin-bottom: 4px; word-break: break-all; }
+    .log-time { color: var(--muted); margin-right: 6px; }
+
+    /* Footer & Health */
+    .health-bar { display: flex; gap: 8px; font-size: 0.72rem; color: var(--muted); flex-wrap: wrap; justify-content: center; padding-top: 4px; }
+    .health-tag { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.03); padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+    .dot-err { background: var(--red); }
+
+    /* Multi-Asset Selector Bar */
+    .asset-bar { display: flex; gap: 8px; justify-content: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
+    .asset-btn { flex: 1; padding: 8px 10px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--muted); font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .asset-btn:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+    .asset-btn.active { background: #1e2230; color: #fff; border: 1px solid #30363d; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    
+    <!-- Top Header -->
+    <div class="header">
+      <div class="title">
+        <span>⚡ 3-STEP DOMINION</span>
+        <span style="font-size: 0.8rem; color: var(--muted); font-weight: 400;">(24/7 Standalone Engine)</span>
+      </div>
+      <div id="liveStatusBadge" class="status-badge badge-standby">STANDBY</div>
+    </div>
+
+    <!-- Multi-Asset Switcher Bar -->
+    <div class="asset-bar">
+      <button id="assetBtn-BTC" class="asset-btn active" onclick="switchAsset('BTC')">
+        <span style="color: #f7931a;">₿</span> BTC
+      </button>
+      <button id="assetBtn-ETH" class="asset-btn" onclick="switchAsset('ETH')">
+        <span style="color: #627eea;">Ξ</span> ETH
+      </button>
+      <button id="assetBtn-SOL" class="asset-btn" onclick="switchAsset('SOL')">
+        <span style="color: #14f195;">◎</span> SOL
+      </button>
+      <button id="assetBtn-DOGE" class="asset-btn" onclick="switchAsset('DOGE')">
+        <span style="color: #e1b303;">Ð</span> DOGE
+      </button>
+    </div>
+
+    <!-- Master Controls -->
+    <div class="controls-grid">
+      <button id="btnArm" class="btn btn-arm" onclick="armBot()">
+        <span>● ARMED</span>
+        <span style="font-size: 0.72rem; font-weight: 400;">EXECUTE LIVE ORDERS</span>
+      </button>
+      <button id="btnDisarm" class="btn btn-disarm disarmed" onclick="disarmBot()">
+        <span>○ DISARMED</span>
+        <span style="font-size: 0.72rem; font-weight: 400;">STANDBY / SAFE MODE</span>
+      </button>
+      <button class="btn btn-panic" onclick="panicHalt()">
+        🛑 EMERGENCY PANIC: CANCEL ALL ORDERS & STOP
+      </button>
+    </div>
+
+    <!-- 5 Primary KPI Cards (Full Kalshi Parity) -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Kalshi Live Balance</div>
+        <div id="balVal" class="kpi-val text-green">$0.00</div>
+        <div id="balSub" class="kpi-sub">Portfolio Shard 2: $0.00</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Today's Realized PnL</div>
+        <div id="pnlVal" class="kpi-val">$0.00</div>
+        <div id="pnlSub" class="kpi-sub">0 settled cycles</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Target Strike (TO BEAT)</div>
+        <div id="strikeHeroVal" class="kpi-val text-amber">$0.00</div>
+        <div id="strikeHeroSub" class="kpi-sub">Target Expiry: --:--</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label" id="spotLabel">Spot Index (NOW)</div>
+        <div id="spotHeroVal" class="kpi-val text-green">$0.00</div>
+        <div id="spotHeroSub" class="kpi-sub">Diff: +$0.00 (+0.00%)</div>
+      </div>
+      <div class="kpi-card span-2">
+        <div class="kpi-label">Active 15M Countdown</div>
+        <div id="cycleVal" class="kpi-val">--:--</div>
+        <div id="cycleSub" class="kpi-sub">Waiting for event...</div>
+      </div>
+    </div>
+
+    <!-- 3-Step Dominion Settings & Parameters Panel -->
+    <div class="panel">
+      <div class="panel-title">
+        <span>⚙️ Strategy Parameters & Guardrails</span>
+        <button onclick="saveParameters()" class="btn-save-sm">💾 Apply & Save</button>
+      </div>
+      <div class="params-grid">
+        <div class="param-item">
+          <label class="param-label">Discount Limit Price (Maker Ceiling)</label>
+          <div class="input-wrap">
+            <span class="prefix">$</span>
+            <input id="inputDiscountPrice" type="number" step="0.01" min="0.10" max="0.50" value="0.48" />
+          </div>
+          <span class="param-hint">Resting limit price ceiling ($0.10 - $0.50)</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Max Contracts (Strict Invariant)</label>
+          <div class="input-wrap">
+            <input id="inputMaxContracts" type="number" step="1" min="1" max="1" value="1" readonly title="Hard-capped to strictly 1 contract per asset" />
+            <span class="suffix">cts</span>
+          </div>
+          <span class="param-hint">1 contract / asset cap (Sole 3-Step Dominion)</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Min Edge % (Statistical Alpha)</label>
+          <div class="input-wrap">
+            <input id="inputMinEdge" type="number" step="0.5" min="1.0" max="50.0" value="6.0" />
+            <span class="suffix">%</span>
+          </div>
+          <span class="param-hint">Minimum edge required to enter</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Min Net EV ($/Contract)</label>
+          <div class="input-wrap">
+            <span class="prefix">$</span>
+            <input id="inputMinEv" type="number" step="0.01" min="0.01" max="0.50" value="0.02" />
+          </div>
+          <span class="param-hint">Minimum dollar expected value</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Min Spot Distance (|Spot - Strike|)</label>
+          <div class="input-wrap">
+            <span class="prefix">$</span>
+            <input id="inputMinSpotDiff" type="number" step="1.0" min="0" max="200" value="35.00" />
+          </div>
+          <span id="minSpotDiffHint" class="param-hint">Skip coin-flip chop near strike ($35.00 BTC)</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">VPIN Toxicity Veto</label>
+          <div class="input-wrap">
+            <input id="inputVpinThreshold" type="number" step="0.05" min="0.10" max="0.95" value="0.60" />
+          </div>
+          <span class="param-hint">Order flow adverse selection cutoff</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Take Profit Price Ceiling</label>
+          <div class="input-wrap">
+            <span class="prefix">$</span>
+            <input id="inputTakeProfitPrice" type="number" step="0.01" min="0.50" max="0.99" value="0.95" />
+          </div>
+          <span class="param-hint">Tail risk ceiling for early exit</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Min Take Profit ROI %</label>
+          <div class="input-wrap">
+            <input id="inputTakeProfitRoi" type="number" step="5" min="5" max="100" value="20.0" />
+            <span class="suffix">%</span>
+          </div>
+          <span class="param-hint">Minimum profit % for early harvest</span>
+        </div>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border);">
+        <button onclick="sweepOrders()" class="btn-sweep-sm">🧹 Sweep Expired Event Orders</button>
+        <span id="paramStatusText" style="font-size: 0.75rem; color: var(--muted); font-family: monospace;">Parameters in sync</span>
+      </div>
+    </div>
+
+    <!-- Strategy & Microstructure Telemetry -->
+    <div class="panel">
+      <div class="panel-title">
+        <span>Microstructure Telemetry</span>
+        <span id="playbookBadge" style="color: var(--blue);">PLAYBOOK: NONE</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Active Position</span>
+        <span id="posVal" class="metric-data">FLAT (0 contracts active)</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Kalshi Inside Touch</span>
+        <span id="touchVal" class="metric-data" style="color: #60a5fa;">YES: -- / -- | NO: -- / --</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">BRTI Spot Index (Kalshi 5Hz)</span>
+        <span id="spotVal" class="metric-data">$0.00</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Target Strike (TO BEAT)</span>
+        <span id="strikeVal" class="metric-data">$0.00</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Moneyness Diff (Spot - Strike)</span>
+        <span id="diffVal" class="metric-data">$0.00</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Statistical Edge / Net EV</span>
+        <span id="edgeVal" class="metric-data">0.0% / $0.00</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">VPIN Adverse Selection Score</span>
+        <span id="vpinVal" class="metric-data">0.00 (SAFE)</span>
+      </div>
+      <div class="metric-row">
+        <span class="metric-name">Last Strategy Rationale</span>
+        <span id="rationaleVal" class="metric-data" style="color: var(--muted); font-size: 0.78rem;">Initializing feeds...</span>
+      </div>
+    </div>
+
+    <!-- Recent Settled Cycles -->
+    <div class="panel" id="recentSettlementsPanel">
+      <div class="panel-title">
+        <span>Today's Settled Cycles</span>
+        <span id="settledSummaryBadge" style="color: var(--green);">+$0.00</span>
+      </div>
+      <div id="settlementsTable" style="display: flex; flex-direction: column; gap: 6px; font-size: 0.78rem; font-family: monospace;">
+        <div style="color: var(--muted); padding: 4px 0;">Loading today's settlement records...</div>
+      </div>
+    </div>
+
+    <!-- Live Event Log -->
+    <div class="panel">
+      <div class="panel-title">Live Execution Log</div>
+      <div id="logBox" class="log-box">
+        <div class="log-line"><span class="log-time">[INIT]</span> Pocket Cockpit connected to Standalone Engine.</div>
+      </div>
+    </div>
+
+    <!-- Health Badges -->
+    <div class="health-bar">
+      <div class="health-tag"><div id="dotWs" class="dot"></div> Kalshi L2 Book</div>
+      <div class="health-tag"><div id="dotSpot" class="dot"></div> BRTI Index (CF Benchmarks / Kalshi 5Hz)</div>
+      <div class="health-tag"><div class="dot"></div> Guardrails (1-2 Cts Cap)</div>
+      <div class="health-tag"><div class="dot"></div> Token Bucket (20/s)</div>
+      <div class="health-tag"><div class="dot"></div> 24/7 Away Mode Active</div>
+    </div>
+
+  </div>
+
+  <script>
+    let isArmed = false;
+    let paramsLoaded = false;
+    let currentAsset = 'BTC';
+    const logBox = document.getElementById('logBox');
+
+    function appendLog(msg) {
+      const timeStr = new Date().toLocaleTimeString();
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.innerHTML = `<span class="log-time">[${timeStr}]</span> ${msg}`;
+      logBox.appendChild(div);
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    const ASSET_SPECS = {
+      BTC: { minDiff: 35.0, step: '1.0', max: '200', decimals: 2, hint: 'Skip coin-flip chop near strike ($35.00 BTC)' },
+      ETH: { minDiff: 2.50, step: '0.1', max: '20', decimals: 2, hint: 'Skip coin-flip chop near strike ($2.50 ETH)' },
+      SOL: { minDiff: 0.50, step: '0.05', max: '10', decimals: 2, hint: 'Skip coin-flip chop near strike ($0.50 SOL)' },
+      DOGE: { minDiff: 0.0005, step: '0.0001', max: '0.05', decimals: 4, hint: 'Skip coin-flip chop near strike ($0.0005 DOGE)' }
+    };
+
+    function applyAssetInputConstraints(asset) {
+      const spec = ASSET_SPECS[asset] || ASSET_SPECS.BTC;
+      const diffInput = document.getElementById('inputMinSpotDiff');
+      const diffHint = document.getElementById('minSpotDiffHint');
+      if (diffInput) {
+        diffInput.step = spec.step;
+        diffInput.max = spec.max;
+      }
+      if (diffHint) {
+        diffHint.textContent = spec.hint;
+      }
+    }
+
+    async function switchAsset(asset) {
+      currentAsset = asset;
+      applyAssetInputConstraints(asset);
+      ['BTC', 'ETH', 'SOL', 'DOGE'].forEach(a => {
+        const btn = document.getElementById(`assetBtn-${a}`);
+        if (btn) {
+          if (a === asset) {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        }
+      });
+      const spotLabel = document.getElementById('spotLabel');
+      if (spotLabel) spotLabel.textContent = `${asset} Spot Index (NOW)`;
+      appendLog(`🔄 Switching active asset to ${asset}...`);
+      try {
+        const res = await fetch('/api/assets/select', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ asset })
+        });
+        if (res.ok) {
+          const d = await res.json();
+          appendLog(`✅ Active asset is now ${asset}`);
+          await fetchState();
+          await loadParameters();
+        } else {
+          appendLog(`❌ Failed to switch asset to ${asset}`);
+        }
+      } catch (err) {
+        appendLog(`❌ Error switching asset: ${err}`);
+      }
+    }
+
+    async function loadParameters() {
+      try {
+        const res = await fetch('/api/bot/parameters');
+        if (!res.ok) return;
+        const p = await res.json();
+        if (p.discount_limit_price !== undefined) document.getElementById('inputDiscountPrice').value = p.discount_limit_price.toFixed(2);
+        if (p.max_contracts !== undefined) document.getElementById('inputMaxContracts').value = Math.min(p.max_contracts, 1);
+        if (p.min_edge_pct !== undefined) document.getElementById('inputMinEdge').value = p.min_edge_pct.toFixed(1);
+        if (p.min_ev_dollars !== undefined) document.getElementById('inputMinEv').value = p.min_ev_dollars.toFixed(2);
+        if (p.min_spot_diff !== undefined) {
+          const spec = ASSET_SPECS[currentAsset] || ASSET_SPECS.BTC;
+          document.getElementById('inputMinSpotDiff').value = p.min_spot_diff.toFixed(spec.decimals);
+        }
+        if (p.vpin_toxic_threshold !== undefined) document.getElementById('inputVpinThreshold').value = p.vpin_toxic_threshold.toFixed(2);
+        if (p.take_profit_price_threshold !== undefined) document.getElementById('inputTakeProfitPrice').value = p.take_profit_price_threshold.toFixed(2);
+        if (p.min_take_profit_roi !== undefined) document.getElementById('inputTakeProfitRoi').value = p.min_take_profit_roi.toFixed(1);
+        paramsLoaded = true;
+      } catch (err) {
+        console.error('Failed to load parameters:', err);
+      }
+    }
+
+    async function saveParameters() {
+      const payload = {
+        discount_limit_price: parseFloat(document.getElementById('inputDiscountPrice').value),
+        max_contracts: 1, // Strictly 1 contract per asset invariant
+        min_edge_pct: parseFloat(document.getElementById('inputMinEdge').value),
+        min_ev_dollars: parseFloat(document.getElementById('inputMinEv').value),
+        min_spot_diff: parseFloat(document.getElementById('inputMinSpotDiff').value),
+        vpin_toxic_threshold: parseFloat(document.getElementById('inputVpinThreshold').value),
+        take_profit_price_threshold: parseFloat(document.getElementById('inputTakeProfitPrice').value),
+        min_take_profit_roi: parseFloat(document.getElementById('inputTakeProfitRoi').value)
+      };
+
+      try {
+        const statusEl = document.getElementById('paramStatusText');
+        statusEl.textContent = 'Saving...';
+        statusEl.style.color = 'var(--amber)';
+        const res = await fetch('/api/bot/parameters', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          statusEl.textContent = 'Saved at ' + new Date().toLocaleTimeString();
+          statusEl.style.color = 'var(--green)';
+          appendLog(`⚙️ [PARAMETERS SAVED] Ceiling: $${payload.discount_limit_price} | Max: ${payload.max_contracts}ct | MinEdge: ${payload.min_edge_pct}% | MinEV: $${payload.min_ev_dollars} | MinDist: $${payload.min_spot_diff}`);
+        } else {
+          const err = await res.json();
+          statusEl.textContent = 'Save failed';
+          statusEl.style.color = 'var(--red)';
+          appendLog('❌ Failed saving parameters: ' + JSON.stringify(err));
+        }
+      } catch (err) {
+        appendLog('❌ Error saving parameters: ' + err);
+      }
+    }
+
+    async function sweepOrders() {
+      try {
+        appendLog('🧹 Sweeping resting orders for finished events...');
+        const res = await fetch('/api/bot/sweep-orders', { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          appendLog(`🧹 [SWEEP COMPLETE] Cancelled ${data.cancelled_orders} resting order(s) for finished events.`);
+        }
+      } catch (err) {
+        appendLog('❌ Error sweeping orders: ' + err);
+      }
+    }
+
+    async function fetchState() {
+      try {
+        const res = await fetch('/api/state');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Sync active asset
+        const serverAsset = data.active_asset || (data.market && data.market.active_asset);
+        if (serverAsset && serverAsset !== currentAsset) {
+          currentAsset = serverAsset;
+          applyAssetInputConstraints(currentAsset);
+          ['BTC', 'ETH', 'SOL', 'DOGE'].forEach(a => {
+            const btn = document.getElementById(`assetBtn-${a}`);
+            if (btn) btn.classList.toggle('active', a === currentAsset);
+          });
+          const spotLabel = document.getElementById('spotLabel');
+          if (spotLabel) spotLabel.textContent = `${currentAsset} Spot Index (NOW)`;
+        }
+
+        // Arming status
+        isArmed = data.armed;
+        const statusBadge = document.getElementById('liveStatusBadge');
+        const btnArm = document.getElementById('btnArm');
+        const btnDisarm = document.getElementById('btnDisarm');
+
+        if (isArmed) {
+          statusBadge.textContent = 'ARMED / LIVE';
+          statusBadge.className = 'status-badge badge-live';
+          btnArm.className = 'btn btn-arm armed';
+          btnDisarm.className = 'btn btn-disarm';
+        } else {
+          statusBadge.textContent = 'STANDBY / SAFE';
+          statusBadge.className = 'status-badge badge-standby';
+          btnArm.className = 'btn btn-arm';
+          btnDisarm.className = 'btn btn-disarm disarmed';
+        }
+
+        // 1. Balance
+        document.getElementById('balVal').textContent = `$${parseFloat(data.balance || 0).toFixed(2)}`;
+        if (data.shard2_balance !== undefined) {
+          document.getElementById('balSub').textContent = `Shard 2: $${parseFloat(data.shard2_balance).toFixed(2)} Available`;
+        }
+        
+        // 2. Realized PnL
+        const pnl = parseFloat(data.today_pnl || 0);
+        const pnlEl = document.getElementById('pnlVal');
+        pnlEl.textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2);
+        pnlEl.className = 'kpi-val ' + (pnl >= 0 ? 'text-green' : 'text-red');
+        const wr = data.today_win_rate !== undefined && data.settled_cycles > 0 
+          ? ` (${data.today_wins}W/${data.today_losses}L • ${data.today_win_rate}%)` 
+          : '';
+        document.getElementById('pnlSub').textContent = `${data.settled_cycles || 0} settled cycles${wr}`;
+
+        const spec = ASSET_SPECS[currentAsset] || ASSET_SPECS.BTC;
+        const dec = spec.decimals >= 4 ? 6 : 2;
+        const minDec = spec.decimals >= 4 ? 4 : 2;
+
+        // 3. Target Strike (TO BEAT)
+        document.getElementById('strikeHeroVal').textContent = data.target_strike_str || (parseFloat(data.target_strike || 0) > 0 ? `$${parseFloat(data.target_strike).toLocaleString('en-US', {minimumFractionDigits: minDec, maximumFractionDigits: dec})}` : '$0.00');
+        document.getElementById('strikeHeroSub').textContent = data.target_time_str 
+          ? `Target Expiry: ${data.target_time_str}` 
+          : 'Target Expiry: --:--';
+
+        // 4. Spot Index (NOW) & Moneyness Diff
+        const spotHeroEl = document.getElementById('spotHeroVal');
+        spotHeroEl.textContent = data.spot_price_str || (parseFloat(data.spot_price || 0) > 0 ? `$${parseFloat(data.spot_price).toLocaleString('en-US', {minimumFractionDigits: minDec, maximumFractionDigits: dec})}` : '$0.00');
+        spotHeroEl.className = 'kpi-val ' + (data.is_above_strike ? 'text-green' : 'text-red');
+        
+        const spotHeroSubEl = document.getElementById('spotHeroSub');
+        let diffBadge = `<span class="badge-diff ${data.is_above_strike ? 'diff-up' : 'diff-down'}">${data.moneyness_diff_str || '$0.00 (+0.00%)'}</span>`;
+        if (data.twap_60s_str && (data.expiry_countdown_seconds <= 60 || data.time_remaining_str === '00:00')) {
+          diffBadge += ` <span style="color: #60a5fa; font-weight: 700; font-size: 0.72rem; margin-left: 4px;">[TWAP: ${data.twap_60s_str}]</span>`;
+        }
+        spotHeroSubEl.innerHTML = diffBadge;
+
+        // 5. Active Cycle Countdown
+        document.getElementById('cycleVal').textContent = data.time_remaining_str || '--:--';
+        document.getElementById('cycleSub').textContent = data.active_ticker || 'No active cycle';
+
+        // 6. Active Position
+        document.getElementById('posVal').textContent = `${data.position_str || 'FLAT'} (${data.position_sub || '0 contracts active'})`;
+
+        // 7. Inside Touch Quotes
+        const yBid = data.best_yes_bid !== null && data.best_yes_bid !== undefined ? (data.best_yes_bid * 100).toFixed(0) + '¢' : '--';
+        const yAsk = data.best_yes_ask !== null && data.best_yes_ask !== undefined ? (data.best_yes_ask * 100).toFixed(0) + '¢' : '--';
+        const nBid = data.best_no_bid !== null && data.best_no_bid !== undefined ? (data.best_no_bid * 100).toFixed(0) + '¢' : '--';
+        const nAsk = data.best_no_ask !== null && data.best_no_ask !== undefined ? (data.best_no_ask * 100).toFixed(0) + '¢' : '--';
+        document.getElementById('touchVal').textContent = `YES: ${yBid} / ${yAsk} | NO: ${nBid} / ${nAsk}`;
+
+        // 8. Spot & Strike & Moneyness Diff (Microstructure Telemetry)
+        document.getElementById('playbookBadge').textContent = `PLAYBOOK: ${(data.playbook || 'NONE').toUpperCase()}`;
+        document.getElementById('spotVal').textContent = data.spot_price_str || `$${parseFloat(data.spot_price || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+        document.getElementById('strikeVal').textContent = data.target_strike_str || `$${parseFloat(data.target_strike || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+        
+        const diffEl = document.getElementById('diffVal');
+        diffEl.textContent = data.moneyness_diff_str || '$0.00 (+0.00%)';
+        diffEl.className = 'metric-data ' + (data.is_above_strike ? 'text-green' : 'text-red');
+
+        document.getElementById('edgeVal').textContent = `${(data.edge_pct * 100).toFixed(1)}% / $${parseFloat(data.ev || 0).toFixed(2)}`;
+        
+        const vpin = parseFloat(data.vpin || 0);
+        const vpinEl = document.getElementById('vpinVal');
+        vpinEl.textContent = `${vpin.toFixed(2)} (${data.vpin_is_safe ? 'SAFE' : 'TOXIC VETO'})`;
+        vpinEl.className = 'metric-data ' + (data.vpin_is_safe ? 'text-green' : 'text-red');
+
+        document.getElementById('rationaleVal').textContent = data.rationale || 'Scanning cycle dynamics...';
+
+        // 7. Recent Settled Cycles Mini-Table
+        if (data.recent_reports && data.recent_reports.length > 0) {
+          const container = document.getElementById('settlementsTable');
+          container.innerHTML = data.recent_reports.map(r => {
+            const isWin = r.outcome === 'WIN';
+            const color = isWin ? 'var(--green)' : 'var(--red)';
+            const pnlStr = (r.pnl >= 0 ? '+$' : '-$') + Math.abs(r.pnl).toFixed(2);
+            return `
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; background: rgba(255,255,255,0.02); border-radius: 4px; border: 1px solid var(--border);">
+                <span><strong style="color: ${color};">${r.outcome}</strong> ${r.ticker.split('-')[1] || r.ticker} (${r.side} ${r.contracts}ct)</span>
+                <span style="color: ${color}; font-weight: bold;">${pnlStr}</span>
+              </div>
+            `;
+          }).join('');
+          document.getElementById('settledSummaryBadge').textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2) + ` (${data.settled_cycles} Cycles)`;
+        }
+
+        // 8. Health Badges
+        document.getElementById('dotWs').className = data.kalshi_ws_connected ? 'dot' : 'dot dot-err';
+        document.getElementById('dotSpot').className = (data.brti_connected || data.spot_connected) ? 'dot' : 'dot dot-err';
+
+      } catch (err) {
+        console.error('State fetch error:', err);
+      }
+    }
+
+    async function armBot() {
+      try {
+        const res = await fetch('/api/bot/arm', { method: 'POST' });
+        if (res.ok) {
+          appendLog('🟢 [MASTER SWITCH] Bot ARMED for live execution.');
+          await fetchState();
+        }
+      } catch (err) {
+        appendLog('❌ Error arming bot: ' + err);
+      }
+    }
+
+    async function disarmBot() {
+      try {
+        const res = await fetch('/api/bot/disarm', { method: 'POST' });
+        if (res.ok) {
+          appendLog('⏸️ [MASTER SWITCH] Bot DISARMED. Standing by.');
+          await fetchState();
+        }
+      } catch (err) {
+        appendLog('❌ Error disarming bot: ' + err);
+      }
+    }
+
+    async function panicHalt() {
+      if (!confirm('EMERGENCY PANIC: Cancel all open orders on Kalshi and halt bot?')) return;
+      try {
+        const res = await fetch('/api/bot/panic', { method: 'POST' });
+        if (res.ok) {
+          appendLog('🛑 [PANIC] Emergency halt triggered. All open orders cancelled.');
+          await fetchState();
+        }
+      } catch (err) {
+        appendLog('❌ Panic request failed: ' + err);
+      }
+    }
+
+    // Load initial parameters and start polling
+    loadParameters();
+    setInterval(fetchState, 1000);
+    fetchState();
+  </script>
+</body>
+</html>

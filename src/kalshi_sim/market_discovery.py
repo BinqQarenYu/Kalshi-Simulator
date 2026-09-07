@@ -9,40 +9,71 @@ import aiohttp
 
 import os
 from kalshi_sim.auth import DEMO_REST_BASE, PROD_REST_BASE, get_auth_headers
-from kalshi_sim.schemas import MarketInfo, MarketStatus, Timeframe
+from kalshi_sim.schemas import CryptoAsset, MarketInfo, MarketStatus, Timeframe
 
 if TYPE_CHECKING:
     from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 logger = logging.getLogger(__name__)
 
-# Module-level constant mapping timeframes to series tickers
-TIMEFRAME_SERIES: dict[Timeframe, list[str]] = {
-    Timeframe.FIVE_MIN: ["KXBTC15M"],  # no native 5m; use 15m + local windowing
-    Timeframe.FIFTEEN_MIN: ["KXBTC15M"],
-    Timeframe.ONE_HOUR: ["KXBTCH"],
-    Timeframe.DAILY: ["KXBTCD"],
+# Mapping per crypto asset and timeframe to Kalshi series tickers
+ASSET_TIMEFRAME_SERIES: dict[CryptoAsset, dict[Timeframe, list[str]]] = {
+    CryptoAsset.BTC: {
+        Timeframe.FIVE_MIN: ["KXBTC15M"],
+        Timeframe.FIFTEEN_MIN: ["KXBTC15M"],
+        Timeframe.ONE_HOUR: ["KXBTCH"],
+        Timeframe.DAILY: ["KXBTCD"],
+    },
+    CryptoAsset.ETH: {
+        Timeframe.FIVE_MIN: ["KXETH15M"],
+        Timeframe.FIFTEEN_MIN: ["KXETH15M"],
+        Timeframe.ONE_HOUR: ["KXETHD", "KXETH"],
+        Timeframe.DAILY: ["KXETH"],
+    },
+    CryptoAsset.SOL: {
+        Timeframe.FIVE_MIN: ["KXSOL15M"],
+        Timeframe.FIFTEEN_MIN: ["KXSOL15M"],
+        Timeframe.ONE_HOUR: ["KXSOLD", "KXSOL"],
+        Timeframe.DAILY: ["KXSOL"],
+    },
+    CryptoAsset.DOGE: {
+        Timeframe.FIVE_MIN: ["KXDOGE15M"],
+        Timeframe.FIFTEEN_MIN: ["KXDOGE15M"],
+        Timeframe.ONE_HOUR: ["KXDOGED", "KXDOGE"],
+        Timeframe.DAILY: ["KXDOGE"],
+    },
 }
 
+# Backwards-compatible module-level constant for BTC
+TIMEFRAME_SERIES: dict[Timeframe, list[str]] = ASSET_TIMEFRAME_SERIES[CryptoAsset.BTC]
 
-async def discover_btc_markets(
+
+async def discover_crypto_markets(
     session: aiohttp.ClientSession,
     api_key_id: str,
     private_key: RSAPrivateKey,
     timeframes: list[Timeframe],
+    assets: list[CryptoAsset] | None = None,
     rest_base: str | None = None,
 ) -> dict[Timeframe, list[MarketInfo]]:
-    """Discover open BTC markets across the specified timeframes via Kalshi REST API."""
+    """Discover open crypto markets across specified assets and timeframes via Kalshi REST API."""
     if rest_base is None:
         env = os.getenv("KALSHI_ENV", "live").lower()
         rest_base = PROD_REST_BASE if env in ("prod", "live") else DEMO_REST_BASE
+
+    if assets is None:
+        assets = [CryptoAsset.BTC]
 
     discovered: dict[Timeframe, list[MarketInfo]] = {tf: [] for tf in timeframes}
     endpoint_path = "/trade-api/v2/markets"
     url = f"{rest_base}/markets"
 
     for tf in timeframes:
-        series_tickers = TIMEFRAME_SERIES.get(tf, [])
+        series_tickers: list[str] = []
+        for asset in assets:
+            tf_map = ASSET_TIMEFRAME_SERIES.get(asset, {})
+            series_tickers.extend(tf_map.get(tf, []))
+
         tf_markets: list[MarketInfo] = []
         seen_tickers: set[str] = set()
 
@@ -144,6 +175,25 @@ async def discover_btc_markets(
         logger.info("Discovered %d markets for timeframe %s", len(tf_markets), tf.value)
 
     return discovered
+
+
+async def discover_btc_markets(
+    session: aiohttp.ClientSession,
+    api_key_id: str,
+    private_key: RSAPrivateKey,
+    timeframes: list[Timeframe],
+    rest_base: str | None = None,
+) -> dict[Timeframe, list[MarketInfo]]:
+    """Legacy helper: discover open BTC markets across specified timeframes."""
+    return await discover_crypto_markets(
+        session=session,
+        api_key_id=api_key_id,
+        private_key=private_key,
+        timeframes=timeframes,
+        assets=[CryptoAsset.BTC],
+        rest_base=rest_base,
+    )
+
 
 
 def get_all_tickers(

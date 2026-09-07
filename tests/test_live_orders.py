@@ -62,34 +62,35 @@ def test_live_order_execution_mocked_success():
     """Test live order execution when enabled and mocked exchange succeeds."""
     with TestClient(app) as client:
         with patch.dict("os.environ", {"KALSHI_API_KEY_ID": "test_id", "KALSHI_LIVE_TRADING_ENABLED": "true"}):
-            with patch("kalshi_sim.server.KalshiLiveOrderClient") as mock_cls:
-                mock_client = AsyncMock()
-                mock_client.place_order.return_value = {
-                    "order_id": "order_uuid_12345",
-                    "status": "executed",
-                    "yes_price_dollars": "0.48",
-                }
-                mock_cls.return_value = mock_client
+            with patch("kalshi_sim.server.get_active_lock_holder", return_value=None):
+                with patch("kalshi_sim.server.KalshiLiveOrderClient") as mock_cls:
+                    mock_client = AsyncMock()
+                    mock_client.place_order.return_value = {
+                        "order_id": "order_uuid_12345",
+                        "status": "executed",
+                        "yes_price_dollars": "0.48",
+                    }
+                    mock_cls.return_value = mock_client
 
-                res = client.post(
-                    "/api/kalshi/orders/live",
-                    json={
-                        "ticker": "KXBTC15M-T78650",
-                        "side": "yes",
-                        "count": 10,
-                        "action": "buy",
-                        "order_type": "limit",
-                        "limit_price_dollars": "0.48",
-                        "dry_run": False,
-                    },
-                )
-                assert res.status_code == 200
-                data = res.json()
-                assert data["success"] is True
-                assert data["order_id"] == "order_uuid_12345"
-                assert data["status"] == "executed"
-                assert data["fill_price"] == "0.48"
-                assert data["is_dry_run"] is False
+                    res = client.post(
+                        "/api/kalshi/orders/live",
+                        json={
+                            "ticker": "KXBTC15M-T78650",
+                            "side": "yes",
+                            "count": 10,
+                            "action": "buy",
+                            "order_type": "limit",
+                            "limit_price_dollars": "0.48",
+                            "dry_run": False,
+                        },
+                    )
+                    assert res.status_code == 200
+                    data = res.json()
+                    assert data["success"] is True
+                    assert data["order_id"] == "order_uuid_12345"
+                    assert data["status"] == "executed"
+                    assert data["fill_price"] == "0.48"
+                    assert data["is_dry_run"] is False
 
 
 def test_live_order_cancellation_endpoint():

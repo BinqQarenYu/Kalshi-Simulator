@@ -123,7 +123,7 @@ class Dominion2Bot:
         time_to_expiry_s: float,
         recent_trades: Optional[List[TradeEvent]] = None,
         total_equity: Decimal = Decimal("25.00"),
-        max_position_size: int = 4,
+        max_position_size: int = 1,
         estimated_vpin: float = 0.15,
         onnx_p_wait: float = 0.0,
     ) -> Dominion2Decision:

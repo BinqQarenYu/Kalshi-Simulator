@@ -18,7 +18,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
-from kalshi_sim.schemas import L2BookState, OrderSide, TradeEvent
+from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, get_asset_config
 
 logger = logging.getLogger("kalshi_sim.domination_bot")
 
@@ -84,20 +84,28 @@ class ThreeStepDominationBot:
         min_take_profit_roi: float = 0.20,  # +20% minimum ROI for early exit
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
         fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
-        min_spot_diff: float = 35.0,  # $35 minimum spot-strike distance (skip coin-flip territory)
+        min_spot_diff: Optional[float] = None,  # Scaled by asset if None
         max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
         discount_limit_price: Decimal = Decimal("0.48"),  # Configurable discount sniper ceiling
+        asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
+        self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
+        cfg = get_asset_config(self.asset)
+
         self.min_edge_pct = min_edge_pct
         self.min_ev_dollars = min_ev_dollars
         self.vpin_toxic_threshold = vpin_toxic_threshold
         self.vpin_safe_threshold = vpin_safe_threshold
-        self.default_btc_1m_volatility = default_btc_1m_volatility
+        if default_btc_1m_volatility == 14.0 and self.asset != CryptoAsset.BTC:
+            self.typical_1m_volatility = float(cfg.typical_1m_volatility)
+        else:
+            self.typical_1m_volatility = default_btc_1m_volatility
+        self.default_btc_1m_volatility = self.typical_1m_volatility  # backward compatibility
         self.take_profit_price_threshold = take_profit_price_threshold
         self.min_take_profit_roi = min_take_profit_roi
         self.late_cycle_roi = late_cycle_roi
         self.fee_per_contract = fee_per_contract
-        self.min_spot_diff = min_spot_diff
+        self.min_spot_diff = min_spot_diff if min_spot_diff is not None else float(cfg.min_spot_diff)
         self.max_entry_price = Decimal(str(max_entry_price))
         self.discount_limit_price = max(Decimal("0.10"), min(Decimal("0.50"), discount_limit_price))
 
@@ -112,12 +120,76 @@ class ThreeStepDominationBot:
             vpin_toxic_threshold=vpin_toxic_threshold,
         )
 
+    def set_asset(self, asset: CryptoAsset | str) -> None:
+        """Calibrate bot parameters for a specific crypto asset."""
+        self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
+        cfg = get_asset_config(self.asset)
+        self.min_spot_diff = float(cfg.min_spot_diff)
+        self.typical_1m_volatility = float(cfg.typical_1m_volatility)
+        self.default_btc_1m_volatility = self.typical_1m_volatility
+        logger.info("[DOMINATION BOT] Calibrated for %s: min_spot_diff=%.6f, 1m_vol=%.6f", cfg.name, self.min_spot_diff, self.typical_1m_volatility)
+
     def set_discount_limit_price(self, new_price: Decimal | float | str) -> None:
         """Dynamically update the maker discount limit price ceiling."""
         dec_price = Decimal(str(new_price))
         clamped = max(Decimal("0.10"), min(Decimal("0.50"), dec_price))
         self.discount_limit_price = clamped
         logger.info("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
+
+    def get_parameters(self) -> Dict[str, Any]:
+        """Return current live strategy parameters."""
+        return {
+            "asset": self.asset.value if hasattr(self, "asset") else "BTC",
+            "discount_limit_price": float(self.discount_limit_price),
+            "min_edge_pct": round(float(self.min_edge_pct) * 100.0, 1),
+            "min_ev_dollars": float(self.min_ev_dollars),
+            "min_spot_diff": float(self.min_spot_diff),
+            "typical_1m_volatility": float(self.typical_1m_volatility),
+            "vpin_toxic_threshold": round(float(self.vpin_toxic_threshold), 2),
+            "take_profit_price_threshold": float(self.take_profit_price_threshold),
+            "min_take_profit_roi": round(float(self.min_take_profit_roi) * 100.0, 1),
+        }
+
+    def update_parameters(
+        self,
+        asset: Optional[str | CryptoAsset] = None,
+        discount_limit_price: Optional[float] = None,
+        min_edge_pct: Optional[float] = None,
+        min_ev_dollars: Optional[float] = None,
+        min_spot_diff: Optional[float] = None,
+        vpin_toxic_threshold: Optional[float] = None,
+        take_profit_price_threshold: Optional[float] = None,
+        min_take_profit_roi: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Dynamically update strategy parameters on the fly."""
+        if asset is not None:
+            self.set_asset(asset)
+        if discount_limit_price is not None:
+            self.set_discount_limit_price(discount_limit_price)
+        if min_edge_pct is not None:
+            val = float(min_edge_pct)
+            if val > 1.0:
+                val = val / 100.0
+            self.min_edge_pct = max(0.01, min(0.50, val))
+            self._ev_engine.min_edge_pct = self.min_edge_pct
+        if min_ev_dollars is not None:
+            self.min_ev_dollars = Decimal(str(max(0.005, min(0.50, float(min_ev_dollars)))))
+            self._ev_engine.min_ev_threshold = self.min_ev_dollars
+        if min_spot_diff is not None:
+            self.min_spot_diff = max(0.0, float(min_spot_diff))
+        if vpin_toxic_threshold is not None:
+            self.vpin_toxic_threshold = max(0.10, min(0.95, float(vpin_toxic_threshold)))
+            self._ev_engine.vpin_toxic_threshold = self.vpin_toxic_threshold
+        if take_profit_price_threshold is not None:
+            self.take_profit_price_threshold = Decimal(str(max(0.50, min(0.99, float(take_profit_price_threshold)))))
+        if min_take_profit_roi is not None:
+            val = float(min_take_profit_roi)
+            if val > 1.0:
+                val = val / 100.0
+            self.min_take_profit_roi = max(0.05, min(1.0, val))
+        logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
+        return self.get_parameters()
+
 
     def evaluate(
         self,
@@ -127,7 +199,7 @@ class ThreeStepDominationBot:
         time_to_expiry_s: float,
         recent_trades: Optional[List[TradeEvent]] = None,
         total_equity: Decimal = Decimal("100.00"),
-        max_position_size: int = 10,
+        max_position_size: int = 1,
         estimated_vpin: float = 0.15,
     ) -> DominationDecision:
         """Execute 3-step cycle analysis and determine optimal playbook execution."""
@@ -157,16 +229,22 @@ class ThreeStepDominationBot:
                           f"Suppressing all trades to prevent adverse whale selection.",
             )
 
-        # Step 0.5: Minimum Spot-Strike Distance Filter (skip coin-flip territory)
-        # Data shows entries within $35 of strike have ~50% WR — pure coin flips.
-        # Only enter when BTC has meaningfully moved away from the strike.
-        if abs(spot_diff) < self.min_spot_diff:
+        cfg = get_asset_config(self.asset)
+
+        # Step 0.5: Minimum Spot-Strike Distance Filter (HARDENED — never bet razor-tight events)
+        # Post-mortem: 9 consecutive losses from entries where spot was barely above strike.
+        # Doubled dead zone to 2x min_spot_diff to completely eliminate coin-flip territory.
+        # BTC: |diff| must be > $70. ETH: > $5. SOL: > $1. DOGE: > $0.001.
+        razor_tight_threshold = self.min_spot_diff * 2.0
+        if abs(spot_diff) < razor_tight_threshold:
+            diff_str = cfg.format_diff(spot_diff)
+            thresh_str = cfg.format_price(razor_tight_threshold)
             return self._build_wait_decision(
                 time_to_expiry_s=time_to_expiry_s,
                 spot_diff=spot_diff,
                 vpin=estimated_vpin,
-                rationale=f"Spot-Strike Proximity Veto: |Diff|=${abs(spot_diff):.2f} < ${self.min_spot_diff:.0f} threshold. "
-                          f"BTC is pinned near strike — coin-flip territory, skipping.",
+                rationale=f"Razor-Tight Proximity Veto: |Diff|={abs(spot_diff):.{cfg.price_decimals}f} < {thresh_str} threshold (2x min_spot_diff). "
+                          f"{cfg.name} is too close to strike — never bet razor-tight events, skipping.",
             )
 
         # Classify Active Playbook by Expiration Countdown Window
@@ -187,7 +265,8 @@ class ThreeStepDominationBot:
 
             # Dynamic Volatility scaling over remaining time
             tau_sqrt = math.sqrt(tau_mins)
-            expected_vol = max(4.0, self.default_btc_1m_volatility * tau_sqrt)
+            vol_floor_p3 = 0.285 * self.typical_1m_volatility
+            expected_vol = max(vol_floor_p3, self.typical_1m_volatility * tau_sqrt)
             z_score = spot_diff / expected_vol
 
             # Digital Option Cumulative Probability Phi(z)
@@ -210,12 +289,13 @@ class ThreeStepDominationBot:
 
             side_str = ev_res.recommended_side.value if ev_res.recommended_side else "wait"
             edge_val = float(ev_res.statistical_edge)
+            diff_str = cfg.format_diff(spot_diff)
 
             if ev_res.has_positive_edge and ev_res.recommended_side:
                 target_prob = prob_yes if ev_res.recommended_side == OrderSide.YES else prob_no
                 rationale = (
                     f"[{playbook_title}] High-Certainty Expiration Harvest | "
-                    f"T={int(time_to_expiry_s)}s left | Spot Diff: {spot_diff:+.2f} | "
+                    f"T={int(time_to_expiry_s)}s left | Spot Diff: {diff_str} | "
                     f"True Prob: {target_prob*100:.1f}% vs Discount Target: ${discount_price:.2f} | "
                     f"Net EV: +${ev_res.expected_value:.2f}/ct | Edge: {edge_val*100:+.1f}% | "
                     f"Kelly: {ev_res.kelly_fraction*100:.1f}% ({ev_res.recommended_contracts} cts)"
@@ -223,7 +303,7 @@ class ThreeStepDominationBot:
             else:
                 rationale = (
                     f"[{playbook_title}] In Range | T={int(time_to_expiry_s)}s left | "
-                    f"Spot Diff: {spot_diff:+.2f} | True Prob: YES {prob_yes*100:.1f}% vs NO {prob_no*100:.1f}% | "
+                    f"Spot Diff: {diff_str} | True Prob: YES {prob_yes*100:.1f}% vs NO {prob_no*100:.1f}% | "
                     f"No edge exceeding {self.min_edge_pct*100:.0f}% at ${discount_price:.2f} discount."
                 )
 
@@ -258,8 +338,10 @@ class ThreeStepDominationBot:
 
             # Directional drift estimation combining moneyness and book skew
             tau_sqrt = math.sqrt(tau_mins)
-            expected_vol = max(10.0, self.default_btc_1m_volatility * tau_sqrt)
-            z_score = (spot_diff + book_skew * 12.0) / expected_vol
+            vol_floor_p2 = 0.714 * self.typical_1m_volatility
+            book_skew_mult = 0.857 * self.typical_1m_volatility
+            expected_vol = max(vol_floor_p2, self.typical_1m_volatility * tau_sqrt)
+            z_score = (spot_diff + book_skew * book_skew_mult) / expected_vol
 
             prob_yes_raw = _standard_normal_cdf(z_score)
             prob_yes = max(0.001, min(0.999, prob_yes_raw))
@@ -278,18 +360,19 @@ class ThreeStepDominationBot:
                 fee_override=Decimal("0.00"),
             )
 
+            diff_str = cfg.format_diff(spot_diff)
             if ev_res.has_positive_edge and ev_res.recommended_side:
                 target_prob = prob_yes if ev_res.recommended_side == OrderSide.YES else prob_no
                 rationale = (
                     f"[{playbook_title}] Directional Trend Drift | T={int(time_to_expiry_s)}s left | "
-                    f"Spot Diff: {spot_diff:+.2f} | Book Skew: {book_skew:+.2f} | "
+                    f"Spot Diff: {diff_str} | Book Skew: {book_skew:+.2f} | "
                     f"Model Prob: {target_prob*100:.1f}% | Edge: {float(ev_res.statistical_edge)*100:+.1f}% | "
                     f"Optimal Size: {ev_res.recommended_contracts} cts"
                 )
             else:
                 rationale = (
                     f"[{playbook_title}] Monitoring Trend | T={int(time_to_expiry_s)}s left | "
-                    f"Spot Diff: {spot_diff:+.2f} | Awaiting high-conviction order flow edge."
+                    f"Spot Diff: {diff_str} | Awaiting high-conviction order flow edge."
                 )
 
             actual_ask_p2 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
@@ -317,7 +400,8 @@ class ThreeStepDominationBot:
 
             # Check for fast breakout velocity across strike
             tau_sqrt = math.sqrt(tau_mins)
-            expected_vol = max(18.0, self.default_btc_1m_volatility * tau_sqrt)
+            vol_floor_p1 = 1.285 * self.typical_1m_volatility
+            expected_vol = max(vol_floor_p1, self.typical_1m_volatility * tau_sqrt)
             z_score = spot_diff / expected_vol
 
             prob_yes_raw = _standard_normal_cdf(z_score)
@@ -337,17 +421,18 @@ class ThreeStepDominationBot:
                 fee_override=Decimal("0.00"),
             )
 
+            diff_str = cfg.format_diff(spot_diff)
             if ev_res.has_positive_edge and ev_res.recommended_side:
                 target_prob = prob_yes if ev_res.recommended_side == OrderSide.YES else prob_no
                 rationale = (
                     f"[{playbook_title}] Early Breakout Velocity | T={int(time_to_expiry_s)}s left | "
-                    f"Spot Diff: {spot_diff:+.2f} | Confidence: {target_prob*100:.1f}% | "
+                    f"Spot Diff: {diff_str} | Confidence: {target_prob*100:.1f}% | "
                     f"Edge: {float(ev_res.statistical_edge)*100:+.1f}% | Kelly: {ev_res.kelly_fraction*100:.1f}%"
                 )
             else:
                 rationale = (
                     f"[{playbook_title}] Cycle Start Window | T={int(time_to_expiry_s)}s left | "
-                    f"Spot Diff: {spot_diff:+.2f} | Scanning for momentum velocity across strike."
+                    f"Spot Diff: {diff_str} | Scanning for momentum velocity across strike."
                 )
 
             actual_ask_p1 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
@@ -407,55 +492,81 @@ class ThreeStepDominationBot:
                         f"Inverted risk/reward ratio ({target_ask*100:.0f}c risk to win {(1.0-target_ask)*100:.0f}c). Skipping."
                     ),
                 )
-            # Tier 2: Standard cap ($0.62) unless spot diff is deep in-the-money (>= $80)
-            if target_ask > self.max_entry_price and abs(spot_diff) < 80.0:
+            cfg = get_asset_config(self.asset)
+            deep_separation_diff = self.min_spot_diff * 2.3
+            # Tier 2: Standard cap ($0.62) unless spot diff is deep in-the-money
+            if target_ask > self.max_entry_price and abs(spot_diff) < deep_separation_diff:
+                deep_sep_str = cfg.format_price(deep_separation_diff)
+                diff_str = cfg.format_diff(spot_diff)
                 return self._build_wait_decision(
                     time_to_expiry_s=time_to_expiry_s,
                     spot_diff=spot_diff,
                     vpin=vpin,
                     rationale=(
                         f"Price Cap Veto (Standard): Recommended {ev_res.recommended_side.value.upper()} ask=${target_ask:.2f} > ${self.max_entry_price:.2f} cap. "
-                        f"Requires deep spot separation (|Diff|=${abs(spot_diff):.2f} < $80.00). Skipping."
+                        f"Requires deep spot separation (|Diff|={diff_str} < {deep_sep_str}). Skipping."
                     ),
                 )
 
             # Momentum Alignment Filter (P0 Fix — data: 0W/6L for contrarian NO in VOL_UP)
-            # When BTC has moved meaningfully away from strike, bet WITH the direction.
+            # When the asset has moved meaningfully away from strike, bet WITH the direction.
             # Contrarian bets (against momentum) require 2.5x higher edge threshold.
             edge_pct = float(ev_res.statistical_edge) * 100.0
             contrarian_min_edge = 15.0  # 15% minimum edge for contrarian bets
             is_contrarian = False
             if spot_diff > self.min_spot_diff and ev_res.recommended_side == OrderSide.NO:
-                # BTC above strike (VOLATILE_UP) but betting NO (price will drop) — contrarian
+                # Asset above strike (VOLATILE_UP) but betting NO (price will drop) — contrarian
                 is_contrarian = True
             elif spot_diff < -self.min_spot_diff and ev_res.recommended_side == OrderSide.YES:
-                # BTC below strike (VOLATILE_DOWN) but betting YES (price will rise) — contrarian
+                # Asset below strike (VOLATILE_DOWN) but betting YES (price will rise) — contrarian
                 is_contrarian = True
 
             if is_contrarian and edge_pct < contrarian_min_edge:
+                diff_str = cfg.format_diff(spot_diff)
                 return self._build_wait_decision(
                     time_to_expiry_s=time_to_expiry_s,
                     spot_diff=spot_diff,
                     vpin=vpin,
                     rationale=(
                         f"Momentum Alignment Veto: {ev_res.recommended_side.value.upper()} is contrarian "
-                        f"(Diff={spot_diff:+.1f}). Edge={edge_pct:.1f}% < {contrarian_min_edge:.0f}% "
+                        f"(Diff={diff_str}). Edge={edge_pct:.1f}% < {contrarian_min_edge:.0f}% "
                         f"contrarian threshold. Bet WITH momentum, not against it."
+                    ),
+                )
+
+            # Marginal Zone Edge Boost (Post-Mortem Fix — 9 consecutive losses from thin-edge trades)
+            # Hard veto catches |spot_diff| < 2x min_spot_diff. This secondary filter catches
+            # the 2x-3x transition zone where signals exist but are still weak.
+            # Require 12% minimum edge to filter noise trades that don't survive reversals.
+            marginal_zone_upper = self.min_spot_diff * 3.0
+            marginal_min_edge = 12.0  # 12% minimum edge in marginal territory
+            if abs(spot_diff) < marginal_zone_upper and edge_pct < marginal_min_edge:
+                diff_str = cfg.format_diff(spot_diff)
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=vpin,
+                    rationale=(
+                        f"Marginal Zone Veto: |Diff|={abs(spot_diff):.{cfg.price_decimals}f} < {marginal_zone_upper:.{cfg.price_decimals}f} "
+                        f"(1.5x min_spot_diff). Edge={edge_pct:.1f}% < {marginal_min_edge:.0f}% "
+                        f"marginal threshold. Signal too weak to survive 15-min reversal risk."
                     ),
                 )
 
         is_yes = ev_res.recommended_side == OrderSide.YES
         is_no = ev_res.recommended_side == OrderSide.NO
         chosen_side_str = ev_res.recommended_side.value if ev_res.recommended_side else "wait"
+        cfg = get_asset_config(self.asset)
 
         if (is_yes or is_no) and ev_res.recommended_contracts > 0:
             target_side = chosen_side_str.upper()
             potential_reward = 1.0 - discount_price_val
             payoff_mult = potential_reward / discount_price_val if discount_price_val > 0 else 1.0
             target_prob = p_up if is_yes else p_down
+            diff_str = cfg.format_diff(spot_diff)
             rationale = (
                 f"[{playbook_title}] Discount Sniper | Resting Limit BUY {target_side} @ ${discount_price_val:.2f} ($0.00 Fee) | "
-                f"T={int(time_to_expiry_s)}s left | Spot Diff: {spot_diff:+.2f} | "
+                f"T={int(time_to_expiry_s)}s left | Spot Diff: {diff_str} | "
                 f"Model Prob: {target_prob*100:.1f}% | Risk: ${discount_price_val:.2f} | "
                 f"Reward: +${potential_reward:.2f} ({payoff_mult:.2f}x) | Kelly: {ev_res.recommended_contracts} cts"
             )
@@ -477,11 +588,11 @@ class ThreeStepDominationBot:
             kelly_f_yes=round(float(ev_res.kelly_fraction) if is_yes else 0.0, 4),
             kelly_f_no=round(float(ev_res.kelly_fraction) if is_no else 0.0, 4),
             recommended_side=chosen_side_str,
-            recommended_contracts=ev_res.recommended_contracts,
+            recommended_contracts=min(ev_res.recommended_contracts, 1),
             rationale=rationale,
             edge_pct=round(float(ev_res.statistical_edge) * 100.0, 2),
             time_to_expiry_s=round(time_to_expiry_s, 1),
-            spot_diff=round(spot_diff, 2),
+            spot_diff=round(spot_diff, cfg.price_decimals),
             order_type="limit",
             limit_price=discount_price_val,
         )
@@ -495,6 +606,7 @@ class ThreeStepDominationBot:
         rationale: str = "Waiting for market trigger conditions.",
     ) -> DominationDecision:
         """Construct default wait decision."""
+        cfg = get_asset_config(self.asset)
         return DominationDecision(
             strategy_id=self.STRATEGY_ID,
             strategy_name=self.STRATEGY_NAME,
@@ -516,7 +628,7 @@ class ThreeStepDominationBot:
             rationale=rationale,
             edge_pct=0.0,
             time_to_expiry_s=round(time_to_expiry_s, 1),
-            spot_diff=round(spot_diff, 2),
+            spot_diff=round(spot_diff, cfg.price_decimals),
             order_type="limit",
             limit_price=float(self.discount_limit_price),
         )

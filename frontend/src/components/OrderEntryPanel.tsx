@@ -8,6 +8,7 @@ import React, { useState } from 'react';
 import { MarketState, PortfolioState, LivePortfolioState } from '../types';
 import { Zap, HelpCircle, Check, Sparkles, AlertTriangle, Lock, ArrowUpRight } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
+import { getAssetMeta } from '../utils/assets';
 
 interface OrderEntryPanelProps {
   market: MarketState;
@@ -31,6 +32,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
   onPlaceOrder,
 }) => {
   const isLive = tradingMode === 'live';
+  const assetMeta = getAssetMeta(market.active_asset);
   const [tradeMode, setTradeMode] = useState<'BUY' | 'SELL'>('BUY');
   const [orderType, setOrderType] = useState<'LIMIT' | 'MARKET'>('LIMIT');
   const [side, setSide] = useState<'yes' | 'no'>('yes');
@@ -151,11 +153,14 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
 
       {/* Target Pill Header */}
       <div className="flex items-center gap-2 text-xs font-semibold text-gray-300">
-        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[#f7931a] text-black text-[11px] font-bold">
-          ₿
+        <span
+          className="flex h-5 w-5 items-center justify-center rounded-full text-black text-[11px] font-bold"
+          style={{ backgroundColor: assetMeta.color }}
+        >
+          {assetMeta.symbol}
         </span>
         <span>
-          BTC 15 min · <strong className="text-white">{market.target_strike_str} target</strong>
+          {assetMeta.name} 15 min · <strong className="text-white">{market.target_strike_str} target</strong>
         </span>
       </div>
 
@@ -230,16 +235,16 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
             id="shares-input"
             type="number"
             min={1}
-            max={isLive ? 2 : 5000}
+            max={isLive ? 1 : 5000}
             value={shares}
-            onChange={(e) => setShares(Math.max(1, parseInt(e.target.value) || 0))}
+            onChange={(e) => setShares(isLive ? 1 : Math.max(1, parseInt(e.target.value) || 0))}
             className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono text-sm font-bold text-white outline-none focus:border-[#00d084]"
           />
         </div>
         {/* Quick Share Chips */}
         <div className="flex items-center justify-between gap-1.5 mt-1.5">
           <div role="group" aria-label="Quick share selection" className="flex gap-1.5">
-            {(isLive ? [1, 2] : [5, 10, 20, 50]).map((count) => (
+            {(isLive ? [1] : [5, 10, 20, 50]).map((count) => (
               <button
                 key={count}
                 type="button"
@@ -261,7 +266,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
           </div>
           {isLive && (
             <span className="text-[10px] font-mono text-amber-400/90 font-semibold">
-              Live Max: 2 Contracts
+              Live Max: 1 Contract / Asset
             </span>
           )}
         </div>

@@ -35,7 +35,7 @@ def test_global_rate_limiter_instance() -> None:
     assert kalshi_rate_limiter.capacity == 20.0
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_acquire_immediate_within_capacity() -> None:
     """Test acquiring tokens immediately when available in capacity."""
     bucket = AsyncTokenBucket(rate=10.0, capacity=10.0)
@@ -50,7 +50,7 @@ async def test_acquire_immediate_within_capacity() -> None:
     assert bucket._tokens == pytest.approx(0.0, abs=1e-2)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_refill_cap_at_capacity() -> None:
     """Test that bucket refill does not exceed maximum capacity."""
     bucket = AsyncTokenBucket(rate=10.0, capacity=10.0)
@@ -59,7 +59,7 @@ async def test_refill_cap_at_capacity() -> None:
     assert bucket._tokens == 10.0
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_acquire_wait_and_refill() -> None:
     """Test acquiring tokens that require waiting for refill."""
     bucket = AsyncTokenBucket(rate=50.0, capacity=5.0)
@@ -75,7 +75,7 @@ async def test_acquire_wait_and_refill() -> None:
     assert elapsed >= 0.015
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_acquire_timeout() -> None:
     """Test timeout when tokens cannot be replenished in time."""
     bucket = AsyncTokenBucket(rate=1.0, capacity=1.0)
@@ -91,7 +91,7 @@ async def test_acquire_timeout() -> None:
     assert elapsed < 1.0
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_acquire_with_none_timeout() -> None:
     """Test acquiring tokens with timeout=None (wait indefinitely)."""
     bucket = AsyncTokenBucket(rate=100.0, capacity=1.0)
@@ -102,7 +102,7 @@ async def test_acquire_with_none_timeout() -> None:
     assert acquired is True
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_acquire_zero_tokens() -> None:
     """Test acquiring 0 tokens."""
     bucket = AsyncTokenBucket(rate=10.0, capacity=10.0)
@@ -111,7 +111,7 @@ async def test_acquire_zero_tokens() -> None:
     assert bucket._tokens == 10.0
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_acquire_concurrent() -> None:
     """Test concurrent acquisitions across multiple asynchronous tasks."""
     bucket = AsyncTokenBucket(rate=100.0, capacity=10.0)
@@ -124,7 +124,7 @@ async def test_acquire_concurrent() -> None:
     assert len(results) == 15
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_refill_time_jump() -> None:
     """Test refill behavior when monotonic time advances."""
     bucket = AsyncTokenBucket(rate=10.0, capacity=20.0)

@@ -6,10 +6,10 @@ description: Strict execution mode segregation, live trading exclusivity, zero c
 
 # Live Trading Exclusivity & Resource Allocation Rule
 
-## 1. Zero Paper Trading During Live Trading
-- **Absolute Segregation**: When live trading is active (`mode === 'live'`), **ALL paper trading, virtual simulation loops, and synthetic executions must STOP immediately and completely**.
-- **No Blended State**: Never run paper trading in the background or side-by-side with live trading.
-- **Dedicated Testing Regimes**: Paper trading and mock simulations are strictly reserved for testing (`mode === 'mock'`) and offline backtesting. 
+## 1. Zero Simulated Trades in Live Portfolio
+- **Absolute Portfolio Segregation**: In Live Mode (`Lane 1`), **ALL orders, balances, margin, and fills must originate 100% from authenticated Kalshi exchange endpoints**.
+- **No Blended State**: Simulated fills, mock executions, and paper trades must NEVER touch or contaminate the real Kalshi balance, real positions, or live win/loss records (`win_loss_reports.json`).
+- **Lane 2 Shadow Isolation**: When testing candidate bots in Lane 2 (Shadow/Incubator Mode on live ticks), the candidate bot operates on a completely quarantined virtual ledger with zero access to live order routing, live API keys, or live margin. 
 
 ## 2. 100% Resource & Compute Dedication to Live Execution
 - When Live Mode is enabled, 100% of available system resources are dedicated exclusively to live production trading:

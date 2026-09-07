@@ -23,6 +23,8 @@ models/
 *.db-wal
 *.db-shm
 *.jsonl
+*.lock
+data/*.lock
 data/*.jsonl
 data/*.db
 data/*.db-wal

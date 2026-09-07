@@ -177,10 +177,18 @@ class TickWriter:
                     break
 
             def _close_file(file_obj: Any) -> None:
-                file_obj.flush()
-                file_obj.close()
+                if file_obj and not getattr(file_obj, "closed", False):
+                    try:
+                        file_obj.flush()
+                    except (ValueError, OSError):
+                        pass
+                    try:
+                        file_obj.close()
+                    except (ValueError, OSError):
+                        pass
 
-            await asyncio.to_thread(_close_file, self._file)
+            if self._file and not getattr(self._file, "closed", False):
+                await asyncio.to_thread(_close_file, self._file)
             self._file = None
             logger.info(
                 "Tick writer closed: %s (%d records)",

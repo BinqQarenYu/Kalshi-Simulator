@@ -26,6 +26,130 @@ class Timeframe(str, Enum):
     DAILY = "daily"
 
 
+class CryptoAsset(str, Enum):
+    """Supported cryptocurrency underlying assets."""
+    BTC = "BTC"
+    ETH = "ETH"
+    SOL = "SOL"
+    DOGE = "DOGE"
+
+
+class AssetConfig(BaseModel):
+    """Institutional configuration and metadata for a tradeable underlying crypto asset."""
+    asset: CryptoAsset
+    name: str
+    series_ticker_15m: str
+    cf_index_id: str
+    price_decimals: int
+    min_spot_diff: Decimal
+    typical_strike_step: Decimal
+    typical_1m_volatility: Decimal = Decimal("14.00")
+    display_prefix: str = "$"
+
+    @property
+    def symbol(self) -> str:
+        """Asset symbol shorthand (e.g. BTC, ETH)."""
+        return self.asset.value
+
+    @property
+    def strike_step(self) -> Decimal:
+        """Typical strike interval step."""
+        return self.typical_strike_step
+
+    @property
+    def coinbase_pair(self) -> str:
+        """Coinbase Pro trading pair (e.g. BTC-USD)."""
+        return f"{self.asset.value}-USD"
+
+    def format_price(self, val: Decimal | float | None) -> str:
+        """Format price according to asset decimal precision."""
+        if val is None:
+            return "N/A"
+        d = Decimal(str(val))
+        return f"{self.display_prefix}{d:,.{self.price_decimals}f}"
+
+    def format_diff(self, diff: Decimal | float | None, pct: Decimal | float | None = None) -> str:
+        """Format price difference and percentage."""
+        if diff is None:
+            return "N/A"
+        d_diff = Decimal(str(diff))
+        sign = "+" if d_diff >= Decimal("0") else "-"
+        diff_str = f"{sign}{self.display_prefix}{abs(d_diff):,.{self.price_decimals}f}"
+        if pct is not None:
+            d_pct = Decimal(str(pct))
+            pct_decimals = 3 if abs(d_pct) < Decimal("0.10") else 2
+            return f"{diff_str} ({sign}{abs(d_pct):.{pct_decimals}f}%)"
+        return diff_str
+
+
+CRYPTO_ASSETS: dict[CryptoAsset, AssetConfig] = {
+    CryptoAsset.BTC: AssetConfig(
+        asset=CryptoAsset.BTC,
+        name="Bitcoin",
+        series_ticker_15m="KXBTC15M",
+        cf_index_id="BRTI",
+        price_decimals=2,
+        min_spot_diff=Decimal("35.00"),
+        typical_strike_step=Decimal("25.00"),
+        typical_1m_volatility=Decimal("14.00"),
+    ),
+    CryptoAsset.ETH: AssetConfig(
+        asset=CryptoAsset.ETH,
+        name="Ethereum",
+        series_ticker_15m="KXETH15M",
+        cf_index_id="ETHUSD_RTI",
+        price_decimals=2,
+        min_spot_diff=Decimal("2.50"),
+        typical_strike_step=Decimal("2.50"),
+        typical_1m_volatility=Decimal("0.60"),
+    ),
+    CryptoAsset.SOL: AssetConfig(
+        asset=CryptoAsset.SOL,
+        name="Solana",
+        series_ticker_15m="KXSOL15M",
+        cf_index_id="SOLUSD_RTI",
+        price_decimals=2,
+        min_spot_diff=Decimal("0.50"),
+        typical_strike_step=Decimal("0.50"),
+        typical_1m_volatility=Decimal("0.04"),
+    ),
+    CryptoAsset.DOGE: AssetConfig(
+        asset=CryptoAsset.DOGE,
+        name="Dogecoin",
+        series_ticker_15m="KXDOGE15M",
+        cf_index_id="DOGEUSD_RTI",
+        price_decimals=6,
+        min_spot_diff=Decimal("0.0005"),
+        typical_strike_step=Decimal("0.0005"),
+        typical_1m_volatility=Decimal("0.000045"),
+    ),
+}
+
+
+def get_asset_config(asset: str | CryptoAsset) -> AssetConfig:
+    """Safely retrieve configuration for a cryptocurrency asset."""
+    if isinstance(asset, CryptoAsset):
+        return CRYPTO_ASSETS[asset]
+    key = str(asset).upper().strip()
+    for ca, cfg in CRYPTO_ASSETS.items():
+        if ca.value == key or cfg.series_ticker_15m == key or cfg.cf_index_id == key:
+            return cfg
+    return CRYPTO_ASSETS[CryptoAsset.BTC]
+
+
+def detect_asset_from_ticker(ticker: str) -> CryptoAsset:
+    """Detect underlying CryptoAsset from market or series ticker."""
+    t = ticker.upper()
+    if "ETH" in t:
+        return CryptoAsset.ETH
+    if "SOL" in t:
+        return CryptoAsset.SOL
+    if "DOGE" in t:
+        return CryptoAsset.DOGE
+    return CryptoAsset.BTC
+
+
+
 class CandleInterval(str, Enum):
     """Candlestick aggregation intervals."""
     ONE_MIN = "1m"

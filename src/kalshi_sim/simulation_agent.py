@@ -35,6 +35,7 @@ from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
 from kalshi_sim.notifications import TelemetryAlertDispatcher
 from kalshi_sim.order_client import KalshiDemoOrderClient
 from kalshi_sim.order_simulator import OrderSimulator
+from kalshi_sim.process_lock import get_active_lock_holder
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.portfolio import Portfolio
 from kalshi_sim.schemas import (
@@ -52,13 +53,13 @@ from kalshi_sim.settlement import run_settlement_cycle
 
 logger = logging.getLogger(__name__)
 
-# Strategy parameters
+# Strategy parameters (1 contract for other bots only)
 SCALP_IMBALANCE_THRESHOLD = Decimal("0.60")
-SCALP_MAX_POSITION_SIZE = 20
+SCALP_MAX_POSITION_SIZE = 1
 MOMENTUM_CONSECUTIVE_TICKS = 2
-MOMENTUM_MAX_POSITION_SIZE = 50
+MOMENTUM_MAX_POSITION_SIZE = 1
 SWING_DEPTH_RATIO_THRESHOLD = Decimal("1.8")
-SWING_MAX_POSITION_SIZE = 100
+SWING_MAX_POSITION_SIZE = 1
 
 PNL_REPORT_INTERVAL_S = 10.0
 SETTLEMENT_CHECK_INTERVAL_S = 10.0
@@ -277,6 +278,12 @@ class SimulationAgent:
         if hasattr(self, "_domination_bot") and hasattr(self._domination_bot, "set_discount_limit_price"):
             self._domination_bot.set_discount_limit_price(price)
 
+    def set_asset(self, asset: Any) -> None:
+        """Update active cryptocurrency underlying asset across bots."""
+        if hasattr(self, "_domination_bot") and hasattr(self._domination_bot, "set_asset"):
+            self._domination_bot.set_asset(asset)
+        logger.info("SimulationAgent underlying asset updated to: %s", asset)
+
     async def _evaluate_market(self, ticker: str, book: OrderBook) -> None:
         """Evaluate trading decisions concurrently for both 3-Step Domination and ONNX Neural Net bots."""
         timeframe = self._ticker_timeframe_map.get(ticker)
@@ -304,22 +311,28 @@ class SimulationAgent:
         if is_live and not ticker.startswith("KXBTC15M"):
             return
 
+        # If another engine (e.g. Standalone Bot) holds the exclusive live lock, silence Mother evaluations
+        if is_live:
+            holder = get_active_lock_holder()
+            if holder and holder[1] != os.getpid():
+                return
+
         # If this cycle is already locked by guardrails, skip evaluation immediately
         cycle_key = market_info.event_ticker if (market_info and market_info.event_ticker) else ticker
         if is_live and (cycle_key in self._guardrails._cycle_locks or ticker in self._guardrails._cycle_locks):
             return
 
         # ===================================================================
-        # BOT: Macro ONNX & Macro Trend Dominion (Evaluated against _portfolio_macro_trend)
+        # BOT: Macro ONNX & Macro Trend Dominion (DISABLED: Only 3-Step Dominion allowed to trade)
         # ===================================================================
-        if not is_live or self.active_strategy_bot in (
+        if False and (not is_live or self.active_strategy_bot in (
             "macro_onnx",
             "macro_onnx_bot",
             "macro_trend_onnx_fusion",
             "macro_trend_dominion",
             "macro_trend",
             "macro_trend_dominion_bot",
-        ):
+        )):
             if (
                 not self._portfolio_macro_trend.circuit_breaker_tripped
                 and len(self._portfolio_macro_trend.open_positions) < MAX_CONCURRENT_POSITIONS
@@ -412,9 +425,9 @@ class SimulationAgent:
                         logger.debug("Macro ONNX / Trend bot evaluation error: %s", exc)
 
         # ===================================================================
-        # BOT 0: Dominion 2 Bot (Evaluated against _portfolio_dominion2)
+        # BOT 0: Dominion 2 Bot (DISABLED: Only 3-Step Dominion allowed to trade)
         # ===================================================================
-        if not is_live or self.active_strategy_bot in ("dominion_2_bot", "dominion2", "dominion_v2"):
+        if False and (not is_live or self.active_strategy_bot in ("dominion_2_bot", "dominion2", "dominion_v2")):
             if (
                 not self._portfolio_dominion2.circuit_breaker_tripped
                 and len(self._portfolio_dominion2.open_positions) < MAX_CONCURRENT_POSITIONS
@@ -451,7 +464,7 @@ class SimulationAgent:
                         time_to_expiry_s=time_to_expiry_s,
                         recent_trades=trades,
                         total_equity=self._portfolio_dominion2.equity,
-                        max_position_size=4,
+                        max_position_size=1,  # 1 contract for other bots only
                         estimated_vpin=vpin_score,
                     )
 
@@ -564,7 +577,7 @@ class SimulationAgent:
                                 )
                                 return
 
-                        order_size = 1 if is_overnight_et else decision.recommended_contracts
+                        order_size = 1  # Strictly 1 contract for each asset
                         side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
                         logger.info(
                             "[%s] %-18s | %-3s (%s) | Edge=%+.1f%% | EV=+%s/ct | Size=%d cts%s",
@@ -594,9 +607,8 @@ class SimulationAgent:
                 except Exception as exc:
                     logger.debug("Domination bot evaluation error: %s", exc)
 
-        # In LIVE mode, secondary paper bots STOP completely!
-        if is_live:
-            return
+        # Paper bots disabled: only 3-Step Dominion is authorized to trade!
+        return
 
         # ===================================================================
         # BOT 2: ONNX Microstructure Neural Net Bot (Evaluated against _portfolio_onnx)
@@ -658,7 +670,7 @@ class SimulationAgent:
                         best_yes_ask=best_yes_ask,
                         best_no_ask=best_no_ask,
                         total_equity=self._portfolio_onnx.equity,
-                        max_position_size=self._get_max_size_for_tf(timeframe),
+                        max_position_size=1,  # 1 contract for other bots only
                         vpin=vpin_score,
                         prob_wait=prob_wait_in,
                     )
@@ -817,15 +829,7 @@ class SimulationAgent:
         self._onnx_engine.extractor.process_trade(trade)
 
     def _get_max_size_for_tf(self, timeframe: Timeframe) -> int:
-        if getattr(self, "execution_mode", "simulated") == "live":
-            # Live Trading Exclusivity: Strict micro-contract cap (1-2 contracts) for live bankroll protection ($30)
-            return 2
-        if timeframe == Timeframe.FIVE_MIN:
-            return SCALP_MAX_POSITION_SIZE
-        elif timeframe == Timeframe.FIFTEEN_MIN:
-            return MOMENTUM_MAX_POSITION_SIZE
-        else:
-            return SWING_MAX_POSITION_SIZE
+        return 1  # Strictly 1 contract for each asset
 
     # -- Strategy Modes ------------------------------------------------------
 
@@ -970,6 +974,7 @@ class SimulationAgent:
             vpin=0.15,
             cycle_id=ticker,
             is_bot=True,
+            bot_type=b_type,
         )
         if not is_ok or approved_size <= 0:
             now_mono = time.monotonic()
@@ -992,7 +997,16 @@ class SimulationAgent:
             if self._order_client is not None and b_type == self.active_strategy_bot:
                 try:
                     live_side = side.value if hasattr(side, "value") else str(side).lower()
-                    live_count = max(1, min(affordable_size, 2))  # Strict hard cap: 1-2 contracts max for micro-bankroll
+                    live_count = 1  # Strictly 1 contract for each asset
+
+                    # Check if standalone trading engine holds exclusive lock
+                    holder = get_active_lock_holder()
+                    if holder and holder[1] != os.getpid():
+                        logger.warning(
+                            "🛑 [LOCKOUT] Standalone engine holds lock (%s, PID: %d). Suppressing main dash live order.",
+                            holder[0], holder[1]
+                        )
+                        return
 
                     # Check global dry-run protection
                     live_enabled_env = os.getenv("KALSHI_LIVE_TRADING_ENABLED", "false").lower() in ("true", "1", "yes")

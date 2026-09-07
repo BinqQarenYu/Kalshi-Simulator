@@ -137,6 +137,15 @@ class OrderBookManager:
         """
         return self._books.get(ticker)
 
+    def set_book(self, ticker: str, book: L2BookState) -> None:
+        """Set or update the order book state for a market ticker.
+
+        Args:
+            ticker: The market ticker symbol.
+            book: The L2BookState instance.
+        """
+        self._books[ticker] = book
+
     def get_top_of_book(
         self, ticker: str
     ) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
