@@ -27,7 +27,7 @@ def main() -> None:
     parser.add_argument("--val-split", type=float, default=0.2, help="Validation set split ratio (0.0 - 1.0)")
     parser.add_argument("--sample-stride", type=int, default=10, help="Sampling stride across ticks to reduce autocorrelation")
     parser.add_argument("--max-frames", type=int, default=1000, help="Maximum frames to extract per tick file")
-    parser.add_argument("--file-pattern", type=str, default="ticks_paper_live_*.jsonl", help="Glob pattern for tick logs")
+    parser.add_argument("--file-pattern", type=str, default="ticks_*.jsonl", help="Glob pattern for tick logs")
     parser.add_argument("--max-files", type=int, default=30, help="Maximum number of recent tick files to parse")
     parser.add_argument("--save-stats", type=str, default="models/feature_stats.json", help="Path to save normalization stats JSON")
     args = parser.parse_args()

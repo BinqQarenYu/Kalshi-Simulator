@@ -196,6 +196,8 @@ export interface WinLossEventReport {
   timeframe: string;
   strike_price: number;
   settlement_btc_price: number;
+  settlement_spot_price?: number;
+  asset?: string;
   bot_side: 'yes' | 'no';
   contracts: number;
   entry_price: number;
@@ -369,6 +371,26 @@ export interface DashboardState {
     domination_discount_price?: number;
   };
   btc_orderflow?: BtcOrderflowSummary;
+  continuous_training?: ContinuousTrainingTelemetry;
+}
+
+export interface ContinuousTrainingTelemetry {
+  status: string;
+  is_enabled: boolean;
+  is_running: boolean;
+  is_paused: boolean;
+  cycles_completed: number;
+  models_promoted: number;
+  best_val_loss?: number | null;
+  last_val_loss?: number | null;
+  last_val_accuracy?: number | null;
+  last_val_f1?: number | null;
+  last_trained_time?: string | null;
+  last_promoted_time?: string | null;
+  samples_trained: number;
+  last_error?: string | null;
+  priority_class?: string;
+  cpu_thread_cap?: number;
 }
 
 export interface LivePositionItem {

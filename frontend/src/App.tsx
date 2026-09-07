@@ -191,6 +191,7 @@ export function App() {
       integrityStatus={data.integrity_status}
       complianceStatus={data.compliance_status}
       systemResources={data.system_resources}
+      continuousTraining={data.continuous_training}
       tradingMode={tradingMode}
       timeframe={data.settings?.timeframe || data.market?.timeframe || '15m'}
       activeStrategyBot={data.settings?.active_strategy_bot || '3_step_domination_bot'}

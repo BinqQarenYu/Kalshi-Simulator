@@ -233,6 +233,8 @@ export const HistoricalAnalyticsTab: React.FC = () => {
 
   // Filter & Pagination States
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [assetFilter, setAssetFilter] = useState<'ALL' | 'BTC' | 'ETH' | 'SOL' | 'DOGE'>('ALL');
+  const [timeframeFilter, setTimeframeFilter] = useState<'ALL' | '5M' | '15M'>('ALL');
   const [botFilter, setBotFilter] = useState<'all' | 'macro_onnx' | 'macro_trend_dominion' | 'dominion_2_bot' | '3_step_domination_bot' | 'onnx_ml_bot' | 'live'>('all');
   const [sideFilter, setSideFilter] = useState<'all' | 'yes' | 'no'>('all');
   const [outcomeFilter, setOutcomeFilter] = useState<'all' | 'win' | 'loss' | 'flat'>('all');
@@ -302,23 +304,26 @@ export const HistoricalAnalyticsTab: React.FC = () => {
       const queryParams = new URLSearchParams();
       if (botParam) queryParams.append('bot_type', botParam);
       if (modeParam) queryParams.append('execution_mode', modeParam);
+      if (assetFilter !== 'ALL') queryParams.append('asset', assetFilter);
+      if (timeframeFilter !== 'ALL') queryParams.append('timeframe', timeframeFilter);
       const qs = queryParams.toString() ? `?${queryParams.toString()}` : '';
+      const filterSuffix = `${assetFilter !== 'ALL' ? `&asset=${assetFilter}` : ''}${timeframeFilter !== 'ALL' ? `&timeframe=${timeframeFilter}` : ''}`;
 
       const [mRes, eqRes, trRes, stRes, aiRes, valRes, wlRes, mAll, mMacroOnnx, mMacro, mDom2, mDom, mOnnx, mLive] = await Promise.all([
         fetch(`/api/history/metrics${qs}`).then((r) => r.json()).catch(() => null),
         fetch(`/api/history/equity-curve${qs ? `${qs}&limit=1000` : '?limit=1000'}`).then((r) => r.json()).catch(() => []),
         fetch(`/api/history/trades${qs ? `${qs}&limit=500` : '?limit=500'}`).then((r) => r.json()).catch(() => []),
         fetch(`/api/history/settlements${qs ? `${qs}&limit=500` : '?limit=500'}`).then((r) => r.json()).catch(() => []),
-        fetch(`/api/history/ai-predictions${botParam ? `?bot_type=${botParam}&limit=500` : '?limit=500'}`).then((r) => r.json()).catch(() => []),
+        fetch(`/api/history/ai-predictions${botParam ? `?bot_type=${botParam}&limit=500${filterSuffix}` : `?limit=500${filterSuffix}`}`).then((r) => r.json()).catch(() => []),
         fetch(`/api/bot/forward-validation-status${qs}`).then((r) => r.json()).catch(() => null),
         fetch(`/api/reports/full${qs ? `?${queryParams.toString()}` : ''}`).then((r) => r.json()).catch(() => null),
-        fetch('/api/history/metrics?bot_type=all').then((r) => r.json()).catch(() => null),
-        fetch('/api/history/metrics?bot_type=macro_onnx').then((r) => r.json()).catch(() => null),
-        fetch('/api/history/metrics?bot_type=macro_trend_dominion&execution_mode=simulated').then((r) => r.json()).catch(() => null),
-        fetch('/api/history/metrics?bot_type=dominion_2_bot&execution_mode=simulated').then((r) => r.json()).catch(() => null),
-        fetch('/api/history/metrics?bot_type=3_step_domination_bot&execution_mode=simulated').then((r) => r.json()).catch(() => null),
-        fetch('/api/history/metrics?bot_type=onnx_ml_bot&execution_mode=simulated').then((r) => r.json()).catch(() => null),
-        fetch('/api/history/metrics?execution_mode=live').then((r) => r.json()).catch(() => null),
+        fetch(`/api/history/metrics?bot_type=all${filterSuffix}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/history/metrics?bot_type=macro_onnx${filterSuffix}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/history/metrics?bot_type=macro_trend_dominion&execution_mode=simulated${filterSuffix}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/history/metrics?bot_type=dominion_2_bot&execution_mode=simulated${filterSuffix}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/history/metrics?bot_type=3_step_domination_bot&execution_mode=simulated${filterSuffix}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/history/metrics?bot_type=onnx_ml_bot&execution_mode=simulated${filterSuffix}`).then((r) => r.json()).catch(() => null),
+        fetch(`/api/history/metrics?execution_mode=live${filterSuffix}`).then((r) => r.json()).catch(() => null),
       ]);
 
       if (mRes) setMetrics(mRes);
@@ -391,13 +396,13 @@ export const HistoricalAnalyticsTab: React.FC = () => {
     fetchAllData();
     const interval = setInterval(fetchAllData, 8000);
     return () => clearInterval(interval);
-  }, [selectedSystem]);
+  }, [selectedSystem, assetFilter, timeframeFilter]);
 
   // Reset page & selection when switching tabs or filters
   useEffect(() => {
     setPage(1);
     setSelectedIds(new Set());
-  }, [activeSubTab, searchTerm, sideFilter, outcomeFilter, selectedSystem]);
+  }, [activeSubTab, searchTerm, sideFilter, outcomeFilter, selectedSystem, assetFilter, timeframeFilter]);
 
   // 1. DELETE Single Item Action
   const handleDeleteSingle = async (type: SubTabType, id: string | number) => {
@@ -680,6 +685,16 @@ export const HistoricalAnalyticsTab: React.FC = () => {
     ) {
       return false;
     }
+    if (assetFilter !== 'ALL') {
+      const ticker = (r.ticker || '').toUpperCase();
+      const rAsset = (r.asset || '').toUpperCase();
+      if (rAsset !== assetFilter && !ticker.includes(`KX${assetFilter}`)) return false;
+    }
+    if (timeframeFilter !== 'ALL') {
+      const ticker = (r.ticker || '').toUpperCase();
+      const rTf = (r.timeframe || '').toUpperCase();
+      if (rTf !== timeframeFilter && !ticker.includes(timeframeFilter)) return false;
+    }
     if (botFilter !== 'all') {
       if (botFilter === 'macro_onnx' && !isMacroOnnxBot(r)) return false;
       if (botFilter === 'macro_trend_dominion' && !isMacroBot(r)) return false;
@@ -705,6 +720,8 @@ export const HistoricalAnalyticsTab: React.FC = () => {
     ) {
       return false;
     }
+    if (assetFilter !== 'ALL' && !t.ticker.toUpperCase().includes(`KX${assetFilter}`)) return false;
+    if (timeframeFilter !== 'ALL' && !t.ticker.toUpperCase().includes(timeframeFilter) && t.timeframe?.toUpperCase() !== timeframeFilter) return false;
     if (sideFilter !== 'all' && t.side.toLowerCase() !== sideFilter) return false;
     return true;
   });
@@ -717,6 +734,8 @@ export const HistoricalAnalyticsTab: React.FC = () => {
     ) {
       return false;
     }
+    if (assetFilter !== 'ALL' && !s.ticker.toUpperCase().includes(`KX${assetFilter}`)) return false;
+    if (timeframeFilter !== 'ALL' && !s.ticker.toUpperCase().includes(timeframeFilter)) return false;
     if (sideFilter !== 'all' && s.side.toLowerCase() !== sideFilter) return false;
     if (outcomeFilter !== 'all' && s.outcome.toLowerCase() !== outcomeFilter) return false;
     return true;
@@ -724,6 +743,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
 
   const filteredAi = aiPredictions.filter((p) => {
     if (searchTerm && !p.ticker.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+    if (assetFilter !== 'ALL' && !p.ticker.toUpperCase().includes(`KX${assetFilter}`)) return false;
     if (sideFilter !== 'all' && p.recommended_side.toLowerCase() !== sideFilter) return false;
     return true;
   });
@@ -1233,6 +1253,47 @@ export const HistoricalAnalyticsTab: React.FC = () => {
             <Radio className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
             Live Trading (Real Capital)
           </button>
+        </div>
+      </div>
+
+      {/* 3B. Multi-Asset & Multi-Timeframe Institutional Filter */}
+      <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl flex flex-wrap items-center justify-between gap-3 font-mono">
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-[#8c9ba5]">Asset Class:</span>
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+            {(['ALL', 'BTC', 'ETH', 'SOL', 'DOGE'] as const).map((a) => (
+              <button
+                key={a}
+                onClick={() => setAssetFilter(a)}
+                className={`px-3 py-1 rounded text-xs font-bold transition ${
+                  assetFilter === a
+                    ? 'bg-emerald-500 text-black shadow-sm font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {a}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-[#8c9ba5]">Cycle Horizon:</span>
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+            {(['ALL', '5M', '15M'] as const).map((tf) => (
+              <button
+                key={tf}
+                onClick={() => setTimeframeFilter(tf)}
+                className={`px-3 py-1 rounded text-xs font-bold transition ${
+                  timeframeFilter === tf
+                    ? 'bg-amber-500 text-black shadow-sm font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 

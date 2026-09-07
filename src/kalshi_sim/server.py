@@ -69,6 +69,7 @@ from kalshi_sim.schemas import (
     CRYPTO_ASSETS,
     CandleInterval,
     CryptoAsset,
+    detect_asset_from_ticker,
     get_asset_config,
 
     IntegrityCheckSchema,
@@ -869,9 +870,17 @@ def record_win_loss_event_report(
     timestamp_utc: Optional[str] = None,
     cycle_time: Optional[str] = None,
     balance_after: Optional[Decimal] = None,
+    settlement_spot_price: Optional[Decimal] = None,
+    asset: Optional[str] = None,
 ) -> dict[str, Any]:
     """Generate and persist a standardized event win/loss report (5m or 15m)."""
     now_utc = datetime.now(timezone.utc)
+    if settlement_spot_price is None:
+        settlement_spot_price = settlement_btc_price
+    if asset is None:
+        asset = detect_asset_from_ticker(ticker).value
+    if "5M" in ticker.upper() or "5MIN" in ticker.upper():
+        timeframe = "5m"
     if not ai_rationale:
         ai_rationale = f"Automated {'5M' if '5m' in str(timeframe).lower() else '15M'} Cycle Execution"
     if not cycle_time:
@@ -975,8 +984,10 @@ def record_win_loss_event_report(
         "cycle_time": cycle_time,
         "ticker": ticker,
         "timeframe": timeframe,
+        "asset": asset,
         "strike_price": float(strike_price),
-        "settlement_btc_price": float(settlement_btc_price),
+        "settlement_btc_price": float(settlement_spot_price),
+        "settlement_spot_price": float(settlement_spot_price),
         "bot_side": side_clean,
         "contracts": contracts,
         "entry_price": float(entry_price),
@@ -1087,8 +1098,17 @@ def format_cycle_time_from_iso(iso_str: str, interval: int = 15) -> str:
         return f"{interval}M Event Cycle ET"
 
 
+_last_live_settlement_sync_time: float = 0.0
+_has_done_initial_full_sync: bool = False
+
+
 async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]:
     """Synchronize live settlements directly from Kalshi API and reconcile with executed trades to generate live win/loss reports."""
+    global _last_live_settlement_sync_time, _has_done_initial_full_sync
+    now = time.time()
+    if not full_sync and (now - _last_live_settlement_sync_time < 30.0):
+        return []
+
     client = state.order_client
     if client is None and state.sim_agent and hasattr(state.sim_agent, "_order_client"):
         client = state.sim_agent._order_client
@@ -1112,9 +1132,10 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
 
     try:
         # Full sync when explicitly requested or on startup when local live report history is incomplete
-        current_live_count = len([r for r in state.win_loss_reports if r.get("execution_mode") == "live"])
-        need_full = full_sync or (current_live_count < 100)
-        settlements = await client.get_settlements(limit=100, all_pages=need_full, max_pages=20)
+        need_full = full_sync or not _has_done_initial_full_sync
+        settlements = await client.get_settlements(limit=100 if need_full else 50, all_pages=need_full, max_pages=10)
+        _last_live_settlement_sync_time = now
+        _has_done_initial_full_sync = True
         if not settlements:
             return []
 
@@ -3752,6 +3773,7 @@ async def trigger_emergency_kill_switch() -> dict[str, Any]:
 @app.get("/api/history/trades")
 async def get_historical_trades_endpoint(
     ticker: str | None = None,
+    asset: str | None = None,
     timeframe: str | None = None,
     bot_type: str | None = None,
     execution_mode: str | None = None,
@@ -3762,6 +3784,7 @@ async def get_historical_trades_endpoint(
     query_service = HistoricalQueryService()
     return await query_service.get_trades(
         ticker=ticker,
+        asset=asset,
         timeframe=timeframe,
         bot_type=bot_type,
         execution_mode=execution_mode,
@@ -3773,6 +3796,8 @@ async def get_historical_trades_endpoint(
 @app.get("/api/history/settlements")
 async def get_historical_settlements_endpoint(
     ticker: str | None = None,
+    asset: str | None = None,
+    timeframe: str | None = None,
     bot_type: str | None = None,
     execution_mode: str | None = None,
     limit: int = 100,
@@ -3782,6 +3807,8 @@ async def get_historical_settlements_endpoint(
     query_service = HistoricalQueryService()
     return await query_service.get_settlements(
         ticker=ticker,
+        asset=asset,
+        timeframe=timeframe,
         bot_type=bot_type,
         execution_mode=execution_mode,
         limit=limit,
@@ -3829,12 +3856,16 @@ async def get_historical_ai_predictions_endpoint(
 async def get_historical_metrics_endpoint(
     bot_type: str | None = None,
     execution_mode: str | None = None,
+    asset: str | None = None,
+    timeframe: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve institutional performance statistics (Sharpe, Sortino, Calmar, Win Rate, Drawdown)."""
     query_service = HistoricalQueryService()
     return await query_service.compute_portfolio_metrics(
         bot_type=bot_type,
         execution_mode=execution_mode,
+        asset=asset,
+        timeframe=timeframe,
     )
 
 
@@ -3949,6 +3980,32 @@ async def get_forward_validation_status_endpoint(
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/api/ml/trainer/status")
+async def get_ml_trainer_status_endpoint() -> dict[str, Any]:
+    """Retrieve real-time continuous ONNX trainer telemetry."""
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        return state.continuous_trainer.get_status()
+    return {"status": "UNAVAILABLE", "is_running": False}
+
+
+@app.post("/api/ml/trainer/pause")
+async def pause_ml_trainer_endpoint() -> dict[str, Any]:
+    """Pause continuous background ONNX training."""
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        state.continuous_trainer.pause()
+        return {"status": "PAUSED", "message": "Continuous trainer paused"}
+    return {"status": "UNAVAILABLE"}
+
+
+@app.post("/api/ml/trainer/resume")
+async def resume_ml_trainer_endpoint() -> dict[str, Any]:
+    """Resume continuous background ONNX training."""
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        state.continuous_trainer.resume()
+        return {"status": "RESUMED", "message": "Continuous trainer resumed"}
+    return {"status": "UNAVAILABLE"}
 
 
 # ---------------------------------------------------------------------------
@@ -4341,10 +4398,29 @@ async def get_win_loss_reports_endpoint(
     mode: str | None = None,
     execution_mode: str | None = None,
     timeframe: str | None = None,
+    asset: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve event Win/Loss reports (5M / 15M) with overall, Domination Bot, ONNX ML Bot, and Live breakdowns."""
     if state.mode == "live":
         await sync_live_settlements()
+
+    # Synchronize with reports persisted to disk by Standalone Bot or prior sessions
+    reports_file = state.data_dir / "win_loss_reports.json"
+    if reports_file.exists():
+        try:
+            disk_reports = json.loads(reports_file.read_text(encoding="utf-8"))
+            if isinstance(disk_reports, list):
+                known_ids = {r.get("report_id") for r in state.win_loss_reports}
+                new_added = False
+                for dr in disk_reports:
+                    if dr.get("report_id") and dr.get("report_id") not in known_ids:
+                        state.win_loss_reports.append(dr)
+                        known_ids.add(dr.get("report_id"))
+                        new_added = True
+                if new_added:
+                    state.win_loss_reports.sort(key=lambda r: str(r.get("timestamp_utc", "")), reverse=True)
+        except Exception:
+            pass
 
     all_reports = state.win_loss_reports
     macro_reports = [r for r in all_reports if r.get("bot_type") in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot")]
@@ -4352,9 +4428,12 @@ async def get_win_loss_reports_endpoint(
     onnx_reports = [r for r in all_reports if r.get("bot_type") in ("onnx_ml_bot", "onnx_microstructure_bot", "onnx")]
     live_reports = [
         r for r in all_reports
-        if (r.get("execution_mode") == "live" or r.get("bot_type") == "live")
+        if (r.get("execution_mode") == "live" or r.get("bot_type") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-"))
     ]
-    sim_reports = [r for r in all_reports if r.get("execution_mode") in ("simulated", "mock", "paper", None)]
+    sim_reports = [
+        r for r in all_reports 
+        if r.get("execution_mode") in ("simulated", "mock", "paper", None) and not str(r.get("report_id", "")).startswith("WLR-LIVE-")
+    ]
 
     filtered_reports = all_reports
     exec_m = mode or execution_mode
@@ -4368,7 +4447,15 @@ async def get_win_loss_reports_endpoint(
         filtered_reports = [r for r in filtered_reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
 
     if timeframe and timeframe.lower() not in ("all", "combined"):
-        filtered_reports = [r for r in filtered_reports if str(r.get("timeframe", "15m")).lower() == timeframe.lower()]
+        tf_clean = timeframe.lower()
+        filtered_reports = [r for r in filtered_reports if str(r.get("timeframe", "15m")).lower() == tf_clean or (f"KX{tf_clean.upper()}" in str(r.get("ticker", "")).upper())]
+
+    if asset and asset.lower() not in ("all", "combined"):
+        asset_clean = asset.upper().strip()
+        filtered_reports = [
+            r for r in filtered_reports
+            if r.get("asset", "").upper() == asset_clean or (f"KX{asset_clean}" in r.get("ticker", "").upper())
+        ]
 
     return {
         "summary": _calculate_15m_metrics(filtered_reports),
@@ -4381,6 +4468,7 @@ async def get_win_loss_reports_endpoint(
         "filter_bot_type": bot_type or "all",
         "filter_mode": exec_m or "all",
         "filter_timeframe": timeframe or "all",
+        "filter_asset": asset or "all",
         "reports": filtered_reports[:limit],
         "live_reports": live_reports[:limit],
         "total_live_reports": len(live_reports),
@@ -4391,18 +4479,22 @@ async def get_win_loss_reports_endpoint(
 async def export_win_loss_reports_csv(
     bot_type: str | None = None,
     mode: str | None = None,
+    timeframe: str | None = None,
+    asset: str | None = None,
 ) -> Response:
-    """Export 15-minute event Win/Loss reports as a CSV document with bot_type and execution_mode."""
+    """Export event Win/Loss reports as a CSV document with bot_type, asset, timeframe, and execution_mode."""
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
         "report_id",
         "bot_type",
         "execution_mode",
+        "asset",
         "cycle_time",
         "ticker",
         "timeframe",
         "strike_price",
+        "settlement_spot_price",
         "settlement_btc_price",
         "bot_side",
         "contracts",
@@ -4421,23 +4513,32 @@ async def export_win_loss_reports_csv(
     reports = state.win_loss_reports
     if mode and mode.lower() not in ("all", "combined"):
         if mode.lower() in ("live", "real"):
-            reports = [r for r in reports if r.get("execution_mode") == "live"]
+            reports = [r for r in reports if r.get("execution_mode") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-")]
         else:
-            reports = [r for r in reports if r.get("execution_mode") in ("simulated", "mock", "paper", None)]
+            reports = [r for r in reports if r.get("execution_mode") in ("simulated", "mock", "paper", None) and not str(r.get("report_id", "")).startswith("WLR-LIVE-")]
 
     if bot_type and bot_type.lower() not in ("all", "combined"):
         reports = [r for r in reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
+
+    if timeframe and timeframe.lower() not in ("all", "combined"):
+        reports = [r for r in reports if str(r.get("timeframe", "15m")).lower() == timeframe.lower()]
+
+    if asset and asset.lower() not in ("all", "combined"):
+        asset_clean = asset.upper().strip()
+        reports = [r for r in reports if r.get("asset", "").upper() == asset_clean or f"KX{asset_clean}" in r.get("ticker", "").upper()]
 
     for r in reports:
         writer.writerow([
             r.get("report_id"),
             r.get("bot_type", "3_step_domination_bot"),
             r.get("execution_mode", "simulated"),
+            r.get("asset", "BTC"),
             r.get("cycle_time"),
             r.get("ticker"),
             r.get("timeframe"),
-            f"{r.get('strike_price', 0.0):.2f}",
-            f"{r.get('settlement_btc_price', 0.0):.2f}",
+            f"{r.get('strike_price', 0.0):.4f}",
+            f"{r.get('settlement_spot_price', r.get('settlement_btc_price', 0.0)):.4f}",
+            f"{r.get('settlement_btc_price', 0.0):.4f}",
             r.get("bot_side"),
             r.get("contracts"),
             f"{r.get('entry_price', 0.0):.4f}",
@@ -4452,7 +4553,9 @@ async def export_win_loss_reports_csv(
             r.get("timestamp_utc"),
             r.get("ai_rationale"),
         ])
-    filename = "kalshi_15m_live_reports.csv" if mode == "live" else "kalshi_15m_win_loss_reports.csv"
+    prefix = f"kalshi_{asset.lower()}_" if asset and asset.lower() != "all" else "kalshi_"
+    tf_str = f"{timeframe}_" if timeframe and timeframe.lower() != "all" else ""
+    filename = f"{prefix}{tf_str}live_reports.csv" if mode == "live" else f"{prefix}{tf_str}win_loss_reports.csv"
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
@@ -4463,15 +4566,27 @@ async def export_win_loss_reports_csv(
 @app.get("/api/reports/win-loss/export.json")
 async def export_win_loss_reports_json(
     mode: str | None = None,
+    timeframe: str | None = None,
+    asset: str | None = None,
 ) -> Response:
-    """Export 15-minute event Win/Loss reports as formatted JSON."""
+    """Export event Win/Loss reports as formatted JSON."""
     reports = state.win_loss_reports
     if mode and mode.lower() not in ("all", "combined"):
         if mode.lower() in ("live", "real"):
-            reports = [r for r in reports if r.get("execution_mode") == "live"]
+            reports = [r for r in reports if r.get("execution_mode") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-")]
         else:
-            reports = [r for r in reports if r.get("execution_mode") in ("simulated", "mock", "paper", None)]
-    filename = "kalshi_15m_live_reports.json" if mode == "live" else "kalshi_15m_win_loss_reports.json"
+            reports = [r for r in reports if r.get("execution_mode") in ("simulated", "mock", "paper", None) and not str(r.get("report_id", "")).startswith("WLR-LIVE-")]
+
+    if timeframe and timeframe.lower() not in ("all", "combined"):
+        reports = [r for r in reports if str(r.get("timeframe", "15m")).lower() == timeframe.lower()]
+
+    if asset and asset.lower() not in ("all", "combined"):
+        asset_clean = asset.upper().strip()
+        reports = [r for r in reports if r.get("asset", "").upper() == asset_clean or f"KX{asset_clean}" in r.get("ticker", "").upper()]
+
+    prefix = f"kalshi_{asset.lower()}_" if asset and asset.lower() != "all" else "kalshi_"
+    tf_str = f"{timeframe}_" if timeframe and timeframe.lower() != "all" else ""
+    filename = f"{prefix}{tf_str}live_reports.json" if mode == "live" else f"{prefix}{tf_str}win_loss_reports.json"
     return Response(
         content=json.dumps(reports, indent=2),
         media_type="application/json",

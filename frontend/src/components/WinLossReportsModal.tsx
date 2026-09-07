@@ -34,12 +34,14 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
 }) => {
   const [modeFilter, setModeFilter] = useState<'all' | 'live' | 'paper'>('all');
   const [filter, setFilter] = useState<'all' | 'win' | 'loss'>('all');
+  const [assetFilter, setAssetFilter] = useState<'all' | 'BTC' | 'ETH' | 'SOL' | 'DOGE'>('all');
+  const [timeframeFilter, setTimeframeFilter] = useState<'all' | '5m' | '15m'>('all');
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [testResultMsg, setTestResultMsg] = useState<string | null>(null);
 
   // Default to 'live' if app is in live mode or if live reports exist
   useEffect(() => {
-    if (isLiveMode || reports.some((r) => r.execution_mode === 'live')) {
+    if (isLiveMode || reports.some((r) => r.execution_mode === 'live' || r.report_id?.startsWith('WLR-LIVE-'))) {
       setModeFilter('live');
     } else {
       setModeFilter('all');
@@ -49,7 +51,28 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
   if (!isOpen) return null;
 
   const isLiveReport = (r: WinLossEventReport) =>
-    (r.execution_mode === 'live' || r.bot_type === 'live') && (r.ticker.includes('SEP01') || r.timestamp_utc?.startsWith('2026-09-01'));
+    r.execution_mode === 'live' || r.bot_type === 'live' || Boolean(r.report_id?.startsWith('WLR-LIVE-'));
+
+  const detectAsset = (r: WinLossEventReport): 'BTC' | 'ETH' | 'SOL' | 'DOGE' => {
+    if (r.asset) {
+      const a = r.asset.toUpperCase();
+      if (a === 'ETH' || a === 'SOL' || a === 'DOGE') return a;
+      return 'BTC';
+    }
+    const t = (r.ticker || '').toUpperCase();
+    if (t.includes('ETH')) return 'ETH';
+    if (t.includes('SOL')) return 'SOL';
+    if (t.includes('DOGE')) return 'DOGE';
+    return 'BTC';
+  };
+
+  const formatAssetPrice = (price: number | undefined | null, asset: string): string => {
+    if (price == null || isNaN(price)) return '0.00';
+    if (asset === 'DOGE') {
+      return price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 });
+    }
+    return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
 
   const isMacroOnnxBot = (r: WinLossEventReport) =>
     r.bot_type === 'macro_onnx' ||
@@ -84,10 +107,12 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
   const liveReports = reports.filter(isLiveReport);
   const paperReports = reports.filter((r) => !isLiveReport(r));
 
-  // Filter reports by execution mode first
+  // Filter reports by execution mode, asset, and timeframe
   const baseReports = reports.filter((r) => {
-    if (modeFilter === 'live') return isLiveReport(r);
-    if (modeFilter === 'paper') return !isLiveReport(r);
+    if (modeFilter === 'live' && !isLiveReport(r)) return false;
+    if (modeFilter === 'paper' && isLiveReport(r)) return false;
+    if (assetFilter !== 'all' && detectAsset(r) !== assetFilter) return false;
+    if (timeframeFilter !== 'all' && (r.timeframe || '15m').toLowerCase() !== timeframeFilter.toLowerCase()) return false;
     return true;
   });
 
@@ -132,21 +157,16 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
     }
   };
 
-  const csvUrl = modeFilter === 'live'
-    ? '/api/reports/win-loss/export.csv?mode=live'
-    : modeFilter === 'paper'
-    ? '/api/reports/win-loss/export.csv?mode=simulated'
-    : '/api/reports/win-loss/export.csv';
+  const queryParams = new URLSearchParams();
+  if (modeFilter === 'live') queryParams.set('mode', 'live');
+  else if (modeFilter === 'paper') queryParams.set('mode', 'simulated');
+  if (assetFilter !== 'all') queryParams.set('asset', assetFilter);
+  if (timeframeFilter !== 'all') queryParams.set('timeframe', timeframeFilter);
 
-  const jsonUrl = modeFilter === 'live'
-    ? '/api/reports/win-loss/export.json?mode=live'
-    : modeFilter === 'paper'
-    ? '/api/reports/win-loss/export.json?mode=simulated'
-    : '/api/reports/win-loss/export.json';
-
-  const csvFilename = modeFilter === 'live'
-    ? 'kalshi_15m_live_reports.csv'
-    : 'kalshi_15m_win_loss_reports.csv';
+  const qs = queryParams.toString() ? `?${queryParams.toString()}` : '';
+  const csvUrl = `/api/reports/win-loss/export.csv${qs}`;
+  const jsonUrl = `/api/reports/win-loss/export.json${qs}`;
+  const csvFilename = `kalshi_${assetFilter !== 'all' ? assetFilter.toLowerCase() + '_' : ''}${timeframeFilter !== 'all' ? timeframeFilter + '_' : ''}${modeFilter === 'live' ? 'live' : 'win_loss'}_reports.csv`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
@@ -164,7 +184,7 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base font-bold text-white tracking-wide">
-                  {modeFilter === 'live' ? '🔴 Live Real-Money Event Reports' : '15-Minute Event Win/Loss Reports'}
+                  {modeFilter === 'live' ? '🔴 Live Real-Money Event Reports' : `${timeframeFilter === '5m' ? '5-Minute' : timeframeFilter === '15m' ? '15-Minute' : 'Ultra-Short'} Event Win/Loss Reports`}
                 </h2>
                 {modeFilter === 'live' ? (
                   <span className="flex items-center gap-1 px-2.5 py-0.5 text-[10px] font-mono font-bold bg-rose-500/20 border border-rose-500/40 text-rose-300 rounded-full animate-pulse">
@@ -355,6 +375,40 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
                 Losses ({losses})
               </button>
             </div>
+
+            {/* Asset Filter Pills */}
+            <div className="flex items-center gap-1 bg-[#0e121a] p-1 rounded-xl border border-[#21262d]">
+              {(['all', 'BTC', 'ETH', 'SOL', 'DOGE'] as const).map((a) => (
+                <button
+                  key={a}
+                  onClick={() => setAssetFilter(a)}
+                  className={`px-2 py-1 text-xs font-mono font-bold rounded-lg transition-colors ${
+                    assetFilter === a
+                      ? 'bg-[#00bda5] text-black shadow-sm'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {a.toUpperCase()}
+                </button>
+              ))}
+            </div>
+
+            {/* Timeframe Filter Pills */}
+            <div className="flex items-center gap-1 bg-[#0e121a] p-1 rounded-xl border border-[#21262d]">
+              {(['all', '5m', '15m'] as const).map((tf) => (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframeFilter(tf)}
+                  className={`px-2 py-1 text-xs font-mono font-bold rounded-lg transition-colors ${
+                    timeframeFilter === tf
+                      ? 'bg-[#d9a752] text-black shadow-sm'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {tf.toUpperCase()}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Test Bot & Export Buttons */}
@@ -435,8 +489,11 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
                 <tbody className="divide-y divide-[#21262d] font-mono">
                   {filteredReports.map((report) => {
                     const isWin = report.outcome === 'win';
-                    const isLiveReport = report.execution_mode === 'live';
-                    const diffStrike = (report.settlement_btc_price || 0) - (report.strike_price || 0);
+                    const isLiveReport = report.execution_mode === 'live' || Boolean(report.report_id?.startsWith('WLR-LIVE-'));
+                    const asset = detectAsset(report);
+                    const spotPrice = report.settlement_spot_price ?? report.settlement_btc_price ?? 0;
+                    const strikePrice = report.strike_price || 0;
+                    const diffStrike = spotPrice - strikePrice;
 
                     return (
                       <tr
@@ -447,7 +504,7 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
                             : 'hover:bg-[#161b22]/70'
                         }`}
                       >
-                        {/* 15m Cycle Window & Mode */}
+                        {/* 15m/5m Cycle Window & Mode */}
                         <td className="py-3 px-3.5 whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
                             <span className="font-sans font-semibold text-gray-200 text-[11px]">
@@ -501,13 +558,16 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
 
                         {/* Ticker & Strike */}
                         <td className="py-3 px-3 whitespace-nowrap">
-                          <div className="text-gray-300 font-bold text-xs">
-                            ${report.strike_price ? report.strike_price.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'}
+                          <div className="text-gray-300 font-bold text-xs flex items-center gap-1.5">
+                            <span>${formatAssetPrice(strikePrice, asset)}</span>
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-[#1f262d] text-[#8c9ba5] border border-[#30363d]">
+                              {asset}
+                            </span>
                           </div>
                           <div className="text-[10px] text-gray-400">
-                            Spot: ${report.settlement_btc_price ? report.settlement_btc_price.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'}
-                            <span className={(diffStrike || 0) >= 0 ? ' text-emerald-400' : ' text-rose-400'}>
-                              {' '}({(diffStrike || 0) >= 0 ? '+' : ''}${(diffStrike || 0).toFixed(2)})
+                            Spot: ${formatAssetPrice(spotPrice, asset)}
+                            <span className={diffStrike >= 0 ? ' text-emerald-400' : ' text-rose-400'}>
+                              {' '}({diffStrike >= 0 ? '+' : ''}${formatAssetPrice(diffStrike, asset)})
                             </span>
                           </div>
                         </td>

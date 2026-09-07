@@ -30,6 +30,7 @@ class HistoricalQueryService:
     async def get_trades(
         self,
         ticker: Optional[str] = None,
+        asset: Optional[str] = None,
         timeframe: Optional[str] = None,
         bot_type: Optional[str] = None,
         execution_mode: Optional[str] = None,
@@ -43,9 +44,12 @@ class HistoricalQueryService:
         if ticker:
             query += " AND ticker = ?"
             params.append(ticker)
-        if timeframe:
-            query += " AND timeframe = ?"
-            params.append(timeframe)
+        if asset and asset.lower() != "all":
+            query += " AND ticker LIKE ?"
+            params.append(f"KX{asset.upper()}%")
+        if timeframe and timeframe.lower() != "all":
+            query += " AND (timeframe = ? OR ticker LIKE ?)"
+            params.extend([timeframe.lower(), f"%{timeframe.upper()}%"])
         if bot_type and bot_type.lower() != "all":
             query += " AND bot_type = ?"
             params.append(bot_type)
@@ -64,6 +68,8 @@ class HistoricalQueryService:
     async def get_settlements(
         self,
         ticker: Optional[str] = None,
+        asset: Optional[str] = None,
+        timeframe: Optional[str] = None,
         bot_type: Optional[str] = None,
         execution_mode: Optional[str] = None,
         limit: int = 100,
@@ -76,6 +82,12 @@ class HistoricalQueryService:
         if ticker:
             query += " AND ticker = ?"
             params.append(ticker)
+        if asset and asset.lower() != "all":
+            query += " AND ticker LIKE ?"
+            params.append(f"KX{asset.upper()}%")
+        if timeframe and timeframe.lower() != "all":
+            query += " AND ticker LIKE ?"
+            params.append(f"%{timeframe.upper()}%")
         if bot_type and bot_type.lower() != "all":
             query += " AND bot_type = ?"
             params.append(bot_type)
@@ -156,8 +168,10 @@ class HistoricalQueryService:
         self,
         bot_type: Optional[str] = None,
         execution_mode: Optional[str] = None,
+        asset: Optional[str] = None,
+        timeframe: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Compute institutional performance statistics filtered by bot and execution mode."""
+        """Compute institutional performance statistics filtered by bot, execution mode, asset, and timeframe."""
         st_where = " WHERE 1=1"
         st_params: List[Any] = []
         tr_where = " WHERE 1=1"
@@ -180,6 +194,20 @@ class HistoricalQueryService:
             tr_params.append(execution_mode)
             eq_where += " AND execution_mode = ?"
             eq_params.append(execution_mode)
+
+        if asset and asset.lower() != "all":
+            asset_pat = f"KX{asset.upper()}%"
+            st_where += " AND ticker LIKE ?"
+            st_params.append(asset_pat)
+            tr_where += " AND ticker LIKE ?"
+            tr_params.append(asset_pat)
+
+        if timeframe and timeframe.lower() != "all":
+            tf_pat = f"%{timeframe.upper()}%"
+            st_where += " AND ticker LIKE ?"
+            st_params.append(tf_pat)
+            tr_where += " AND (timeframe = ? OR ticker LIKE ?)"
+            tr_params.extend([timeframe.lower(), tf_pat])
 
         async with self.db_manager.get_connection() as db:
             # 1. Fetch settlements

@@ -235,9 +235,18 @@ class StandaloneBotEngine:
         self.twap_60s_price: Optional[Decimal] = None
         self.kalshi_ws_connected: bool = False
         self.spot_connected: bool = False
-        self.tasks: List[asyncio.Task] = []
+        self.timeframe: str = "15m"
         self._running = False
+        self.tasks: List[asyncio.Task] = []
         self._eval_lock = asyncio.Lock()
+
+    def get_current_timeframe(self) -> str:
+        """Detect current active contract timeframe (5m or 15m)."""
+        if self.active_ticker:
+            t_upper = self.active_ticker.upper()
+            if "5M" in t_upper or "5MIN" in t_upper:
+                return "5m"
+        return self.timeframe
 
     def set_asset(self, asset: CryptoAsset) -> None:
         """Switch active underlying asset in the standalone engine."""
@@ -748,7 +757,7 @@ class StandaloneBotEngine:
                         gross_value=float(est_price * Decimal(str(approved_size))),
                         fees=0.0,
                         vpin=decision.vpin,
-                        timeframe="15m",
+                        timeframe=self.get_current_timeframe(),
                         bot_type="3_step_domination_bot",
                         execution_mode="live",
                         status="resting",
@@ -949,23 +958,37 @@ class StandaloneBotEngine:
                             if ticker == self.active_ticker:
                                 strike_price = self.target_strike
                             if strike_price <= Decimal("0.0"):
-                                strike_price = self.current_btc_spot if self.current_btc_spot > Decimal("0.0") else Decimal("79500.00")
+                                if self.current_btc_spot > Decimal("0.0"):
+                                    strike_price = self.current_btc_spot
+                                else:
+                                    fallback_strikes = {
+                                        CryptoAsset.BTC: Decimal("80000.00"),
+                                        CryptoAsset.ETH: Decimal("3000.00"),
+                                        CryptoAsset.SOL: Decimal("180.00"),
+                                        CryptoAsset.DOGE: Decimal("0.2000"),
+                                    }
+                                    strike_price = fallback_strikes.get(self.active_asset, Decimal("80000.00"))
 
                             step = self.active_cfg.strike_step
                             # Use real spot price at reconciliation time; fabricated strike±step as fallback
                             if self.current_btc_spot > Decimal("0.0"):
-                                settlement_btc_price = self.current_btc_spot
+                                settlement_spot_price = self.current_btc_spot
                             else:
-                                settlement_btc_price = strike_price + (step if market_result == "yes" else -step)
+                                settlement_spot_price = strike_price + (step if market_result == "yes" else -step)
                             balance_after = self.total_balance_dollars if self.total_balance_dollars > 0 else self.balance_dollars
+
+                            rep_tf = "5m" if ("5M" in ticker.upper() or "5MIN" in ticker.upper()) else "15m"
+                            rep_asset = self.active_asset.value
 
                             rep = {
                                 "report_id": report_id,
                                 "cycle_time": cycle_time,
                                 "ticker": ticker,
-                                "timeframe": "15m",
+                                "timeframe": rep_tf,
+                                "asset": rep_asset,
                                 "strike_price": float(strike_price),
-                                "settlement_btc_price": float(settlement_btc_price),
+                                "settlement_btc_price": float(settlement_spot_price),
+                                "settlement_spot_price": float(settlement_spot_price),
                                 "bot_side": trade_side,
                                 "contracts": size,
                                 "entry_price": float(entry_price),
