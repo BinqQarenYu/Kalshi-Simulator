@@ -419,7 +419,9 @@ class HistoricalQueryService:
     async def delete_batch(self, table: str, ids: List[Any]) -> int:
         """Batch delete records from a specified historical table given a list of IDs."""
         valid_tables = {"trades", "settlements", "ai_predictions", "equity_snapshots"}
-        if table not in valid_tables or not ids:
+        if table not in valid_tables:
+            raise ValueError(f"Invalid table name for delete operation: {table}")
+        if not ids:
             return 0
 
         placeholders = ",".join("?" for _ in ids)

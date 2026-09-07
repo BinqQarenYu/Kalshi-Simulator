@@ -195,3 +195,18 @@ def test_server_history_endpoints() -> None:
         assert res_batch.status_code == 200
         assert res_batch.json()["success"] is True
 
+        # 8. Batch Delete SQL injection prevention test
+        res_invalid_batch = client.post("/api/history/batch-delete", json={"table": "users; DROP TABLE trades;--", "ids": [1]})
+        assert res_invalid_batch.status_code == 400
+        assert "Invalid table name" in res_invalid_batch.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_delete_batch_sql_injection_prevention(tmp_path: Path) -> None:
+    """Verify that delete_batch raises ValueError for invalid/malicious table names."""
+    db_path = tmp_path / "test_sqli.db"
+    db_mgr = DatabaseManager(db_path=db_path)
+    query_service = HistoricalQueryService(db_manager=db_mgr)
+
+    with pytest.raises(ValueError, match="Invalid table name for delete operation"):
+        await query_service.delete_batch("users; DROP TABLE trades;--", [1])

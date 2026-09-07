@@ -4374,10 +4374,16 @@ class BatchDeleteRequest(BaseModel):
     ids: list[Any] = Field(..., description="List of IDs or keys to delete")
 
 
+ALLOWED_BATCH_DELETE_TABLES = {"trades", "settlements", "ai_predictions", "equity_snapshots", "win_loss_reports", "reports"}
+
+
 @app.post("/api/history/batch-delete")
 async def batch_delete_endpoint(req: BatchDeleteRequest) -> dict[str, Any]:
     """Batch delete records from a specified historical table or reports ledger."""
-    table_clean = req.table.lower()
+    table_clean = req.table.lower().strip()
+    if table_clean not in ALLOWED_BATCH_DELETE_TABLES:
+        raise HTTPException(status_code=400, detail=f"Invalid table name '{req.table}' for batch delete.")
+
     if table_clean in ("win_loss_reports", "reports"):
         id_set = {str(x) for x in req.ids}
         initial_len = len(state.win_loss_reports)
