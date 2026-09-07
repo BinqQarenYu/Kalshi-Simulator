@@ -39,10 +39,12 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
     <div className="bg-[#0d1117] p-3 sm:p-4 rounded-xl border border-[#21262d]/60 shadow-inner">
       {/* Top Controls: Filter Pills & Spread Pill */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#21262d]">
-        <div className="flex items-center gap-1.5 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
+        <div role="group" aria-label="Order book depth filter" className="flex items-center gap-1.5 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
           <button
+            type="button"
+            aria-pressed={filterSide === 'all'}
             onClick={() => setFilterSide('all')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
               filterSide === 'all'
                 ? 'bg-slate-700 text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -51,8 +53,10 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
             All Depth ({ladder.length})
           </button>
           <button
+            type="button"
+            aria-pressed={filterSide === 'yes'}
             onClick={() => setFilterSide('yes')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
               filterSide === 'yes'
                 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-emerald-400'
@@ -62,8 +66,10 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
             YES (Up)
           </button>
           <button
+            type="button"
+            aria-pressed={filterSide === 'no'}
             onClick={() => setFilterSide('no')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
               filterSide === 'no'
                 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-amber-400'
@@ -107,11 +113,15 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
             const hoverBorder = isYes ? 'hover:border-emerald-500/40' : 'hover:border-amber-500/40';
 
             return (
-              <div
+              <button
+                type="button"
                 key={`${row.side}-${row.price_cents}-${idx}`}
                 onClick={() => onSelectPrice(parseFloat((row.price_raw * 100).toFixed(1)))}
                 title={`Click to set Limit Order at ${row.price_cents}`}
-                className={`relative grid grid-cols-4 py-2 px-1.5 cursor-pointer hover:bg-[#161b22] rounded items-center group transition-all border border-transparent ${hoverBorder}`}
+                aria-label={`Select limit order price ${row.price_cents} for ${row.side.toUpperCase()}, ${(row.price_raw * 100).toFixed(0)}% probability, ${row.contracts.toLocaleString()} contracts`}
+                className={`w-full text-left relative grid grid-cols-4 py-2 px-1.5 cursor-pointer hover:bg-[#161b22] focus-visible:outline-none focus-visible:ring-2 ${
+                  isYes ? 'focus-visible:ring-emerald-400' : 'focus-visible:ring-amber-400'
+                } rounded items-center group transition-all border border-transparent ${hoverBorder}`}
               >
                 {/* Instantaneous Hardware-Accelerated Depth Bar */}
                 <div
@@ -147,7 +157,7 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
                 <div className="col-span-1 text-right text-[#8b949e] group-hover:text-white font-medium z-10">
                   {row.total}
                 </div>
-              </div>
+              </button>
             );
           })
         )}

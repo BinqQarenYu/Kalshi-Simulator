@@ -18,3 +18,7 @@
 ## 2026-09-04 - Segmented View Mode Toggles & Metric Emphasis
 **Learning:** Segmented toggle button groups (such as `$` vs `%` price view mode) need explicit `role="group"`, `aria-label`, `type="button"`, and dynamic `aria-pressed` state attributes so assistive technology users understand the available selection group and current active filter state. In addition, changing view modes should dynamically adjust visual emphasis on the selected metric.
 **Action:** Wrap button toggle pairs in a `role="group"` element with a clear `aria-label`, supply `aria-pressed` and `focus-visible:ring-2` focus rings on each button, and wire state changes to dynamically highlight the active metric.
+
+## 2026-09-07 - Level-2 Order Book Depth Rows & Filter Pill Groups
+**Learning:** Dense data grid rows in Level-2 order book depth ladders often use `div` containers with `onClick` handlers, which prevents keyboard navigation via Tab/Enter and excludes screen readers from announcing order parameters.
+**Action:** Render order book depth rows as semantic `<button type="button">` elements with descriptive `aria-label` text and `focus-visible:ring-2` focus rings. Ensure filter pill controls are grouped in `role="group"` with explicit `aria-pressed` states.
