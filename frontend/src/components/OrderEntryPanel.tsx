@@ -49,7 +49,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
   const maxPayout = shares * 1.0; // Kalshi binary contract payout ($1.00)
 
   // Live account balance & freeze calculations
-  const availableLiveCash = livePortfolio?.balance_dollars ?? 0.0;
+  const availableLiveCash = Number(livePortfolio?.balance_dollars ?? 0.0) || 0.0;
   const isLiveFrozen = isLive && (availableLiveCash <= 0.05 || availableLiveCash < totalCost);
 
   const handleExecute = async () => {

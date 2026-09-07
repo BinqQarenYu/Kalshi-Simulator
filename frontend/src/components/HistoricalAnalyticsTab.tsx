@@ -2540,7 +2540,7 @@ export const HistoricalAnalyticsTab: React.FC = () => {
                 <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800">
                   <div className="text-[#8b949e] text-[10px] uppercase">Live Exchange Bankroll</div>
                   <div className="text-blue-400 font-bold text-sm mt-0.5">
-                    ${(validationStatus?.real_money_readiness.live_account?.balance_dollars ?? 0.3).toFixed(2)} Available
+                    ${(Number(validationStatus?.real_money_readiness.live_account?.balance_dollars ?? 0.3) || 0.3).toFixed(2)} Available
                   </div>
                 </div>
               </div>

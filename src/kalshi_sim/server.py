@@ -596,17 +596,18 @@ async def standalone_sync_loop() -> None:
                             if "armed" in data:
                                 state.ai_auto_trade = bool(data["armed"])
 
-                            bal = data.get("balance", 0.0)
+                            bal = float(data.get("balance", 0.0))
                             state.live_portfolio = {
                                 "balance": bal,
-                                "balance_dollars": str(bal),
-                                "today_pnl": data.get("today_pnl", 0.0),
-                                "settled_cycles": data.get("settled_cycles", 0),
-                                "today_wins": data.get("today_wins", 0),
-                                "today_losses": data.get("today_losses", 0),
-                                "today_win_rate": data.get("today_win_rate", 0.0),
-                                "consecutive_losses": data.get("consecutive_losses", 0),
-                                "max_consecutive_losses": data.get("max_consecutive_losses", 3),
+                                "balance_dollars": bal,
+                                "available_margin": bal,
+                                "today_pnl": float(data.get("today_pnl", 0.0)),
+                                "settled_cycles": int(data.get("settled_cycles", 0)),
+                                "today_wins": int(data.get("today_wins", 0)),
+                                "today_losses": int(data.get("today_losses", 0)),
+                                "today_win_rate": float(data.get("today_win_rate", 0.0)),
+                                "consecutive_losses": int(data.get("consecutive_losses", 0)),
+                                "max_consecutive_losses": int(data.get("max_consecutive_losses", 3)),
                                 "positions": [],
                                 "payout_pending": 0.0,
                             }

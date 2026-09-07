@@ -381,9 +381,9 @@ export interface LivePositionItem {
 }
 
 export interface LivePortfolioState {
-  balance_dollars: number;
-  available_margin: number;
-  payout_pending: number;
+  balance_dollars: number | string;
+  available_margin: number | string;
+  payout_pending: number | string;
   positions_count?: number;
   positions: LivePositionItem[];
   updated_at: string;

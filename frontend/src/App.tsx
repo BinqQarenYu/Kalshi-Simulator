@@ -217,7 +217,7 @@ export function App() {
                 Environment: {data.live_portfolio?.environment?.toUpperCase() || 'LIVE PROD'}
               </span>
               <span className="text-[#8b949e] hidden md:inline font-mono">
-                | Cash: ${(data.live_portfolio?.balance_dollars ?? 0.30).toFixed(2)}
+                | Cash: ${(Number(data.live_portfolio?.balance_dollars ?? 0.30) || 0.30).toFixed(2)}
               </span>
               <span className="text-[#8b949e] hidden md:inline font-mono">
                 | Single-Trade Cap: 1 Contract / Asset ($1.00 Max Risk)
@@ -248,12 +248,12 @@ export function App() {
       )}
 
       {/* Small Notification if Live Balance is Depleted / All Bets Frozen */}
-      {isLive && (data.live_portfolio?.balance_dollars ?? 0.0) <= 0.05 && (
+      {isLive && (Number(data.live_portfolio?.balance_dollars ?? 0.0) || 0.0) <= 0.05 && (
         <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2 animate-in fade-in">
           <div className="max-w-[1600px] w-full mx-auto flex flex-wrap items-center justify-between gap-3 text-xs">
             <div className="flex items-center gap-2 text-amber-300">
               <span className="text-sm">⚠️</span>
-              <span className="font-bold">Live Balance Depleted (${(data.live_portfolio?.balance_dollars ?? 0.0).toFixed(2)}):</span>
+              <span className="font-bold">Live Balance Depleted (${(Number(data.live_portfolio?.balance_dollars ?? 0.0) || 0.0).toFixed(2)}):</span>
               <span className="text-amber-200/90">All live bets are frozen. Please load assets into your Kalshi account to resume.</span>
             </div>
             <a

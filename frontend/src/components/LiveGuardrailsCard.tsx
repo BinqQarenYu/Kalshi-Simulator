@@ -27,8 +27,8 @@ export const LiveGuardrailsCard: React.FC<LiveGuardrailsCardProps> = ({
   onKillSwitch,
   onResumeTrading,
 }) => {
-  const balance = livePortfolio?.balance_dollars ?? 0.30;
-  const margin = livePortfolio?.available_margin ?? 0.30;
+  const balance = Number(livePortfolio?.balance_dollars ?? 0.30) || 0.30;
+  const margin = Number(livePortfolio?.available_margin ?? 0.30) || 0.30;
   const env = livePortfolio?.environment?.toUpperCase() || 'LIVE';
   const isBalanceDepleted = balance <= 0.05;
 

@@ -403,12 +403,12 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Live Kalshi Account Balance Badge */}
               <div
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#161b22] border border-emerald-500/40 text-xs font-mono shadow-sm shadow-emerald-500/10 cursor-default"
-                title={`Kalshi Live Account | Available Cash: $${(livePortfolio?.balance_dollars ?? 0.30).toFixed(2)} | Margin: $${(livePortfolio?.available_margin ?? 0.30).toFixed(2)}`}
+                title={`Kalshi Live Account | Available Cash: $${(Number(livePortfolio?.balance_dollars ?? 0.30) || 0.30).toFixed(2)} | Margin: $${(Number(livePortfolio?.available_margin ?? 0.30) || 0.30).toFixed(2)}`}
               >
                 <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-[#8b949e] font-sans font-semibold text-[11px]">Live Cash:</span>
                 <span className="font-bold text-emerald-400">
-                  ${(livePortfolio?.balance_dollars ?? 0.30).toFixed(2)}
+                  ${(Number(livePortfolio?.balance_dollars ?? 0.30) || 0.30).toFixed(2)}
                 </span>
               </div>
             </>
