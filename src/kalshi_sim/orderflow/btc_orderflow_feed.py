@@ -265,11 +265,15 @@ class BtcOrderflowFeed:
         self.rolling_cvd = (self.rolling_cvd * 0.9995) + signed_qty
 
         # Dispatch fast callbacks for spot price listeners
+        self._dispatch_on_tick(p)
+
+    def _dispatch_on_tick(self, price: Decimal) -> None:
+        """Dispatch spot price update to registered callbacks, logging any callback errors."""
         for cb in self._on_tick_callbacks:
             try:
-                cb(p)
-            except Exception:
-                pass
+                cb(price)
+            except Exception as exc:
+                logger.error("[BTC ORDERFLOW] Error in on_tick callback %r: %s", cb, exc, exc_info=True)
 
     async def _coinbase_stream_worker(self) -> None:
         """Standby fallback stream from Coinbase Pro WebSocket."""
@@ -302,11 +306,7 @@ class BtcOrderflowFeed:
                                 if "price" in data:
                                     p = Decimal(str(data["price"]))
                                     self.last_spot_price = p
-                                    for cb in self._on_tick_callbacks:
-                                        try:
-                                            cb(p)
-                                        except Exception:
-                                            pass
+                                    self._dispatch_on_tick(p)
                         except Exception as exc:
                             logger.debug("[BTC ORDERFLOW] Parse error in Coinbase frame: %s", exc)
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
@@ -340,8 +340,4 @@ class BtcOrderflowFeed:
         self.last_spot_price = p
         self.rolling_cvd = (self.rolling_cvd * 0.9995) + signed_qty
 
-        for cb in self._on_tick_callbacks:
-            try:
-                cb(p)
-            except Exception:
-                pass
+        self._dispatch_on_tick(p)
