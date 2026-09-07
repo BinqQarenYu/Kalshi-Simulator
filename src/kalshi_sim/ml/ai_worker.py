@@ -88,6 +88,12 @@ class AIWorker:
         if hasattr(self, "_domination_bot") and hasattr(self._domination_bot, "set_discount_limit_price"):
             self._domination_bot.set_discount_limit_price(price)
 
+    def set_asset(self, asset: Any) -> None:
+        """Update active asset on the domination bot."""
+        if hasattr(self, "_domination_bot") and hasattr(self._domination_bot, "set_asset"):
+            self._domination_bot.set_asset(asset)
+        logger.info("AIWorker underlying asset updated to: %s", asset)
+
     def get_cached_signals(self) -> dict[str, Any]:
         """Return the latest cached AI state instantly with <0.001ms latency."""
         return self._cached_signals.copy()
@@ -261,7 +267,7 @@ class AIWorker:
                                 time_to_expiry_s=time_to_expiry_s,
                                 recent_trades=trades,
                                 total_equity=equity,
-                                max_position_size=10,
+                                max_position_size=1,
                                 estimated_vpin=vpin_val,
                             )
 
