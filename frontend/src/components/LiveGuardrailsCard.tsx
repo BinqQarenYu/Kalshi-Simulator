@@ -145,8 +145,8 @@ export const LiveGuardrailsCard: React.FC<LiveGuardrailsCardProps> = ({
       <div className="grid grid-cols-2 gap-2.5">
         <div className="bg-[#161b22] border border-[#21262d] p-3 rounded-xl">
           <div className="text-[10px] text-[#8b949e] uppercase font-semibold">Max Sizing Cap</div>
-          <div className="text-sm font-bold text-white font-mono mt-0.5">1 – 2 Contracts</div>
-          <div className="text-[10px] text-emerald-400 mt-0.5 font-mono">$1.50 Max Risk / Event</div>
+          <div className="text-sm font-bold text-white font-mono mt-0.5">1 Contract / Asset</div>
+          <div className="text-[10px] text-emerald-400 mt-0.5 font-mono">$1.00 Max Risk / Event</div>
         </div>
 
         <div className="bg-[#161b22] border border-[#21262d] p-3 rounded-xl">

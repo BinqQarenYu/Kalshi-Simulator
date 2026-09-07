@@ -15,6 +15,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import { ChartPoint, MarketState, TradeTapeItem, WinLossEventReport } from '../types';
 import { ChevronDown, Crosshair, Trophy, ArrowUpRight, ArrowDownRight, TrendingUp, TrendingDown } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
+import { getAssetMeta, formatAssetDelta } from '../utils/assets';
 
 interface TargetChartProps {
   /** Real-time market state containing target strike, spot price, and calculated deltas */
@@ -80,6 +81,9 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
   const [selectedTimeframe, setSelectedTimeframe] = useState<'LIVE' | '5M' | '15M' | '1H'>('LIVE');
   const [isPastDropdownOpen, setIsPastDropdownOpen] = useState<boolean>(false);
 
+  const assetMeta = getAssetMeta(market.active_asset);
+  const decimals = market.active_asset_decimals ?? assetMeta.decimals;
+
   // Helper references for coordinate projection in mouse events
   const chartLayoutRef = useRef<{
     minPrice: number;
@@ -116,18 +120,19 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
 
   // Memoize trajectory points with pre-parsed seconds to eliminate ~216,000 string splits/min and 3,600 array allocations/sec in 60FPS RAF loop
   const processedPoints = useMemo<(ChartPoint & { secs: number })[]>(() => {
+    const buf = assetMeta.defaultBuffer;
     const raw: ChartPoint[] = chart.length >= 2 ? chart : [
-      { time: '00:00:01', price: market.target_strike - 10, target: market.target_strike },
-      { time: '00:00:05', price: market.target_strike - 25, target: market.target_strike },
-      { time: '00:00:10', price: market.target_strike - 40, target: market.target_strike },
-      { time: '00:00:15', price: market.target_strike - 60, target: market.target_strike },
+      { time: '00:00:01', price: market.target_strike - buf * 0.2, target: market.target_strike },
+      { time: '00:00:05', price: market.target_strike - buf * 0.4, target: market.target_strike },
+      { time: '00:00:10', price: market.target_strike - buf * 0.7, target: market.target_strike },
+      { time: '00:00:15', price: market.target_strike - buf * 1.0, target: market.target_strike },
       { time: '00:00:20', price: market.current_btc_price, target: market.target_strike },
     ];
     return raw.map((p) => ({
       ...p,
       secs: parseTimeToSeconds(p.time),
     }));
-  }, [chart, market.target_strike, market.current_btc_price]);
+  }, [chart, market.target_strike, market.current_btc_price, assetMeta.defaultBuffer]);
 
   // Track container resize with ResizeObserver
   useEffect(() => {
@@ -183,9 +188,10 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       const currentPrice = market.current_btc_price;
       const isUp = currentPrice >= targetStrike;
 
-      // 1. Calculate strictly proportional Y-bounds with nice .5 unit steps
-      let rawMin = Math.min(targetStrike, currentPrice) - 30;
-      let rawMax = Math.max(targetStrike, currentPrice) + 30;
+      // 1. Calculate strictly proportional Y-bounds with dynamic unit steps
+      const baseBuffer = assetMeta.defaultBuffer;
+      let rawMin = Math.min(targetStrike, currentPrice) - baseBuffer;
+      let rawMax = Math.max(targetStrike, currentPrice) + baseBuffer;
 
       if (processedPoints.length > 0) {
         for (let i = 0; i < processedPoints.length; i++) {
@@ -193,25 +199,37 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
           if (p < rawMin) rawMin = p;
           if (p > rawMax) rawMax = p;
         }
-        rawMin -= 10;
-        rawMax += 15;
+        rawMin -= assetMeta.minBuffer;
+        rawMax += assetMeta.minBuffer * 1.5;
       }
 
-      // Proportional vertical span calculation (snapping to .5 unit increments)
+      // Proportional vertical span calculation (adaptive to asset price scale)
       const span = rawMax - rawMin;
       let tickStep = 0.5;
-      if (span > 300) tickStep = 50.0;
-      else if (span > 150) tickStep = 25.0;
-      else if (span > 75) tickStep = 10.0;
-      else if (span > 30) tickStep = 5.0;
-      else if (span > 10) tickStep = 2.5;
-      else if (span > 4) tickStep = 1.0;
-      else tickStep = 0.5;
+      if (decimals >= 4) {
+        if (span > 0.02) tickStep = 0.005;
+        else if (span > 0.01) tickStep = 0.002;
+        else if (span > 0.004) tickStep = 0.001;
+        else if (span > 0.002) tickStep = 0.0005;
+        else if (span > 0.0008) tickStep = 0.0002;
+        else tickStep = 0.0001;
+      } else {
+        if (span > 300) tickStep = 50.0;
+        else if (span > 150) tickStep = 25.0;
+        else if (span > 75) tickStep = 10.0;
+        else if (span > 30) tickStep = 5.0;
+        else if (span > 10) tickStep = 2.5;
+        else if (span > 4) tickStep = 1.0;
+        else if (span > 1.5) tickStep = 0.5;
+        else if (span > 0.6) tickStep = 0.25;
+        else if (span > 0.2) tickStep = 0.1;
+        else tickStep = 0.05;
+      }
 
       // Align minPrice and maxPrice to nice tick boundaries
       const minPrice = Math.floor(rawMin / tickStep) * tickStep;
       const maxPrice = Math.ceil(rawMax / tickStep) * tickStep;
-      const priceRange = maxPrice - minPrice || 50;
+      const priceRange = maxPrice - minPrice || (baseBuffer * 2);
 
       const padTop = 28;
       const padBottom = 42; // Generous bottom margin for dedicated X-axis time ticker
@@ -226,7 +244,7 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       const chartStartX = 52;
       const chartEndX = width - 85;
 
-      // 2. Draw Horizontal Proportional Grid Lines & .5-unit Price Labels
+      // 2. Draw Horizontal Proportional Grid Lines & Adaptive Price Labels
       ctx.lineWidth = 1;
       ctx.font = '10px "JetBrains Mono", Inter, sans-serif';
       ctx.textAlign = 'right';
@@ -244,41 +262,41 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
         ctx.lineTo(chartEndX, y);
         ctx.stroke();
 
-        // Format price label with .5 / .0 decimal precision (e.g. 77,624.5 or 77,324.0)
+        // Format price label with asset decimal precision
         ctx.fillStyle = '#6e7681';
         const formattedPrice = p.toLocaleString('en-US', {
-          minimumFractionDigits: tickStep < 1 ? 1 : 0,
-          maximumFractionDigits: 1,
+          minimumFractionDigits: decimals >= 4 ? 4 : (tickStep < 1 ? (tickStep < 0.1 ? 2 : 1) : 0),
+          maximumFractionDigits: decimals,
         });
         ctx.fillText(`$${formattedPrice}`, width - 8, y + 3.5);
       }
 
-      // 3. Left-Axis Strike Delta Labels (+ $0, + $1, + $6, + $10, + $30, + $50, + $64)
-      const deltaOffsets = [64, 50, 30, 10, 6, 1, 0, -6, -10, -30, -50];
+      // 3. Left-Axis Strike Delta Labels (Scaled per Asset Microstructure)
+      const deltaOffsets = assetMeta.deltaOffsets;
       ctx.font = 'bold 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'left';
 
       deltaOffsets.forEach((delta) => {
         const p = targetStrike + delta;
-        if (p >= minPrice - 5 && p <= maxPrice + 5) {
+        if (p >= minPrice - assetMeta.minBuffer && p <= maxPrice + assetMeta.minBuffer) {
           const y = getY(p);
 
           let color = '#f7931a'; // + $0 orange baseline
           if (delta > 0) {
-            color = delta >= 30 ? '#00d084' : '#ff7b7b';
+            color = delta >= assetMeta.minSpotDiff ? '#00d084' : '#ff7b7b';
           } else if (delta < 0) {
             color = '#ff4d4d';
           }
 
           ctx.fillStyle = color;
-          const labelText = delta >= 0 ? `+ $${delta}` : `- $${Math.abs(delta)}`;
+          const labelText = formatAssetDelta(delta, market.active_asset);
           ctx.fillText(labelText, 8, y + 3.5);
 
           // Red/Green dotted threshold guidelines across chart
-          if (delta === 50 || delta === -50) {
+          if (Math.abs(delta) === assetMeta.thresholdGuideline) {
             ctx.save();
             ctx.setLineDash([3, 3]);
-            ctx.strokeStyle = delta === 50 ? 'rgba(255, 77, 77, 0.7)' : 'rgba(0, 208, 132, 0.7)';
+            ctx.strokeStyle = delta > 0 ? 'rgba(0, 208, 132, 0.7)' : 'rgba(255, 77, 77, 0.7)';
             ctx.lineWidth = 1.2;
             ctx.beginPath();
             ctx.moveTo(chartStartX, y);
@@ -434,7 +452,9 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
 
       // Floating Live Directional Delta Pill on Head
       const diffVal = market?.diff ?? 0;
-      const diffStr = diffVal >= 0 ? `▲ +$${diffVal.toFixed(2)}` : `▼ -$${Math.abs(diffVal).toFixed(2)}`;
+      const diffStr = market.diff_str
+        ? market.diff_str.split(' ')[0]
+        : (diffVal >= 0 ? `▲ +$${diffVal.toFixed(decimals)}` : `▼ -$${Math.abs(diffVal).toFixed(decimals)}`);
       const tagBg = isUp ? '#00d084' : '#ff4d4d';
 
       ctx.fillStyle = tagBg;
@@ -552,12 +572,12 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       const diffEl = tooltip.querySelector('.tt-diff');
 
       if (timeEl) timeEl.textContent = snappedPt.time;
-      if (priceEl) priceEl.textContent = `$${snappedPt.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      if (priceEl) priceEl.textContent = `$${snappedPt.price.toLocaleString('en-US', { minimumFractionDigits: decimals >= 4 ? 4 : 2, maximumFractionDigits: decimals })}`;
 
       if (diffEl) {
         const sign = (diff ?? 0) >= 0 ? '+' : '';
         const colorClass = (diff ?? 0) >= 0 ? 'text-[#00d084]' : 'text-[#ff4d4d]';
-        diffEl.textContent = `${sign}${(diff ?? 0).toFixed(2)} (${sign}${(diffPct ?? 0).toFixed(3)}%)`;
+        diffEl.textContent = `${sign}${(diff ?? 0).toFixed(decimals)} (${sign}${(diffPct ?? 0).toFixed(3)}%)`;
         diffEl.className = `tt-diff text-[11px] font-semibold flex items-center gap-1 mt-0.5 ${colorClass}`;
       }
 
@@ -744,7 +764,7 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
               <TrendingDown className="h-4 w-4 text-rose-400" />
             )}
             <span className={`font-bold text-xs font-mono ${isMarketAbove ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {market.current_btc_price_str || `$${market.current_btc_price.toFixed(2)}`}
+              {market.current_btc_price_str || `$${market.current_btc_price.toFixed(decimals)}`}
             </span>
           </div>
 

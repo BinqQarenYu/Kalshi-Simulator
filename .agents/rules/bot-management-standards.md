@@ -19,7 +19,7 @@ description: Standard institutional rules for bot management, multi-strategy arc
   - All bots share the same production-grade data ingestion and risk infrastructure:
     - Authenticated Kalshi CF Benchmarks BRTI 5Hz stream (`cfbenchmarks_value_5hz`) and official 60s settlement TWAP (`avg_60s_data`).
     - Local L2 Central Limit Order Book (CLOB) with sequence continuity validation.
-    - Pre-trade risk guardrails: micro-bankroll sizing (1–2 contracts, max 4), 1-trade-per-cycle lock, VPIN toxicity cutoff, and cooldown buffers.
+    - Pre-trade risk guardrails: strictly 1 contract for each asset (`BTC`, `ETH`, `SOL`, `DOGE`), only 3-Step Dominion authorized to trade, all other paper bots strictly prohibited, 1-trade-per-cycle lock, VPIN toxicity cutoff, and cooldown buffers.
     - Deterministic `decimal.Decimal` arithmetic for all monetary values.
 - **Isolated Strategy Modules**:
   - Each trading strategy lives in its own dedicated file (e.g., `src/kalshi_sim/strategies/`).
@@ -61,6 +61,7 @@ Every algorithmic trading strategy must graduate through a rigorous 4-stage life
 4. **Certify & Promote**: Pass the 4-pillar pre-flight certification audit (`BotDeploymentAuditor`). Once certified, switch the strategy selector to promote the bot to Lane 1 (Live).
 
 ## 5. Invariant Protections & Zero Regression
+- **Strict 1-Contract Invariant & Sole Authorization**: Only `ThreeStepDominion` is authorized to trade; all other bots (Dominion 2, ONNX, Scalp, Momentum, Swing, Shadow/Incubator candidates) are strictly prohibited from placing trades. Sizing is strictly hard-capped to 1 contract for each asset (`BTC`, `ETH`, `SOL`, `DOGE`).
 - Never disable or bypass the 1-trade-per-cycle lock or VPIN toxicity veto in Lane 1.
 - Never use IEEE-754 floats for monetary calculations in any lane.
 - Always run the full verification battery before committing:

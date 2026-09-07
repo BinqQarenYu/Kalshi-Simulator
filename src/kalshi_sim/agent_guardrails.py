@@ -22,8 +22,9 @@ class AgentGuardrails:
         self,
         min_order_interval_seconds: float = 45.0,
         max_risk_pct_per_trade: Decimal = Decimal("0.08"),  # Max 8% of equity per trade
-        max_micro_bankroll_contracts: int = 2,  # Hard cap: Max 1-2 contracts for equity <= $100
-        max_nano_bankroll_contracts: int = 2,   # Max contracts for equity <= $25
+        max_micro_bankroll_contracts: int = 1,  # Hard cap: Strictly 1 contract per trade for each asset
+        max_nano_bankroll_contracts: int = 1,   # Strictly 1 contract max
+        max_other_bots_contracts: int = 0,      # Rule: Only 3-Step Dominion is authorized to trade (other bots 0)
         consecutive_loss_taper_threshold: int = 2,
         drawdown_taper_threshold: Decimal = Decimal("0.15"),  # 15% drawdown activates taper
         emergency_drawdown_limit: Decimal = Decimal("0.25"),  # 25% drawdown halts all trading
@@ -33,6 +34,7 @@ class AgentGuardrails:
         self.max_risk_pct_per_trade = max_risk_pct_per_trade
         self.max_micro_bankroll_contracts = max_micro_bankroll_contracts
         self.max_nano_bankroll_contracts = max_nano_bankroll_contracts
+        self.max_other_bots_contracts = max_other_bots_contracts
         self.consecutive_loss_taper_threshold = consecutive_loss_taper_threshold
         self.drawdown_taper_threshold = drawdown_taper_threshold
         self.emergency_drawdown_limit = emergency_drawdown_limit
@@ -68,6 +70,7 @@ class AgentGuardrails:
         vpin: float = 0.0,
         cycle_id: Optional[str] = None,
         is_bot: bool = True,
+        bot_type: Optional[str] = None,
     ) -> Tuple[bool, str, int, Dict[str, Any]]:
         """Validate an order against all safety guardrails before placement.
 
@@ -142,6 +145,21 @@ class AgentGuardrails:
             bankroll_cap = self.max_micro_bankroll_contracts
         else:
             bankroll_cap = max(self.max_micro_bankroll_contracts, int(total_equity / Decimal("25.00")))
+
+        # Rule: Strictly 1 contract for each asset; only 3-Step Dominion authorized to trade
+        # All other paper/simulation bots (Dominion 2, ONNX Microstructure, Scalp, Momentum, etc.) are prohibited.
+        is_primary_domination = (
+            bot_type in ("3_step_domination_bot", "3_step_domination", "domination", "3step_dominion", "three_step_domination")
+            or bot_type is None
+        )
+        if is_bot:
+            if not is_primary_domination:
+                msg = f"BOT TRADING PROHIBITED: Only 3-Step Dominion bot is authorized to trade. Bot '{bot_type}' is deactivated."
+                self._record_rejection("bot_prohibited", msg, ticker, now_utc)
+                return False, msg, 0, {"bot_type": bot_type}
+            else:
+                # Strictly 1 contract for each asset
+                bankroll_cap = 1
 
         approved_size = min(requested_size, budget_contracts, bankroll_cap)
 

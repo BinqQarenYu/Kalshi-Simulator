@@ -21,9 +21,11 @@ import {
   Shield,
 } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
+import { getAssetMeta } from '../utils/assets';
 
 interface AIMicrostructureCardProps {
   signals: AISignals;
+  activeAsset?: string;
   onSelectStrategy?: (strategyId: string) => Promise<any>;
   onTestBot?: () => Promise<any>;
   onOpenReports?: () => void;
@@ -33,12 +35,14 @@ interface AIMicrostructureCardProps {
 
 export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.memo(({
   signals,
+  activeAsset,
   onSelectStrategy,
   onTestBot,
   onOpenReports,
   dominationDiscountPrice,
   onUpdateDiscountPrice,
 }) => {
+  const assetMeta = getAssetMeta(activeAsset);
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
@@ -230,7 +234,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                       </span>
                     </div>
                     <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
-                      1h/15m Macro Trend + BTC L2 Orderflow • $40 Gate
+                      1h/15m Macro Trend + {assetMeta.id} L2 Orderflow • ${assetMeta.minSpotDiff} Gate
                     </p>
                   </div>
                 </div>
@@ -596,9 +600,9 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             <Cpu className="h-4 w-4 text-cyan-400" />
             <div>
               <div className="font-semibold text-white flex items-center gap-1.5">
-                <span>Bitcoin Orderflow (ONNX)</span>
+                <span>{assetMeta.name} Orderflow (ONNX)</span>
                 <span className="px-1.5 py-0.2 text-[8px] font-mono bg-cyan-500/20 text-cyan-300 rounded font-bold">
-                  BTC SPOT L2
+                  {assetMeta.id} SPOT L2
                 </span>
               </div>
               <div className="text-[10px] text-[#8b949e]">

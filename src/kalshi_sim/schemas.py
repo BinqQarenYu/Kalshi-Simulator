@@ -43,7 +43,23 @@ class AssetConfig(BaseModel):
     price_decimals: int
     min_spot_diff: Decimal
     typical_strike_step: Decimal
+    typical_1m_volatility: Decimal = Decimal("14.00")
     display_prefix: str = "$"
+
+    @property
+    def symbol(self) -> str:
+        """Asset symbol shorthand (e.g. BTC, ETH)."""
+        return self.asset.value
+
+    @property
+    def strike_step(self) -> Decimal:
+        """Typical strike interval step."""
+        return self.typical_strike_step
+
+    @property
+    def coinbase_pair(self) -> str:
+        """Coinbase Pro trading pair (e.g. BTC-USD)."""
+        return f"{self.asset.value}-USD"
 
     def format_price(self, val: Decimal | float | None) -> str:
         """Format price according to asset decimal precision."""
@@ -75,6 +91,7 @@ CRYPTO_ASSETS: dict[CryptoAsset, AssetConfig] = {
         price_decimals=2,
         min_spot_diff=Decimal("35.00"),
         typical_strike_step=Decimal("25.00"),
+        typical_1m_volatility=Decimal("14.00"),
     ),
     CryptoAsset.ETH: AssetConfig(
         asset=CryptoAsset.ETH,
@@ -84,6 +101,7 @@ CRYPTO_ASSETS: dict[CryptoAsset, AssetConfig] = {
         price_decimals=2,
         min_spot_diff=Decimal("2.50"),
         typical_strike_step=Decimal("2.50"),
+        typical_1m_volatility=Decimal("0.60"),
     ),
     CryptoAsset.SOL: AssetConfig(
         asset=CryptoAsset.SOL,
@@ -93,6 +111,7 @@ CRYPTO_ASSETS: dict[CryptoAsset, AssetConfig] = {
         price_decimals=2,
         min_spot_diff=Decimal("0.50"),
         typical_strike_step=Decimal("0.50"),
+        typical_1m_volatility=Decimal("0.04"),
     ),
     CryptoAsset.DOGE: AssetConfig(
         asset=CryptoAsset.DOGE,
@@ -102,6 +121,7 @@ CRYPTO_ASSETS: dict[CryptoAsset, AssetConfig] = {
         price_decimals=6,
         min_spot_diff=Decimal("0.0005"),
         typical_strike_step=Decimal("0.0005"),
+        typical_1m_volatility=Decimal("0.000045"),
     ),
 }
 

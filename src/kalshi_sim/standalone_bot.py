@@ -47,13 +47,16 @@ from kalshi_sim.auth import (
     load_private_key,
 )
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
-from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync
+from kalshi_sim.cfbenchmarks_sync import CFBenchmarksSync
 from kalshi_sim.db import get_db, get_db_writer, DatabaseWriter
 from kalshi_sim.ml.domination_bot import DominationDecision, ThreeStepDominationBot
 from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.rate_limiter import kalshi_rate_limiter
 from kalshi_sim.schemas import (
+    CRYPTO_ASSETS,
+    CryptoAsset,
+    get_asset_config,
     L2BookState,
     MarketInfo,
     MarketStatus,
@@ -138,18 +141,21 @@ class StandaloneBotEngine:
         is_live: bool = True,
         is_armed: bool = True,
         data_dir: Path = Path("data"),
+        asset: CryptoAsset = CryptoAsset.BTC,
     ) -> None:
         self.is_live = is_live
         self.is_armed = is_armed
         self.data_dir = data_dir
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.active_asset: CryptoAsset = asset
+        self.active_cfg = get_asset_config(asset)
 
         # 1. Instantiate Strategy & Guardrails
-        self.bot = ThreeStepDominationBot()
+        self.bot = ThreeStepDominationBot(asset=asset)
         self.guardrails = AgentGuardrails(
             min_order_interval_seconds=45.0,
-            max_micro_bankroll_contracts=2,
-            max_nano_bankroll_contracts=2,
+            max_micro_bankroll_contracts=1,
+            max_nano_bankroll_contracts=1,
             vpin_toxic_threshold=0.60,
         )
         self.auditor = BotDeploymentAuditor()
@@ -208,6 +214,10 @@ class StandaloneBotEngine:
         self.today_win_rate: float = 0.0
         self.recent_reports: List[Dict[str, Any]] = []
 
+        # Consecutive Loss Streak Breaker (Post-Mortem Fix — 9 consecutive overnight losses)
+        self.consecutive_losses: int = 0
+        self.max_consecutive_losses: int = 3  # Auto-disarm after 3 consecutive losses
+
         self.last_decision: Optional[DominationDecision] = None
         self.last_eval_time: float = 0.0
 
@@ -217,8 +227,9 @@ class StandaloneBotEngine:
         self.coinbase_connected: bool = False
         self.binance_connected: bool = False
 
-        # CF Benchmarks BRTI Index & Health
-        self.brti_sync: Optional[CFBenchmarksBRTISync] = None
+        # CF Benchmarks Multi-Asset Index & Health
+        self.cf_sync: Optional[CFBenchmarksSync] = None
+        self.brti_sync: Optional[CFBenchmarksSync] = None
         self.brti_connected: bool = False
         self.spot_source: str = "Uninitialized"
         self.twap_60s_price: Optional[Decimal] = None
@@ -226,6 +237,20 @@ class StandaloneBotEngine:
         self.spot_connected: bool = False
         self.tasks: List[asyncio.Task] = []
         self._running = False
+
+    def set_asset(self, asset: CryptoAsset) -> None:
+        """Switch active underlying asset in the standalone engine."""
+        self.active_asset = asset
+        self.active_cfg = get_asset_config(asset)
+        self.bot.set_asset(asset)
+        self.active_ticker = ""
+        self.target_strike = Decimal("0.00")
+        if self.cf_sync:
+            p = self.cf_sync.get_price(asset)
+            if p > Decimal("0.00"):
+                self.current_btc_spot = p
+                self.twap_60s_price = self.cf_sync.get_twap(asset)
+        logger.info("Switched Standalone Bot active asset to %s (%s)", self.active_cfg.name, asset.value)
 
     def get_parameters(self) -> Dict[str, Any]:
         """Return strategy parameters and guardrail thresholds."""
@@ -237,7 +262,7 @@ class StandaloneBotEngine:
         """Dynamically update strategy parameters and guardrail caps."""
         max_contracts = kwargs.pop("max_contracts", None)
         if max_contracts is not None:
-            clamped_size = max(1, min(4, int(max_contracts)))
+            clamped_size = max(1, min(1, int(max_contracts)))
             self.guardrails.max_micro_bankroll_contracts = clamped_size
             self.guardrails.max_nano_bankroll_contracts = clamped_size
             logger.info("🛡️ [GUARDRAIL PARAM UPDATE] Max contracts updated to: %d", clamped_size)
@@ -276,7 +301,9 @@ class StandaloneBotEngine:
             await asyncio.gather(*self.tasks, return_exceptions=True)
         self.tasks.clear()
         await self.db_writer.stop()
-        if self.brti_sync:
+        if self.cf_sync:
+            await self.cf_sync.stop()
+        elif self.brti_sync:
             await self.brti_sync.stop()
         if self.order_client:
             await self.order_client.close()
@@ -350,29 +377,38 @@ class StandaloneBotEngine:
             await asyncio.sleep(5.0)
 
     async def _spot_feed_loop(self) -> None:
-        """Stream real-time BTC spot price prioritizing official CF Benchmarks BRTI 5Hz feed."""
-        def _on_brti_update(price: Decimal, twap: Optional[Decimal], source: str) -> None:
-            self.current_btc_spot = price
-            if twap is not None:
-                self.twap_60s_price = twap
-            self.spot_source = source
-            self.spot_connected = True
-            self.brti_connected = True
-            asyncio.create_task(self.evaluate_and_execute())
+        """Stream real-time crypto spot price prioritizing official CF Benchmarks 5Hz feed."""
+        def _on_cf_asset_update(asset: CryptoAsset, price: Decimal, twap: Optional[Decimal], source: str) -> None:
+            if asset == self.active_asset:
+                self.current_btc_spot = price
+                if twap is not None:
+                    self.twap_60s_price = twap
+                self.spot_source = source
+                self.spot_connected = True
+                self.brti_connected = True
+                asyncio.create_task(self.evaluate_and_execute())
 
         if self.api_key_id and self.private_key_path:
             try:
-                self.brti_sync = CFBenchmarksBRTISync(
+                self.cf_sync = CFBenchmarksSync(
                     api_key_id=self.api_key_id,
                     private_key_path=self.private_key_path,
                     ws_url=self.ws_url,
                     rest_base=self.rest_base,
-                    on_price_update=_on_brti_update,
+                    on_asset_price_update=_on_cf_asset_update,
                 )
-                await self.brti_sync.start()
-                logger.info("📡 [BRTI SYNC] Official CF Benchmarks BRTI 5Hz client active.")
+                self.brti_sync = self.cf_sync
+                await self.cf_sync.start()
+                logger.info("📡 [CF BENCHMARKS] Official Multi-Asset 5Hz client active on Standalone Bot.")
             except Exception as e:
-                logger.warning("Could not start BRTI sync: %s. Falling back to public feeds.", e)
+                logger.warning("Could not start CF Benchmarks sync: %s. Falling back to public feeds.", e)
+
+        product_map = {
+            "BTC-USD": CryptoAsset.BTC,
+            "ETH-USD": CryptoAsset.ETH,
+            "SOL-USD": CryptoAsset.SOL,
+            "DOGE-USD": CryptoAsset.DOGE,
+        }
 
         connector = create_aiohttp_connector()
         async with aiohttp.ClientSession(connector=connector) as session:
@@ -380,10 +416,14 @@ class StandaloneBotEngine:
                 while self._running:
                     try:
                         async with session.ws_connect("wss://ws-feed.exchange.coinbase.com", timeout=5.0) as ws:
-                            await ws.send_json({"type": "subscribe", "product_ids": ["BTC-USD"], "channels": ["ticker"]})
-                            logger.info("📈 [SPOT WS] Connected to Coinbase Pro BTC-USD standby feed.")
+                            await ws.send_json({
+                                "type": "subscribe",
+                                "product_ids": ["BTC-USD", "ETH-USD", "SOL-USD", "DOGE-USD"],
+                                "channels": ["ticker"],
+                            })
+                            logger.info("📈 [SPOT WS] Connected to Coinbase Pro multi-asset standby feed.")
                             self.coinbase_connected = True
-                            if not (self.brti_sync and self.brti_sync.brti_connected):
+                            if not (self.cf_sync and self.cf_sync.is_connected):
                                 self.spot_connected = True
                             async for msg in ws:
                                 if not self._running:
@@ -391,9 +431,11 @@ class StandaloneBotEngine:
                                 if msg.type == aiohttp.WSMsgType.TEXT:
                                     data = json.loads(msg.data)
                                     if data.get("type") == "ticker" and "price" in data:
-                                        if not (self.brti_sync and self.brti_sync.brti_connected):
+                                        pid = data.get("product_id")
+                                        matched_asset = product_map.get(pid)
+                                        if matched_asset == self.active_asset and not (self.cf_sync and self.cf_sync.is_connected):
                                             self.current_btc_spot = Decimal(str(data["price"]))
-                                            self.spot_source = "Coinbase Pro BTC-USD (Fallback)"
+                                            self.spot_source = f"Coinbase Pro {pid} (Fallback)"
                                             self.brti_connected = False
                                             await self.evaluate_and_execute()
                                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
@@ -407,21 +449,26 @@ class StandaloneBotEngine:
                     await asyncio.sleep(2.0)
 
             async def _binance_worker() -> None:
+                streams = "btcusdt@ticker/ethusdt@ticker/solusdt@ticker/dogeusdt@ticker"
                 while self._running:
                     try:
-                        async with session.ws_connect("wss://stream.binance.com:9443/ws/btcusdt@ticker", timeout=5.0) as ws:
-                            logger.info("📈 [SPOT WS] Connected to Binance fallback BTC-USDT standby feed.")
+                        async with session.ws_connect(f"wss://stream.binance.com:9443/stream?streams={streams}", timeout=5.0) as ws:
+                            logger.info("📈 [SPOT WS] Connected to Binance multi-asset fallback feed.")
                             self.binance_connected = True
                             async for msg in ws:
                                 if not self._running:
                                     break
                                 if msg.type == aiohttp.WSMsgType.TEXT:
-                                    data = json.loads(msg.data)
-                                    if "c" in data and not (self.brti_sync and self.brti_sync.brti_connected) and not self.coinbase_connected:
-                                        self.current_btc_spot = Decimal(str(data["c"]))
-                                        self.spot_source = "Binance BTC-USDT (Fallback)"
-                                        self.brti_connected = False
-                                        await self.evaluate_and_execute()
+                                    raw = json.loads(msg.data)
+                                    s_data = raw.get("data", raw)
+                                    if "c" in s_data and "s" in s_data:
+                                        symbol = s_data.get("s", "").upper()
+                                        expected_sym = f"{self.active_asset.value}USDT"
+                                        if symbol == expected_sym and not (self.cf_sync and self.cf_sync.is_connected) and not self.coinbase_connected:
+                                            self.current_btc_spot = Decimal(str(s_data["c"]))
+                                            self.spot_source = f"Binance {symbol} (Fallback)"
+                                            self.brti_connected = False
+                                            await self.evaluate_and_execute()
                                 elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                                     break
                     except asyncio.CancelledError:
@@ -435,15 +482,16 @@ class StandaloneBotEngine:
             async def _rest_fallback_worker() -> None:
                 while self._running:
                     try:
-                        if not (self.brti_sync and self.brti_sync.brti_connected) and not self.coinbase_connected:
-                            async with session.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                        if not (self.cf_sync and self.cf_sync.is_connected) and not self.coinbase_connected:
+                            pair = self.active_cfg.coinbase_pair
+                            async with session.get(f"https://api.coinbase.com/v2/prices/{pair}/spot", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
                                 if resp.status == 200:
                                     r_data = await resp.json()
                                     amt = r_data.get("data", {}).get("amount")
                                     if amt:
                                         p_dec = Decimal(str(amt))
                                         self.current_btc_spot = p_dec
-                                        self.spot_source = "Coinbase REST (Fallback)"
+                                        self.spot_source = f"Coinbase REST {pair} (Fallback)"
                                         self.spot_connected = True
                                         self.brti_connected = False
                                         await self.evaluate_and_execute()
@@ -464,7 +512,7 @@ class StandaloneBotEngine:
                 rst_t.cancel()
 
     async def _market_discovery_and_book_loop(self) -> None:
-        """Discover active KXBTC15M contracts and sync L2 orderbook every 500ms."""
+        """Discover active 15M crypto contracts and sync L2 orderbook every 500ms."""
         connector = create_aiohttp_connector()
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -474,7 +522,7 @@ class StandaloneBotEngine:
             while self._running:
                 try:
                     # 1. Discover current open contract
-                    url = f"{self.rest_base}/markets?series_ticker=KXBTC15M&status=open&limit=15"
+                    url = f"{self.rest_base}/markets?series_ticker={self.active_cfg.series_ticker_15m}&status=open&limit=15"
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
                         if resp.status == 200:
                             data = await resp.json()
@@ -592,7 +640,7 @@ class StandaloneBotEngine:
             target_strike=float(self.target_strike),
             time_to_expiry_s=t_rem,
             total_equity=self.balance_dollars,
-            max_position_size=2,
+            max_position_size=1,
             estimated_vpin=0.15,
         )
         self.last_decision = decision
@@ -607,7 +655,7 @@ class StandaloneBotEngine:
 
         # 4. Institutional Pre-Trade Guardrail Check
         rec_side = decision.recommended_side
-        rec_size = min(decision.recommended_contracts, 2)  # Cap strictly to 1-2 contracts
+        rec_size = min(decision.recommended_contracts, 1)  # Strictly 1 contract for each asset
         est_price = Decimal(str(decision.limit_price))
 
         is_allowed, g_reason, approved_size, _ = self.guardrails.validate_pre_trade_intent(
@@ -619,6 +667,7 @@ class StandaloneBotEngine:
             vpin=decision.vpin,
             cycle_id=self.active_ticker,
             is_bot=True,
+            bot_type="3_step_domination_bot",
         )
 
         if not is_allowed or approved_size <= 0:
@@ -887,9 +936,14 @@ class StandaloneBotEngine:
                             if ticker == self.active_ticker:
                                 strike_price = self.target_strike
                             if strike_price <= Decimal("0.0"):
-                                strike_price = Decimal("79500.00")
+                                strike_price = self.current_btc_spot if self.current_btc_spot > Decimal("0.0") else Decimal("79500.00")
 
-                            settlement_btc_price = strike_price + (Decimal("45.00") if market_result == "yes" else Decimal("-45.00"))
+                            step = self.active_cfg.strike_step
+                            # Use real spot price at reconciliation time; fabricated strike±step as fallback
+                            if self.current_btc_spot > Decimal("0.0"):
+                                settlement_btc_price = self.current_btc_spot
+                            else:
+                                settlement_btc_price = strike_price + (step if market_result == "yes" else -step)
                             balance_after = self.total_balance_dollars if self.total_balance_dollars > 0 else self.balance_dollars
 
                             rep = {
@@ -944,9 +998,29 @@ class StandaloneBotEngine:
                                 balance_after=balance_after,
                                 cycle_id=ticker,
                             )
+
+                            # Consecutive Loss Streak Breaker — auto-disarm after N consecutive losses
+                            if outcome == "loss":
+                                self.consecutive_losses += 1
+                                if self.consecutive_losses >= self.max_consecutive_losses and self.is_armed:
+                                    self.is_armed = False
+                                    logger.warning(
+                                        "🛑 [STREAK BREAKER] %d consecutive losses reached (max=%d). "
+                                        "Bot AUTO-DISARMED to prevent further hemorrhaging. "
+                                        "Manual re-arm required via /api/bot/arm.",
+                                        self.consecutive_losses, self.max_consecutive_losses,
+                                    )
+                            else:
+                                if self.consecutive_losses > 0:
+                                    logger.info(
+                                        "✅ [STREAK RESET] Win breaks %d-loss streak. Counter reset to 0.",
+                                        self.consecutive_losses,
+                                    )
+                                self.consecutive_losses = 0
+
                             logger.info(
-                                "🏆 [SETTLEMENT RECONCILED] %s: %s | Result: %s | PnL: %+.2f",
-                                ticker, outcome.upper(), market_result.upper(), float(pnl)
+                                "🏆 [SETTLEMENT RECONCILED] %s: %s | Result: %s | PnL: %+.2f | Streak: %d",
+                                ticker, outcome.upper(), market_result.upper(), float(pnl), self.consecutive_losses
                             )
 
                         if new_reconciled > 0:
@@ -989,7 +1063,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 2. Start Engine
     is_live = os.getenv("KALSHI_ENV", "live").lower() in ("prod", "live")
-    app_engine = StandaloneBotEngine(is_live=is_live, is_armed=True)
+    init_asset_str = os.getenv("KALSHI_ACTIVE_ASSET", "BTC").upper().strip()
+    try:
+        init_asset = CryptoAsset(init_asset_str)
+    except ValueError:
+        init_asset = CryptoAsset.BTC
+    app_engine = StandaloneBotEngine(is_live=is_live, is_armed=True, asset=init_asset)
     await app_engine.start()
 
     yield
@@ -1018,6 +1097,7 @@ async def get_state() -> Dict[str, Any]:
     if not app_engine:
         raise HTTPException(status_code=503, detail="Engine initializing")
 
+    cfg = app_engine.active_cfg
     t_rem = app_engine.get_time_to_expiry()
     mins = int(t_rem // 60)
     secs = int(t_rem % 60)
@@ -1037,8 +1117,8 @@ async def get_state() -> Dict[str, Any]:
     diff_abs = abs(diff_dec)
     diff_pct_abs = abs(diff_pct_dec)
 
-    diff_str = f"{diff_sign}${diff_abs:,.2f}"
-    pct_decimals = 3 if diff_pct_abs < Decimal("0.10") else 2
+    diff_str = f"{diff_sign}{cfg.format_price(diff_abs)}"
+    pct_decimals = 4 if diff_pct_abs < Decimal("0.01") else (3 if diff_pct_abs < Decimal("0.10") else 2)
     diff_pct_str = f"{diff_sign}{diff_pct_abs:.{pct_decimals}f}%"
     moneyness_diff_str = f"{diff_str} ({diff_pct_str})"
 
@@ -1076,6 +1156,12 @@ async def get_state() -> Dict[str, Any]:
         "today_wins": app_engine.today_wins,
         "today_losses": app_engine.today_losses,
         "today_win_rate": round(app_engine.today_win_rate, 1),
+        "consecutive_losses": app_engine.consecutive_losses,
+        "max_consecutive_losses": app_engine.max_consecutive_losses,
+        "active_asset": app_engine.active_asset.value,
+        "active_asset_name": cfg.name,
+        "active_asset_symbol": cfg.symbol,
+        "series_ticker": cfg.series_ticker_15m,
         "active_ticker": app_engine.active_ticker,
         "time_remaining_str": t_str,
         "target_time_str": app_engine.target_time_str,
@@ -1085,10 +1171,10 @@ async def get_state() -> Dict[str, Any]:
         "position_sub": pos_sub,
         "resting_orders_count": resting_count,
         "spot_price": float(spot_dec),
-        "spot_price_str": f"${spot_dec:,.2f}",
+        "spot_price_str": cfg.format_price(spot_dec),
         "target_strike": float(strike_dec),
-        "target_strike_str": f"${strike_dec:,.2f}",
-        "spot_diff": float(round(diff_dec, 2)),
+        "target_strike_str": cfg.format_price(strike_dec) if strike_dec > 0 else "$0.00",
+        "spot_diff": float(round(diff_dec, cfg.price_decimals)),
         "spot_diff_pct": float(round(diff_pct_dec, 3)),
         "spot_diff_str": diff_str,
         "spot_diff_pct_str": diff_pct_str,
@@ -1107,7 +1193,7 @@ async def get_state() -> Dict[str, Any]:
         "spot_source": app_engine.spot_source if app_engine else "Unknown",
         "brti_connected": app_engine.brti_connected if app_engine else False,
         "twap_60s": float(app_engine.twap_60s_price) if (app_engine and app_engine.twap_60s_price) else None,
-        "twap_60s_str": f"${app_engine.twap_60s_price:,.2f}" if (app_engine and app_engine.twap_60s_price) else None,
+        "twap_60s_str": cfg.format_price(app_engine.twap_60s_price) if (app_engine and app_engine.twap_60s_price) else None,
         "recent_reports": app_engine.recent_reports,
         "kalshi_ws_connected": app_engine.kalshi_ws_connected,
         "spot_connected": app_engine.spot_connected,
@@ -1117,14 +1203,68 @@ async def get_state() -> Dict[str, Any]:
     }
 
 
+class AssetSelectRequest(BaseModel):
+    asset: str
+
+
+@app.get("/api/assets")
+async def get_supported_assets() -> Dict[str, Any]:
+    """Return supported cryptocurrency assets and live CF Benchmarks prices for Standalone Bot."""
+    if not app_engine:
+        raise HTTPException(status_code=503, detail="Engine not ready")
+    cf_data = app_engine.cf_sync.get_all_state() if app_engine.cf_sync else {}
+    assets_list = []
+    for a in CryptoAsset:
+        cfg = get_asset_config(a)
+        quote = cf_data.get(a.value, {})
+        assets_list.append({
+            "id": a.value,
+            "name": cfg.name,
+            "series_15m": cfg.series_ticker_15m,
+            "cf_index_id": cfg.cf_index_id,
+            "price_decimals": cfg.price_decimals,
+            "strike_step": float(cfg.strike_step),
+            "min_spot_diff": float(cfg.min_spot_diff),
+            "price": float(quote.get("price", 0.0)),
+            "twap_60s": float(quote.get("twap_60s", 0.0)) if quote.get("twap_60s") else None,
+            "is_active": (a == app_engine.active_asset),
+        })
+    return {
+        "active_asset": app_engine.active_asset.value,
+        "assets": assets_list,
+    }
+
+
+@app.post("/api/assets/select")
+async def select_active_asset(req: AssetSelectRequest) -> Dict[str, Any]:
+    """Switch active asset on Standalone Bot (BTC, ETH, SOL, DOGE)."""
+    if not app_engine:
+        raise HTTPException(status_code=503, detail="Engine not ready")
+    try:
+        new_asset = CryptoAsset(req.asset.upper().strip())
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid asset: '{req.asset}'. Supported assets: {[a.value for a in CryptoAsset]}"
+        )
+    app_engine.set_asset(new_asset)
+    return {
+        "status": "SUCCESS",
+        "active_asset": app_engine.active_asset.value,
+        "active_asset_name": app_engine.active_cfg.name,
+        "series_ticker": app_engine.active_cfg.series_ticker_15m,
+    }
+
+
 @app.post("/api/bot/arm")
 async def arm_bot() -> Dict[str, Any]:
     """Arm the bot for live execution."""
     if not app_engine:
         raise HTTPException(status_code=503, detail="Engine not ready")
     app_engine.is_armed = True
-    logger.info("🟢 [BOT ARMED] Live order execution activated by user.")
-    return {"status": "ARMED", "armed": True}
+    app_engine.consecutive_losses = 0  # Reset streak counter on manual re-arm
+    logger.info("🟢 [BOT ARMED] Live order execution activated by user. Loss streak reset.")
+    return {"status": "ARMED", "armed": True, "consecutive_losses": 0}
 
 
 @app.post("/api/bot/disarm")
@@ -1149,7 +1289,7 @@ async def panic_halt() -> Dict[str, Any]:
 
 class ParametersUpdateRequest(BaseModel):
     discount_limit_price: Optional[float] = Field(default=None, ge=0.10, le=0.50, description="Maker discount limit price ceiling")
-    max_contracts: Optional[int] = Field(default=None, ge=1, le=4, description="Max contracts per cycle trade (1-4)")
+    max_contracts: Optional[int] = Field(default=None, ge=1, le=1, description="Max contracts per cycle trade (strictly 1)")
     min_edge_pct: Optional[float] = Field(default=None, ge=1.0, le=50.0, description="Minimum edge percentage")
     min_ev_dollars: Optional[float] = Field(default=None, ge=0.01, le=0.50, description="Minimum net EV dollars per contract")
     min_spot_diff: Optional[float] = Field(default=None, ge=0.0, le=200.0, description="Minimum distance from strike to avoid coin flips")
@@ -1198,9 +1338,12 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", default=True, help="Enable live trading mode")
     parser.add_argument("--force", action="store_true", default=False, help="Force lock acquisition if stale")
     parser.add_argument("--no-browser", action="store_true", default=False, help="Do not open browser automatically")
+    parser.add_argument("--asset", type=str, default="BTC", choices=["BTC", "ETH", "SOL", "DOGE"], help="Active crypto asset (default: BTC)")
     args = parser.parse_args()
     if args.force:
         os.environ["KALSHI_FORCE_LOCK"] = "true"
+    if args.asset:
+        os.environ["KALSHI_ACTIVE_ASSET"] = args.asset.upper()
 
     if not args.no_browser:
         def _delayed_open():
@@ -1211,7 +1354,7 @@ def main() -> None:
                 pass
         threading.Thread(target=_delayed_open, daemon=True).start()
 
-    logger.info("⚡ Launching Kalshi 3-Step Dominion Standalone Engine on http://%s:%d ...", args.host, args.port)
+    logger.info("⚡ Launching Kalshi 3-Step Dominion Standalone Engine [%s] on http://%s:%d ...", args.asset.upper(), args.host, args.port)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

@@ -329,7 +329,7 @@ def test_standalone_bot_parameters_and_endpoints(tmp_path):
     # Check default parameters
     p = engine.get_parameters()
     assert p["discount_limit_price"] == 0.48
-    assert p["max_contracts"] == 2
+    assert p["max_contracts"] == 1
     assert p["min_edge_pct"] == 6.0
     assert p["min_ev_dollars"] == 0.02
     assert p["min_spot_diff"] == 35.0
@@ -360,13 +360,13 @@ def test_standalone_bot_parameters_and_endpoints(tmp_path):
 
         r_post = client.post("/api/bot/parameters", json={
             "discount_limit_price": 0.42,
-            "max_contracts": 2,
+            "max_contracts": 1,
             "min_edge_pct": 10.0,
         })
         assert r_post.status_code == 200
         assert r_post.json()["status"] == "SUCCESS"
         assert r_post.json()["parameters"]["discount_limit_price"] == 0.42
-        assert r_post.json()["parameters"]["max_contracts"] == 2
+        assert r_post.json()["parameters"]["max_contracts"] == 1
 
 
 def test_standalone_bot_sweep_old_orders(tmp_path):
@@ -414,3 +414,142 @@ def test_simulation_agent_live_lockout_suppression(tmp_path):
                 agent._domination_bot.evaluate.assert_not_called()
 
     asyncio.run(_run())
+
+
+def test_standalone_bot_multi_asset_switching(tmp_path: Path):
+    from kalshi_sim.schemas import CryptoAsset
+
+    # 1. Initialize engine with ETH
+    engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path, asset=CryptoAsset.ETH)
+    assert engine.active_asset == CryptoAsset.ETH
+    assert engine.active_cfg.series_ticker_15m == "KXETH15M"
+    assert engine.bot.asset == CryptoAsset.ETH
+    assert engine.bot.min_spot_diff == 2.50
+
+    # 2. Switch to SOL
+    engine.set_asset(CryptoAsset.SOL)
+    assert engine.active_asset == CryptoAsset.SOL
+    assert engine.active_cfg.series_ticker_15m == "KXSOL15M"
+    assert engine.bot.asset == CryptoAsset.SOL
+    assert engine.bot.min_spot_diff == 0.50
+
+    # 3. Switch to DOGE and verify sub-penny formatting in /api/state
+    engine.set_asset(CryptoAsset.DOGE)
+    assert engine.active_asset == CryptoAsset.DOGE
+    assert engine.active_cfg.series_ticker_15m == "KXDOGE15M"
+    assert engine.bot.asset == CryptoAsset.DOGE
+    assert engine.bot.min_spot_diff == 0.0005
+
+    engine.current_btc_spot = Decimal("0.245000")
+    engine.target_strike = Decimal("0.240000")
+
+    with patch("kalshi_sim.standalone_bot.app_engine", engine):
+        client = TestClient(app)
+
+        # Verify /api/state metadata and sub-penny precision
+        resp_state = client.get("/api/state")
+        assert resp_state.status_code == 200
+        s_data = resp_state.json()
+        assert s_data["active_asset"] == "DOGE"
+        assert s_data["active_asset_name"] == "Dogecoin"
+        assert s_data["series_ticker"] == "KXDOGE15M"
+        assert s_data["spot_price_str"] == "$0.245000"
+        assert s_data["target_strike_str"] == "$0.240000"
+        assert s_data["spot_diff"] == 0.005000
+
+        # Verify GET /api/assets
+        resp_assets = client.get("/api/assets")
+        assert resp_assets.status_code == 200
+        a_data = resp_assets.json()
+        assert a_data["active_asset"] == "DOGE"
+        assert len(a_data["assets"]) == 4
+        doge_asset = [a for a in a_data["assets"] if a["id"] == "DOGE"][0]
+        assert doge_asset["is_active"] is True
+        btc_asset = [a for a in a_data["assets"] if a["id"] == "BTC"][0]
+        assert btc_asset["is_active"] is False
+
+        # Verify POST /api/assets/select
+        resp_sel = client.post("/api/assets/select", json={"asset": "BTC"})
+        assert resp_sel.status_code == 200
+        sel_data = resp_sel.json()
+        assert sel_data["status"] == "SUCCESS"
+        assert sel_data["active_asset"] == "BTC"
+        assert sel_data["series_ticker"] == "KXBTC15M"
+        assert engine.active_asset == CryptoAsset.BTC
+
+        # Verify invalid asset returns 400
+        resp_inv = client.post("/api/assets/select", json={"asset": "INVALID_COIN"})
+        assert resp_inv.status_code == 400
+
+
+def test_standalone_bot_consecutive_loss_streak_breaker(tmp_path: Path):
+    """Verify that 3 consecutive losses auto-disarm the bot, and re-arming resets the streak."""
+    engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+    assert engine.is_armed is True
+    assert engine.consecutive_losses == 0
+    assert engine.max_consecutive_losses == 3
+
+    # Mock order client get_settlements returning 3 losses in sequence
+    mock_settlements = [
+        {"ticker": "KXBTC15M-T1", "market_result": "no", "count": 1, "settled_time": "2026-09-07T00:00:00Z"},
+        {"ticker": "KXBTC15M-T2", "market_result": "no", "count": 1, "settled_time": "2026-09-07T00:15:00Z"},
+        {"ticker": "KXBTC15M-T3", "market_result": "no", "count": 1, "settled_time": "2026-09-07T00:30:00Z"},
+    ]
+    engine.order_client = MagicMock()
+    engine.order_client.get_settlements = AsyncMock(return_value=mock_settlements)
+
+    # Seed mock local trades where bot bet YES (so market_result=no results in losses)
+    local_trades = {
+        "KXBTC15M-T1": {"trade_id": "tr1", "ticker": "KXBTC15M-T1", "side": "yes", "size": 1, "price": Decimal("0.48"), "gross_value": Decimal("0.48"), "timestamp_utc": "2026-09-07T00:00:00Z", "bot_type": "3_step_domination_bot"},
+        "KXBTC15M-T2": {"trade_id": "tr2", "ticker": "KXBTC15M-T2", "side": "yes", "size": 1, "price": Decimal("0.48"), "gross_value": Decimal("0.48"), "timestamp_utc": "2026-09-07T00:15:00Z", "bot_type": "3_step_domination_bot"},
+        "KXBTC15M-T3": {"trade_id": "tr3", "ticker": "KXBTC15M-T3", "side": "yes", "size": 1, "price": Decimal("0.48"), "gross_value": Decimal("0.48"), "timestamp_utc": "2026-09-07T00:30:00Z", "bot_type": "3_step_domination_bot"},
+    }
+
+    async def _test():
+        engine._running = True
+        with patch("kalshi_sim.standalone_bot.get_db") as mock_get_db:
+            mock_cursor = AsyncMock()
+            mock_cursor.fetchall.return_value = [
+                ("tr1", "KXBTC15M-T1", "yes", 1, 0.48, 0.48, "2026-09-07T00:00:00Z", "3_step_domination_bot"),
+                ("tr2", "KXBTC15M-T2", "yes", 1, 0.48, 0.48, "2026-09-07T00:15:00Z", "3_step_domination_bot"),
+                ("tr3", "KXBTC15M-T3", "yes", 1, 0.48, 0.48, "2026-09-07T00:30:00Z", "3_step_domination_bot"),
+            ]
+            mock_conn = AsyncMock()
+            mock_conn.execute.return_value.__aenter__.return_value = mock_cursor
+            mock_get_db.return_value.get_connection.return_value.__aenter__.return_value = mock_conn
+
+            settle_task = asyncio.create_task(engine._settlement_reconciliation_loop())
+            await asyncio.sleep(0.05)
+            engine._running = False
+            settle_task.cancel()
+            try:
+                await settle_task
+            except asyncio.CancelledError:
+                pass
+
+    asyncio.run(_test())
+
+    # Verify auto-disarm triggered after 3 consecutive losses
+    assert engine.consecutive_losses == 3
+    assert engine.is_armed is False
+
+    # Verify /api/state reflects auto-disarmed and consecutive loss status
+    with patch("kalshi_sim.standalone_bot.app_engine", engine):
+        client = TestClient(app)
+        st = client.get("/api/state").json()
+        assert st["armed"] is False
+        assert st["consecutive_losses"] == 3
+        assert st["max_consecutive_losses"] == 3
+
+        # Re-arm via API
+        resp_arm = client.post("/api/bot/arm")
+        assert resp_arm.status_code == 200
+        arm_data = resp_arm.json()
+        assert arm_data["status"] == "ARMED"
+        assert arm_data["armed"] is True
+        assert arm_data["consecutive_losses"] == 0
+
+        # State should now be reset
+        assert engine.is_armed is True
+        assert engine.consecutive_losses == 0
+
