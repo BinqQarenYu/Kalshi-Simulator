@@ -445,6 +445,7 @@ async def live_kalshi_public_sync_loop() -> None:
                         if resp.status == 200:
                             data = await resp.json()
                             raw_markets = data.get("markets", [])
+                            open_m: list[tuple[datetime, dict[str, Any]]] = []
                             for m in raw_markets:
                                 ticker = m.get("ticker")
                                 if not ticker:
@@ -472,9 +473,18 @@ async def live_kalshi_public_sync_loop() -> None:
                                 if state.sim_agent:
                                     state.sim_agent._market_cache[ticker] = minfo
                                     state.sim_agent._ticker_timeframe_map[ticker] = Timeframe.FIFTEEN_MIN
-                                    if floor_dec:
-                                        state.target_strike = floor_dec
-                                    state.active_ticker = ticker
+                                if close_dt and close_dt > now_utc:
+                                    open_m.append((close_dt, m))
+
+                            if open_m:
+                                open_m.sort(key=lambda x: x[0])
+                                active_close, active_m = open_m[0]
+                                new_ticker = active_m.get("ticker", "")
+                                if new_ticker:
+                                    state.active_ticker = new_ticker
+                                    fl = active_m.get("floor_strike")
+                                    if fl is not None:
+                                        state.target_strike = Decimal(str(fl))
 
                 # 2. Fetch live Level-2 Orderbook Snapshot from Kalshi public API every 500ms
                 active_ticker = state.active_ticker
@@ -483,9 +493,9 @@ async def live_kalshi_public_sync_loop() -> None:
                     async with session.get(ob_url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
                         if resp2.status == 200:
                             ob_data = await resp2.json()
-                            raw_book = ob_data.get("orderbook", {})
-                            bids = raw_book.get("yes", [])
-                            asks = raw_book.get("no", [])
+                            raw_book = ob_data.get("orderbook_fp") or ob_data.get("orderbook") or {}
+                            bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []
+                            asks = raw_book.get("no_dollars") or raw_book.get("no") or []
 
                             book = state.orderbook.get_book(active_ticker)
                             if not book:
@@ -614,11 +624,19 @@ async def live_btc_spot_ws_loop() -> None:
                     }
                     await ws.send_json(sub_msg)
                     logger.info("[SPOT FEED] Coinbase Pro WebSocket active as standby.")
+                    product_map = {
+                        "BTC-USD": CryptoAsset.BTC,
+                        "ETH-USD": CryptoAsset.ETH,
+                        "SOL-USD": CryptoAsset.SOL,
+                        "DOGE-USD": CryptoAsset.DOGE,
+                    }
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             data = json.loads(msg.data)
                             if data.get("type") == "ticker" and "price" in data:
-                                if not (state.cf_sync and state.cf_sync.is_connected):
+                                pid = data.get("product_id")
+                                matched_asset = product_map.get(pid)
+                                if matched_asset == state.active_asset and not (state.cf_sync and state.cf_sync.is_connected):
                                     p = Decimal(str(data["price"]))
                                     if p != state.current_btc_price:
                                         state.current_btc_price = p
@@ -1257,13 +1275,22 @@ def resolve_active_market(now_utc: datetime) -> tuple[Any | None, int, Decimal, 
     w_end = w_start + timedelta(minutes=interval_mins)
 
     active_m = None
+    active_cfg = get_asset_config(state.active_asset)
+    is_btc = (state.active_asset == CryptoAsset.BTC)
+    series_pfx = "KXBTC" if is_btc else active_cfg.series_ticker_15m[:5]
+    reanchor_threshold = 150.0 if is_btc else float(active_cfg.min_spot_diff) * 4.0
+
     if state.sim_agent and state.sim_agent._market_cache:
         matching: list[MarketInfo] = []
         for m in state.sim_agent._market_cache.values():
+            m_s = m.series_ticker or ""
+            m_t = m.ticker or ""
+            if not is_btc and not (m_s.startswith(series_pfx) or m_t.startswith(series_pfx)):
+                continue
             if (
-                (tf_val in ("15m", "5m") and ("15M" in m.series_ticker or "15M" in m.ticker)) or
-                (tf_val == "1h" and ("1H" in m.series_ticker or "BTCH" in m.series_ticker or "1H" in m.ticker or "BTCH" in m.ticker)) or
-                (tf_val in ("24h", "1d", "daily") and ("BTCD" in m.series_ticker or "BTCD" in m.ticker))
+                (tf_val in ("15m", "5m") and ("15M" in m_s or "15M" in m_t)) or
+                (tf_val == "1h" and ("1H" in m_s or "BTCH" in m_s or "1H" in m_t or "BTCH" in m_t)) or
+                (tf_val in ("24h", "1d", "daily") and ("BTCD" in m_s or "BTCD" in m_t))
             ):
                 matching.append(m)
 
@@ -1296,7 +1323,7 @@ def resolve_active_market(now_utc: datetime) -> tuple[Any | None, int, Decimal, 
         elif active_m.cap_strike:
             strike = active_m.cap_strike
             state.target_strike = strike
-        elif tf_val in ("15m", "5m") and abs(float(state.target_strike - state.current_btc_price)) > 150:
+        elif tf_val in ("15m", "5m") and abs(float(state.target_strike - state.current_btc_price)) > reanchor_threshold:
             # Re-anchor dynamic ATM strike to cycle open price
             strike = state.cycle_open_strikes.get(cycle_key, state.current_btc_price)
             state.target_strike = strike
@@ -1306,11 +1333,11 @@ def resolve_active_market(now_utc: datetime) -> tuple[Any | None, int, Decimal, 
         else:
             remaining_secs = (interval_mins * 60) - passed_secs
     else:
-        if tf_val in ("15m", "5m") and abs(float(state.target_strike - state.current_btc_price)) > 150:
+        if tf_val in ("15m", "5m") and abs(float(state.target_strike - state.current_btc_price)) > reanchor_threshold:
             strike = state.cycle_open_strikes.get(cycle_key, state.current_btc_price)
             state.target_strike = strike
         remaining_secs = (interval_mins * 60) - passed_secs
-        tf_prefix = "KXBTC15M" if tf_val == "15m" else ("KXBTC5M" if tf_val == "5m" else "KXBTCD")
+        tf_prefix = ("KXBTC15M" if is_btc else active_cfg.series_ticker_15m) if tf_val == "15m" else ("KXBTC5M" if tf_val == "5m" else "KXBTCD")
         state.active_ticker = f"{tf_prefix}-{w_end.strftime('%y%b%d%H%M').upper()}-{w_end.minute:02d}"
 
     state.market_expiry_seconds = remaining_secs
@@ -1340,9 +1367,14 @@ def update_dynamic_clob_ladder(spot_price: Decimal, strike_price: Decimal, ticke
     diff = float(spot_price - strike_price)
     # Dynamic time-to-expiry fraction (tau in range [0, 1])
     tau_fraction = max(5, remaining_secs) / 900.0
-    # Volatility scale narrows with sqrt(tau): ~180.0 at start down to ~35.0 at expiry
-    scale = max(35.0, 180.0 * math.sqrt(tau_fraction))
-    z = diff / scale
+    # Volatility scale narrows with sqrt(tau): exactly preserved for BTC (~180.0 at start down to ~35.0 at expiry)
+    if state.active_asset == CryptoAsset.BTC:
+        scale = max(35.0, 180.0 * math.sqrt(tau_fraction))
+    else:
+        active_cfg = get_asset_config(state.active_asset)
+        base_diff = float(active_cfg.min_spot_diff)
+        scale = max(base_diff, base_diff * (180.0 / 35.0) * math.sqrt(tau_fraction))
+    z = diff / scale if scale > 0 else 0.0
     try:
         prob = 1.0 / (1.0 + math.exp(-z))
     except OverflowError:
@@ -3099,7 +3131,9 @@ async def get_supported_assets() -> dict[str, Any]:
             "series_15m": cfg.series_ticker_15m,
             "cf_index_id": cfg.cf_index_id,
             "price_decimals": cfg.price_decimals,
+            "strike_step": float(cfg.strike_step),
             "min_spot_diff": float(cfg.min_spot_diff),
+            "price": float(quote.get("price", 0.0)) if quote.get("price") is not None else 0.0,
             "spot_price": quote.get("price"),
             "spot_price_str": quote.get("price_str"),
             "twap_60s": quote.get("twap_60s"),
@@ -3133,9 +3167,22 @@ async def select_active_asset(req: AssetSelectRequest) -> dict[str, Any]:
             state.current_btc_price = p
             state.twap_60s_price = state.cf_sync.get_twap(new_asset)
 
-    # Recalibrate domination bot if active
-    if state.sim_agent and hasattr(state.sim_agent, "bot") and hasattr(state.sim_agent.bot, "set_asset"):
+    # Re-seed price history so chart transitions cleanly without skewing
+    state.price_history.clear()
+    now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    state.price_history.append({
+        "time": now_t,
+        "price": float(state.current_btc_price),
+        "target": float(state.target_strike),
+    })
+
+    # Recalibrate domination bot across agents
+    if state.sim_agent and hasattr(state.sim_agent, "set_asset"):
+        state.sim_agent.set_asset(new_asset)
+    elif state.sim_agent and hasattr(state.sim_agent, "bot") and hasattr(state.sim_agent.bot, "set_asset"):
         state.sim_agent.bot.set_asset(new_asset)
+    if state.ai_worker and hasattr(state.ai_worker, "set_asset"):
+        state.ai_worker.set_asset(new_asset)
 
     # Immediately point active_ticker to this asset's 15m contract
     found_market = False
@@ -3172,7 +3219,42 @@ async def select_active_asset(req: AssetSelectRequest) -> dict[str, Any]:
     logger.info("Switched active asset to %s (%s)", cfg.name, new_asset.value)
     if state.connected_websockets:
         asyncio.create_task(trigger_instant_broadcast())
-    return {"status": "SUCCESS", "active_asset": new_asset.value, "config": cfg.model_dump()}
+    return {
+        "status": "SUCCESS",
+        "active_asset": new_asset.value,
+        "active_asset_name": cfg.name,
+        "series_ticker": cfg.series_ticker_15m,
+        "config": cfg.model_dump(),
+    }
+
+
+@app.post("/api/bot/arm")
+async def arm_bot() -> dict[str, Any]:
+    """Arm the bot for automated live/paper execution."""
+    state.ai_auto_trade = True
+    state.is_dirty = True
+    logger.info("🟢 [BOT ARMED] Order execution activated by user.")
+    if state.connected_websockets:
+        asyncio.create_task(trigger_instant_broadcast())
+    return {"status": "ARMED", "armed": True}
+
+
+@app.post("/api/bot/disarm")
+async def disarm_bot() -> dict[str, Any]:
+    """Disarm the bot into standby mode."""
+    state.ai_auto_trade = False
+    state.is_dirty = True
+    logger.info("⏸️ [BOT DISARMED] Standby mode activated by user.")
+    if state.connected_websockets:
+        asyncio.create_task(trigger_instant_broadcast())
+    return {"status": "DISARMED", "armed": False}
+
+
+@app.post("/api/bot/panic")
+async def panic_halt() -> dict[str, Any]:
+    """Emergency halt: disarm bot and cancel all resting orders."""
+    res = await trigger_emergency_kill_switch()
+    return {"status": "PANIC_EXECUTED", "cancelled_orders": res.get("cancelled_orders", 0), "armed": False}
 
 
 @app.get("/api/bot/strategies")

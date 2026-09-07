@@ -481,3 +481,75 @@ def test_standalone_bot_multi_asset_switching(tmp_path: Path):
         resp_inv = client.post("/api/assets/select", json={"asset": "INVALID_COIN"})
         assert resp_inv.status_code == 400
 
+
+def test_standalone_bot_consecutive_loss_streak_breaker(tmp_path: Path):
+    """Verify that 3 consecutive losses auto-disarm the bot, and re-arming resets the streak."""
+    engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+    assert engine.is_armed is True
+    assert engine.consecutive_losses == 0
+    assert engine.max_consecutive_losses == 3
+
+    # Mock order client get_settlements returning 3 losses in sequence
+    mock_settlements = [
+        {"ticker": "KXBTC15M-T1", "market_result": "no", "count": 1, "settled_time": "2026-09-07T00:00:00Z"},
+        {"ticker": "KXBTC15M-T2", "market_result": "no", "count": 1, "settled_time": "2026-09-07T00:15:00Z"},
+        {"ticker": "KXBTC15M-T3", "market_result": "no", "count": 1, "settled_time": "2026-09-07T00:30:00Z"},
+    ]
+    engine.order_client = MagicMock()
+    engine.order_client.get_settlements = AsyncMock(return_value=mock_settlements)
+
+    # Seed mock local trades where bot bet YES (so market_result=no results in losses)
+    local_trades = {
+        "KXBTC15M-T1": {"trade_id": "tr1", "ticker": "KXBTC15M-T1", "side": "yes", "size": 1, "price": Decimal("0.48"), "gross_value": Decimal("0.48"), "timestamp_utc": "2026-09-07T00:00:00Z", "bot_type": "3_step_domination_bot"},
+        "KXBTC15M-T2": {"trade_id": "tr2", "ticker": "KXBTC15M-T2", "side": "yes", "size": 1, "price": Decimal("0.48"), "gross_value": Decimal("0.48"), "timestamp_utc": "2026-09-07T00:15:00Z", "bot_type": "3_step_domination_bot"},
+        "KXBTC15M-T3": {"trade_id": "tr3", "ticker": "KXBTC15M-T3", "side": "yes", "size": 1, "price": Decimal("0.48"), "gross_value": Decimal("0.48"), "timestamp_utc": "2026-09-07T00:30:00Z", "bot_type": "3_step_domination_bot"},
+    }
+
+    async def _test():
+        engine._running = True
+        with patch("kalshi_sim.standalone_bot.get_db") as mock_get_db:
+            mock_cursor = AsyncMock()
+            mock_cursor.fetchall.return_value = [
+                ("tr1", "KXBTC15M-T1", "yes", 1, 0.48, 0.48, "2026-09-07T00:00:00Z", "3_step_domination_bot"),
+                ("tr2", "KXBTC15M-T2", "yes", 1, 0.48, 0.48, "2026-09-07T00:15:00Z", "3_step_domination_bot"),
+                ("tr3", "KXBTC15M-T3", "yes", 1, 0.48, 0.48, "2026-09-07T00:30:00Z", "3_step_domination_bot"),
+            ]
+            mock_conn = AsyncMock()
+            mock_conn.execute.return_value.__aenter__.return_value = mock_cursor
+            mock_get_db.return_value.get_connection.return_value.__aenter__.return_value = mock_conn
+
+            settle_task = asyncio.create_task(engine._settlement_reconciliation_loop())
+            await asyncio.sleep(0.05)
+            engine._running = False
+            settle_task.cancel()
+            try:
+                await settle_task
+            except asyncio.CancelledError:
+                pass
+
+    asyncio.run(_test())
+
+    # Verify auto-disarm triggered after 3 consecutive losses
+    assert engine.consecutive_losses == 3
+    assert engine.is_armed is False
+
+    # Verify /api/state reflects auto-disarmed and consecutive loss status
+    with patch("kalshi_sim.standalone_bot.app_engine", engine):
+        client = TestClient(app)
+        st = client.get("/api/state").json()
+        assert st["armed"] is False
+        assert st["consecutive_losses"] == 3
+        assert st["max_consecutive_losses"] == 3
+
+        # Re-arm via API
+        resp_arm = client.post("/api/bot/arm")
+        assert resp_arm.status_code == 200
+        arm_data = resp_arm.json()
+        assert arm_data["status"] == "ARMED"
+        assert arm_data["armed"] is True
+        assert arm_data["consecutive_losses"] == 0
+
+        # State should now be reset
+        assert engine.is_armed is True
+        assert engine.consecutive_losses == 0
+

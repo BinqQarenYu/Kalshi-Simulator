@@ -214,6 +214,10 @@ class StandaloneBotEngine:
         self.today_win_rate: float = 0.0
         self.recent_reports: List[Dict[str, Any]] = []
 
+        # Consecutive Loss Streak Breaker (Post-Mortem Fix — 9 consecutive overnight losses)
+        self.consecutive_losses: int = 0
+        self.max_consecutive_losses: int = 3  # Auto-disarm after 3 consecutive losses
+
         self.last_decision: Optional[DominationDecision] = None
         self.last_eval_time: float = 0.0
 
@@ -935,7 +939,11 @@ class StandaloneBotEngine:
                                 strike_price = self.current_btc_spot if self.current_btc_spot > Decimal("0.0") else Decimal("79500.00")
 
                             step = self.active_cfg.strike_step
-                            settlement_btc_price = strike_price + (step if market_result == "yes" else -step)
+                            # Use real spot price at reconciliation time; fabricated strike±step as fallback
+                            if self.current_btc_spot > Decimal("0.0"):
+                                settlement_btc_price = self.current_btc_spot
+                            else:
+                                settlement_btc_price = strike_price + (step if market_result == "yes" else -step)
                             balance_after = self.total_balance_dollars if self.total_balance_dollars > 0 else self.balance_dollars
 
                             rep = {
@@ -990,9 +998,29 @@ class StandaloneBotEngine:
                                 balance_after=balance_after,
                                 cycle_id=ticker,
                             )
+
+                            # Consecutive Loss Streak Breaker — auto-disarm after N consecutive losses
+                            if outcome == "loss":
+                                self.consecutive_losses += 1
+                                if self.consecutive_losses >= self.max_consecutive_losses and self.is_armed:
+                                    self.is_armed = False
+                                    logger.warning(
+                                        "🛑 [STREAK BREAKER] %d consecutive losses reached (max=%d). "
+                                        "Bot AUTO-DISARMED to prevent further hemorrhaging. "
+                                        "Manual re-arm required via /api/bot/arm.",
+                                        self.consecutive_losses, self.max_consecutive_losses,
+                                    )
+                            else:
+                                if self.consecutive_losses > 0:
+                                    logger.info(
+                                        "✅ [STREAK RESET] Win breaks %d-loss streak. Counter reset to 0.",
+                                        self.consecutive_losses,
+                                    )
+                                self.consecutive_losses = 0
+
                             logger.info(
-                                "🏆 [SETTLEMENT RECONCILED] %s: %s | Result: %s | PnL: %+.2f",
-                                ticker, outcome.upper(), market_result.upper(), float(pnl)
+                                "🏆 [SETTLEMENT RECONCILED] %s: %s | Result: %s | PnL: %+.2f | Streak: %d",
+                                ticker, outcome.upper(), market_result.upper(), float(pnl), self.consecutive_losses
                             )
 
                         if new_reconciled > 0:
@@ -1128,6 +1156,8 @@ async def get_state() -> Dict[str, Any]:
         "today_wins": app_engine.today_wins,
         "today_losses": app_engine.today_losses,
         "today_win_rate": round(app_engine.today_win_rate, 1),
+        "consecutive_losses": app_engine.consecutive_losses,
+        "max_consecutive_losses": app_engine.max_consecutive_losses,
         "active_asset": app_engine.active_asset.value,
         "active_asset_name": cfg.name,
         "active_asset_symbol": cfg.symbol,
@@ -1232,8 +1262,9 @@ async def arm_bot() -> Dict[str, Any]:
     if not app_engine:
         raise HTTPException(status_code=503, detail="Engine not ready")
     app_engine.is_armed = True
-    logger.info("🟢 [BOT ARMED] Live order execution activated by user.")
-    return {"status": "ARMED", "armed": True}
+    app_engine.consecutive_losses = 0  # Reset streak counter on manual re-arm
+    logger.info("🟢 [BOT ARMED] Live order execution activated by user. Loss streak reset.")
+    return {"status": "ARMED", "armed": True, "consecutive_losses": 0}
 
 
 @app.post("/api/bot/disarm")
