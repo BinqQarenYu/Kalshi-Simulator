@@ -31,7 +31,8 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
   tradingMode = 'paper',
   onPlaceOrder,
 }) => {
-  const isLive = tradingMode === 'live';
+  const is5m = market.timeframe === '5m';
+  const isLive = tradingMode === 'live' && !is5m;
   const assetMeta = getAssetMeta(market.active_asset);
   const [tradeMode, setTradeMode] = useState<'BUY' | 'SELL'>('BUY');
   const [orderType, setOrderType] = useState<'LIMIT' | 'MARKET'>('LIMIT');
@@ -91,6 +92,14 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
 
   return (
     <div className="bg-[#111620] border border-[#21262d] rounded-2xl p-4 sm:p-5 flex flex-col gap-4 shadow-xl">
+      {/* 5M Expansion Notice Banner */}
+      {is5m && (
+        <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs font-bold text-amber-300 shadow-sm">
+          <Lock className="h-4 w-4 shrink-0 text-amber-400" />
+          <span>5M Sprint Event: Paper Live Only. Live real-money trading is disabled.</span>
+        </div>
+      )}
+
       {/* Top Header Mode Toggle */}
       <div className="flex items-center justify-between pb-2 border-b border-[#21262d]">
         <button

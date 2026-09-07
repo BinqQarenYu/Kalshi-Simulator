@@ -98,11 +98,22 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market }) => {
           </span>
 
           {/* Expiry Countdown Timer Badge */}
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#f59e0b]/10 border border-[#f59e0b]/30 shadow-inner">
-            <span className="text-xl sm:text-2xl font-mono font-extrabold text-[#f59e0b] tracking-wider">
-              {market.expiry_countdown_str}
-            </span>
-            <Hourglass className="h-4 w-4 text-[#f59e0b] animate-spin" style={{ animationDuration: '6s' }} />
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border shadow-inner ${
+            market.timeframe === '5m'
+              ? 'bg-[#f59e0b]/15 border-[#f59e0b]/40'
+              : 'bg-[#f59e0b]/10 border-[#f59e0b]/30'
+          }`}>
+            <div className="flex flex-col items-end">
+              <span className="text-xl sm:text-2xl font-mono font-extrabold text-[#f59e0b] tracking-wider leading-none">
+                {market.expiry_countdown_str}
+              </span>
+              {market.timeframe === '5m' && (
+                <span className="text-[9px] font-mono font-bold text-amber-400/90 uppercase tracking-widest mt-0.5">
+                  5M SPRINT (300s)
+                </span>
+              )}
+            </div>
+            <Hourglass className="h-4 w-4 text-[#f59e0b] animate-spin" style={{ animationDuration: market.timeframe === '5m' ? '3s' : '6s' }} />
           </div>
         </div>
       </div>

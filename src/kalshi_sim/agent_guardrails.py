@@ -71,6 +71,7 @@ class AgentGuardrails:
         cycle_id: Optional[str] = None,
         is_bot: bool = True,
         bot_type: Optional[str] = None,
+        is_live: bool = False,
     ) -> Tuple[bool, str, int, Dict[str, Any]]:
         """Validate an order against all safety guardrails before placement.
 
@@ -81,6 +82,24 @@ class AgentGuardrails:
         now_mono = time.monotonic()
         now_utc = datetime.now(timezone.utc).isoformat()
         cycle_key = cycle_id or ticker
+
+        # 0. 5M Expansion Live Prohibition Veto
+        # 5-minute event contracts (KXBTC5M or 5m cycle) are strictly exclusive to Mother Dash Paper Live.
+        # Live real-money trading is permanently prohibited under all conditions.
+        # Ensure "15M" is not falsely matched when testing for "5M" substring!
+        is_5m_contract = (
+            ("5M" in ticker.upper() and "15M" not in ticker.upper())
+            or "5MIN" in ticker.upper()
+            or (cycle_id is not None and "5M" in cycle_id.upper() and "15M" not in cycle_id.upper())
+            or (cycle_id is not None and "_5m" in cycle_id.lower())
+        )
+        if is_live and is_5m_contract:
+            msg = (
+                f"5M LIVE TRADING PROHIBITED: Contract '{ticker}' is part of the 5-Minute Expansion series. "
+                f"5M events are strictly exclusive to Mother Dash Paper Live. Live real-money trading is permanently prohibited."
+            )
+            self._record_rejection("5m_live_prohibited", msg, ticker, now_utc)
+            return False, msg, 0, {"veto": "5m_live_prohibited", "ticker": ticker, "is_live": True}
 
         # Update peak equity
         if self._peak_equity is None or total_equity > self._peak_equity:

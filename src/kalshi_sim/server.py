@@ -95,10 +95,38 @@ from kalshi_sim.tick_writer import TickWriter
 logger = logging.getLogger("kalshi_sim.server")
 
 TIMEFRAME_CONFIGS: dict[Timeframe, dict[str, Any]] = {
-    Timeframe.FIVE_MIN: {"series": "KXBTC15M", "title": "BTC 5 min", "duration": "5m", "expiry_seconds": 300},
-    Timeframe.FIFTEEN_MIN: {"series": "KXBTC15M", "title": "BTC 15 min", "duration": "15m", "expiry_seconds": 900},
-    Timeframe.ONE_HOUR: {"series": "KXBTCH", "title": "BTC 1 Hour", "duration": "1h", "expiry_seconds": 3600},
-    Timeframe.DAILY: {"series": "KXBTCD", "title": "BTC Daily", "duration": "24h", "expiry_seconds": 86400},
+    Timeframe.FIVE_MIN: {
+        "series": "KXBTC5M",
+        "ticker": "KXBTC5M-T78600",
+        "target_strike": Decimal("78600.00"),
+        "title": "BTC 5 min",
+        "duration": "5m",
+        "expiry_seconds": 300,
+    },
+    Timeframe.FIFTEEN_MIN: {
+        "series": "KXBTC15M",
+        "ticker": "KXBTC15M-T78650",
+        "target_strike": Decimal("77645.14"),
+        "title": "BTC 15 min",
+        "duration": "15m",
+        "expiry_seconds": 900,
+    },
+    Timeframe.ONE_HOUR: {
+        "series": "KXBTCH",
+        "ticker": "KXBTCH-T78500",
+        "target_strike": Decimal("78500.00"),
+        "title": "BTC 1 Hour",
+        "duration": "1h",
+        "expiry_seconds": 3600,
+    },
+    Timeframe.DAILY: {
+        "series": "KXBTCD",
+        "ticker": "KXBTCD-T78000",
+        "target_strike": Decimal("78000.00"),
+        "title": "BTC Daily",
+        "duration": "24h",
+        "expiry_seconds": 86400,
+    },
 }
 
 def resolve_bot_instance(bot_id: str) -> Any:
@@ -514,10 +542,13 @@ async def live_kalshi_public_sync_loop() -> None:
                             book.yes_book = new_yes_book
                             book.no_book = new_no_book
 
-                            # Trigger bot evaluation against real live orderbook (suppressed if standalone bot holds trading lock)
+                            # Trigger bot evaluation against real live orderbook (suppressed if standalone bot holds trading lock during live mode)
                             if state.sim_agent and state.ai_auto_trade:
-                                holder = get_active_lock_holder()
-                                if not (holder and holder[1] != os.getpid()):
+                                if state.mode == "live":
+                                    holder = get_active_lock_holder()
+                                    if not (holder and holder[1] != os.getpid()):
+                                        asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
+                                else:
                                     asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
 
                             state.is_dirty = True
@@ -742,7 +773,7 @@ def record_win_loss_event_report(
     strike_price: Decimal,
     timeframe: str = "15m",
     ai_confidence: float = 0.75,
-    ai_rationale: str = "Automated 15M Cycle Execution",
+    ai_rationale: Optional[str] = None,
     vpin_score: float = 0.15,
     ev_edge: float = 0.08,
     bot_type: Optional[str] = None,
@@ -754,15 +785,18 @@ def record_win_loss_event_report(
     cycle_time: Optional[str] = None,
     balance_after: Optional[Decimal] = None,
 ) -> dict[str, Any]:
-    """Generate and persist a standardized 15-minute event win/loss report."""
+    """Generate and persist a standardized event win/loss report (5m or 15m)."""
     now_utc = datetime.now(timezone.utc)
+    if not ai_rationale:
+        ai_rationale = f"Automated {'5M' if '5m' in str(timeframe).lower() else '15M'} Cycle Execution"
     if not cycle_time:
         et_tz = ZoneInfo("America/New_York")
         et_now = now_utc.astimezone(et_tz)
         hr_now = et_now.hour % 12 or 12
-        m_now = (et_now.minute // 15) * 15
-        m_next = (m_now + 15) % 60
-        hr_next = hr_now if m_now < 45 else ((et_now.hour + 1) % 12 or 12)
+        interval = 5 if "5m" in str(timeframe).lower() else 15
+        m_now = (et_now.minute // interval) * interval
+        m_next = (m_now + interval) % 60
+        hr_next = hr_now if (m_now + interval) < 60 else ((et_now.hour + 1) % 12 or 12)
         ampm_now = "AM" if et_now.hour < 12 else "PM"
         cycle_time = f"{et_now.strftime('%B %d')}, {hr_now}:{m_now:02d} - {hr_next}:{m_next:02d} {ampm_now} ET"
 
@@ -919,19 +953,21 @@ def record_win_loss_event_report(
         logger.debug("DB settlement & snapshot enqueue error: %s", exc)
 
     try:
-        asyncio.create_task(
-            state.telemetry_alerts.send_settlement_alert(
-                ticker=ticker,
-                side=side_clean,
-                contracts=contracts,
-                pnl=pnl,
-                roi_pct=float(roi_pct),
-                outcome=outcome,
-                balance_after=balance_after,
-                strike_price=float(strike_price),
-                settlement_btc_price=float(settlement_btc_price),
-            )
+        loop = asyncio.get_running_loop()
+        coro = state.telemetry_alerts.send_settlement_alert(
+            ticker=ticker,
+            side=side_clean,
+            contracts=contracts,
+            pnl=pnl,
+            roi_pct=float(roi_pct),
+            outcome=outcome,
+            balance_after=balance_after,
+            strike_price=float(strike_price),
+            settlement_btc_price=float(settlement_btc_price),
         )
+        loop.create_task(coro)
+    except RuntimeError:
+        pass  # No running event loop (e.g. in synchronous test)
     except Exception as exc:
         logger.debug("Telemetry settlement alert dispatch error: %s", exc)
 
@@ -939,31 +975,31 @@ def record_win_loss_event_report(
     return report
 
 
-def format_cycle_time_from_iso(iso_str: str) -> str:
+def format_cycle_time_from_iso(iso_str: str, interval: int = 15) -> str:
     """Format an ISO timestamp to authentic Kalshi Eastern Time cycle interval."""
     try:
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
         et_tz = ZoneInfo("America/New_York")
         et = dt.astimezone(et_tz)
         m_end = et.minute
-        m_boundary = round(m_end / 15.0) * 15
-        if m_boundary == 60:
-            et_rounded = (et + timedelta(minutes=10)).replace(minute=0, second=0, microsecond=0)
+        m_boundary = round(m_end / float(interval)) * interval
+        if m_boundary >= 60:
+            et_rounded = (et + timedelta(minutes=max(1, interval // 2))).replace(minute=0, second=0, microsecond=0)
             m_end = 0
             hr_end = et_rounded.hour
         else:
             hr_end = et.hour
             m_end = m_boundary
         
-        m_start = (m_end - 15) % 60
-        hr_start = hr_end if m_end >= 15 else (hr_end - 1)
+        m_start = (m_end - interval) % 60
+        hr_start = hr_end if m_end >= interval else (hr_end - 1)
         ampm = "AM" if hr_end < 12 else "PM"
         hr_start_12 = hr_start % 12 or 12
         hr_end_12 = hr_end % 12 or 12
         date_str = et.strftime("%B %d")
         return f"{date_str}, {hr_start_12}:{m_start:02d} - {hr_end_12}:{m_end:02d} {ampm} ET"
     except Exception:
-        return "15M Event Cycle ET"
+        return f"{interval}M Event Cycle ET"
 
 
 async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]:
@@ -1288,13 +1324,14 @@ def resolve_active_market(now_utc: datetime) -> tuple[Any | None, int, Decimal, 
             if not is_btc and not (m_s.startswith(series_pfx) or m_t.startswith(series_pfx)):
                 continue
             if (
-                (tf_val in ("15m", "5m") and ("15M" in m_s or "15M" in m_t)) or
+                (tf_val == "15m" and ("15M" in m_s or "15M" in m_t)) or
+                (tf_val == "5m" and (("5M" in m_s and "15M" not in m_s) or ("5M" in m_t and "15M" not in m_t))) or
                 (tf_val == "1h" and ("1H" in m_s or "BTCH" in m_s or "1H" in m_t or "BTCH" in m_t)) or
                 (tf_val in ("24h", "1d", "daily") and ("BTCD" in m_s or "BTCD" in m_t))
             ):
                 matching.append(m)
 
-        if not matching:
+        if not matching and tf_val != "5m":
             matching = list(state.sim_agent._market_cache.values())
 
         if matching:
@@ -1365,15 +1402,22 @@ def update_dynamic_clob_ladder(spot_price: Decimal, strike_price: Decimal, ticke
         state.orderbook._books[ticker] = book
 
     diff = float(spot_price - strike_price)
-    # Dynamic time-to-expiry fraction (tau in range [0, 1])
-    tau_fraction = max(5, remaining_secs) / 900.0
-    # Volatility scale narrows with sqrt(tau): exactly preserved for BTC (~180.0 at start down to ~35.0 at expiry)
+    # Dynamic time-to-expiry fraction (tau in range [0, 1]) scaled to active timeframe
+    tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
+    cycle_duration = 300.0 if tf_val == "5m" else (3600.0 if tf_val == "1h" else 900.0)
+    tau_fraction = min(1.0, max(5, remaining_secs) / cycle_duration)
+    # Volatility scale narrows with sqrt(tau):
+    # For 5M, volatility scale starts tighter (~105.0 down to ~25.0 at expiry) reflecting smaller 5m dispersion
     if state.active_asset == CryptoAsset.BTC:
-        scale = max(35.0, 180.0 * math.sqrt(tau_fraction))
+        if tf_val == "5m":
+            scale = max(25.0, 105.0 * math.sqrt(tau_fraction))
+        else:
+            scale = max(35.0, 180.0 * math.sqrt(tau_fraction))
     else:
         active_cfg = get_asset_config(state.active_asset)
         base_diff = float(active_cfg.min_spot_diff)
-        scale = max(base_diff, base_diff * (180.0 / 35.0) * math.sqrt(tau_fraction))
+        multiplier = (105.0 / 25.0) if tf_val == "5m" else (180.0 / 35.0)
+        scale = max(base_diff, base_diff * multiplier * math.sqrt(tau_fraction))
     z = diff / scale if scale > 0 else 0.0
     try:
         prob = 1.0 / (1.0 + math.exp(-z))
@@ -1459,8 +1503,12 @@ async def live_ticker_and_timer_loop() -> None:
                 if state.mode == "mock":
                     update_dynamic_clob_ladder(state.current_btc_price, state.target_strike, state.active_ticker, remaining_secs)
                 if state.ai_auto_trade and state.sim_agent:
-                    holder = get_active_lock_holder()
-                    if not (holder and holder[1] != os.getpid()):
+                    if state.mode == "live":
+                        holder = get_active_lock_holder()
+                        if not (holder and holder[1] != os.getpid()):
+                            state.sim_agent.set_ticker_timeframe(state.active_ticker, state.active_timeframe)
+                            asyncio.create_task(state.sim_agent.on_orderbook_update(state.active_ticker))
+                    else:
                         state.sim_agent.set_ticker_timeframe(state.active_ticker, state.active_timeframe)
                         asyncio.create_task(state.sim_agent.on_orderbook_update(state.active_ticker))
 
@@ -1487,7 +1535,9 @@ async def live_ticker_and_timer_loop() -> None:
                             })
 
             # Pre-fetch contract or instant rollover trigger at cycle boundaries (debounced to once every 5 seconds)
-            if (remaining_secs <= 15 or remaining_secs >= 898) and state.ingestion_agent:
+            tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
+            cycle_duration_secs = 300 if tf_val == "5m" else (3600 if tf_val == "1h" else 900)
+            if (remaining_secs <= 15 or remaining_secs >= cycle_duration_secs - 2) and state.ingestion_agent:
                 now_mono = time.monotonic()
                 if now_mono - last_rollover_trigger_time >= 5.0:
                     last_rollover_trigger_time = now_mono
@@ -1498,10 +1548,10 @@ async def live_ticker_and_timer_loop() -> None:
                 if state.market_expiry_seconds <= 0:
                     cfg = TIMEFRAME_CONFIGS.get(state.active_timeframe, {})
                     tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
-                    duration = cfg.get("expiry_seconds", 900)
+                    duration = cfg.get("expiry_seconds", 300 if tf_val == "5m" else 900)
                     state.market_expiry_seconds = duration
 
-                    # Settle open positions on current contract and record 15M Win/Loss Event
+                    # Settle open positions on current contract and record Win/Loss Event
                     if state.mode == "live":
                         asyncio.create_task(sync_live_settlements())
                     elif state.sim_agent:
@@ -1528,7 +1578,7 @@ async def live_ticker_and_timer_loop() -> None:
                                 if settle_res and state.sim_agent._exec_logger:
                                     state.sim_agent._exec_logger.log_settlement(settle_res)
                                 
-                                # Record authentic 15-Minute Event Win/Loss Report
+                                # Record authentic Event Win/Loss Report
                                 record_win_loss_event_report(
                                     ticker=state.active_ticker,
                                     side=pos.side.value,
@@ -1538,7 +1588,7 @@ async def live_ticker_and_timer_loop() -> None:
                                     strike_price=state.target_strike,
                                     timeframe=tf_val,
                                     ai_confidence=0.82,
-                                    ai_rationale=f"15M Expiration Settlement for {b_type} | Spot: ${float(state.current_btc_price):,.2f} vs Strike: ${float(state.target_strike):,.2f}",
+                                    ai_rationale=f"{tf_val.upper()} Expiration Settlement for {b_type} | Spot: ${float(state.current_btc_price):,.2f} vs Strike: ${float(state.target_strike):,.2f}",
                                     vpin_score=0.15,
                                     ev_edge=0.10,
                                     bot_type=b_type,
@@ -2590,6 +2640,7 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
         vpin=0.15,
         cycle_id=ticker,
         is_bot=False,
+        is_live=(req.execution_mode == "live"),
     )
     if not g_ok:
         logger.warning("[GUARDRAIL GATEWAY REJECT] %s", g_msg)
@@ -2603,6 +2654,19 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
     # LIVE TRADING EXECUTION INTERCEPT (Real Kalshi Account Routing & Balance Freeze)
     # =========================================================================
     if req.execution_mode == "live":
+        # Strict 5M Live Trading Prohibition Invariant
+        is_5m_target = (("5M" in ticker.upper() and "15M" not in ticker.upper()) or "5MIN" in ticker.upper()) or state.active_timeframe == Timeframe.FIVE_MIN
+        if is_5m_target:
+            logger.error(
+                "[LIVE TRADE BLOCKED] 5M contract %s is strictly Paper Live only. Live orders are permanently blocked.",
+                ticker,
+            )
+            return {
+                "success": False,
+                "status": "5m_live_prohibited",
+                "reason": "5-Minute event contracts (KXBTC5M) are strictly exclusive to Mother Dash Paper Live. Real-money live trading is permanently prohibited.",
+            }
+
         live_p = state.live_portfolio or {}
         live_balance = Decimal(str(live_p.get("balance_dollars", "0.0")))
         est_price = limit_price if limit_price is not None else ((book.best_yes_ask if side == OrderSide.YES else book.best_no_ask) or Decimal("0.50"))
@@ -2972,30 +3036,6 @@ async def close_position_endpoint(req: ClosePositionRequest) -> dict[str, Any]:
     else:
         return {"success": False, "reason": "Failed to close position"}
 
-TIMEFRAME_CONFIGS: dict[Timeframe, dict[str, Any]] = {
-    Timeframe.FIVE_MIN: {
-        "series": "KXBTC5M",
-        "ticker": "KXBTC5M-T78600",
-        "target_strike": Decimal("78600.00"),
-        "title": "BTC 5 min",
-        "expiry_seconds": 300,
-    },
-    Timeframe.FIFTEEN_MIN: {
-        "series": "KXBTC15M",
-        "ticker": "KXBTC15M-T78650",
-        "target_strike": Decimal("77645.14"),
-        "title": "BTC 15 min",
-        "expiry_seconds": 900,
-    },
-    Timeframe.ONE_HOUR: {
-        "series": "KXBTCH",
-        "ticker": "KXBTCH-T78500",
-        "target_strike": Decimal("78500.00"),
-        "title": "BTC 1 hour",
-        "expiry_seconds": 3600,
-    },
-}
-
 @app.post("/api/settings")
 async def update_settings(req: SettingsRequest) -> dict[str, Any]:
     if req.ai_auto_trade is not None:
@@ -3037,6 +3077,12 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
             if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):
                 state.sim_agent.set_active_strategy(cand_bot)
     if req.mode is not None:
+        # Strict 5M Live Mode Prohibition
+        if req.mode == "live" and (state.active_timeframe == Timeframe.FIVE_MIN or (req.active_timeframe and req.active_timeframe.lower() == "5m")):
+            raise HTTPException(
+                status_code=400,
+                detail="Live Trading is strictly prohibited on the 5-Minute timeframe. 5M is exclusive to Mother Dash Paper Live.",
+            )
         if req.mode != state.mode:
             await stop_current_feed()
             if req.mode == "live":
@@ -3051,6 +3097,14 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
         try:
             tf = Timeframe(req.active_timeframe.lower())
             state.active_timeframe = tf
+            if tf == Timeframe.FIVE_MIN and state.mode == "live":
+                # Automatically disarm live mode to Paper Live (mock) when switching to 5M
+                logger.warning("[5M TIMEFRAME SWITCH] Auto-disarming live trading. 5M is strictly exclusive to Mother Dash Paper Live.")
+                await stop_current_feed()
+                await start_mock_feed()
+                state.mode = "mock"
+                if state.sim_agent:
+                    state.sim_agent.execution_mode = "mock"
             cfg = TIMEFRAME_CONFIGS.get(tf)
             if cfg:
                 state.active_ticker = cfg["ticker"]
@@ -4073,8 +4127,9 @@ async def get_win_loss_reports_endpoint(
     bot_type: str | None = None,
     mode: str | None = None,
     execution_mode: str | None = None,
+    timeframe: str | None = None,
 ) -> dict[str, Any]:
-    """Retrieve 15-minute event Win/Loss reports with overall, Domination Bot, ONNX ML Bot, and Live breakdowns."""
+    """Retrieve event Win/Loss reports (5M / 15M) with overall, Domination Bot, ONNX ML Bot, and Live breakdowns."""
     if state.mode == "live":
         await sync_live_settlements()
 
@@ -4099,6 +4154,9 @@ async def get_win_loss_reports_endpoint(
     if bot_type and bot_type.lower() not in ("all", "combined"):
         filtered_reports = [r for r in filtered_reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
 
+    if timeframe and timeframe.lower() not in ("all", "combined"):
+        filtered_reports = [r for r in filtered_reports if str(r.get("timeframe", "15m")).lower() == timeframe.lower()]
+
     return {
         "summary": _calculate_15m_metrics(filtered_reports),
         "all_summary": _calculate_15m_metrics(all_reports),
@@ -4109,6 +4167,7 @@ async def get_win_loss_reports_endpoint(
         "sim_summary": _calculate_15m_metrics(sim_reports),
         "filter_bot_type": bot_type or "all",
         "filter_mode": exec_m or "all",
+        "filter_timeframe": timeframe or "all",
         "reports": filtered_reports[:limit],
         "live_reports": live_reports[:limit],
         "total_live_reports": len(live_reports),
@@ -4837,8 +4896,16 @@ def _build_full_state_payload() -> dict[str, Any]:
     else:
         # Dynamic digital option fair probability with time-to-expiry decay (Strictly MOCK mode only)
         diff_val = float(state.current_btc_price - strike_dec)
-        tau_fraction = max(5, remaining_secs) / 900.0
-        scale = max(35.0, 180.0 * math.sqrt(tau_fraction))
+        tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
+        cycle_duration = 300.0 if tf_val == "5m" else (3600.0 if tf_val == "1h" else 900.0)
+        tau_fraction = min(1.0, max(5, remaining_secs) / cycle_duration)
+        if state.active_asset == CryptoAsset.BTC:
+            scale = max(25.0, 105.0 * math.sqrt(tau_fraction)) if tf_val == "5m" else max(35.0, 180.0 * math.sqrt(tau_fraction))
+        else:
+            active_cfg = get_asset_config(state.active_asset)
+            base_diff = float(active_cfg.min_spot_diff)
+            multiplier = (105.0 / 25.0) if tf_val == "5m" else (180.0 / 35.0)
+            scale = max(base_diff, base_diff * multiplier * math.sqrt(tau_fraction))
         z = diff_val / scale
         try:
             p_yes = 1.0 / (1.0 + math.exp(-z))
@@ -5018,6 +5085,7 @@ def _build_full_state_payload() -> dict[str, Any]:
             "diff_str": asset_cfg.format_diff(diff, diff_pct),
             "expiry_countdown_seconds": remaining_secs,
             "expiry_countdown_str": f"{remaining_secs // 60:02d}:{remaining_secs % 60:02d}",
+            "timeframe": state.active_timeframe.value,
             "market_chance_pct": market_chance_pct,
             "volume_24h_str": state.volume_24h_str,
             "best_yes_ask": round(best_yes_ask, 3),

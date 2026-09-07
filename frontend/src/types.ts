@@ -27,6 +27,7 @@ export interface MarketState {
   diff_str?: string;
   expiry_countdown_seconds: number;
   expiry_countdown_str: string;
+  timeframe?: string;
   market_chance_pct: number;
   volume_24h_str: string;
   best_yes_ask: number;

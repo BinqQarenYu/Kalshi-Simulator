@@ -159,7 +159,7 @@
         <div id="spotHeroSub" class="kpi-sub">Diff: +$0.00 (+0.00%)</div>
       </div>
       <div class="kpi-card span-2">
-        <div class="kpi-label">Active 15M Countdown</div>
+        <div class="kpi-label" id="cycleLabel">Active Countdown</div>
         <div id="cycleVal" class="kpi-val">--:--</div>
         <div id="cycleSub" class="kpi-sub">Waiting for event...</div>
       </div>
@@ -536,6 +536,9 @@
         spotHeroSubEl.innerHTML = diffBadge;
 
         // 5. Active Cycle Countdown
+        const tfName = data.active_timeframe ? data.active_timeframe.toUpperCase() : ((data.active_ticker && data.active_ticker.includes('5M')) ? '5M' : '15M');
+        const cycleLabelEl = document.getElementById('cycleLabel');
+        if (cycleLabelEl) cycleLabelEl.textContent = `Active ${tfName} Countdown`;
         document.getElementById('cycleVal').textContent = data.time_remaining_str || '--:--';
         document.getElementById('cycleSub').textContent = data.active_ticker || 'No active cycle';
 

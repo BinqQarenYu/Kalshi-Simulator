@@ -788,6 +788,8 @@ class SimulationAgent:
                     from kalshi_sim.server import record_win_loss_event_report
                     strike_val = market_info.floor_strike if market_info.floor_strike is not None else (market_info.target_strike if market_info.target_strike is not None else Decimal("0.0"))
                     settle_spot = spot_dec if spot_dec is not None else strike_val
+                    is_5m = ("5M" in result.ticker and "15M" not in result.ticker) or getattr(market_info, "timeframe", None) == "5m"
+                    tf_val = "5m" if is_5m else "15m"
                     record_win_loss_event_report(
                         ticker=result.ticker,
                         side=result.side.value,
@@ -795,9 +797,9 @@ class SimulationAgent:
                         entry_price=result.entry_price,
                         settlement_btc_price=settle_spot,
                         strike_price=strike_val,
-                        timeframe="15m",
+                        timeframe=tf_val,
                         ai_confidence=0.82,
-                        ai_rationale=f"Natural 15M Expiration Settlement for {b_type} | BTC: ${float(settle_spot):,.2f} vs Strike: ${float(strike_val):,.2f}",
+                        ai_rationale=f"Natural {tf_val.upper()} Expiration Settlement for {b_type} | BTC: ${float(settle_spot):,.2f} vs Strike: ${float(strike_val):,.2f}",
                         vpin_score=0.15,
                         ev_edge=0.10,
                         bot_type=b_type,

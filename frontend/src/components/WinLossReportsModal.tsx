@@ -370,7 +370,7 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
                 ) : (
                   <Play className="h-3.5 w-3.5 fill-current" />
                 )}
-                <span>{isTesting ? 'Running Bot Test...' : '🧪 Test Macro ONNX (15M)'}</span>
+                <span>{isTesting ? 'Running Bot Test...' : '🧪 Test Domination Bot'}</span>
               </button>
             )}
 
@@ -461,6 +461,15 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
                             ) : (
                               <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-bold uppercase rounded bg-indigo-500/20 border border-indigo-500/30 text-indigo-300">
                                 PAPER
+                              </span>
+                            )}
+                            {report.timeframe === '5m' ? (
+                              <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-bold uppercase rounded bg-amber-500/20 border border-amber-500/40 text-amber-300">
+                                5M
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-1.5 py-0.2 text-[9px] font-bold uppercase rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
+                                15M
                               </span>
                             )}
                           </div>

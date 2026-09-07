@@ -118,10 +118,27 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
     dpr: window.devicePixelRatio || 1,
   });
 
+  // Synchronize chart timeframe selector with active market timeframe
+  useEffect(() => {
+    if (market.timeframe === '5m') {
+      setSelectedTimeframe('5M');
+    } else if (market.timeframe === '15m') {
+      setSelectedTimeframe('15M');
+    } else if (market.timeframe === '1h') {
+      setSelectedTimeframe('1H');
+    }
+  }, [market.timeframe]);
+
   // Memoize trajectory points with pre-parsed seconds to eliminate ~216,000 string splits/min and 3,600 array allocations/sec in 60FPS RAF loop
   const processedPoints = useMemo<(ChartPoint & { secs: number })[]>(() => {
     const buf = assetMeta.defaultBuffer;
-    const raw: ChartPoint[] = chart.length >= 2 ? chart : [
+    let baseChart = chart;
+    if (selectedTimeframe === 'LIVE') {
+      baseChart = chart.slice(-25);
+    } else if (selectedTimeframe === '5M') {
+      baseChart = chart.slice(-50);
+    }
+    const raw: ChartPoint[] = baseChart.length >= 2 ? baseChart : [
       { time: '00:00:01', price: market.target_strike - buf * 0.2, target: market.target_strike },
       { time: '00:00:05', price: market.target_strike - buf * 0.4, target: market.target_strike },
       { time: '00:00:10', price: market.target_strike - buf * 0.7, target: market.target_strike },
@@ -132,7 +149,7 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       ...p,
       secs: parseTimeToSeconds(p.time),
     }));
-  }, [chart, market.target_strike, market.current_btc_price, assetMeta.defaultBuffer]);
+  }, [chart, market.target_strike, market.current_btc_price, assetMeta.defaultBuffer, selectedTimeframe]);
 
   // Track container resize with ResizeObserver
   useEffect(() => {
