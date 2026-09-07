@@ -16,10 +16,8 @@ import { AIMicrostructureCard } from './components/AIMicrostructureCard';
 import { LiveGuardrailsCard } from './components/LiveGuardrailsCard';
 import { PortfolioDrawer } from './components/PortfolioDrawer';
 import { HistoricalAnalyticsTab } from './components/HistoricalAnalyticsTab';
-import { WinLossReportsModal } from './components/WinLossReportsModal';
-import { IntegrityModal } from './components/IntegrityModal';
-import { ComplianceModal } from './components/ComplianceModal';
-import { SystemResourcesModal } from './components/SystemResourcesModal';
+import { TradeTape } from './components/TradeTape';
+import { GuardianStationModal, GuardianTab } from './components/GuardianStationModal';
 import { soundFX } from './utils/audioFX';
 import { AlertOctagon, Play } from 'lucide-react';
 
@@ -46,11 +44,9 @@ export function App() {
   const [tradingMode, setTradingMode] = useState<'paper' | 'live'>(
     data.settings?.mode === 'live' ? 'live' : 'paper'
   );
-  const [activeTab, setActiveTab] = useState<'trade_up' | 'trade_down' | 'graph' | 'orderbook' | 'ai'>('orderbook');
-  const [isReportsOpen, setIsReportsOpen] = useState<boolean>(false);
-  const [isIntegrityOpen, setIsIntegrityOpen] = useState<boolean>(false);
-  const [isComplianceOpen, setIsComplianceOpen] = useState<boolean>(false);
-  const [isSystemResourcesOpen, setIsSystemResourcesOpen] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'orderbook' | 'tape' | 'positions'>('orderbook');
+  const [rightDeckTab, setRightDeckTab] = useState<'brain' | 'guardrails'>('brain');
+  const [guardianStationTab, setGuardianStationTab] = useState<GuardianTab | null>(null);
   const [isLoadingAudit, setIsLoadingAudit] = useState<boolean>(false);
 
   // Synchronize trading mode when backend reports live mode
@@ -186,19 +182,19 @@ export function App() {
         }}
         onOpenReports={() => {
           soundFX.playClickSound();
-          setIsReportsOpen(true);
+          setGuardianStationTab('reports');
         }}
         onOpenIntegrity={() => {
           soundFX.playClickSound();
-          setIsIntegrityOpen(true);
+          setGuardianStationTab('integrity');
         }}
         onOpenCompliance={() => {
           soundFX.playClickSound();
-          setIsComplianceOpen(true);
+          setGuardianStationTab('compliance');
         }}
         onOpenSystemResources={() => {
           soundFX.playClickSound();
-          setIsSystemResourcesOpen(true);
+          setGuardianStationTab('resources');
         }}
         onTestBot={!isLive ? handleTestBot : undefined}
       />
@@ -304,11 +300,11 @@ export function App() {
           </button>
         </div>
 
-        {/* Quick 15M Win/Loss Reports button on banner (Active in both Paper & Live modes) */}
+        {/* Quick 15M Win/Loss Reports button on banner */}
         <button
           onClick={() => {
             soundFX.playClickSound();
-            setIsReportsOpen(true);
+            setGuardianStationTab('reports');
           }}
           className={`hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl transition-all shadow-sm font-bold text-xs ${
             isLive
@@ -352,10 +348,10 @@ export function App() {
           {/* Left Column: Price Hero, Target Chart, Tabs & L2 Book (7 cols) */}
           <div className="lg:col-span-7 flex flex-col gap-4">
             <div className="bg-[#111620] border border-[#21262d] rounded-2xl overflow-hidden shadow-xl">
-              {/* Price Hero Section */}
+              {/* Compact Price Hero Section */}
               <PriceHero market={data.market} />
 
-              {/* Interactive Target Strike Chart */}
+              {/* Interactive Target Strike Chart (60 FPS Conveyor) */}
               <TargetChart
                 market={data.market}
                 chart={data.chart}
@@ -364,62 +360,60 @@ export function App() {
                 onSelectPrice={handleSelectPrice}
                 onOpenReports={() => {
                   soundFX.playClickSound();
-                  setIsReportsOpen(true);
+                  setGuardianStationTab('reports');
                 }}
               />
 
               {/* Market Chance Banner & Tab Selector */}
               <ChanceBanner
                 market={data.market}
-                activeTab={activeTab}
+                activeTab={activeTab as any}
                 tradingMode={tradingMode}
                 onSelectTab={(tab) => {
                   soundFX.playClickSound();
-                  setActiveTab(tab);
+                  setActiveTab(tab as any);
                 }}
                 onQuickTrade={handleQuickTrade}
               />
 
-              {/* Tab Views */}
-              {activeTab === 'orderbook' || activeTab === 'trade_up' || activeTab === 'trade_down' ? (
+              {/* Lower Deck Tab Views */}
+              {activeTab === 'orderbook' ? (
                 <OrderBookLadder
                   ladder={data.orderbook_ladder}
                   onSelectPrice={handleSelectPrice}
                 />
-              ) : activeTab === 'ai' ? (
-                <div className="p-4">
-                  <AIMicrostructureCard 
-                    signals={data.ai_signals} 
-                    activeAsset={data.market.active_asset}
-                    onSelectStrategy={selectStrategyBot}
-                    onTestBot={!isLive ? handleTestBot : undefined}
-                    onOpenReports={() => setIsReportsOpen(true)}
-                    dominationDiscountPrice={data.settings?.domination_discount_price ?? data.ai_signals?.discount_limit_price ?? 0.48}
-                    onUpdateDiscountPrice={updateDominationDiscountPrice}
+              ) : activeTab === 'tape' ? (
+                <TradeTape tradeTape={data.trade_tape} />
+              ) : (
+                <div className="p-2 sm:p-4">
+                  <PortfolioDrawer
+                    portfolio={data.portfolio}
+                    livePortfolio={data.live_portfolio}
+                    tradingMode={tradingMode}
+                    onClosePosition={closePosition}
+                    onCancelOrder={cancelOrder}
+                    onResetCircuitBreaker={resetCircuitBreaker}
                   />
                 </div>
-              ) : (
-                <OrderBookLadder
-                  ladder={data.orderbook_ladder}
-                  onSelectPrice={handleSelectPrice}
-                />
               )}
             </div>
 
-            {/* Portfolio & Active Positions Drawer */}
-            <PortfolioDrawer
-              portfolio={data.portfolio}
-              livePortfolio={data.live_portfolio}
-              tradingMode={tradingMode}
-              onClosePosition={closePosition}
-              onCancelOrder={cancelOrder}
-              onResetCircuitBreaker={resetCircuitBreaker}
-            />
+            {/* Persistent Portfolio Ledger when viewing CLOB or Tape */}
+            {activeTab !== 'positions' && (
+              <PortfolioDrawer
+                portfolio={data.portfolio}
+                livePortfolio={data.live_portfolio}
+                tradingMode={tradingMode}
+                onClosePosition={closePosition}
+                onCancelOrder={cancelOrder}
+                onResetCircuitBreaker={resetCircuitBreaker}
+              />
+            )}
           </div>
 
-          {/* Right Column: Order Entry Panel & AI Brain Card or Live Guardrails (5 cols) */}
+          {/* Right Column: Order Entry Panel & Intelligence Deck (5 cols) */}
           <div className="lg:col-span-5 flex flex-col gap-4">
-            {/* Right Execution Widget */}
+            {/* 1-Click Execution Widget (Micro-Sizing Cap, Limit Sniper) */}
             <OrderEntryPanel
               market={data.market}
               portfolio={data.portfolio}
@@ -428,73 +422,78 @@ export function App() {
               onPlaceOrder={handlePlaceOrderIntercept}
             />
 
-            {/* In Live Trading: Show Pre-Trade Guardrails AND Active AI Trading Brain */}
-            {isLive ? (
-              <>
-                <LiveGuardrailsCard
-                  livePortfolio={data.live_portfolio}
-                  integrityStatus={data.integrity_status}
-                  complianceStatus={data.compliance_status}
-                  isKillSwitchTripped={isKillSwitchTripped}
-                  onKillSwitch={handleKillSwitch}
-                  onResumeTrading={handleResumeTrading}
-                />
-                <AIMicrostructureCard 
-                  signals={data.ai_signals} 
-                  activeAsset={data.market.active_asset}
-                  onSelectStrategy={selectStrategyBot}
-                  onTestBot={undefined}
-                  onOpenReports={() => setIsReportsOpen(true)}
-                  dominationDiscountPrice={data.settings?.domination_discount_price ?? data.ai_signals?.discount_limit_price ?? 0.48}
-                  onUpdateDiscountPrice={updateDominationDiscountPrice}
-                />
-              </>
-            ) : (
-              /* In Paper Trading: Show AI Microstructure & ONNX Inferences */
+            {/* Right Side Intelligence Deck Switcher */}
+            <div className="flex items-center bg-[#161b22] p-1 rounded-xl border border-[#21262d] text-xs font-bold shadow-md">
+              <button
+                onClick={() => {
+                  soundFX.playClickSound();
+                  setRightDeckTab('brain');
+                }}
+                className={`flex-1 py-1.5 px-3 rounded-lg transition-all flex items-center justify-center gap-2 ${
+                  rightDeckTab === 'brain'
+                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
+                    : 'text-[#8b949e] hover:text-white border border-transparent'
+                }`}
+              >
+                <span>🧠 3-Step Dominion Brain</span>
+              </button>
+              <button
+                onClick={() => {
+                  soundFX.playClickSound();
+                  setRightDeckTab('guardrails');
+                }}
+                className={`flex-1 py-1.5 px-3 rounded-lg transition-all flex items-center justify-center gap-2 ${
+                  rightDeckTab === 'guardrails'
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
+                    : 'text-[#8b949e] hover:text-white border border-transparent'
+                }`}
+              >
+                <span>🛡️ Live Risk & Guardrails</span>
+              </button>
+            </div>
+
+            {/* Right Intelligence Deck Body */}
+            {rightDeckTab === 'brain' ? (
               <AIMicrostructureCard 
                 signals={data.ai_signals} 
                 activeAsset={data.market.active_asset}
                 onSelectStrategy={selectStrategyBot}
-                onTestBot={handleTestBot}
-                onOpenReports={() => setIsReportsOpen(true)}
+                onTestBot={!isLive ? handleTestBot : undefined}
+                onOpenReports={() => {
+                  soundFX.playClickSound();
+                  setGuardianStationTab('reports');
+                }}
                 dominationDiscountPrice={data.settings?.domination_discount_price ?? data.ai_signals?.discount_limit_price ?? 0.48}
                 onUpdateDiscountPrice={updateDominationDiscountPrice}
+              />
+            ) : (
+              <LiveGuardrailsCard
+                livePortfolio={data.live_portfolio}
+                integrityStatus={data.integrity_status}
+                complianceStatus={data.compliance_status}
+                isKillSwitchTripped={isKillSwitchTripped}
+                onKillSwitch={handleKillSwitch}
+                onResumeTrading={handleResumeTrading}
               />
             )}
           </div>
         </main>
       )}
 
-      {/* 15-Minute Event Win/Loss Reports Modal */}
-      <WinLossReportsModal
-        isOpen={isReportsOpen}
-        onClose={() => setIsReportsOpen(false)}
+      {/* Consolidated Terminal Guardian Station Modal */}
+      <GuardianStationModal
+        isOpen={guardianStationTab !== null}
+        onClose={() => setGuardianStationTab(null)}
+        activeTab={guardianStationTab || 'reports'}
+        onSelectTab={(tab) => setGuardianStationTab(tab)}
         reports={data.win_loss_reports}
-        onTestBot={handleTestBot}
+        onTestBot={!isLive ? handleTestBot : undefined}
         isLiveMode={isLive}
-      />
-
-      {/* Agent_integrity_check Suite Modal */}
-      <IntegrityModal
-        isOpen={isIntegrityOpen}
-        onClose={() => setIsIntegrityOpen(false)}
         integrityStatus={data.integrity_status}
         onRunAuditNow={handleRunAuditNow}
         isLoadingAudit={isLoadingAudit}
-      />
-
-      {/* Agent_law_order Compliance Guardian Modal */}
-      <ComplianceModal
-        isOpen={isComplianceOpen}
-        onClose={() => setIsComplianceOpen(false)}
         complianceStatus={data.compliance_status}
-      />
-
-      {/* System Resource & CPU/Memory Governor Modal */}
-      <SystemResourcesModal
-        isOpen={isSystemResourcesOpen}
-        onClose={() => setIsSystemResourcesOpen(false)}
-        metrics={data.system_resources}
+        systemResources={data.system_resources}
       />
     </div>
   );

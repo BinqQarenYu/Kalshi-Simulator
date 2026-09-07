@@ -376,14 +376,41 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
       {/* 3-Step Domination Bot: Active Playbook Stage Badge */}
       {is3StepBot && (
-        <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs font-semibold ${playbook.bg}`}>
-          <div className="flex items-center gap-2">
-            {playbook.icon}
-            <span className="text-[11px] font-bold tracking-tight">{playbook.text}</span>
+        <div className="flex flex-col gap-1.5">
+          <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs font-semibold ${playbook.bg}`}>
+            <div className="flex items-center gap-2">
+              {playbook.icon}
+              <span className="text-[11px] font-bold tracking-tight">{playbook.text}</span>
+            </div>
+            <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-black/30 rounded-full uppercase">
+              Active
+            </span>
           </div>
-          <span className="px-2 py-0.5 text-[10px] font-mono font-bold bg-black/30 rounded-full uppercase">
-            Active
-          </span>
+
+          {/* Coin-Flip Dead Zone Status Indicator */}
+          <div className={`px-3 py-1.5 rounded-lg border text-[11px] font-mono flex items-center justify-between ${
+            signals.rationale?.includes('Razor-Tight') || signals.rationale?.includes('Proximity Veto')
+              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+          }`}>
+            <div className="flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                signals.rationale?.includes('Razor-Tight') || signals.rationale?.includes('Proximity Veto')
+                  ? 'bg-amber-400'
+                  : 'bg-emerald-400 animate-pulse'
+              }`} />
+              <span>
+                {signals.rationale?.includes('Razor-Tight') || signals.rationale?.includes('Proximity Veto')
+                  ? 'Coin-Flip Dead Zone Active'
+                  : 'Directional Moneyness Validated'}
+              </span>
+            </div>
+            <span className="text-[10px] font-bold opacity-80">
+              {signals.rationale?.includes('Razor-Tight') || signals.rationale?.includes('Proximity Veto')
+                ? 'SKIPPING'
+                : 'EDGE READY'}
+            </span>
+          </div>
         </div>
       )}
 

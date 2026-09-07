@@ -63,59 +63,36 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
       </div>
 
       {/* Sub Tab Navigation */}
-      <div className="flex items-center gap-4 text-xs font-semibold border-t border-[#21262d] pt-2">
-        <button
-          onClick={() => onSelectTab('trade_up')}
-          className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
-            activeTab === 'trade_up'
-              ? 'border-[#00d084] text-[#00d084]'
-              : 'border-transparent text-[#8b949e] hover:text-white'
-          }`}
-        >
-          Trade Up
-        </button>
-        <button
-          onClick={() => onSelectTab('trade_down')}
-          className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff4d4d] ${
-            activeTab === 'trade_down'
-              ? 'border-[#ff4d4d] text-[#ff4d4d]'
-              : 'border-transparent text-[#8b949e] hover:text-white'
-          }`}
-        >
-          Trade Down
-        </button>
-        <button
-          onClick={() => onSelectTab('graph')}
-          className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${
-            activeTab === 'graph'
-              ? 'border-white text-white'
-              : 'border-transparent text-[#8b949e] hover:text-white'
-          }`}
-        >
-          Graph
-        </button>
+      <div className="flex items-center gap-6 text-xs font-semibold border-t border-[#21262d] pt-2">
         <button
           onClick={() => onSelectTab('orderbook')}
-          className={`pb-1 border-b-2 transition-all rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
+          className={`pb-1 border-b-2 transition-all rounded-sm flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
             activeTab === 'orderbook'
-              ? 'border-[#f7931a] text-[#f7931a]'
+              ? 'border-[#f7931a] text-[#f7931a] font-bold'
               : 'border-transparent text-[#8b949e] hover:text-white'
           }`}
         >
-          Level-2 Book
+          <span>📊 Level-2 CLOB Ladder</span>
         </button>
         <button
-          onClick={() => onSelectTab('ai')}
-          className={`pb-1 border-b-2 flex items-center gap-1.5 transition-all ${
-            activeTab === 'ai'
-              ? 'border-purple-500 text-purple-300 font-bold'
+          onClick={() => onSelectTab('tape' as any)}
+          className={`pb-1 border-b-2 transition-all rounded-sm flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
+            activeTab === ('tape' as any)
+              ? 'border-[#00d084] text-[#00d084] font-bold'
               : 'border-transparent text-[#8b949e] hover:text-white'
           }`}
         >
-          <span>🧠 AI Brain & ONNX</span>
-          <span className="px-1.5 py-0.2 text-[9px] font-mono bg-purple-500/25 text-purple-300 border border-purple-500/40 rounded-full font-bold">
-            Macro ONNX
-          </span>
+          <span>⚡ Live Trade Tape</span>
+        </button>
+        <button
+          onClick={() => onSelectTab('positions' as any)}
+          className={`pb-1 border-b-2 transition-all rounded-sm flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6] ${
+            activeTab === ('positions' as any)
+              ? 'border-[#3b82f6] text-[#3b82f6] font-bold'
+              : 'border-transparent text-[#8b949e] hover:text-white'
+          }`}
+        >
+          <span>💼 Active Positions & Fills</span>
         </button>
       </div>
     </div>
