@@ -278,6 +278,12 @@ class SimulationAgent:
         if hasattr(self, "_domination_bot") and hasattr(self._domination_bot, "set_discount_limit_price"):
             self._domination_bot.set_discount_limit_price(price)
 
+    def set_asset(self, asset: Any) -> None:
+        """Update active cryptocurrency underlying asset across bots."""
+        if hasattr(self, "_domination_bot") and hasattr(self._domination_bot, "set_asset"):
+            self._domination_bot.set_asset(asset)
+        logger.info("SimulationAgent underlying asset updated to: %s", asset)
+
     async def _evaluate_market(self, ticker: str, book: OrderBook) -> None:
         """Evaluate trading decisions concurrently for both 3-Step Domination and ONNX Neural Net bots."""
         timeframe = self._ticker_timeframe_map.get(ticker)

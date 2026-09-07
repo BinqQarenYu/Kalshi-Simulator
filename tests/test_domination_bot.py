@@ -62,10 +62,10 @@ def test_domination_bot_playbook2_mid_cycle_ofi_drift() -> None:
     book.yes_book = {Decimal("0.55"): Decimal("300")}
     book.no_book = {Decimal("0.45"): Decimal("100")}
 
-    # T = 420s (7 minutes left), spot is +$45 above strike
+    # T = 420s (7 minutes left), spot is +$110 above strike (must exceed 2x min_spot_diff=$70)
     decision = bot.evaluate(
         book=book,
-        spot_price=78695.0,
+        spot_price=78760.0,
         target_strike=78650.0,
         time_to_expiry_s=420.0,
         total_equity=Decimal("100.00"),
@@ -115,10 +115,10 @@ def test_domination_bot_discount_sniper_maker_execution() -> None:
     book.yes_book = {Decimal("0.60"): Decimal("200")}
     book.no_book = {Decimal("0.40"): Decimal("200")}
 
-    # Spot is +$60 above strike, T = 120s
+    # Spot is +$110 above strike (must exceed 2x min_spot_diff=$70), T = 120s
     decision = bot.evaluate(
         book=book,
-        spot_price=78710.0,
+        spot_price=78760.0,
         target_strike=78650.0,
         time_to_expiry_s=120.0,
         total_equity=Decimal("100.00"),
@@ -208,7 +208,7 @@ def test_domination_bot_multi_asset_evaluation() -> None:
 
     eth_decision = eth_bot.evaluate(
         book=eth_book,
-        spot_price=2104.0,  # +$4.00 ITM (> $2.50 threshold, ~6.6x 1m std dev)
+        spot_price=2108.0,  # +$8.00 ITM (> 2x $2.50 threshold=$5.00, ~13.3x 1m std dev)
         target_strike=2100.0,
         time_to_expiry_s=120.0,
         total_equity=Decimal("100.00"),
@@ -218,7 +218,7 @@ def test_domination_bot_multi_asset_evaluation() -> None:
     assert eth_decision.recommended_contracts == 1
     assert eth_decision.p_up > 0.85
     assert "BTC" not in eth_decision.rationale
-    assert eth_decision.spot_diff == 4.0
+    assert eth_decision.spot_diff == 8.0
 
     # 2. Dogecoin Evaluation (Micro-decimal precision test)
     doge_bot = ThreeStepDominationBot(asset=CryptoAsset.DOGE, min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"))
@@ -228,7 +228,7 @@ def test_domination_bot_multi_asset_evaluation() -> None:
 
     doge_decision = doge_bot.evaluate(
         book=doge_book,
-        spot_price=0.090600,  # +$0.000600 ITM (> $0.0005 threshold, ~13x 1m std dev)
+        spot_price=0.091500,  # +$0.001500 ITM (> 2x $0.0005 threshold=$0.001, ~33x 1m std dev)
         target_strike=0.090000,
         time_to_expiry_s=120.0,
         total_equity=Decimal("100.00"),
@@ -239,8 +239,8 @@ def test_domination_bot_multi_asset_evaluation() -> None:
     assert doge_decision.p_up > 0.85
     assert "BTC" not in doge_decision.rationale
     # Verify DOGE spot_diff is not rounded to 0.00
-    assert doge_decision.spot_diff == 0.0006
-    assert "+$0.000600" in doge_decision.rationale
+    assert doge_decision.spot_diff == 0.0015
+    assert "+$0.001500" in doge_decision.rationale
 
     # 3. Solana Evaluation
     sol_bot = ThreeStepDominationBot(asset=CryptoAsset.SOL, min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"))
@@ -250,7 +250,7 @@ def test_domination_bot_multi_asset_evaluation() -> None:
 
     sol_decision = sol_bot.evaluate(
         book=sol_book,
-        spot_price=131.00,  # +$1.00 ITM (> $0.50 threshold, 25x 1m std dev)
+        spot_price=132.00,  # +$2.00 ITM (> 2x $0.50 threshold=$1.00, > 3x marginal=$1.50, 50x 1m std dev)
         target_strike=130.00,
         time_to_expiry_s=120.0,
         total_equity=Decimal("100.00"),
@@ -260,5 +260,57 @@ def test_domination_bot_multi_asset_evaluation() -> None:
     assert sol_decision.recommended_contracts == 1
     assert sol_decision.p_up > 0.85
     assert "BTC" not in sol_decision.rationale
-    assert sol_decision.spot_diff == 1.0
+    assert sol_decision.spot_diff == 2.0
+
+
+def test_domination_bot_razor_tight_proximity_veto() -> None:
+    """Verify that any razor-tight event (|Diff| < 2x min_spot_diff) is vetoed across all crypto assets."""
+    from kalshi_sim.schemas import CryptoAsset
+
+    # BTC: min_spot_diff = 35.0, 2x = 70.0. Diff = $40.00 -> VETO
+    btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.55"): Decimal("100")}
+    book.no_book = {Decimal("0.45"): Decimal("100")}
+    d_btc = btc_bot.evaluate(
+        book=book,
+        spot_price=78690.0,  # +$40.00 (< $70.00)
+        target_strike=78650.0,
+        time_to_expiry_s=120.0,
+    )
+    assert d_btc.recommended_side == "wait"
+    assert "Razor-Tight Proximity Veto" in d_btc.rationale
+
+    # ETH: min_spot_diff = 2.50, 2x = 5.00. Diff = $3.00 -> VETO
+    eth_bot = ThreeStepDominationBot(asset=CryptoAsset.ETH)
+    d_eth = eth_bot.evaluate(
+        book=book,
+        spot_price=2103.0,  # +$3.00 (< $5.00)
+        target_strike=2100.0,
+        time_to_expiry_s=120.0,
+    )
+    assert d_eth.recommended_side == "wait"
+    assert "Razor-Tight Proximity Veto" in d_eth.rationale
+
+    # SOL: min_spot_diff = 0.50, 2x = 1.00. Diff = $0.75 -> VETO
+    sol_bot = ThreeStepDominationBot(asset=CryptoAsset.SOL)
+    d_sol = sol_bot.evaluate(
+        book=book,
+        spot_price=130.75,  # +$0.75 (< $1.00)
+        target_strike=130.00,
+        time_to_expiry_s=120.0,
+    )
+    assert d_sol.recommended_side == "wait"
+    assert "Razor-Tight Proximity Veto" in d_sol.rationale
+
+    # DOGE: min_spot_diff = 0.0005, 2x = 0.0010. Diff = $0.0007 -> VETO
+    doge_bot = ThreeStepDominationBot(asset=CryptoAsset.DOGE)
+    d_doge = doge_bot.evaluate(
+        book=book,
+        spot_price=0.090700,  # +$0.000700 (< $0.001000)
+        target_strike=0.090000,
+        time_to_expiry_s=120.0,
+    )
+    assert d_doge.recommended_side == "wait"
+    assert "Razor-Tight Proximity Veto" in d_doge.rationale
 

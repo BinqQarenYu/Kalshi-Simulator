@@ -24,6 +24,9 @@ INTERVAL_SECONDS: dict[CandleInterval, int] = {
     CandleInterval.FIFTEEN_MIN: 900,
     CandleInterval.ONE_HOUR: 3600,
 }
+# Pre-tuple to avoid dict .items() tuple generation inside high-frequency tick loop
+INTERVAL_ITEMS: tuple[tuple[CandleInterval, int], ...] = tuple(INTERVAL_SECONDS.items())
+ZERO_DECIMAL = Decimal("0")
 
 
 class OHLCVAggregator:
@@ -69,8 +72,9 @@ class OHLCVAggregator:
         if price is None:
             return
 
-        price_dec = Decimal(str(price))
-        vol_dec = Decimal(str(volume)) if volume is not None else Decimal("0")
+        # Optimization: Fast-path Decimal type check to avoid expensive str conversion and re-parsing
+        price_dec = price if isinstance(price, Decimal) else Decimal(str(price))
+        vol_dec = volume if isinstance(volume, Decimal) else (Decimal(str(volume)) if volume is not None else ZERO_DECIMAL)
 
         # Determine UNIX epoch seconds
         if timestamp is None:
@@ -84,7 +88,8 @@ class OHLCVAggregator:
 
         symbol_series = self._series[symbol]
 
-        for interval, dur_sec in INTERVAL_SECONDS.items():
+        # Optimization: Iterate over precomputed INTERVAL_ITEMS tuple to eliminate dict.items() allocations
+        for interval, dur_sec in INTERVAL_ITEMS:
             bucket_ts = (ts_sec // dur_sec) * dur_sec
             series_deque = symbol_series[interval]
 
@@ -103,8 +108,12 @@ class OHLCVAggregator:
             elif series_deque[-1].timestamp == bucket_ts:
                 # Update existing active candlestick bar
                 active = series_deque[-1]
-                active.high = max(active.high, price_dec)
-                active.low = min(active.low, price_dec)
+                # Optimization: Guard field assignment with conditionals to prevent triggering Pydantic's
+                # __setattr__ validator overhead when high/low bounds are unchanged.
+                if price_dec > active.high:
+                    active.high = price_dec
+                if price_dec < active.low:
+                    active.low = price_dec
                 active.close = price_dec
                 active.volume += vol_dec
                 active.trades_count += 1
@@ -112,8 +121,10 @@ class OHLCVAggregator:
                 # Out-of-order historical backfill update
                 for candle in reversed(series_deque):
                     if candle.timestamp == bucket_ts:
-                        candle.high = max(candle.high, price_dec)
-                        candle.low = min(candle.low, price_dec)
+                        if price_dec > candle.high:
+                            candle.high = price_dec
+                        if price_dec < candle.low:
+                            candle.low = price_dec
                         candle.close = price_dec
                         candle.volume += vol_dec
                         candle.trades_count += 1

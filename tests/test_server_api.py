@@ -360,3 +360,76 @@ def test_domination_config_endpoints(client: TestClient) -> None:
         set_resp = client.post("/api/settings", json={"domination_discount_price": 0.40})
         assert set_resp.status_code == 200
         assert set_resp.json()["domination_discount_price"] == 0.40
+
+
+def test_supported_assets_endpoint(client: TestClient) -> None:
+    resp = client.get("/api/assets")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "active_asset" in data
+    assert "assets" in data
+    assert len(data["assets"]) == 4
+    asset_ids = [a["id"] for a in data["assets"]]
+    assert set(asset_ids) == {"BTC", "ETH", "SOL", "DOGE"}
+
+    # Verify BTC asset config values
+    btc_item = next(a for a in data["assets"] if a["id"] == "BTC")
+    assert btc_item["name"] == "Bitcoin"
+    assert btc_item["series_15m"] == "KXBTC15M"
+    assert btc_item["cf_index_id"] == "BRTI"
+    assert btc_item["strike_step"] == 25.0
+    assert btc_item["min_spot_diff"] == 35.0
+
+
+def test_select_active_asset_endpoint(client: TestClient) -> None:
+    # 1. Select ETH
+    resp_eth = client.post("/api/assets/select", json={"asset": "ETH"})
+    assert resp_eth.status_code == 200
+    data_eth = resp_eth.json()
+    assert data_eth["status"] == "SUCCESS"
+    assert data_eth["active_asset"] == "ETH"
+    assert data_eth["series_ticker"] == "KXETH15M"
+
+    # Verify state reflection
+    state_resp = client.get("/api/state")
+    assert state_resp.status_code == 200
+    assert state_resp.json()["market"]["active_asset"] == "ETH"
+
+    # 2. Select SOL
+    resp_sol = client.post("/api/assets/select", json={"asset": "SOL"})
+    assert resp_sol.status_code == 200
+    assert resp_sol.json()["active_asset"] == "SOL"
+
+    # 3. Select DOGE
+    resp_doge = client.post("/api/assets/select", json={"asset": "DOGE"})
+    assert resp_doge.status_code == 200
+    assert resp_doge.json()["active_asset"] == "DOGE"
+
+    # 4. Invalid asset rejected with 400
+    resp_bad = client.post("/api/assets/select", json={"asset": "INVALID_COIN"})
+    assert resp_bad.status_code == 400
+
+    # 5. Restore back to BTC to preserve default environment
+    resp_btc = client.post("/api/assets/select", json={"asset": "BTC"})
+    assert resp_btc.status_code == 200
+    assert resp_btc.json()["active_asset"] == "BTC"
+
+
+def test_bot_arm_disarm_panic_endpoints(client: TestClient) -> None:
+    # 1. Arm
+    resp_arm = client.post("/api/bot/arm")
+    assert resp_arm.status_code == 200
+    assert resp_arm.json()["status"] == "ARMED"
+    assert resp_arm.json()["armed"] is True
+
+    # 2. Disarm
+    resp_disarm = client.post("/api/bot/disarm")
+    assert resp_disarm.status_code == 200
+    assert resp_disarm.json()["status"] == "DISARMED"
+    assert resp_disarm.json()["armed"] is False
+
+    # 3. Panic
+    resp_panic = client.post("/api/bot/panic")
+    assert resp_panic.status_code == 200
+    assert resp_panic.json()["status"] == "PANIC_EXECUTED"
+    assert resp_panic.json()["armed"] is False
