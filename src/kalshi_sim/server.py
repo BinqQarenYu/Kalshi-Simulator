@@ -561,8 +561,10 @@ async def stop_current_feed() -> None:
         state.feed_task.cancel()
         try:
             await state.feed_task
-        except (asyncio.CancelledError, Exception):
-            pass
+        except asyncio.CancelledError:
+            logger.debug("Feed task cancelled successfully.")
+        except Exception as exc:
+            logger.warning("Unexpected error awaiting feed task: %s", exc)
         state.feed_task = None
 
 
