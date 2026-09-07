@@ -433,3 +433,92 @@ def test_bot_arm_disarm_panic_endpoints(client: TestClient) -> None:
     assert resp_panic.status_code == 200
     assert resp_panic.json()["status"] == "PANIC_EXECUTED"
     assert resp_panic.json()["armed"] is False
+
+
+def test_mother_standalone_single_source_of_truth_sync(client: TestClient) -> None:
+    """Verify that Mother server synchronizes 100% of its market, timer, and balance state from Standalone Bot."""
+    import time
+    from unittest.mock import patch
+    from kalshi_sim.server import state, _build_full_state_payload
+
+    # Simulate Standalone Bot running with active lock
+    with patch("kalshi_sim.server.get_active_lock_holder", return_value=("standalone_bot", 99999)):
+        # Inject mock standalone telemetry into state
+        state._standalone_data = {
+            "active_ticker": "KXETH15M-TRUTH-15",
+            "active_asset": "ETH",
+            "active_asset_name": "Ethereum",
+            "target_strike": 2150.00,
+            "target_strike_str": "$2,150.00",
+            "spot_price": 2162.50,
+            "spot_price_str": "$2,162.50",
+            "spot_diff": 12.50,
+            "spot_diff_pct": 0.581,
+            "moneyness_diff_str": "+$12.50 (+0.581%)",
+            "expiry_countdown_seconds": 385,
+            "time_remaining_str": "06:25",
+            "target_time_str": "09:00am ET",
+            "time_window_str": "September 07, 08:45 - 09:00 AM ET",
+            "balance": 24.6462,
+            "today_pnl": 3.56,
+            "settled_cycles": 10,
+            "today_wins": 5,
+            "today_losses": 5,
+            "today_win_rate": 50.0,
+            "best_yes_ask": 0.58,
+            "best_yes_bid": 0.57,
+            "best_no_ask": 0.43,
+            "best_no_bid": 0.42,
+            "armed": True,
+            "playbook": "Playbook 2: OFI Drift",
+            "edge_pct": 14.5,
+            "ev": 0.04,
+            "vpin": 0.18,
+            "vpin_is_safe": True,
+            "rationale": "High conviction drift detected",
+            "orderbook_ladder": [
+                {"side": "yes", "price_cents": "57.0¢", "price_raw": 0.57, "contracts": 10, "total": "$6", "depth_pct": 80}
+            ],
+        }
+        state._last_standalone_sync = time.monotonic()
+
+        payload = _build_full_state_payload()
+        m = payload["market"]
+        p = payload["portfolio"]
+        s = payload["settings"]
+        ai = payload["ai_signals"]
+
+        # 1. Market parity
+        assert m["ticker"] == "KXETH15M-TRUTH-15"
+        assert m["target_strike"] == 2150.00
+        assert m["target_strike_str"] == "$2,150.00"
+        assert m["current_btc_price"] == 2162.50
+        assert m["current_btc_price_str"] == "$2,162.50"
+        assert m["diff"] == 12.50
+        assert m["expiry_countdown_seconds"] == 385
+        assert m["expiry_countdown_str"] == "06:25"
+        assert m["target_time_str"] == "09:00am ET"
+
+        # 2. Portfolio & PnL parity
+        assert p["balance"] == 24.6462
+        assert p["realized_pnl"] == 3.56
+        assert p["total_trades"] == 10
+        assert p["wins"] == 5
+        assert p["losses"] == 5
+        assert p["win_rate"] == 50.0
+
+        # 3. AI signal parity
+        assert ai["active_playbook"] == "Playbook 2: OFI Drift"
+        assert ai["statistical_edge"] == 14.5
+        assert ai["expected_value"] == 0.04
+        assert ai["p_up"] == 0.50
+
+        # 4. Settings & lock indicator
+        assert s["standalone_lock_active"] is True
+        assert s["standalone_sync_active"] is True
+        assert s["lock_holder"] == "standalone_bot"
+
+        # Clean up
+        state._standalone_data = None
+        state._last_standalone_sync = 0.0
+

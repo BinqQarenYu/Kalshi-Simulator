@@ -1185,6 +1185,9 @@ async def get_state() -> Dict[str, Any]:
         "best_no_bid": float(app_engine.best_no_bid) if app_engine.best_no_bid is not None else None,
         "best_no_ask": float(app_engine.best_no_ask) if app_engine.best_no_ask is not None else None,
         "playbook": playbook,
+        "p_up": float(dec.p_up) if dec else 0.50,
+        "p_down": float(dec.p_down) if dec else 0.50,
+        "p_wait": float(dec.p_wait) if dec else 0.00,
         "edge_pct": edge,
         "ev": ev,
         "vpin": vpin,
@@ -1200,6 +1203,31 @@ async def get_state() -> Dict[str, Any]:
         "coinbase_connected": app_engine.coinbase_connected,
         "binance_connected": app_engine.binance_connected,
         "parameters": app_engine.get_parameters(),
+        "orderbook_ladder": [
+            {
+                "side": "yes",
+                "price_cents": f"{float(pr * 100):.1f}¢",
+                "price_raw": float(pr),
+                "contracts": int(qty),
+                "total": f"${float(pr * qty):,.0f}",
+                "depth_pct": min(100, max(8, int((float(qty) / (max([float(q) for q in list(b.yes_book.values()) + list(b.no_book.values())] or [1000.0]))) * 100))),
+            }
+            for b in [app_engine.orderbook.get_book(app_engine.active_ticker)]
+            if b
+            for pr, qty in sorted(b.yes_book.items(), key=lambda x: x[0], reverse=True)[:8]
+        ] + [
+            {
+                "side": "no",
+                "price_cents": f"{float(pr * 100):.1f}¢",
+                "price_raw": float(pr),
+                "contracts": int(qty),
+                "total": f"${float(pr * qty):,.0f}",
+                "depth_pct": min(100, max(8, int((float(qty) / (max([float(q) for q in list(b.yes_book.values()) + list(b.no_book.values())] or [1000.0]))) * 100))),
+            }
+            for b in [app_engine.orderbook.get_book(app_engine.active_ticker)]
+            if b
+            for pr, qty in sorted(b.no_book.items(), key=lambda x: x[0], reverse=True)[:8]
+        ],
     }
 
 
