@@ -190,22 +190,39 @@ class ThreeStepDominationBot:
         logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
-    def get_dynamic_proximity_threshold(self, time_to_expiry_s: float) -> float:
-        """Compute time-and-volatility-scaled minimum spot distance threshold.
+    def get_dynamic_proximity_threshold(
+        self,
+        time_to_expiry_s: float,
+        cycle_duration_s: float = 900.0,
+    ) -> float:
+        """Compute self-calibrating time-and-volatility-scaled minimum spot distance threshold.
 
         Calculates the required safety moat in dollars:
-            threshold = clamp(floor, z_moat * sigma_1m * sqrt(tau_mins), ceiling)
+            threshold = clamp(floor, z_asset * live_vol * sqrt(tau_mins), ceiling)
+            where z_asset = ceiling_moat / (baseline_vol * sqrt(cycle_mins))
 
-        - Hard Floor: Ensures we never enter within strike noise (1.15x min_spot_diff, ~$40.25 for BTC).
-        - Hard Ceiling: Caps threshold at 2.15x min_spot_diff (~$75.25 for BTC) to prevent chasing impossible moats.
-        - Scales automatically with asset volatility and remaining cycle duration.
+        - Hard Floor: Ensures we never enter within strike noise (1.15x min_spot_diff).
+        - Hard Ceiling: Caps threshold at 2.15x min_spot_diff to prevent chasing impossible moats.
+        - Sweet Spot: Naturally lands at ~1.36x min_spot_diff at mid-cycle across all assets (BTC, ETH, SOL, DOGE).
+        - Self-Calibrating: Adapts dynamically if parameters or volatility change, with zero manual hardcoding.
         """
         tau_mins = max(0.2, time_to_expiry_s / 60.0)
-        expected_noise = self.typical_1m_volatility * math.sqrt(tau_mins)
-        dynamic_moat = 1.4 * expected_noise
+        cycle_mins = max(1.0, cycle_duration_s / 60.0)
+
+        cfg = get_asset_config(self.asset)
+        baseline_vol = float(cfg.typical_1m_volatility)
+        live_vol = self.typical_1m_volatility if self.typical_1m_volatility > 0 else baseline_vol
 
         floor_moat = self.min_spot_diff * 1.15
         ceiling_moat = self.min_spot_diff * 2.15
+
+        expected_full_cycle_noise = baseline_vol * math.sqrt(cycle_mins)
+        if expected_full_cycle_noise > 1e-9:
+            z_asset = ceiling_moat / expected_full_cycle_noise
+        else:
+            z_asset = 1.40
+
+        dynamic_moat = z_asset * live_vol * math.sqrt(tau_mins)
 
         return max(floor_moat, min(ceiling_moat, dynamic_moat))
 
@@ -262,12 +279,17 @@ class ThreeStepDominationBot:
                           f"Suppressing all trades to prevent adverse whale selection.",
             )
 
+        # Classify Active Playbook & Cycle Duration by Expiration Window
+        ticker_str = (getattr(book, "market_ticker", "") or getattr(book, "ticker", "")) if book else ""
+        is_5m = ("5M" in ticker_str.upper() and "15M" not in ticker_str.upper()) or "5MIN" in ticker_str.upper()
+        cycle_duration_s = 300.0 if is_5m else 900.0
+
         cfg = get_asset_config(self.asset)
 
-        # Step 0.5: Dynamic Volatility-Scaled Spot-Strike Distance Filter
+        # Step 0.5: Dynamic Volatility-Scaled Spot-Strike Distance Filter (Option A: Self-Calibrating)
         # Replaces rigid static 2x buffer with continuous volatility and time-decay moat.
         # Clamped between Hard Floor (1.15x min_spot_diff) and Hard Ceiling (2.15x min_spot_diff).
-        razor_tight_threshold = self.get_dynamic_proximity_threshold(time_to_expiry_s)
+        razor_tight_threshold = self.get_dynamic_proximity_threshold(time_to_expiry_s, cycle_duration_s=cycle_duration_s)
         if abs(spot_diff) < razor_tight_threshold:
             diff_str = cfg.format_diff(spot_diff)
             thresh_str = cfg.format_price(razor_tight_threshold)
@@ -279,10 +301,6 @@ class ThreeStepDominationBot:
                           f"({self.asset.value} vol-adjusted threshold at T={int(time_to_expiry_s)}s). "
                           f"Asset too close to strike for current volatility regime, skipping.",
             )
-
-        # Classify Active Playbook by Expiration Countdown Window
-        ticker_str = (getattr(book, "market_ticker", "") or getattr(book, "ticker", "")) if book else ""
-        is_5m = ("5M" in ticker_str.upper() and "15M" not in ticker_str.upper()) or "5MIN" in ticker_str.upper()
 
         # Dynamic Playbook Timing Thresholds:
         # Standard 15M cycle: P3 in [45s, 240s], P2 in (240s, 600s], P1 in (600s, 900s], lock < 45s
@@ -368,6 +386,7 @@ class ThreeStepDominationBot:
                 spot_diff=spot_diff,
                 rationale=rationale,
                 actual_market_ask=actual_ask_p3,
+                cycle_duration_s=cycle_duration_s,
             )
 
         # -------------------------------------------------------------------
@@ -436,6 +455,7 @@ class ThreeStepDominationBot:
                 spot_diff=spot_diff,
                 rationale=rationale,
                 actual_market_ask=actual_ask_p2,
+                cycle_duration_s=cycle_duration_s,
             )
 
         # -------------------------------------------------------------------
@@ -496,6 +516,7 @@ class ThreeStepDominationBot:
                 spot_diff=spot_diff,
                 rationale=rationale,
                 actual_market_ask=actual_ask_p1,
+                cycle_duration_s=cycle_duration_s,
             )
 
         # Expiry lock window (< p3_min_s)
@@ -521,6 +542,7 @@ class ThreeStepDominationBot:
         spot_diff: float,
         rationale: str,
         actual_market_ask: Optional[float] = None,
+        cycle_duration_s: float = 900.0,
     ) -> DominationDecision:
         """Construct normalized DominationDecision object with dynamic price cap protection."""
         discount_price_val = float(self.discount_limit_price)
@@ -585,7 +607,7 @@ class ThreeStepDominationBot:
             # Dynamic moat catches |spot_diff| < dynamic_threshold. This secondary filter catches
             # the transition zone up to 1.5x of that threshold where signals exist but are still developing.
             # Require 12% minimum edge to filter noise trades that don't survive reversals.
-            razor_tight_threshold = self.get_dynamic_proximity_threshold(time_to_expiry_s)
+            razor_tight_threshold = self.get_dynamic_proximity_threshold(time_to_expiry_s, cycle_duration_s=cycle_duration_s)
             marginal_zone_upper = razor_tight_threshold * 1.5
             marginal_min_edge = 12.0  # 12% minimum edge in marginal territory
             if abs(spot_diff) < marginal_zone_upper and edge_pct < marginal_min_edge:

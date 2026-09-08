@@ -264,24 +264,23 @@ def test_domination_bot_multi_asset_evaluation() -> None:
 
 
 def test_domination_bot_dynamic_proximity_threshold() -> None:
-    """Verify dynamic volatility-scaled proximity threshold calculations and clamps across all assets."""
+    """Verify Option A: Self-calibrating dynamic proximity threshold across all 4 crypto assets."""
     from kalshi_sim.schemas import CryptoAsset
-    import math
 
     # 1. BTC: min_spot_diff=35.0, typical_1m_vol=14.0
     # Floor = 35.0 * 1.15 = 40.25, Ceiling = 35.0 * 2.15 = 75.25
     btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
     
-    # At T=900s (15 mins): 1.4 * 14.0 * sqrt(15) ~= 75.91 -> clamped to ceiling 75.25
+    # At T=900s (15 mins): reaches ceiling 75.25
     assert btc_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(75.25, abs=1e-2)
 
-    # At T=600s (10 mins): 1.4 * 14.0 * sqrt(10) ~= 61.98 -> within bounds
-    assert btc_bot.get_dynamic_proximity_threshold(600.0) == pytest.approx(61.98, abs=0.1)
+    # At T=600s (10 mins): ~61.44
+    assert btc_bot.get_dynamic_proximity_threshold(600.0) == pytest.approx(61.44, abs=0.1)
 
-    # At T=360s (6 mins): 1.4 * 14.0 * sqrt(6) ~= 48.01 -> within bounds
-    assert btc_bot.get_dynamic_proximity_threshold(360.0) == pytest.approx(48.01, abs=0.1)
+    # At T=360s (6 mins): sweet spot ~47.60 (1.36x strike step)
+    assert btc_bot.get_dynamic_proximity_threshold(360.0) == pytest.approx(47.60, abs=0.1)
 
-    # At T=120s (2 mins): 1.4 * 14.0 * sqrt(2) ~= 27.72 -> clamped to floor 40.25
+    # At T=120s (2 mins): clamped to floor 40.25
     assert btc_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(40.25, abs=1e-2)
 
     # At T=30s (0.5 mins): clamped to floor 40.25
@@ -289,21 +288,38 @@ def test_domination_bot_dynamic_proximity_threshold() -> None:
 
     # 2. ETH: min_spot_diff=2.50, typical_1m_vol=0.60
     # Floor = 2.50 * 1.15 = 2.875, Ceiling = 2.50 * 2.15 = 5.375
-    # At T=900s: 1.4 * 0.60 * sqrt(15) ~= 3.25 (between 2.875 and 5.375)
     eth_bot = ThreeStepDominationBot(asset=CryptoAsset.ETH)
-    assert eth_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(3.25, abs=0.1)
+    assert eth_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(5.375, abs=1e-2)  # Reaches ceiling
+    assert eth_bot.get_dynamic_proximity_threshold(600.0) == pytest.approx(4.39, abs=0.1)
+    assert eth_bot.get_dynamic_proximity_threshold(360.0) == pytest.approx(3.40, abs=0.1)    # Sweet spot ~3.40 (1.36x)
     assert eth_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(2.875, abs=1e-2)  # Clamped to floor
 
     # 3. SOL: min_spot_diff=0.50, typical_1m_vol=0.04
     # Floor = 0.50 * 1.15 = 0.575, Ceiling = 0.50 * 2.15 = 1.075
     sol_bot = ThreeStepDominationBot(asset=CryptoAsset.SOL)
-    assert sol_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(0.575, abs=1e-2)  # Clamped to floor because 1.4*0.04*sqrt(15) = 0.217 < 0.575
-    assert sol_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(0.575, abs=1e-2)
+    assert sol_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(1.075, abs=1e-2)  # Reaches ceiling
+    assert sol_bot.get_dynamic_proximity_threshold(600.0) == pytest.approx(0.88, abs=0.05)
+    assert sol_bot.get_dynamic_proximity_threshold(360.0) == pytest.approx(0.68, abs=0.05)   # Sweet spot ~0.68 (1.36x)
+    assert sol_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(0.575, abs=1e-2)  # Clamped to floor
 
     # 4. DOGE: min_spot_diff=0.0005, typical_1m_vol=0.000045
     # Floor = 0.0005 * 1.15 = 0.000575, Ceiling = 0.0005 * 2.15 = 0.001075
     doge_bot = ThreeStepDominationBot(asset=CryptoAsset.DOGE)
-    assert doge_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(0.000575, abs=1e-6)
+    assert doge_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(0.001075, abs=1e-6)  # Reaches ceiling
+    assert doge_bot.get_dynamic_proximity_threshold(360.0) == pytest.approx(0.000680, abs=1e-5)  # Sweet spot (1.36x)
+    assert doge_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(0.000575, abs=1e-6)  # Clamped to floor
+
+    # 5. Universal Sweet Spot Ratio Invariant at T=6m: exactly 1.36x across ALL assets!
+    for bot, expected_min_diff in [(btc_bot, 35.0), (eth_bot, 2.50), (sol_bot, 0.50), (doge_bot, 0.0005)]:
+        thresh = bot.get_dynamic_proximity_threshold(360.0)
+        ratio = thresh / expected_min_diff
+        assert ratio == pytest.approx(1.36, abs=0.02)
+
+    # 6. Elevated Live Volatility Protection: When vol doubles, moat widens
+    btc_high_vol = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    btc_high_vol.typical_1m_volatility = 28.0  # 2x volatility spike
+    # At T=360s, baseline was 47.60, high vol should widen to ceiling 75.25
+    assert btc_high_vol.get_dynamic_proximity_threshold(360.0) == pytest.approx(75.25, abs=1e-2)
 
 
 def test_domination_bot_dynamic_moat_unlocks_mid_cycle_entry() -> None:

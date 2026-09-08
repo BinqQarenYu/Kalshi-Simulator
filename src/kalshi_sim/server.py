@@ -1153,6 +1153,7 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
         except Exception as bal_err:
             logger.debug("Failed fetching balance in sync_live_settlements: %s", bal_err)
 
+        current_live_count = sum(1 for r in state.win_loss_reports if r.get("execution_mode") == "live")
         settlements_by_ticker = {s.get("ticker"): s for s in settlements if s.get("ticker")}
         if full_sync or current_live_count < len(settlements):
             state.win_loss_reports = [r for r in state.win_loss_reports if r.get("execution_mode") != "live" and r.get("bot_type") != "live"]
