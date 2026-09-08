@@ -50,6 +50,18 @@ export function App() {
     typeof window !== 'undefined' &&
     (window.location.search.includes('view=baby-bot') || window.name === 'BabyBot');
 
+  // Support URL bot parameter or fallback to server active strategy
+  const urlBotParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('bot') : null;
+  const [standaloneBotId, setStandaloneBotId] = useState<string>(
+    urlBotParam || data.settings?.active_strategy_bot || '3_step_domination_bot'
+  );
+
+  useEffect(() => {
+    if (data.settings?.active_strategy_bot && !urlBotParam) {
+      setStandaloneBotId(data.settings.active_strategy_bot);
+    }
+  }, [data.settings?.active_strategy_bot, urlBotParam]);
+
   // Track settlements to trigger win/loss audio chimes automatically
   const prevSettlementsCount = useRef<number>((data.portfolio?.settlements || []).length);
   useEffect(() => {
@@ -133,10 +145,11 @@ export function App() {
     }
   };
 
-  const handleTogglePopOutBabyBot = () => {
+  const handleTogglePopOutBabyBot = (botId?: string) => {
     if (!isPoppedOutBabyBot) {
+      const queryParam = botId ? `&bot=${encodeURIComponent(botId)}` : '';
       const popout = window.open(
-        '/?view=baby-bot',
+        `/?view=baby-bot${queryParam}`,
         'BabyBot',
         'width=480,height=760,menubar=no,toolbar=no,location=no,status=no'
       );
@@ -171,6 +184,16 @@ export function App() {
           onQuickTrade={handleQuickTrade}
           reportsCount={Array.isArray(data.win_loss_reports) ? data.win_loss_reports.length : 0}
           consecutiveLosses={consecutiveLosses}
+          selectedBotId={standaloneBotId}
+          onSelectBot={(botId) => {
+            setStandaloneBotId(botId);
+            selectStrategyBot(botId);
+            if (typeof window !== 'undefined' && window.history) {
+              const url = new URL(window.location.href);
+              url.searchParams.set('bot', botId);
+              window.history.replaceState({}, '', url.toString());
+            }
+          }}
         />
       </div>
     );

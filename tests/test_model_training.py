@@ -81,3 +81,22 @@ def test_model_trainer_fit_and_checkpoint(tmp_path: Path) -> None:
     assert "val_accuracy" in ckpt
     assert ckpt["input_dim"] == 28
     assert ckpt["num_classes"] == 3
+
+
+def test_compute_class_weights_inverse_frequency() -> None:
+    """Verify calculation of inverse-frequency class weights and normalization."""
+    trainer = ModelTrainer(device="cpu")
+
+    # 1. Balanced distribution: 100 samples each
+    y_balanced = np.array([0] * 100 + [1] * 100 + [2] * 100)
+    w_balanced = trainer.compute_class_weights(y_balanced, num_classes=3)
+    assert torch.allclose(w_balanced, torch.tensor([1/3, 1/3, 1/3]), atol=1e-4)
+    assert torch.isclose(torch.sum(w_balanced), torch.tensor(1.0))
+
+    # 2. Imbalanced distribution: UP=10, DOWN=20, WAIT=70
+    y_imbalanced = np.array([0] * 10 + [1] * 20 + [2] * 70)
+    w_imbalanced = trainer.compute_class_weights(y_imbalanced, num_classes=3)
+    # Rarest class (UP, 0) must have highest weight, most common (WAIT, 2) lowest
+    assert w_imbalanced[0] > w_imbalanced[1] > w_imbalanced[2]
+    assert torch.isclose(torch.sum(w_imbalanced), torch.tensor(1.0))
+    assert torch.all(torch.isfinite(w_imbalanced))

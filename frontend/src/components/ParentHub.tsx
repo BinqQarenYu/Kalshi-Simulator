@@ -5,7 +5,8 @@
  * benchmarking matrix, live CLOB trajectory workbench, and right rail timeline & trade notes.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ONNXSettingsPanel } from './ONNXSettingsPanel';
 import {
   MarketState,
   OrderBookLadderRow,
@@ -108,7 +109,7 @@ interface ParentHubProps {
   onRunAuditNow?: () => void;
   onTestBot?: (botId: string) => void;
   isPoppedOutBabyBot: boolean;
-  onTogglePopOutBabyBot: () => void;
+  onTogglePopOutBabyBot: (botId?: string) => void;
   consecutiveLosses?: number;
   portfolio?: any;
   onClosePosition?: (ticker: string, executionMode?: 'paper' | 'live') => Promise<any>;
@@ -199,10 +200,31 @@ export const ParentHub: React.FC<ParentHubProps> = ({
     return botType.replace(/_/g, ' ');
   };
 
+  const [selectedBotId, setSelectedBotId] = useState<string>(activeStrategyBot || '3_step_domination_bot');
+
+  useEffect(() => {
+    if (activeStrategyBot) {
+      setSelectedBotId(activeStrategyBot);
+    }
+  }, [activeStrategyBot]);
+
+  const handleSelectBot = async (botId: string) => {
+    soundFX.playClickSound();
+    setSelectedBotId(botId);
+    if (onSelectStrategy && ['3_step_domination_bot', 'macro_onnx', 'dominion_2_bot', 'macro_trend_dominion', 'onnx_microstructure_bot'].includes(botId)) {
+      try {
+        await onSelectStrategy(botId);
+      } catch (e) {
+        console.error('Failed to sync strategy:', e);
+      }
+    }
+  };
+
   // Benchmarking models for Factory Matrix
   const benchmarkingModels = useMemo(
     () => [
       {
+        id: '3_step_domination_bot',
         name: '3-Step Dominion v3.2',
         asset: 'BTC-15M',
         lane: 'Lane 1 (LIVE)',
@@ -216,6 +238,22 @@ export const ParentHub: React.FC<ParentHubProps> = ({
         canPromote: false,
       },
       {
+        id: 'macro_onnx',
+        name: 'ONNX Macro Net v2',
+        subName: 'Dual-Brain (QuoLas + Kalshi)',
+        asset: 'BTC-15M',
+        lane: 'Lane 2 (Shadow)',
+        events: 480,
+        winRate: '74.5%',
+        profitFactor: '1.92',
+        drawdown: '5.2%',
+        vpinPass: '96.8%',
+        status: 'SHADOW BENCHMARK',
+        statusColor: 'text-purple-400 bg-purple-500/15 border-purple-500/30',
+        canPromote: true,
+      },
+      {
+        id: 'ofi_sprint_scalper',
         name: 'OFI Sprint Scalper',
         asset: 'BTC-5M',
         lane: 'Lane 2 (Shadow)',
@@ -229,19 +267,35 @@ export const ParentHub: React.FC<ParentHubProps> = ({
         canPromote: true,
       },
       {
-        name: 'ONNX Macro Net v2',
-        asset: 'ETH-15M',
+        id: 'dominion_2_bot',
+        name: 'Dominion 2 (Anti-Pin)',
+        asset: 'BTC-15M',
         lane: 'Lane 2 (Shadow)',
-        events: 318,
-        winRate: '66.4%',
-        profitFactor: '1.41',
-        drawdown: '9.2%',
-        vpinPass: '91.0%',
-        status: 'INCUBATING (318/500)',
+        events: 285,
+        winRate: '69.1%',
+        profitFactor: '1.58',
+        drawdown: '7.4%',
+        vpinPass: '93.5%',
+        status: 'INCUBATING (285/500)',
         statusColor: 'text-[#d9a752] bg-[#d9a752]/15 border-[#d9a752]/30',
         canPromote: false,
       },
       {
+        id: 'macro_trend_dominion',
+        name: 'Macro Trend Dominion',
+        asset: 'BTC-15M',
+        lane: 'Lane 2 (Shadow)',
+        events: 310,
+        winRate: '67.8%',
+        profitFactor: '1.52',
+        drawdown: '6.8%',
+        vpinPass: '95.1%',
+        status: 'SHADOW BENCHMARK',
+        statusColor: 'text-cyan-400 bg-cyan-500/15 border-cyan-500/30',
+        canPromote: false,
+      },
+      {
+        id: 'sol_vol_breakout',
         name: 'SOL Vol-Breakout',
         asset: 'SOL-5M',
         lane: 'Lane 3 (Backtest)',
@@ -643,7 +697,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           <div className="flex items-center gap-3">
             {/* Pop-Out Baby Bot Console Button */}
             <button
-              onClick={onTogglePopOutBabyBot}
+              onClick={() => onTogglePopOutBabyBot(selectedBotId)}
               className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-[#00bda5]/15 hover:bg-[#00bda5]/25 text-[#2dd4bf] border border-[#00bda5]/40 transition-all flex items-center gap-1.5 shadow-sm"
               title="Open Baby Bot Standalone Execution Cockpit in new window"
             >
@@ -880,38 +934,74 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#1f262d]">
-                      {benchmarkingModels.map((m, idx) => (
-                        <tr key={idx} className="hover:bg-[#171c22]/50 transition-colors">
-                          <td className="py-3 px-4 font-bold text-white">{m.name}</td>
-                          <td className="py-3 px-4 text-[#8c9ba5]">{m.asset}</td>
-                          <td className="py-3 px-4 text-slate-300">{m.lane}</td>
-                          <td className="py-3 px-4 text-right text-white">{m.events}</td>
-                          <td className="py-3 px-4 text-right font-bold text-[#34d399]">{m.winRate}</td>
-                          <td className="py-3 px-4 text-right text-white">{m.profitFactor}</td>
-                          <td className="py-3 px-4 text-right text-slate-300">{m.drawdown}</td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${m.statusColor}`}>
-                              {m.status}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            {m.canPromote ? (
-                              <button
-                                onClick={() => setIsPromoteModalOpen(true)}
-                                className="px-2.5 py-1 rounded bg-[#00bda5] text-black font-bold hover:bg-[#2dd4bf] transition-all shadow-sm"
-                              >
-                                Promote 🚀
-                              </button>
-                            ) : (
-                              <span className="text-[10px] text-[#8c9ba5]">&mdash;</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {benchmarkingModels.map((m, idx) => {
+                        const isSelected =
+                          selectedBotId === m.id ||
+                          (m.id === 'macro_onnx' && (selectedBotId === 'onnx_microstructure_bot' || selectedBotId === 'macro_onnx'));
+                        return (
+                          <tr
+                            key={idx}
+                            onClick={() => handleSelectBot(m.id)}
+                            className={`cursor-pointer transition-all duration-150 ${
+                              isSelected
+                                ? 'bg-[#00bda5]/15 border-l-4 border-l-[#00bda5] shadow-[inset_0_0_15px_rgba(0,189,165,0.12)]'
+                                : 'hover:bg-[#171c22]/70'
+                            }`}
+                          >
+                            <td className="py-3 px-4 font-bold text-white flex items-center gap-2">
+                              {isSelected ? (
+                                <span className="w-2 h-2 rounded-full bg-[#00bda5] animate-ping shrink-0" />
+                              ) : (
+                                <span className="w-2 h-2 rounded-full bg-transparent shrink-0" />
+                              )}
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2">
+                                  <span>{m.name}</span>
+                                  {isSelected && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#00bda5]/25 text-[#2dd4bf] font-bold border border-[#00bda5]/40 uppercase tracking-wider">
+                                      Cockpit Focus
+                                    </span>
+                                  )}
+                                </div>
+                                {m.subName && (
+                                  <span className="text-[10px] text-purple-400/80 font-normal font-sans">
+                                    {m.subName}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-[#8c9ba5]">{m.asset}</td>
+                            <td className="py-3 px-4 text-slate-300">{m.lane}</td>
+                            <td className="py-3 px-4 text-right text-white">{m.events}</td>
+                            <td className="py-3 px-4 text-right font-bold text-[#34d399]">{m.winRate}</td>
+                            <td className="py-3 px-4 text-right text-white">{m.profitFactor}</td>
+                            <td className="py-3 px-4 text-right text-slate-300">{m.drawdown}</td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${m.statusColor}`}>
+                                {m.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                              {m.canPromote ? (
+                                <button
+                                  onClick={() => setIsPromoteModalOpen(true)}
+                                  className="px-2.5 py-1 rounded bg-[#00bda5] text-black font-bold hover:bg-[#2dd4bf] transition-all shadow-sm cursor-pointer"
+                                >
+                                  Promote 🚀
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-[#8c9ba5]">&mdash;</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               </div>
+
+              <ONNXSettingsPanel />
 
               {/* ONNX Continuous Autonomous Background Learning Telemetry Card */}
               <div className="bg-[#12161a] border border-[#262d35] rounded-xl p-5 space-y-4 font-mono">
@@ -1523,11 +1613,24 @@ export const ParentHub: React.FC<ParentHubProps> = ({
         {!isPoppedOutBabyBot ? (
           <div className="p-3 border-b border-[#262d35]">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8c9ba5]">
-                Docked Baby Bot Console
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8c9ba5] flex items-center gap-1.5 truncate pr-1">
+                <span>Docked:</span>
+                <span className="text-[#00bda5] font-extrabold truncate">
+                  {selectedBotId === 'macro_onnx' || selectedBotId === 'onnx_microstructure_bot'
+                    ? 'ONNX Macro v2'
+                    : selectedBotId === '3_step_domination_bot'
+                    ? '3-Step Dom'
+                    : selectedBotId === 'dominion_2_bot'
+                    ? 'Dominion 2'
+                    : selectedBotId === 'ofi_sprint_scalper'
+                    ? 'OFI Scalp'
+                    : selectedBotId === 'macro_trend_dominion'
+                    ? 'Macro Trend'
+                    : 'Baby Bot'}
+                </span>
               </span>
               <button
-                onClick={onTogglePopOutBabyBot}
+                onClick={() => onTogglePopOutBabyBot(selectedBotId)}
                 title="Pop out Baby Bot window"
                 className="text-[11px] font-mono text-[#00bda5] hover:text-white flex items-center gap-1"
               >
@@ -1543,11 +1646,13 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               tradingMode={tradingMode}
               timeframe={timeframe}
               isPoppedOut={false}
-              onTogglePopOut={onTogglePopOutBabyBot}
+              onTogglePopOut={() => onTogglePopOutBabyBot(selectedBotId)}
               onFlattenHalt={onFlattenHalt}
               onQuickTrade={onQuickTrade}
               reportsCount={reports.length}
               consecutiveLosses={consecutiveLosses}
+              selectedBotId={selectedBotId}
+              onSelectBot={handleSelectBot}
             />
           </div>
         ) : (
@@ -1555,7 +1660,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
             <div className="w-2 h-2 rounded-full bg-[#00bda5] animate-ping mx-auto mb-2" />
             <span>Baby Bot running in standalone pop-out window</span>
             <button
-              onClick={onTogglePopOutBabyBot}
+              onClick={() => onTogglePopOutBabyBot(selectedBotId)}
               className="mt-2 block mx-auto text-[11px] text-[#2dd4bf] hover:underline"
             >
               Dock back to rail
@@ -1707,7 +1812,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                 onClick={() => {
                   soundFX.playOrderFillSound();
                   setIsPromoteModalOpen(false);
-                  onTogglePopOutBabyBot();
+                  onTogglePopOutBabyBot(selectedBotId);
                 }}
                 className="px-4 py-2 rounded bg-[#00bda5] hover:bg-[#2dd4bf] text-black font-bold text-xs shadow-lg transition-all"
               >

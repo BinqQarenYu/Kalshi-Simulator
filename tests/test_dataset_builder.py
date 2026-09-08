@@ -72,7 +72,7 @@ def test_parse_synthetic_tick_file(sample_jsonl_file: Path) -> None:
 
 def test_build_dataset_labeling_logic() -> None:
     """Test future return horizon labeling (0=UP, 1=DOWN, 2=WAIT)."""
-    builder = DatasetBuilder(horizon_steps=2, price_diff_threshold=0.02)
+    builder = DatasetBuilder(horizon_steps=2, price_diff_threshold=0.02, horizon_seconds=2.0)
 
     frames = [
         TickFrame(timestamp=1.0, ticker="TEST", features=np.zeros(28, dtype=np.float32), mid_price=0.50),
@@ -112,3 +112,127 @@ def test_build_from_directory_and_save_npz(tmp_path: Path, sample_jsonl_file: Pa
     assert "y_val" in loaded
     assert loaded["X_train"].shape[1] == 28
     assert len(loaded["X_train"]) + len(loaded["X_val"]) == len(X)
+
+
+def test_time_anchored_horizon_windowing_and_stale_skip() -> None:
+    """Test time-anchored frame matching, stale data gap skipping (> 10.0s), and step fallback."""
+    builder = DatasetBuilder(horizon_steps=2, horizon_seconds=3.0, price_diff_threshold=0.02)
+
+    # Non-uniform timestamps with horizon_seconds=3.0:
+    # t=1.0 -> target 4.0, closest is t=4.1 (mid 0.55 -> +0.05 => UP 0)
+    # t=2.0 -> target 5.0, closest is t=5.0 (mid 0.45 -> -0.05 => DOWN 1)
+    # t=4.1 -> target 7.1, closest is t=7.0 (mid 0.55 -> 0.00 => WAIT 2)
+    # t=5.0 -> target 8.0, closest is t=7.0 (mid 0.55 -> +0.10 => UP 0)
+    # t=7.0 -> target 10.0, closest is t=25.0 -> gap 18.0s > 10.0s (STALE DATA! Skipped!)
+    # t=25.0 -> target 28.0, closest is t=28.0 (mid 0.60 -> 0.00 => WAIT 2)
+    frames = [
+        TickFrame(timestamp=1.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50),
+        TickFrame(timestamp=2.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50),
+        TickFrame(timestamp=4.1, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.55),
+        TickFrame(timestamp=5.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.45),
+        TickFrame(timestamp=7.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.55),
+        TickFrame(timestamp=25.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.60),
+        TickFrame(timestamp=28.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.60),
+    ]
+    X, y = builder.build_dataset_from_frames(frames, max_wait_ratio=None)
+    # 5 pairs matched; t=7.0 skipped due to 18.0s gap to t=25.0
+    assert len(X) == 5
+    assert y[0] == 0
+    assert y[1] == 1
+    assert y[2] == 2
+    assert y[3] == 0
+    assert y[4] == 2
+
+
+def test_stale_data_gap_skipped() -> None:
+    """Explicitly verify that frame pairs with timestamp gap > 10.0s are skipped."""
+    builder = DatasetBuilder(horizon_seconds=3.0, price_diff_threshold=0.02)
+    # Frame 0 at 1.0, Frame 1 at 16.0 (gap = 15.0s > 10.0s)
+    frames = [
+        TickFrame(timestamp=1.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50),
+        TickFrame(timestamp=16.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.55),
+    ]
+    X, y = builder.build_dataset_from_frames(frames, max_wait_ratio=None)
+    assert len(X) == 0  # Skipped due to gap > 10.0s
+
+
+def test_timestamp_fallback_to_horizon_steps() -> None:
+    """Verify that absent/non-positive/identical timestamps gracefully fall back to horizon_steps."""
+    builder = DatasetBuilder(horizon_steps=2, horizon_seconds=3.0, price_diff_threshold=0.02)
+
+    # All timestamps 0.0 (non-positive / absent)
+    frames_zero_ts = [
+        TickFrame(timestamp=0.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50),
+        TickFrame(timestamp=0.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50),
+        TickFrame(timestamp=0.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.55),
+        TickFrame(timestamp=0.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.45),
+    ]
+    X, y = builder.build_dataset_from_frames(frames_zero_ts, max_wait_ratio=None)
+    assert len(X) == 2  # 4 - horizon_steps(2) = 2
+    assert y[0] == 0  # 0.55 - 0.50 = +0.05 -> UP
+    assert y[1] == 1  # 0.45 - 0.50 = -0.05 -> DOWN
+
+    # Identical timestamps
+    frames_identical_ts = [
+        TickFrame(timestamp=100.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50),
+        TickFrame(timestamp=100.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50),
+        TickFrame(timestamp=100.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.55),
+        TickFrame(timestamp=100.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.45),
+    ]
+    X_id, y_id = builder.build_dataset_from_frames(frames_identical_ts, max_wait_ratio=None)
+    assert len(X_id) == 2
+    assert y_id[0] == 0
+    assert y_id[1] == 1
+
+
+def test_micro_price_directional_labeling() -> None:
+    """Test spread-aware micro-price vs mid-price label assignment."""
+    builder = DatasetBuilder(horizon_steps=1, horizon_seconds=1.0, price_diff_threshold=0.02)
+
+    # Both have valid micro_price: micro_price diff is used
+    # Frame 0: mid=0.50, micro=0.50
+    # Frame 1: mid=0.50, micro=0.53 (diff = +0.03 >= 0.02 -> UP 0, even though mid diff is 0.00!)
+    frames_micro = [
+        TickFrame(timestamp=1.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50, micro_price=0.50),
+        TickFrame(timestamp=2.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50, micro_price=0.53),
+    ]
+    X_m, y_m = builder.build_dataset_from_frames(frames_micro, max_wait_ratio=None)
+    assert len(y_m) == 1
+    assert y_m[0] == 0  # UP due to micro-price shift
+
+    # Fallback to mid_price when micro_price is None
+    frames_fallback = [
+        TickFrame(timestamp=1.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50, micro_price=None),
+        TickFrame(timestamp=2.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.53, micro_price=None),
+    ]
+    X_fb, y_fb = builder.build_dataset_from_frames(frames_fallback, max_wait_ratio=None)
+    assert len(y_fb) == 1
+    assert y_fb[0] == 0
+
+
+def test_dynamic_wait_undersampling() -> None:
+    """Test dynamic WAIT undersampling respecting max_wait_ratio."""
+    builder = DatasetBuilder(horizon_steps=1, horizon_seconds=1.0, price_diff_threshold=0.02)
+
+    # Generate 2 non-wait frames (1 UP, 1 DOWN) and 20 WAIT frames
+    frames = [
+        TickFrame(timestamp=1.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.50),
+        TickFrame(timestamp=2.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.55),  # 0->1: UP (0)
+        TickFrame(timestamp=3.0, ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.45),  # 1->2: DOWN (1)
+    ]
+    # Add 20 identical mid_price frames resulting in WAIT (2)
+    for i in range(4, 24):
+        frames.append(TickFrame(timestamp=float(i), ticker="T", features=np.zeros(28, dtype=np.float32), mid_price=0.45))
+
+    # With max_wait_ratio=0.50: N_non_wait = 2 -> max_wait_samples = 2
+    # Total samples should be 2 + 2 = 4 (WAIT ratio <= 50%)
+    X_sub, y_sub = builder.build_dataset_from_frames(frames, max_wait_ratio=0.50)
+    assert len(X_sub) == 4
+    assert np.sum(y_sub == 2) == 2
+    assert np.sum(y_sub != 2) == 2
+    assert np.sum(y_sub == 2) / len(y_sub) <= 0.50
+
+    # With max_wait_ratio=None: all WAIT frames are preserved
+    X_all, y_all = builder.build_dataset_from_frames(frames, max_wait_ratio=None)
+    assert len(X_all) > 4
+    assert np.sum(y_all == 2) > 2

@@ -132,7 +132,7 @@ class ThreeStepDominationBot:
     def set_discount_limit_price(self, new_price: Decimal | float | str) -> None:
         """Dynamically update the maker discount limit price ceiling."""
         dec_price = Decimal(str(new_price))
-        clamped = max(Decimal("0.10"), min(Decimal("0.50"), dec_price))
+        clamped = max(Decimal("0.10"), min(Decimal("0.85"), dec_price))
         self.discount_limit_price = clamped
         logger.info("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
 
@@ -141,6 +141,8 @@ class ThreeStepDominationBot:
         return {
             "asset": self.asset.value if hasattr(self, "asset") else "BTC",
             "discount_limit_price": float(self.discount_limit_price),
+            "momentum_max_price": float(self.max_entry_price),
+            "min_confidence": round(float(self.min_edge_pct) * 100.0, 1),
             "min_edge_pct": round(float(self.min_edge_pct) * 100.0, 1),
             "min_ev_dollars": float(self.min_ev_dollars),
             "min_spot_diff": float(self.min_spot_diff),
@@ -154,18 +156,29 @@ class ThreeStepDominationBot:
         self,
         asset: Optional[str | CryptoAsset] = None,
         discount_limit_price: Optional[float] = None,
+        momentum_max_price: Optional[float] = None,
+        min_confidence: Optional[float] = None,
         min_edge_pct: Optional[float] = None,
         min_ev_dollars: Optional[float] = None,
         min_spot_diff: Optional[float] = None,
         vpin_toxic_threshold: Optional[float] = None,
         take_profit_price_threshold: Optional[float] = None,
         min_take_profit_roi: Optional[float] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """Dynamically update strategy parameters on the fly."""
         if asset is not None:
             self.set_asset(asset)
         if discount_limit_price is not None:
             self.set_discount_limit_price(discount_limit_price)
+        if momentum_max_price is not None:
+            self.max_entry_price = Decimal(str(max(0.50, min(0.99, float(momentum_max_price)))))
+        if min_confidence is not None:
+            val = float(min_confidence)
+            if val > 1.0:
+                val = val / 100.0
+            self.min_edge_pct = max(0.01, min(0.50, val))
+            self._ev_engine.min_edge_pct = self.min_edge_pct
         if min_edge_pct is not None:
             val = float(min_edge_pct)
             if val > 1.0:

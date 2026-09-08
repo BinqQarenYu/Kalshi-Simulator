@@ -7,6 +7,7 @@ KalshiOrderflowFeatureExtractor, and labels future directional returns (UP=0, DO
 
 from __future__ import annotations
 
+import bisect
 import json
 import logging
 from dataclasses import dataclass
@@ -40,6 +41,7 @@ class TickFrame:
     ticker: str
     features: np.ndarray  # Shape: (28,)
     mid_price: float
+    micro_price: Optional[float] = None
 
 
 class DatasetBuilder:
@@ -48,18 +50,22 @@ class DatasetBuilder:
     def __init__(
         self,
         horizon_steps: int = 15,
-        price_diff_threshold: float = 0.01,
+        horizon_seconds: float = 3.0,
+        price_diff_threshold: float = 0.02,
         target_depth: int = 15,
         spatial_alpha: float = 0.425,
         sample_stride: int = 1,
         max_frames_per_file: Optional[int] = None,
+        max_wait_ratio: Optional[float] = 0.50,
     ) -> None:
         self.horizon_steps = horizon_steps
+        self.horizon_seconds = horizon_seconds
         self.price_diff_threshold = price_diff_threshold
         self.target_depth = target_depth
         self.spatial_alpha = spatial_alpha
         self.sample_stride = max(1, sample_stride)
         self.max_frames_per_file = max_frames_per_file
+        self.max_wait_ratio = max_wait_ratio
 
     def parse_tick_file(self, file_path: Union[str, Path]) -> List[TickFrame]:
         """Stream and parse a single JSONL tick recording file."""
@@ -177,7 +183,8 @@ class DatasetBuilder:
                 if not l2_state:
                     continue
 
-                mid_p = l2_state.mid_price or 0.50
+                mid_p = float(l2_state.mid_price or 0.50)
+                micro_p = float(l2_state.micro_price) if l2_state.micro_price is not None else mid_p
                 features = extractor.extract_features_from_book(l2_state)
                 if not np.all(np.isfinite(features)):
                     continue
@@ -187,7 +194,8 @@ class DatasetBuilder:
                         timestamp=ts,
                         ticker=current_ticker,
                         features=features,
-                        mid_price=float(mid_p),
+                        mid_price=mid_p,
+                        micro_price=micro_p if micro_p > 0.0 else None,
                     )
                 )
 
@@ -197,27 +205,95 @@ class DatasetBuilder:
         return frames
 
     def build_dataset_from_frames(
-        self, frames: List[TickFrame]
+        self,
+        frames: List[TickFrame],
+        max_wait_ratio: Optional[float] = 0.50,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Align features and future target labels from sequential tick frames.
 
         Target labeling rule:
-          - UP (0): mid_price(t + horizon) - mid_price(t) >= price_diff_threshold
-          - DOWN (1): mid_price(t + horizon) - mid_price(t) <= -price_diff_threshold
-          - WAIT (2): |mid_price(t + horizon) - mid_price(t)| < price_diff_threshold
+          - UP (0): diff >= price_diff_threshold
+          - DOWN (1): diff <= -price_diff_threshold
+          - WAIT (2): |diff| < price_diff_threshold
+          where diff = (future.micro_price - current.micro_price) if both frames have
+          valid micro_price > 0, else fallback to (future.mid_price - current.mid_price).
+
+        Supports time-anchored future frame matching: find the frame closest to
+        current.timestamp + horizon_seconds. If timestamps are non-positive, identical,
+        or absent, falls back to horizon_steps. Skips frame pairs if timestamp gap indicates
+        stale data (> 10.0s).
         """
         n = len(frames)
-        if n <= self.horizon_steps:
+        if n == 0:
+            return np.empty((0, 28), dtype=np.float32), np.empty((0,), dtype=np.int64)
+
+        timestamps = [f.timestamp for f in frames]
+        # Check if timestamps support time-anchored horizon matching:
+        # Must be strictly positive, non-None, not all identical, and horizon_seconds > 0.
+        use_time_anchor = (
+            self.horizon_seconds is not None
+            and self.horizon_seconds > 0
+            and n > 1
+            and not any(ts is None for ts in timestamps)
+            and not any(ts <= 0 for ts in timestamps)
+            and (max(timestamps) > min(timestamps))
+        )
+
+        pairs: List[Tuple[TickFrame, TickFrame]] = []
+
+        if use_time_anchor:
+            last_ts = frames[-1].timestamp
+            for i in range(n - 1):
+                current = frames[i]
+                target_time = current.timestamp + self.horizon_seconds
+                if target_time > last_ts:
+                    break
+
+                # Find closest frame in future (j > i)
+                idx = bisect.bisect_left(timestamps, target_time, lo=i + 1)
+                best_j = None
+                if idx < n and (idx - 1) > i:
+                    diff_curr = abs(timestamps[idx] - target_time)
+                    diff_prev = abs(timestamps[idx - 1] - target_time)
+                    best_j = idx if diff_curr <= diff_prev else (idx - 1)
+                elif idx < n:
+                    best_j = idx
+                elif (idx - 1) > i:
+                    best_j = idx - 1
+
+                if best_j is None:
+                    continue
+
+                future = frames[best_j]
+                gap = future.timestamp - current.timestamp
+                # Skip frame pairs if timestamp gap indicates stale data (> max(10.0, horizon_seconds * 1.5)) or non-positive
+                max_stale_gap = max(10.0, (self.horizon_seconds or 0.0) * 1.5)
+                if gap > max_stale_gap or gap <= 0.0:
+                    continue
+
+                pairs.append((current, future))
+        else:
+            if n <= self.horizon_steps:
+                return np.empty((0, 28), dtype=np.float32), np.empty((0,), dtype=np.int64)
+            for i in range(n - self.horizon_steps):
+                pairs.append((frames[i], frames[i + self.horizon_steps]))
+
+        if not pairs:
             return np.empty((0, 28), dtype=np.float32), np.empty((0,), dtype=np.int64)
 
         x_list: List[np.ndarray] = []
         y_list: List[int] = []
 
-        for i in range(n - self.horizon_steps):
-            current = frames[i]
-            future = frames[i + self.horizon_steps]
-
-            diff = future.mid_price - current.mid_price
+        for current, future in pairs:
+            if (
+                current.micro_price is not None
+                and future.micro_price is not None
+                and current.micro_price > 0.0
+                and future.micro_price > 0.0
+            ):
+                diff = future.micro_price - current.micro_price
+            else:
+                diff = future.mid_price - current.mid_price
 
             if diff >= self.price_diff_threshold:
                 label = 0  # UP
@@ -231,6 +307,29 @@ class DatasetBuilder:
 
         X = np.array(x_list, dtype=np.float32)
         y = np.array(y_list, dtype=np.int64)
+
+        # Dynamic WAIT undersampling
+        if max_wait_ratio is not None and 0.0 <= max_wait_ratio < 1.0:
+            wait_indices = np.where(y == 2)[0]
+            n_wait = len(wait_indices)
+            if n_wait > 0:
+                non_wait_indices = np.where(y != 2)[0]
+                n_non_wait = len(non_wait_indices)
+                if n_non_wait > 0:
+                    max_wait_samples = int(np.floor(n_non_wait * (max_wait_ratio / (1.0 - max_wait_ratio))))
+                else:
+                    max_wait_samples = 0
+
+                if n_wait > max_wait_samples:
+                    if max_wait_samples > 0:
+                        selected_wait = np.random.choice(wait_indices, size=max_wait_samples, replace=False)
+                        kept_indices = np.sort(np.concatenate([non_wait_indices, selected_wait]))
+                    else:
+                        kept_indices = non_wait_indices
+
+                    X = X[kept_indices]
+                    y = y[kept_indices]
+
         return X, y
 
     def build_from_directory(
@@ -238,6 +337,7 @@ class DatasetBuilder:
         data_dir: Union[str, Path],
         file_pattern: str = "ticks_*.jsonl",
         max_files: Optional[int] = None,
+        max_wait_ratio: Optional[float] = 0.50,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Iterate over all matching tick files in a directory and concatenate into feature tensors."""
         data_dir = Path(data_dir)
@@ -252,7 +352,7 @@ class DatasetBuilder:
         for file_path in files:
             frames = self.parse_tick_file(file_path)
             if len(frames) > self.horizon_steps:
-                X_f, y_f = self.build_dataset_from_frames(frames)
+                X_f, y_f = self.build_dataset_from_frames(frames, max_wait_ratio=max_wait_ratio)
                 if len(X_f) > 0:
                     all_x.append(X_f)
                     all_y.append(y_f)

@@ -102,6 +102,11 @@ export interface AISignals {
   order_type?: string;
   limit_price?: number;
   discount_limit_price?: number;
+  quolas_signal?: string;
+  quolas_confidence?: number;
+  kalshi_signal?: string;
+  kalshi_confidence?: number;
+  dual_onnx_regime?: 'MOMENTUM_SCALP' | 'CONTRADICTION_ARBITRAGE' | 'CHOP_WAIT' | 'TOXIC_VETO' | string;
 }
 
 export interface BtcOrderflowSummary {

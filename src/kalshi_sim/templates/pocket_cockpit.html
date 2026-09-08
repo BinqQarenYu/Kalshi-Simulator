@@ -161,6 +161,32 @@
       color: var(--text);
       border-color: rgba(255, 255, 255, 0.2);
     }
+  
+    /* Tooltips */
+    .info-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: rgba(255,255,255,0.1); color: var(--muted);
+      font-size: 0.6rem; font-weight: bold; cursor: help;
+      margin-left: 4px; position: relative;
+    }
+    .info-icon:hover { background: var(--blue); color: #fff; }
+    .info-icon .tooltip {
+      visibility: hidden; width: 250px; background-color: #1e2230; color: #fff;
+      text-align: left; border-radius: 6px; padding: 8px 10px;
+      position: absolute; z-index: 100; bottom: 130%; left: 50%;
+      transform: translateX(-50%); opacity: 0; transition: opacity 0.2s;
+      font-size: 0.7rem; font-weight: normal; text-transform: none;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5); border: 1px solid #334155;
+    }
+    .info-icon .tooltip::after {
+      content: ""; position: absolute; top: 100%; left: 50%; margin-left: -5px;
+      border-width: 5px; border-style: solid; border-color: #1e2230 transparent transparent transparent;
+    }
+    .info-icon:hover .tooltip { visibility: visible; opacity: 1; }
+    .tooltip b { color: #38bdf8; display: block; margin-bottom: 2px; }
+    .tooltip i { color: #94a3b8; display: block; margin-bottom: 4px; font-style: normal; }
+
   </style>
 </head>
 <body>
@@ -259,16 +285,16 @@
       </div>
       <div class="params-grid">
         <div class="param-item">
-          <label class="param-label">Discount Limit Price (Maker Ceiling)</label>
+          <label class="param-label">Discount Limit Price (Maker Ceiling) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"What is the absolute maximum price you are willing to pay?"</i><br><b>How it works:</b> Places a 'lowball offer' below market value.<br><b>Why it matters:</b> Guarantees  Kalshi exchange fees and protects against sudden crashes.</div></div></label>
           <div class="input-wrap">
             <span class="prefix">$</span>
-            <input id="inputDiscountPrice" type="number" step="0.01" min="0.10" max="0.50" value="0.48" />
+            <input id="inputDiscountPrice" type="number" step="0.01" min="0.10" max="0.85" value="0.62" />
           </div>
-          <span class="param-hint">Resting limit price ceiling ($0.10 - $0.50)</span>
+          <span class="param-hint">Resting limit price ceiling ($0.10 - $0.85)</span>
         </div>
 
         <div class="param-item">
-          <label class="param-label">Max Contracts (Strict Invariant)</label>
+          <label class="param-label">Max Contracts (Strict Invariant) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"Your bet size limit."</i><br><b>How it works:</b> Hard-coded safety lock capping you at 1 contract per trade.<br><b>Why it matters:</b> Prevents blowing up your micro-bankroll during losing streaks.</div></div></label>
           <div class="input-wrap">
             <input id="inputMaxContracts" type="number" step="1" min="1" max="1" value="1" readonly title="Hard-capped to strictly 1 contract per asset" />
             <span class="suffix">cts</span>
@@ -277,7 +303,7 @@
         </div>
 
         <div class="param-item">
-          <label class="param-label">Min Edge % (Statistical Alpha)</label>
+          <label class="param-label">Min Edge % (Statistical Alpha) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"How rigged must the game be before you play?"</i><br><b>How it works:</b> Demands a mathematical advantage over the market price.<br><b>Why it matters:</b> A 6% edge means we only trade when we have a massive statistical advantage.</div></div></label>
           <div class="input-wrap">
             <input id="inputMinEdge" type="number" step="0.5" min="1.0" max="50.0" value="6.0" />
             <span class="suffix">%</span>
@@ -286,7 +312,7 @@
         </div>
 
         <div class="param-item">
-          <label class="param-label">Min Net EV ($/Contract)</label>
+          <label class="param-label">Min Net EV ($/Contract) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"Minimum expected profit per trade."</i><br><b>How it works:</b> The average profit if you played this setup 1,000 times.<br><b>Why it matters:</b> Ignores trades that only yield pennies. Demands structural profit.</div></div></label>
           <div class="input-wrap">
             <span class="prefix">$</span>
             <input id="inputMinEv" type="number" step="0.01" min="0.01" max="0.50" value="0.02" />
@@ -295,16 +321,16 @@
         </div>
 
         <div class="param-item">
-          <label class="param-label">Min Spot Distance (|Spot - Strike|)</label>
+          <label class="param-label">Min Spot Distance (|Spot - Strike|) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Moat / Buffer Zone."</i><br><b>How it works:</b> Refuses trades when Bitcoin is hovering right on the strike line.<br><b>Why it matters:</b> Keeps you out of 50/50 coin-flip noise.</div></div></label>
           <div class="input-wrap">
             <span class="prefix">$</span>
-            <input id="inputMinSpotDiff" type="number" step="1.0" min="0" max="200" value="35.00" />
+            <input id="inputMinSpotDiff" type="number" step="1.0" min="0" max="200" value="21.00" />
           </div>
-          <span id="minSpotDiffHint" class="param-hint">Skip coin-flip chop near strike ($35.00 BTC)</span>
+          <span id="minSpotDiffHint" class="param-hint">Skip coin-flip chop near strike ($21.00 BTC)</span>
         </div>
 
         <div class="param-item">
-          <label class="param-label">VPIN Toxicity Veto</label>
+          <label class="param-label">VPIN Toxicity Veto <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Shark Detector."</i><br><b>How it works:</b> Tracks if massive institutions are dumping/pumping Bitcoin right now.<br><b>Why it matters:</b> Instantly vetoes trades if a flash-crash is detected in the order flow.</div></div></label>
           <div class="input-wrap">
             <input id="inputVpinThreshold" type="number" step="0.05" min="0.10" max="0.95" value="0.60" />
           </div>
@@ -312,7 +338,7 @@
         </div>
 
         <div class="param-item">
-          <label class="param-label">Take Profit Price Ceiling</label>
+          <label class="param-label">Take Profit Price Ceiling <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br><b>How it works:</b> Automatically sells the contract early if you are winning big.<br><b>Why it matters:</b> Cashes out guaranteed profit instead of risking everything for the final 5 pennies.</div></div></label>
           <div class="input-wrap">
             <span class="prefix">$</span>
             <input id="inputTakeProfitPrice" type="number" step="0.01" min="0.50" max="0.99" value="0.95" />
@@ -321,7 +347,7 @@
         </div>
 
         <div class="param-item">
-          <label class="param-label">Min Take Profit ROI %</label>
+          <label class="param-label">Min Take Profit ROI % <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"How much profit is good enough to leave early?"</i><br><b>How it works:</b> Ensures you walk away with at least a 20% return on your investment.<br><b>Why it matters:</b> Stops the bot from panic-selling for a 1% profit.</div></div></label>
           <div class="input-wrap">
             <input id="inputTakeProfitRoi" type="number" step="5" min="5" max="100" value="20.0" />
             <span class="suffix">%</span>
@@ -421,10 +447,10 @@
     }
 
     const ASSET_SPECS = {
-      BTC: { minDiff: 35.0, step: '1.0', max: '200', decimals: 2, hint: 'Skip coin-flip chop near strike ($35.00 BTC)' },
+      BTC: { minDiff: 21.0, step: '1.0', max: '200', decimals: 2, hint: 'Skip coin-flip chop near strike ($21.00 BTC)' },
       ETH: { minDiff: 2.50, step: '0.1', max: '20', decimals: 2, hint: 'Skip coin-flip chop near strike ($2.50 ETH)' },
       SOL: { minDiff: 0.50, step: '0.05', max: '10', decimals: 2, hint: 'Skip coin-flip chop near strike ($0.50 SOL)' },
-      DOGE: { minDiff: 0.0005, step: '0.0001', max: '0.05', decimals: 4, hint: 'Skip coin-flip chop near strike ($0.0005 DOGE)' }
+      DOGE: { minDiff: 0.00014, step: '0.00001', max: '0.01', decimals: 5, hint: 'Skip coin-flip chop near strike ($0.00014 DOGE)' }
     };
 
     function applyAssetInputConstraints(asset) {
