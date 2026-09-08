@@ -17,6 +17,7 @@ import logging
 import math
 import os
 import random
+import re
 import sys
 import time
 import uuid
@@ -2298,6 +2299,10 @@ async def get_hot_ticks(ticker: str, limit: int = 100) -> dict:
 @app.get("/api/export/ticks")
 async def export_ticks(timeframe: str = "mock") -> FileResponse:
     """Download the active session tick recording JSONL file."""
+    # SECURITY: Validate timeframe parameter to prevent path traversal and glob injection
+    if not re.match(r"^[a-zA-Z0-9_\-]+$", timeframe):
+        raise HTTPException(status_code=400, detail="Invalid timeframe parameter")
+
     data_dir = state.data_dir
     files = sorted(data_dir.glob(f"ticks_{timeframe}_*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
     if not files:
@@ -2308,6 +2313,13 @@ async def export_ticks(timeframe: str = "mock") -> FileResponse:
         raise HTTPException(status_code=404, detail="No recorded tick files found.")
 
     target_file = files[0]
+    # SECURITY: Ensure target file is strictly inside data_dir to prevent path traversal
+    try:
+        if not target_file.resolve().is_relative_to(data_dir.resolve()):
+            raise HTTPException(status_code=403, detail="Access denied")
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
     return FileResponse(
         path=str(target_file),
         media_type="application/x-ndjson",

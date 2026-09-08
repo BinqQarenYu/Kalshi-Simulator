@@ -575,3 +575,25 @@ def test_sweep_orders_endpoint(client: TestClient) -> None:
             assert len(state.sim_agent.active_resting_orders) == 0
 
 
+def test_export_ticks_security_sanitization(client: TestClient) -> None:
+    with client:
+        # Invalid / path traversal / glob injection timeframe inputs must return 400 Bad Request
+        invalid_inputs = [
+            "../etc/passwd",
+            "..",
+            "mock/../",
+            "*",
+            "mock*",
+            "timeframe;drop",
+            "mock.jsonl",
+            "../../../",
+        ]
+        for invalid_tf in invalid_inputs:
+            resp = client.get(f"/api/export/ticks?timeframe={invalid_tf}")
+            assert resp.status_code == 400, f"Expected 400 for timeframe '{invalid_tf}', got {resp.status_code}"
+            assert resp.json()["detail"] == "Invalid timeframe parameter"
+
+        # Valid timeframe parameters must not trigger 400 validation error
+        valid_resp = client.get("/api/export/ticks?timeframe=mock")
+        # Should be either 200 (if tick files exist) or 404 (if no tick files found), but NOT 400
+        assert valid_resp.status_code in (200, 404)
