@@ -18,3 +18,7 @@
 ## 2026-09-04 - Segmented View Mode Toggles & Metric Emphasis
 **Learning:** Segmented toggle button groups (such as `$` vs `%` price view mode) need explicit `role="group"`, `aria-label`, `type="button"`, and dynamic `aria-pressed` state attributes so assistive technology users understand the available selection group and current active filter state. In addition, changing view modes should dynamically adjust visual emphasis on the selected metric.
 **Action:** Wrap button toggle pairs in a `role="group"` element with a clear `aria-label`, supply `aria-pressed` and `focus-visible:ring-2` focus rings on each button, and wire state changes to dynamically highlight the active metric.
+
+## 2026-09-07 - Order Book Ladder Keyboard Navigation and Filter Controls
+**Learning:** Interactive list/table rows (like order book price levels) implemented as `<div>` elements are invisible to keyboard tab order and screen reader action queues unless marked with `role="button"`, `tabIndex={0}`, explicit `aria-label`, and `onKeyDown` handlers for `Enter`/`Space`.
+**Action:** When converting interactive container elements (e.g. order book price rows) into accessible controls, add `role="button"`, `tabIndex={0}`, descriptive `aria-label`, `onKeyDown` keyboard event listeners, `focus-visible:ring-*` focus outlines, and sound feedback (`soundFX.playClickSound()`).
