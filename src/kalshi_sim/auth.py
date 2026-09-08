@@ -27,7 +27,12 @@ def load_private_key(pem_source: str | Path) -> RSAPrivateKey:
     Returns:
         RSAPrivateKey: The loaded RSA private key instance.
     """
-    if isinstance(pem_source, Path) or (isinstance(pem_source, str) and (Path(pem_source).exists() and not "\n" in pem_source)):
+    if isinstance(pem_source, Path) or (
+        isinstance(pem_source, str)
+        and len(pem_source) < 260
+        and "\n" not in pem_source
+        and Path(pem_source).exists()
+    ):
         pem_bytes = Path(pem_source).read_bytes()
     else:
         content = str(pem_source).strip()
@@ -191,7 +196,7 @@ def get_ws_auth_headers(
 
 
 def get_ssl_context():
-    """Create a secure SSL context using the system certificate store with resilient fallback."""
+    """Create a secure SSL context using system CA store or certifi fallback."""
     import ssl
     try:
         return ssl.create_default_context()
@@ -199,8 +204,11 @@ def get_ssl_context():
         try:
             import certifi
             return ssl.create_default_context(cafile=certifi.where())
-        except Exception:
-            return ssl._create_unverified_context()
+        except Exception as exc:
+            # SECURITY: Never disable SSL verification on exchange API traffic.
+            raise RuntimeError(
+                "Failed to create secure SSL context: system CA store and certifi CA bundle are both unavailable."
+            ) from exc
 
 
 
