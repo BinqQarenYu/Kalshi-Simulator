@@ -22,3 +22,7 @@
 ## 2026-09-07 - Order Book Ladder Keyboard Navigation and Filter Controls
 **Learning:** Interactive list/table rows (like order book price levels) implemented as `<div>` elements are invisible to keyboard tab order and screen reader action queues unless marked with `role="button"`, `tabIndex={0}`, explicit `aria-label`, and `onKeyDown` handlers for `Enter`/`Space`.
 **Action:** When converting interactive container elements (e.g. order book price rows) into accessible controls, add `role="button"`, `tabIndex={0}`, descriptive `aria-label`, `onKeyDown` keyboard event listeners, `focus-visible:ring-*` focus outlines, and sound feedback (`soundFX.playClickSound()`).
+
+## 2026-09-08 - Scrollable Data Table Feed Focusability & Table Row Semantics
+**Learning:** Scrollable container wrappers holding live data feeds (such as real-time trade tape tables) require `tabIndex={0}` and focus ring styles so keyboard users can navigate and scroll the container. Non-interactive `<tr>` rows should NOT receive `tabIndex={0}` or `aria-label` overrides, as doing so pollutes the document tab sequence and breaks standard screen reader table navigation semantics.
+**Action:** Place `tabIndex={0}`, `aria-label`, and `focus-visible:ring-*` on the scrollable container `<div>`, use `scope="col"` on `<th>`, and preserve semantic table row/cell structure without forcing non-interactive rows into the tab order.

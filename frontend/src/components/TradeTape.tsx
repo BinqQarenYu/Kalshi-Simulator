@@ -26,15 +26,19 @@ export const TradeTape: React.FC<TradeTapeProps> = React.memo(({ tradeTape = [],
   }
 
   return (
-    <div className="w-full overflow-x-auto max-h-[360px] overflow-y-auto">
-      <table className="w-full text-left text-xs font-mono">
+    <div
+      tabIndex={0}
+      aria-label="Live Trade Tape feed"
+      className="w-full overflow-x-auto max-h-[360px] overflow-y-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] rounded-lg"
+    >
+      <table className="w-full text-left text-xs font-mono" aria-label="Live Trade Tape prints">
         <thead className="text-[10px] uppercase tracking-wider text-[#8b949e] bg-[#161b22] sticky top-0 z-10 border-b border-[#21262d]">
           <tr>
-            <th className="py-2 px-4">Time</th>
-            <th className="py-2 px-4">Side</th>
-            <th className="py-2 px-4 text-right">Price</th>
-            <th className="py-2 px-4 text-right">Volume</th>
-            <th className="py-2 px-4 text-right">Notional</th>
+            <th scope="col" className="py-2 px-4">Time</th>
+            <th scope="col" className="py-2 px-4">Side</th>
+            <th scope="col" className="py-2 px-4 text-right">Price</th>
+            <th scope="col" className="py-2 px-4 text-right">Volume</th>
+            <th scope="col" className="py-2 px-4 text-right">Notional</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[#21262d]/50">
