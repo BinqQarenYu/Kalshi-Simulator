@@ -27,6 +27,7 @@ export interface MarketState {
   diff_str?: string;
   expiry_countdown_seconds: number;
   expiry_countdown_str: string;
+  timeframe?: string;
   market_chance_pct: number;
   volume_24h_str: string;
   best_yes_ask: number;
@@ -195,6 +196,8 @@ export interface WinLossEventReport {
   timeframe: string;
   strike_price: number;
   settlement_btc_price: number;
+  settlement_spot_price?: number;
+  asset?: string;
   bot_side: 'yes' | 'no';
   contracts: number;
   entry_price: number;
@@ -368,6 +371,26 @@ export interface DashboardState {
     domination_discount_price?: number;
   };
   btc_orderflow?: BtcOrderflowSummary;
+  continuous_training?: ContinuousTrainingTelemetry;
+}
+
+export interface ContinuousTrainingTelemetry {
+  status: string;
+  is_enabled: boolean;
+  is_running: boolean;
+  is_paused: boolean;
+  cycles_completed: number;
+  models_promoted: number;
+  best_val_loss?: number | null;
+  last_val_loss?: number | null;
+  last_val_accuracy?: number | null;
+  last_val_f1?: number | null;
+  last_trained_time?: string | null;
+  last_promoted_time?: string | null;
+  samples_trained: number;
+  last_error?: string | null;
+  priority_class?: string;
+  cpu_thread_cap?: number;
 }
 
 export interface LivePositionItem {
@@ -380,9 +403,9 @@ export interface LivePositionItem {
 }
 
 export interface LivePortfolioState {
-  balance_dollars: number;
-  available_margin: number;
-  payout_pending: number;
+  balance_dollars: number | string;
+  available_margin: number | string;
+  payout_pending: number | string;
   positions_count?: number;
   positions: LivePositionItem[];
   updated_at: string;

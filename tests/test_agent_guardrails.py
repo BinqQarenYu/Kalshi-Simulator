@@ -328,3 +328,102 @@ def test_guardrail_3step_domination_sole_authorization_and_one_contract() -> Non
         assert ok is True
         assert size == 1, f"Expected 1 contract for {asset_ticker}, got {size}"
 
+
+def test_guardrail_in_flight_concurrency_lockout() -> None:
+    """Verify that an order in flight immediately blocks concurrent orders on the same cycle."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    cycle = "KXDOGE15M-26SEP071200-00"
+
+    # 1. First order pre-trade intent validation succeeds and places in-flight reservation
+    ok1, reason1, size1, _ = guardrails.validate_pre_trade_intent(
+        ticker=cycle,
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.48"),
+        total_equity=Decimal("25.00"),
+        vpin=0.10,
+        is_bot=True,
+    )
+    assert ok1 is True
+    assert size1 == 1
+
+    # 2. Concurrent invocation during network dispatch is immediately BLOCKED
+    ok2, reason2, size2, _ = guardrails.validate_pre_trade_intent(
+        ticker=cycle,
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.48"),
+        total_equity=Decimal("25.00"),
+        vpin=0.10,
+        is_bot=True,
+    )
+    assert ok2 is False
+    assert "IN-FLIGHT ORDER LOCKOUT" in reason2
+    assert size2 == 0
+
+    # 3. If dispatch fails and is released, next order is permitted
+    guardrails.release_in_flight_intent(cycle)
+    ok3, reason3, size3, _ = guardrails.validate_pre_trade_intent(
+        ticker=cycle,
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.48"),
+        total_equity=Decimal("25.00"),
+        vpin=0.10,
+        is_bot=True,
+    )
+    assert ok3 is True
+    assert size3 == 1
+
+
+def test_guardrail_max_2_contracts_per_cycle() -> None:
+    """Verify strictly 1 contract per trade and hard-capped maximum of 2 contracts per cycle."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    cycle = "KXBTC15M-26SEP071200-00"
+
+    # Trade 1: Requested 5 contracts, clamped strictly to 1 contract
+    ok1, _, size1, _ = guardrails.validate_pre_trade_intent(
+        ticker=cycle,
+        side="yes",
+        requested_size=5,
+        est_price=Decimal("0.48"),
+        total_equity=Decimal("25.00"),
+        vpin=0.10,
+        is_bot=True,
+    )
+    assert ok1 is True
+    assert size1 == 1
+    guardrails.record_resting_order("ord_1", cycle, "yes", size1, Decimal("0.48"))
+
+    # Unlock cycle lock to test second entry up to max 2 shares
+    guardrails._cycle_locks.pop(cycle, None)
+
+    # Trade 2: Requested 2 contracts, clamped to 1 (2 - 1 = 1 remaining capacity)
+    ok2, _, size2, _ = guardrails.validate_pre_trade_intent(
+        ticker=cycle,
+        side="yes",
+        requested_size=2,
+        est_price=Decimal("0.48"),
+        total_equity=Decimal("25.00"),
+        vpin=0.10,
+        is_bot=True,
+    )
+    assert ok2 is True
+    assert size2 == 1
+    guardrails.record_resting_order("ord_2", cycle, "yes", size2, Decimal("0.48"))
+
+    # Trade 3: Total is now 2 contracts. Further entries are strictly rejected
+    ok3, reason3, size3, _ = guardrails.validate_pre_trade_intent(
+        ticker=cycle,
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.48"),
+        total_equity=Decimal("25.00"),
+        vpin=0.10,
+        is_bot=True,
+    )
+    assert ok3 is False
+    assert "CYCLE" in reason3
+    assert size3 == 0
+
+

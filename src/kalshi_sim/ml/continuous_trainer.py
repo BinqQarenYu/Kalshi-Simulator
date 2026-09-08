@@ -338,7 +338,7 @@ class ContinuousModelTrainer:
 
         X_recent, y_recent = builder.build_from_directory(
             self.data_dir,
-            file_pattern="ticks_paper_live_*.jsonl",
+            file_pattern="ticks_*.jsonl",
             max_files=self.max_recent_tick_files,
         )
 

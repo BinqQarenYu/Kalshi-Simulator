@@ -69,6 +69,7 @@ from kalshi_sim.schemas import (
     CRYPTO_ASSETS,
     CandleInterval,
     CryptoAsset,
+    detect_asset_from_ticker,
     get_asset_config,
 
     IntegrityCheckSchema,
@@ -95,10 +96,38 @@ from kalshi_sim.tick_writer import TickWriter
 logger = logging.getLogger("kalshi_sim.server")
 
 TIMEFRAME_CONFIGS: dict[Timeframe, dict[str, Any]] = {
-    Timeframe.FIVE_MIN: {"series": "KXBTC15M", "title": "BTC 5 min", "duration": "5m", "expiry_seconds": 300},
-    Timeframe.FIFTEEN_MIN: {"series": "KXBTC15M", "title": "BTC 15 min", "duration": "15m", "expiry_seconds": 900},
-    Timeframe.ONE_HOUR: {"series": "KXBTCH", "title": "BTC 1 Hour", "duration": "1h", "expiry_seconds": 3600},
-    Timeframe.DAILY: {"series": "KXBTCD", "title": "BTC Daily", "duration": "24h", "expiry_seconds": 86400},
+    Timeframe.FIVE_MIN: {
+        "series": "KXBTC5M",
+        "ticker": "KXBTC5M-T78600",
+        "target_strike": Decimal("78600.00"),
+        "title": "BTC 5 min",
+        "duration": "5m",
+        "expiry_seconds": 300,
+    },
+    Timeframe.FIFTEEN_MIN: {
+        "series": "KXBTC15M",
+        "ticker": "KXBTC15M-T78650",
+        "target_strike": Decimal("77645.14"),
+        "title": "BTC 15 min",
+        "duration": "15m",
+        "expiry_seconds": 900,
+    },
+    Timeframe.ONE_HOUR: {
+        "series": "KXBTCH",
+        "ticker": "KXBTCH-T78500",
+        "target_strike": Decimal("78500.00"),
+        "title": "BTC 1 Hour",
+        "duration": "1h",
+        "expiry_seconds": 3600,
+    },
+    Timeframe.DAILY: {
+        "series": "KXBTCD",
+        "ticker": "KXBTCD-T78000",
+        "target_strike": Decimal("78000.00"),
+        "title": "BTC Daily",
+        "duration": "24h",
+        "expiry_seconds": 86400,
+    },
 }
 
 def resolve_bot_instance(bot_id: str) -> Any:
@@ -196,6 +225,9 @@ class ServerState:
         self.last_twap_second: int = -1
         self.active_asset: CryptoAsset = CryptoAsset.BTC
         self.cf_sync: Optional[CFBenchmarksSync] = None
+        self._standalone_data: Optional[dict[str, Any]] = None
+        self._last_standalone_sync: float = 0.0
+        self.standalone_sync_task: Optional[asyncio.Task] = None
 
 
         # Real-time Institutional Bitcoin Orderflow Feed (Binance / Coinbase L2)
@@ -514,10 +546,13 @@ async def live_kalshi_public_sync_loop() -> None:
                             book.yes_book = new_yes_book
                             book.no_book = new_no_book
 
-                            # Trigger bot evaluation against real live orderbook (suppressed if standalone bot holds trading lock)
+                            # Trigger bot evaluation against real live orderbook (suppressed if standalone bot holds trading lock during live mode)
                             if state.sim_agent and state.ai_auto_trade:
-                                holder = get_active_lock_holder()
-                                if not (holder and holder[1] != os.getpid()):
+                                if state.mode == "live":
+                                    holder = get_active_lock_holder()
+                                    if not (holder and holder[1] != os.getpid()):
+                                        asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
+                                else:
                                     asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
 
                             state.is_dirty = True
@@ -528,6 +563,86 @@ async def live_kalshi_public_sync_loop() -> None:
                 logger.debug("[LIVE KALSHI SYNC] Poll error: %s", exc)
 
             await asyncio.sleep(0.5)
+
+
+async def standalone_sync_loop() -> None:
+    """Continuously synchronize Mother server with 24/7 Standalone Bot as the single source of truth."""
+    connector = create_aiohttp_connector()
+    async with aiohttp.ClientSession(connector=connector) as session:
+        while True:
+            try:
+                holder = get_active_lock_holder()
+                if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+                    async with session.get("http://127.0.0.1:8001/api/state", timeout=aiohttp.ClientTimeout(total=0.8)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            state._standalone_data = data
+                            state._last_standalone_sync = time.monotonic()
+
+                            # Synchronize core state variables
+                            act_asset_str = data.get("active_asset")
+                            if act_asset_str:
+                                try:
+                                    state.active_asset = CryptoAsset(act_asset_str.upper())
+                                except ValueError:
+                                    pass
+
+                            state.active_ticker = data.get("active_ticker", state.active_ticker)
+                            if data.get("target_strike") is not None:
+                                state.target_strike = Decimal(str(data["target_strike"]))
+                            if data.get("spot_price") is not None:
+                                state.current_btc_price = Decimal(str(data["spot_price"]))
+                            if data.get("twap_60s") is not None:
+                                state.twap_60s_price = Decimal(str(data["twap_60s"]))
+                            if "armed" in data:
+                                state.ai_auto_trade = bool(data["armed"])
+
+                            bal = float(data.get("balance", 0.0))
+                            state.live_portfolio = {
+                                "balance": bal,
+                                "balance_dollars": bal,
+                                "available_margin": bal,
+                                "today_pnl": float(data.get("today_pnl", 0.0)),
+                                "settled_cycles": int(data.get("settled_cycles", 0)),
+                                "today_wins": int(data.get("today_wins", 0)),
+                                "today_losses": int(data.get("today_losses", 0)),
+                                "today_win_rate": float(data.get("today_win_rate", 0.0)),
+                                "consecutive_losses": int(data.get("consecutive_losses", 0)),
+                                "max_consecutive_losses": int(data.get("max_consecutive_losses", 3)),
+                                "positions": [],
+                                "payout_pending": 0.0,
+                            }
+
+                            # Ingest Standalone's orderbook into state.orderbook if ticker present
+                            if state.active_ticker and data.get("orderbook_ladder"):
+                                book = state.orderbook.get_book(state.active_ticker)
+                                if not book:
+                                    book = L2BookState(state.active_ticker)
+                                    state.orderbook.set_book(state.active_ticker, book)
+                                for item in data["orderbook_ladder"]:
+                                    p_dec = Decimal(str(item.get("price_raw", 0.5)))
+                                    q_dec = Decimal(str(item.get("contracts", 1)))
+                                    if item.get("side") == "yes":
+                                        book.yes_book[p_dec] = q_dec
+                                    elif item.get("side") == "no":
+                                        book.no_book[p_dec] = q_dec
+
+                            now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                            if not state.price_history or state.price_history[-1].get("time") != now_t:
+                                state.price_history.append({
+                                    "time": now_t,
+                                    "price": float(state.current_btc_price),
+                                    "target": float(state.target_strike),
+                                })
+
+                            state.is_dirty = True
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.debug("[STANDALONE SYNC] Polling standby: %s", exc)
+
+            await asyncio.sleep(0.25)
+
 
 
 async def start_live_public_feed() -> None:
@@ -744,7 +859,7 @@ def record_win_loss_event_report(
     strike_price: Decimal,
     timeframe: str = "15m",
     ai_confidence: float = 0.75,
-    ai_rationale: str = "Automated 15M Cycle Execution",
+    ai_rationale: Optional[str] = None,
     vpin_score: float = 0.15,
     ev_edge: float = 0.08,
     bot_type: Optional[str] = None,
@@ -755,16 +870,27 @@ def record_win_loss_event_report(
     timestamp_utc: Optional[str] = None,
     cycle_time: Optional[str] = None,
     balance_after: Optional[Decimal] = None,
+    settlement_spot_price: Optional[Decimal] = None,
+    asset: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Generate and persist a standardized 15-minute event win/loss report."""
+    """Generate and persist a standardized event win/loss report (5m or 15m)."""
     now_utc = datetime.now(timezone.utc)
+    if settlement_spot_price is None:
+        settlement_spot_price = settlement_btc_price
+    if asset is None:
+        asset = detect_asset_from_ticker(ticker).value
+    if "5M" in ticker.upper() or "5MIN" in ticker.upper():
+        timeframe = "5m"
+    if not ai_rationale:
+        ai_rationale = f"Automated {'5M' if '5m' in str(timeframe).lower() else '15M'} Cycle Execution"
     if not cycle_time:
         et_tz = ZoneInfo("America/New_York")
         et_now = now_utc.astimezone(et_tz)
         hr_now = et_now.hour % 12 or 12
-        m_now = (et_now.minute // 15) * 15
-        m_next = (m_now + 15) % 60
-        hr_next = hr_now if m_now < 45 else ((et_now.hour + 1) % 12 or 12)
+        interval = 5 if "5m" in str(timeframe).lower() else 15
+        m_now = (et_now.minute // interval) * interval
+        m_next = (m_now + interval) % 60
+        hr_next = hr_now if (m_now + interval) < 60 else ((et_now.hour + 1) % 12 or 12)
         ampm_now = "AM" if et_now.hour < 12 else "PM"
         cycle_time = f"{et_now.strftime('%B %d')}, {hr_now}:{m_now:02d} - {hr_next}:{m_next:02d} {ampm_now} ET"
 
@@ -858,8 +984,10 @@ def record_win_loss_event_report(
         "cycle_time": cycle_time,
         "ticker": ticker,
         "timeframe": timeframe,
+        "asset": asset,
         "strike_price": float(strike_price),
-        "settlement_btc_price": float(settlement_btc_price),
+        "settlement_btc_price": float(settlement_spot_price),
+        "settlement_spot_price": float(settlement_spot_price),
         "bot_side": side_clean,
         "contracts": contracts,
         "entry_price": float(entry_price),
@@ -921,19 +1049,21 @@ def record_win_loss_event_report(
         logger.debug("DB settlement & snapshot enqueue error: %s", exc)
 
     try:
-        asyncio.create_task(
-            state.telemetry_alerts.send_settlement_alert(
-                ticker=ticker,
-                side=side_clean,
-                contracts=contracts,
-                pnl=pnl,
-                roi_pct=float(roi_pct),
-                outcome=outcome,
-                balance_after=balance_after,
-                strike_price=float(strike_price),
-                settlement_btc_price=float(settlement_btc_price),
-            )
+        loop = asyncio.get_running_loop()
+        coro = state.telemetry_alerts.send_settlement_alert(
+            ticker=ticker,
+            side=side_clean,
+            contracts=contracts,
+            pnl=pnl,
+            roi_pct=float(roi_pct),
+            outcome=outcome,
+            balance_after=balance_after,
+            strike_price=float(strike_price),
+            settlement_btc_price=float(settlement_btc_price),
         )
+        loop.create_task(coro)
+    except RuntimeError:
+        pass  # No running event loop (e.g. in synchronous test)
     except Exception as exc:
         logger.debug("Telemetry settlement alert dispatch error: %s", exc)
 
@@ -941,35 +1071,44 @@ def record_win_loss_event_report(
     return report
 
 
-def format_cycle_time_from_iso(iso_str: str) -> str:
+def format_cycle_time_from_iso(iso_str: str, interval: int = 15) -> str:
     """Format an ISO timestamp to authentic Kalshi Eastern Time cycle interval."""
     try:
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
         et_tz = ZoneInfo("America/New_York")
         et = dt.astimezone(et_tz)
         m_end = et.minute
-        m_boundary = round(m_end / 15.0) * 15
-        if m_boundary == 60:
-            et_rounded = (et + timedelta(minutes=10)).replace(minute=0, second=0, microsecond=0)
+        m_boundary = round(m_end / float(interval)) * interval
+        if m_boundary >= 60:
+            et_rounded = (et + timedelta(minutes=max(1, interval // 2))).replace(minute=0, second=0, microsecond=0)
             m_end = 0
             hr_end = et_rounded.hour
         else:
             hr_end = et.hour
             m_end = m_boundary
         
-        m_start = (m_end - 15) % 60
-        hr_start = hr_end if m_end >= 15 else (hr_end - 1)
+        m_start = (m_end - interval) % 60
+        hr_start = hr_end if m_end >= interval else (hr_end - 1)
         ampm = "AM" if hr_end < 12 else "PM"
         hr_start_12 = hr_start % 12 or 12
         hr_end_12 = hr_end % 12 or 12
         date_str = et.strftime("%B %d")
         return f"{date_str}, {hr_start_12}:{m_start:02d} - {hr_end_12}:{m_end:02d} {ampm} ET"
     except Exception:
-        return "15M Event Cycle ET"
+        return f"{interval}M Event Cycle ET"
+
+
+_last_live_settlement_sync_time: float = 0.0
+_has_done_initial_full_sync: bool = False
 
 
 async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]:
     """Synchronize live settlements directly from Kalshi API and reconcile with executed trades to generate live win/loss reports."""
+    global _last_live_settlement_sync_time, _has_done_initial_full_sync
+    now = time.time()
+    if not full_sync and (now - _last_live_settlement_sync_time < 30.0):
+        return []
+
     client = state.order_client
     if client is None and state.sim_agent and hasattr(state.sim_agent, "_order_client"):
         client = state.sim_agent._order_client
@@ -993,9 +1132,10 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
 
     try:
         # Full sync when explicitly requested or on startup when local live report history is incomplete
-        current_live_count = len([r for r in state.win_loss_reports if r.get("execution_mode") == "live"])
-        need_full = full_sync or (current_live_count < 100)
-        settlements = await client.get_settlements(limit=100, all_pages=need_full, max_pages=20)
+        need_full = full_sync or not _has_done_initial_full_sync
+        settlements = await client.get_settlements(limit=100 if need_full else 50, all_pages=need_full, max_pages=10)
+        _last_live_settlement_sync_time = now
+        _has_done_initial_full_sync = True
         if not settlements:
             return []
 
@@ -1266,6 +1406,19 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
 
 def resolve_active_market(now_utc: datetime) -> tuple[Any | None, int, Decimal, str, str]:
     """Resolve the currently active open market, remaining seconds, target strike, target time str, and window str."""
+    # 0. Single Source of Truth: When 24/7 Standalone Bot is active, inherit its exact live market truth
+    now_mono = time.monotonic()
+    if hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 5.0):
+        sd = state._standalone_data
+        t_rem = int(sd.get("expiry_countdown_seconds", 0))
+        st_dec = Decimal(str(sd.get("target_strike", "0.00")))
+        t_str = sd.get("target_time_str", "")
+        w_str = sd.get("time_window_str", "")
+        state.active_ticker = sd.get("active_ticker", state.active_ticker)
+        state.target_strike = st_dec
+        state.market_expiry_seconds = t_rem
+        return None, t_rem, st_dec, t_str, w_str
+
     cfg = TIMEFRAME_CONFIGS.get(state.active_timeframe, {})
     tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
     interval_mins = 15 if tf_val == "15m" else (5 if tf_val == "5m" else (60 if tf_val == "1h" else 1440))
@@ -1290,13 +1443,14 @@ def resolve_active_market(now_utc: datetime) -> tuple[Any | None, int, Decimal, 
             if not is_btc and not (m_s.startswith(series_pfx) or m_t.startswith(series_pfx)):
                 continue
             if (
-                (tf_val in ("15m", "5m") and ("15M" in m_s or "15M" in m_t)) or
+                (tf_val == "15m" and ("15M" in m_s or "15M" in m_t)) or
+                (tf_val == "5m" and (("5M" in m_s and "15M" not in m_s) or ("5M" in m_t and "15M" not in m_t))) or
                 (tf_val == "1h" and ("1H" in m_s or "BTCH" in m_s or "1H" in m_t or "BTCH" in m_t)) or
                 (tf_val in ("24h", "1d", "daily") and ("BTCD" in m_s or "BTCD" in m_t))
             ):
                 matching.append(m)
 
-        if not matching:
+        if not matching and tf_val != "5m":
             matching = list(state.sim_agent._market_cache.values())
 
         if matching:
@@ -1367,15 +1521,22 @@ def update_dynamic_clob_ladder(spot_price: Decimal, strike_price: Decimal, ticke
         state.orderbook._books[ticker] = book
 
     diff = float(spot_price - strike_price)
-    # Dynamic time-to-expiry fraction (tau in range [0, 1])
-    tau_fraction = max(5, remaining_secs) / 900.0
-    # Volatility scale narrows with sqrt(tau): exactly preserved for BTC (~180.0 at start down to ~35.0 at expiry)
+    # Dynamic time-to-expiry fraction (tau in range [0, 1]) scaled to active timeframe
+    tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
+    cycle_duration = 300.0 if tf_val == "5m" else (3600.0 if tf_val == "1h" else 900.0)
+    tau_fraction = min(1.0, max(5, remaining_secs) / cycle_duration)
+    # Volatility scale narrows with sqrt(tau):
+    # For 5M, volatility scale starts tighter (~105.0 down to ~25.0 at expiry) reflecting smaller 5m dispersion
     if state.active_asset == CryptoAsset.BTC:
-        scale = max(35.0, 180.0 * math.sqrt(tau_fraction))
+        if tf_val == "5m":
+            scale = max(25.0, 105.0 * math.sqrt(tau_fraction))
+        else:
+            scale = max(35.0, 180.0 * math.sqrt(tau_fraction))
     else:
         active_cfg = get_asset_config(state.active_asset)
         base_diff = float(active_cfg.min_spot_diff)
-        scale = max(base_diff, base_diff * (180.0 / 35.0) * math.sqrt(tau_fraction))
+        multiplier = (105.0 / 25.0) if tf_val == "5m" else (180.0 / 35.0)
+        scale = max(base_diff, base_diff * multiplier * math.sqrt(tau_fraction))
     z = diff / scale if scale > 0 else 0.0
     try:
         prob = 1.0 / (1.0 + math.exp(-z))
@@ -1461,8 +1622,12 @@ async def live_ticker_and_timer_loop() -> None:
                 if state.mode == "mock":
                     update_dynamic_clob_ladder(state.current_btc_price, state.target_strike, state.active_ticker, remaining_secs)
                 if state.ai_auto_trade and state.sim_agent:
-                    holder = get_active_lock_holder()
-                    if not (holder and holder[1] != os.getpid()):
+                    if state.mode == "live":
+                        holder = get_active_lock_holder()
+                        if not (holder and holder[1] != os.getpid()):
+                            state.sim_agent.set_ticker_timeframe(state.active_ticker, state.active_timeframe)
+                            asyncio.create_task(state.sim_agent.on_orderbook_update(state.active_ticker))
+                    else:
                         state.sim_agent.set_ticker_timeframe(state.active_ticker, state.active_timeframe)
                         asyncio.create_task(state.sim_agent.on_orderbook_update(state.active_ticker))
 
@@ -1489,7 +1654,9 @@ async def live_ticker_and_timer_loop() -> None:
                             })
 
             # Pre-fetch contract or instant rollover trigger at cycle boundaries (debounced to once every 5 seconds)
-            if (remaining_secs <= 15 or remaining_secs >= 898) and state.ingestion_agent:
+            tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
+            cycle_duration_secs = 300 if tf_val == "5m" else (3600 if tf_val == "1h" else 900)
+            if (remaining_secs <= 15 or remaining_secs >= cycle_duration_secs - 2) and state.ingestion_agent:
                 now_mono = time.monotonic()
                 if now_mono - last_rollover_trigger_time >= 5.0:
                     last_rollover_trigger_time = now_mono
@@ -1500,10 +1667,10 @@ async def live_ticker_and_timer_loop() -> None:
                 if state.market_expiry_seconds <= 0:
                     cfg = TIMEFRAME_CONFIGS.get(state.active_timeframe, {})
                     tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
-                    duration = cfg.get("expiry_seconds", 900)
+                    duration = cfg.get("expiry_seconds", 300 if tf_val == "5m" else 900)
                     state.market_expiry_seconds = duration
 
-                    # Settle open positions on current contract and record 15M Win/Loss Event
+                    # Settle open positions on current contract and record Win/Loss Event
                     if state.mode == "live":
                         asyncio.create_task(sync_live_settlements())
                     elif state.sim_agent:
@@ -1530,7 +1697,7 @@ async def live_ticker_and_timer_loop() -> None:
                                 if settle_res and state.sim_agent._exec_logger:
                                     state.sim_agent._exec_logger.log_settlement(settle_res)
                                 
-                                # Record authentic 15-Minute Event Win/Loss Report
+                                # Record authentic Event Win/Loss Report
                                 record_win_loss_event_report(
                                     ticker=state.active_ticker,
                                     side=pos.side.value,
@@ -1540,7 +1707,7 @@ async def live_ticker_and_timer_loop() -> None:
                                     strike_price=state.target_strike,
                                     timeframe=tf_val,
                                     ai_confidence=0.82,
-                                    ai_rationale=f"15M Expiration Settlement for {b_type} | Spot: ${float(state.current_btc_price):,.2f} vs Strike: ${float(state.target_strike):,.2f}",
+                                    ai_rationale=f"{tf_val.upper()} Expiration Settlement for {b_type} | Spot: ${float(state.current_btc_price):,.2f} vs Strike: ${float(state.target_strike):,.2f}",
                                     vpin_score=0.15,
                                     ev_edge=0.10,
                                     bot_type=b_type,
@@ -1778,6 +1945,7 @@ async def start_background_simulation() -> None:
     state.btc_spot_task = asyncio.create_task(live_btc_spot_sync_loop(), name="btc_spot_sync")
     state.integrity_task = asyncio.create_task(integrity_audit_loop(), name="integrity_audit")
     state.live_balance_task = asyncio.create_task(live_balance_sync_loop(), name="live_balance_sync")
+    state.standalone_sync_task = asyncio.create_task(standalone_sync_loop(), name="standalone_sync")
     if state.mode == "live":
         asyncio.create_task(sync_live_settlements(), name="initial_settlement_sync")
     logger.info("Simulation background tasks started in '%s' mode with Real-time BTC Orderflow Feed, Decoupled AI Worker, Agent_integrity_check & Live Balance Sync active.", state.mode)
@@ -1798,6 +1966,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await state.gdrive_sync.stop()
     if state.ai_worker:
         state.ai_worker.stop()
+    if state.standalone_sync_task:
+        state.standalone_sync_task.cancel()
     if state.broadcast_task:
         state.broadcast_task.cancel()
     if state.ticker_timer_task:
@@ -2593,6 +2763,7 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
         vpin=0.15,
         cycle_id=ticker,
         is_bot=False,
+        is_live=(req.execution_mode == "live"),
     )
     if not g_ok:
         logger.warning("[GUARDRAIL GATEWAY REJECT] %s", g_msg)
@@ -2606,6 +2777,19 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
     # LIVE TRADING EXECUTION INTERCEPT (Real Kalshi Account Routing & Balance Freeze)
     # =========================================================================
     if req.execution_mode == "live":
+        # Strict 5M Live Trading Prohibition Invariant
+        is_5m_target = (("5M" in ticker.upper() and "15M" not in ticker.upper()) or "5MIN" in ticker.upper()) or state.active_timeframe == Timeframe.FIVE_MIN
+        if is_5m_target:
+            logger.error(
+                "[LIVE TRADE BLOCKED] 5M contract %s is strictly Paper Live only. Live orders are permanently blocked.",
+                ticker,
+            )
+            return {
+                "success": False,
+                "status": "5m_live_prohibited",
+                "reason": "5-Minute event contracts (KXBTC5M) are strictly exclusive to Mother Dash Paper Live. Real-money live trading is permanently prohibited.",
+            }
+
         live_p = state.live_portfolio or {}
         live_balance = Decimal(str(live_p.get("balance_dollars", "0.0")))
         est_price = limit_price if limit_price is not None else ((book.best_yes_ask if side == OrderSide.YES else book.best_no_ask) or Decimal("0.50"))
@@ -2975,30 +3159,6 @@ async def close_position_endpoint(req: ClosePositionRequest) -> dict[str, Any]:
     else:
         return {"success": False, "reason": "Failed to close position"}
 
-TIMEFRAME_CONFIGS: dict[Timeframe, dict[str, Any]] = {
-    Timeframe.FIVE_MIN: {
-        "series": "KXBTC5M",
-        "ticker": "KXBTC5M-T78600",
-        "target_strike": Decimal("78600.00"),
-        "title": "BTC 5 min",
-        "expiry_seconds": 300,
-    },
-    Timeframe.FIFTEEN_MIN: {
-        "series": "KXBTC15M",
-        "ticker": "KXBTC15M-T78650",
-        "target_strike": Decimal("77645.14"),
-        "title": "BTC 15 min",
-        "expiry_seconds": 900,
-    },
-    Timeframe.ONE_HOUR: {
-        "series": "KXBTCH",
-        "ticker": "KXBTCH-T78500",
-        "target_strike": Decimal("78500.00"),
-        "title": "BTC 1 hour",
-        "expiry_seconds": 3600,
-    },
-}
-
 @app.post("/api/settings")
 async def update_settings(req: SettingsRequest) -> dict[str, Any]:
     if req.ai_auto_trade is not None:
@@ -3040,6 +3200,12 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
             if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):
                 state.sim_agent.set_active_strategy(cand_bot)
     if req.mode is not None:
+        # Strict 5M Live Mode Prohibition
+        if req.mode == "live" and (state.active_timeframe == Timeframe.FIVE_MIN or (req.active_timeframe and req.active_timeframe.lower() == "5m")):
+            raise HTTPException(
+                status_code=400,
+                detail="Live Trading is strictly prohibited on the 5-Minute timeframe. 5M is exclusive to Mother Dash Paper Live.",
+            )
         if req.mode != state.mode:
             await stop_current_feed()
             if req.mode == "live":
@@ -3054,6 +3220,14 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
         try:
             tf = Timeframe(req.active_timeframe.lower())
             state.active_timeframe = tf
+            if tf == Timeframe.FIVE_MIN and state.mode == "live":
+                # Automatically disarm live mode to Paper Live (mock) when switching to 5M
+                logger.warning("[5M TIMEFRAME SWITCH] Auto-disarming live trading. 5M is strictly exclusive to Mother Dash Paper Live.")
+                await stop_current_feed()
+                await start_mock_feed()
+                state.mode = "mock"
+                if state.sim_agent:
+                    state.sim_agent.execution_mode = "mock"
             cfg = TIMEFRAME_CONFIGS.get(tf)
             if cfg:
                 state.active_ticker = cfg["ticker"]
@@ -3218,6 +3392,22 @@ async def select_active_asset(req: AssetSelectRequest) -> dict[str, Any]:
         except Exception as e:
             logger.debug("Failed to quick-fetch market for %s: %s", new_asset.value, e)
 
+    # Forward asset switch to Standalone Bot if active
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post(
+                    "http://127.0.0.1:8001/api/assets/select",
+                    json={"asset": new_asset.value},
+                    timeout=aiohttp.ClientTimeout(total=2.0)
+                ) as fwd_resp:
+                    if fwd_resp.status == 200:
+                        logger.info("Forwarded asset switch to Standalone Bot: %s", new_asset.value)
+        except Exception as fwd_exc:
+            logger.warning("Failed forwarding asset switch to standalone bot: %s", fwd_exc)
+
     state.is_dirty = True
     logger.info("Switched active asset to %s (%s)", cfg.name, new_asset.value)
     if state.connected_websockets:
@@ -3234,6 +3424,20 @@ async def select_active_asset(req: AssetSelectRequest) -> dict[str, Any]:
 @app.post("/api/bot/arm")
 async def arm_bot() -> dict[str, Any]:
     """Arm the bot for automated live/paper execution."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post("http://127.0.0.1:8001/api/bot/arm", timeout=aiohttp.ClientTimeout(total=2.0)) as fwd_resp:
+                    if fwd_resp.status == 200:
+                        res_data = await fwd_resp.json()
+                        state.ai_auto_trade = True
+                        state.is_dirty = True
+                        return res_data
+        except Exception as fwd_exc:
+            logger.warning("Failed forwarding arm to standalone bot: %s", fwd_exc)
+
     state.ai_auto_trade = True
     state.is_dirty = True
     logger.info("🟢 [BOT ARMED] Order execution activated by user.")
@@ -3245,6 +3449,20 @@ async def arm_bot() -> dict[str, Any]:
 @app.post("/api/bot/disarm")
 async def disarm_bot() -> dict[str, Any]:
     """Disarm the bot into standby mode."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post("http://127.0.0.1:8001/api/bot/disarm", timeout=aiohttp.ClientTimeout(total=2.0)) as fwd_resp:
+                    if fwd_resp.status == 200:
+                        res_data = await fwd_resp.json()
+                        state.ai_auto_trade = False
+                        state.is_dirty = True
+                        return res_data
+        except Exception as fwd_exc:
+            logger.warning("Failed forwarding disarm to standalone bot: %s", fwd_exc)
+
     state.ai_auto_trade = False
     state.is_dirty = True
     logger.info("⏸️ [BOT DISARMED] Standby mode activated by user.")
@@ -3256,8 +3474,147 @@ async def disarm_bot() -> dict[str, Any]:
 @app.post("/api/bot/panic")
 async def panic_halt() -> dict[str, Any]:
     """Emergency halt: disarm bot and cancel all resting orders."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post("http://127.0.0.1:8001/api/bot/panic", timeout=aiohttp.ClientTimeout(total=2.0)) as fwd_resp:
+                    if fwd_resp.status == 200:
+                        res_data = await fwd_resp.json()
+                        state.ai_auto_trade = False
+                        state.is_dirty = True
+                        return res_data
+        except Exception as fwd_exc:
+            logger.warning("Failed forwarding panic to standalone bot: %s", fwd_exc)
+
     res = await trigger_emergency_kill_switch()
     return {"status": "PANIC_EXECUTED", "cancelled_orders": res.get("cancelled_orders", 0), "armed": False}
+
+
+@app.post("/api/bot/sweep-orders")
+async def sweep_orders_endpoint(force: bool = False) -> dict[str, Any]:
+    """Sweep and cancel resting orders on expired or finished events across live exchange and local simulators."""
+    # 1. If standalone bot is running as active lock holder, forward request to it
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                url = f"http://127.0.0.1:8001/api/bot/sweep-orders?force={str(force).lower()}"
+                async with session.post(url, timeout=aiohttp.ClientTimeout(total=3.0)) as fwd_resp:
+                    if fwd_resp.status == 200:
+                        return await fwd_resp.json()
+        except Exception as fwd_exc:
+            logger.warning("Failed forwarding sweep to standalone bot: %s", fwd_exc)
+
+    cancelled = 0
+    client = state.order_client
+    if client is None and state.sim_agent and hasattr(state.sim_agent, "_order_client"):
+        client = state.sim_agent._order_client
+
+    active_ticker = getattr(state, "active_ticker", None)
+    if not active_ticker and state.sim_agent and hasattr(state.sim_agent, "active_ticker"):
+        active_ticker = state.sim_agent.active_ticker
+
+    t_rem = 900.0
+    if state.sim_agent and hasattr(state.sim_agent, "time_to_expiry_s"):
+        t_rem = float(state.sim_agent.time_to_expiry_s)
+
+    is_active_expired = t_rem <= 45.0
+    effective_keep = None if (force or is_active_expired) else active_ticker
+
+    # If exchange order client is available, sweep live exchange open orders
+    if client and hasattr(client, "get_open_orders"):
+        try:
+            open_orders = await client.get_open_orders()
+            for o in open_orders:
+                t = o.get("ticker")
+                oid = o.get("order_id")
+                if oid and (not effective_keep or t != effective_keep):
+                    try:
+                        success = await client.cancel_order(oid, ticker=t)
+                        if success:
+                            cancelled += 1
+                            logger.warning("🧹 [SERVER SWEEP] Cancelled exchange resting order %s on %s", oid, t)
+                    except Exception as ce:
+                        logger.error("Error cancelling old order %s on %s: %s", oid, t, ce)
+        except Exception as e:
+            logger.error("Error fetching open orders in server sweep: %s", e)
+
+    # If simulation agent has virtual resting orders, clear them
+    if state.sim_agent and hasattr(state.sim_agent, "active_resting_orders"):
+        resting = getattr(state.sim_agent, "active_resting_orders", {})
+        if resting:
+            for oid, o_info in list(resting.items()):
+                t = o_info.get("ticker") if isinstance(o_info, dict) else None
+                if not effective_keep or (t and t != effective_keep):
+                    resting.pop(oid, None)
+                    if not client:
+                        cancelled += 1
+                        logger.warning("🧹 [SERVER SWEEP] Cleared simulated resting order %s on %s", oid, t)
+
+    logger.info("🧹 [SERVER SWEEP COMPLETE] Cancelled %d order(s). Active: %s (t_rem=%.0fs)", cancelled, active_ticker, t_rem)
+    return {
+        "status": "SWEEP_COMPLETE",
+        "cancelled_orders": cancelled,
+        "active_ticker": active_ticker,
+        "time_to_expiry_s": round(t_rem, 1),
+    }
+
+
+
+class ParametersUpdateRequest(BaseModel):
+    discount_limit_price: Optional[float] = Field(default=None, ge=0.10, le=0.50, description="Maker discount limit price ceiling")
+    max_contracts: Optional[int] = Field(default=None, ge=1, le=1, description="Max contracts per cycle trade (strictly 1)")
+    min_edge_pct: Optional[float] = Field(default=None, ge=1.0, le=50.0, description="Minimum edge percentage")
+    min_ev_dollars: Optional[float] = Field(default=None, ge=0.01, le=0.50, description="Minimum net EV dollars per contract")
+    min_spot_diff: Optional[float] = Field(default=None, ge=0.0, le=200.0, description="Minimum distance from strike to avoid coin flips")
+    vpin_toxic_threshold: Optional[float] = Field(default=None, ge=0.10, le=0.95, description="VPIN toxicity threshold")
+    take_profit_price_threshold: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Take profit ceiling")
+    min_take_profit_roi: Optional[float] = Field(default=None, ge=5.0, le=100.0, description="Minimum take profit ROI percentage")
+
+
+@app.get("/api/bot/parameters")
+async def get_bot_parameters() -> dict[str, Any]:
+    """Return live strategy parameters and guardrail thresholds (forwarded to Standalone Bot if active)."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get("http://127.0.0.1:8001/api/bot/parameters", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as e:
+            logger.debug("Failed fetching parameters from standalone bot: %s", e)
+
+    inst = resolve_bot_instance(state.active_strategy_bot)
+    if inst and hasattr(inst, "get_parameters"):
+        return inst.get_parameters()
+    return {"status": "NO_PARAMETERS"}
+
+
+@app.post("/api/bot/parameters")
+@app.patch("/api/bot/parameters")
+async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
+    """Dynamically update strategy parameters (forwarded to Standalone Bot if active)."""
+    payload = req.model_dump(exclude_none=True)
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post("http://127.0.0.1:8001/api/bot/parameters", json=payload, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as e:
+            logger.warning("Failed updating parameters on standalone bot: %s", e)
+
+    inst = resolve_bot_instance(state.active_strategy_bot)
+    if inst and hasattr(inst, "update_parameters"):
+        return inst.update_parameters(**payload)
+    return {"status": "UPDATED", "parameters": payload}
 
 
 @app.get("/api/bot/strategies")
@@ -3488,6 +3845,7 @@ async def trigger_emergency_kill_switch() -> dict[str, Any]:
 @app.get("/api/history/trades")
 async def get_historical_trades_endpoint(
     ticker: str | None = None,
+    asset: str | None = None,
     timeframe: str | None = None,
     bot_type: str | None = None,
     execution_mode: str | None = None,
@@ -3498,6 +3856,7 @@ async def get_historical_trades_endpoint(
     query_service = HistoricalQueryService()
     return await query_service.get_trades(
         ticker=ticker,
+        asset=asset,
         timeframe=timeframe,
         bot_type=bot_type,
         execution_mode=execution_mode,
@@ -3509,6 +3868,8 @@ async def get_historical_trades_endpoint(
 @app.get("/api/history/settlements")
 async def get_historical_settlements_endpoint(
     ticker: str | None = None,
+    asset: str | None = None,
+    timeframe: str | None = None,
     bot_type: str | None = None,
     execution_mode: str | None = None,
     limit: int = 100,
@@ -3518,6 +3879,8 @@ async def get_historical_settlements_endpoint(
     query_service = HistoricalQueryService()
     return await query_service.get_settlements(
         ticker=ticker,
+        asset=asset,
+        timeframe=timeframe,
         bot_type=bot_type,
         execution_mode=execution_mode,
         limit=limit,
@@ -3565,12 +3928,16 @@ async def get_historical_ai_predictions_endpoint(
 async def get_historical_metrics_endpoint(
     bot_type: str | None = None,
     execution_mode: str | None = None,
+    asset: str | None = None,
+    timeframe: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve institutional performance statistics (Sharpe, Sortino, Calmar, Win Rate, Drawdown)."""
     query_service = HistoricalQueryService()
     return await query_service.compute_portfolio_metrics(
         bot_type=bot_type,
         execution_mode=execution_mode,
+        asset=asset,
+        timeframe=timeframe,
     )
 
 
@@ -3685,6 +4052,32 @@ async def get_forward_validation_status_endpoint(
         },
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/api/ml/trainer/status")
+async def get_ml_trainer_status_endpoint() -> dict[str, Any]:
+    """Retrieve real-time continuous ONNX trainer telemetry."""
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        return state.continuous_trainer.get_status()
+    return {"status": "UNAVAILABLE", "is_running": False}
+
+
+@app.post("/api/ml/trainer/pause")
+async def pause_ml_trainer_endpoint() -> dict[str, Any]:
+    """Pause continuous background ONNX training."""
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        state.continuous_trainer.pause()
+        return {"status": "PAUSED", "message": "Continuous trainer paused"}
+    return {"status": "UNAVAILABLE"}
+
+
+@app.post("/api/ml/trainer/resume")
+async def resume_ml_trainer_endpoint() -> dict[str, Any]:
+    """Resume continuous background ONNX training."""
+    if hasattr(state, "continuous_trainer") and state.continuous_trainer:
+        state.continuous_trainer.resume()
+        return {"status": "RESUMED", "message": "Continuous trainer resumed"}
+    return {"status": "UNAVAILABLE"}
 
 
 # ---------------------------------------------------------------------------
@@ -4076,42 +4469,97 @@ async def get_win_loss_reports_endpoint(
     bot_type: str | None = None,
     mode: str | None = None,
     execution_mode: str | None = None,
+    timeframe: str | None = None,
+    asset: str | None = None,
+    date: str | None = None,
 ) -> dict[str, Any]:
-    """Retrieve 15-minute event Win/Loss reports with overall, Domination Bot, ONNX ML Bot, and Live breakdowns."""
+    """Retrieve event Win/Loss reports (5M / 15M) with overall, Domination Bot, ONNX ML Bot, Today's, and Live breakdowns."""
     if state.mode == "live":
         await sync_live_settlements()
+
+    # Synchronize with reports persisted to disk by Standalone Bot or prior sessions
+    reports_file = state.data_dir / "win_loss_reports.json"
+    if reports_file.exists():
+        try:
+            disk_reports = json.loads(reports_file.read_text(encoding="utf-8"))
+            if isinstance(disk_reports, list):
+                known_ids = {r.get("report_id") for r in state.win_loss_reports}
+                new_added = False
+                for dr in disk_reports:
+                    if dr.get("report_id") and dr.get("report_id") not in known_ids:
+                        state.win_loss_reports.append(dr)
+                        known_ids.add(dr.get("report_id"))
+                        new_added = True
+                if new_added:
+                    state.win_loss_reports.sort(key=lambda r: str(r.get("timestamp_utc", "")), reverse=True)
+        except Exception:
+            pass
 
     all_reports = state.win_loss_reports
     macro_reports = [r for r in all_reports if r.get("bot_type") in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot")]
     dom_reports = [r for r in all_reports if r.get("bot_type") in ("3_step_domination_bot", "domination_bot", "domination")]
+    dom2_reports = [r for r in all_reports if r.get("bot_type") in ("dominion_2_bot", "dominion2", "dominion_v2")]
     onnx_reports = [r for r in all_reports if r.get("bot_type") in ("onnx_ml_bot", "onnx_microstructure_bot", "onnx")]
     live_reports = [
         r for r in all_reports
-        if (r.get("execution_mode") == "live" or r.get("bot_type") == "live")
+        if (r.get("execution_mode") == "live" or r.get("bot_type") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-"))
     ]
-    sim_reports = [r for r in all_reports if r.get("execution_mode") in ("simulated", "mock", "paper", None)]
+    sim_reports = [
+        r for r in all_reports 
+        if r.get("execution_mode") in ("simulated", "mock", "paper", None) and not str(r.get("report_id", "")).startswith("WLR-LIVE-")
+    ]
+
+    et_now = datetime.now(ZoneInfo("America/New_York"))
+    today_et_prefix = et_now.strftime("%Y-%m-%d")
+    today_et_month_day = et_now.strftime("%B %d")
+    today_reports = [
+        r for r in all_reports
+        if (str(r.get("timestamp_utc", "")).startswith(today_et_prefix)
+            or today_et_month_day in str(r.get("cycle_time", ""))
+            or today_et_prefix.replace("-", "") in str(r.get("report_id", "")))
+    ]
 
     filtered_reports = all_reports
+    if date and date.lower() in ("today", "current"):
+        filtered_reports = today_reports
+
     exec_m = mode or execution_mode
     if exec_m and exec_m.lower() not in ("all", "combined"):
         if exec_m.lower() in ("live", "real"):
-            filtered_reports = live_reports
+            filtered_reports = [r for r in filtered_reports if r in live_reports]
         elif exec_m.lower() in ("simulated", "mock", "paper"):
-            filtered_reports = sim_reports
+            filtered_reports = [r for r in filtered_reports if r in sim_reports]
 
     if bot_type and bot_type.lower() not in ("all", "combined"):
         filtered_reports = [r for r in filtered_reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
+
+    if timeframe and timeframe.lower() not in ("all", "combined"):
+        tf_clean = timeframe.lower()
+        filtered_reports = [r for r in filtered_reports if str(r.get("timeframe", "15m")).lower() == tf_clean or (f"KX{tf_clean.upper()}" in str(r.get("ticker", "")).upper())]
+
+    if asset and asset.lower() not in ("all", "combined"):
+        asset_clean = asset.upper().strip()
+        filtered_reports = [
+            r for r in filtered_reports
+            if r.get("asset", "").upper() == asset_clean or (f"KX{asset_clean}" in r.get("ticker", "").upper())
+        ]
 
     return {
         "summary": _calculate_15m_metrics(filtered_reports),
         "all_summary": _calculate_15m_metrics(all_reports),
         "macro_trend_summary": _calculate_15m_metrics(macro_reports),
         "domination_summary": _calculate_15m_metrics(dom_reports),
+        "dominion2_summary": _calculate_15m_metrics(dom2_reports),
         "onnx_summary": _calculate_15m_metrics(onnx_reports),
         "live_summary": _calculate_15m_metrics(live_reports),
         "sim_summary": _calculate_15m_metrics(sim_reports),
+        "today_summary": _calculate_15m_metrics(today_reports),
+        "total_today_reports": len(today_reports),
         "filter_bot_type": bot_type or "all",
         "filter_mode": exec_m or "all",
+        "filter_timeframe": timeframe or "all",
+        "filter_asset": asset or "all",
+        "filter_date": date or "all",
         "reports": filtered_reports[:limit],
         "live_reports": live_reports[:limit],
         "total_live_reports": len(live_reports),
@@ -4122,18 +4570,23 @@ async def get_win_loss_reports_endpoint(
 async def export_win_loss_reports_csv(
     bot_type: str | None = None,
     mode: str | None = None,
+    timeframe: str | None = None,
+    asset: str | None = None,
+    date: str | None = None,
 ) -> Response:
-    """Export 15-minute event Win/Loss reports as a CSV document with bot_type and execution_mode."""
+    """Export event Win/Loss reports as a CSV document with bot_type, asset, timeframe, date, and execution_mode."""
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
         "report_id",
         "bot_type",
         "execution_mode",
+        "asset",
         "cycle_time",
         "ticker",
         "timeframe",
         "strike_price",
+        "settlement_spot_price",
         "settlement_btc_price",
         "bot_side",
         "contracts",
@@ -4150,25 +4603,45 @@ async def export_win_loss_reports_csv(
         "ai_rationale",
     ])
     reports = state.win_loss_reports
+    if date and date.lower() in ("today", "current"):
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        today_et_prefix = et_now.strftime("%Y-%m-%d")
+        today_et_month_day = et_now.strftime("%B %d")
+        reports = [
+            r for r in reports
+            if (str(r.get("timestamp_utc", "")).startswith(today_et_prefix)
+                or today_et_month_day in str(r.get("cycle_time", ""))
+                or today_et_prefix.replace("-", "") in str(r.get("report_id", "")))
+        ]
+
     if mode and mode.lower() not in ("all", "combined"):
         if mode.lower() in ("live", "real"):
-            reports = [r for r in reports if r.get("execution_mode") == "live"]
+            reports = [r for r in reports if r.get("execution_mode") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-")]
         else:
-            reports = [r for r in reports if r.get("execution_mode") in ("simulated", "mock", "paper", None)]
+            reports = [r for r in reports if r.get("execution_mode") in ("simulated", "mock", "paper", None) and not str(r.get("report_id", "")).startswith("WLR-LIVE-")]
 
     if bot_type and bot_type.lower() not in ("all", "combined"):
         reports = [r for r in reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
+
+    if timeframe and timeframe.lower() not in ("all", "combined"):
+        reports = [r for r in reports if str(r.get("timeframe", "15m")).lower() == timeframe.lower()]
+
+    if asset and asset.lower() not in ("all", "combined"):
+        asset_clean = asset.upper().strip()
+        reports = [r for r in reports if r.get("asset", "").upper() == asset_clean or f"KX{asset_clean}" in r.get("ticker", "").upper()]
 
     for r in reports:
         writer.writerow([
             r.get("report_id"),
             r.get("bot_type", "3_step_domination_bot"),
             r.get("execution_mode", "simulated"),
+            r.get("asset", "BTC"),
             r.get("cycle_time"),
             r.get("ticker"),
             r.get("timeframe"),
-            f"{r.get('strike_price', 0.0):.2f}",
-            f"{r.get('settlement_btc_price', 0.0):.2f}",
+            f"{r.get('strike_price', 0.0):.4f}",
+            f"{r.get('settlement_spot_price', r.get('settlement_btc_price', 0.0)):.4f}",
+            f"{r.get('settlement_btc_price', 0.0):.4f}",
             r.get("bot_side"),
             r.get("contracts"),
             f"{r.get('entry_price', 0.0):.4f}",
@@ -4183,7 +4656,10 @@ async def export_win_loss_reports_csv(
             r.get("timestamp_utc"),
             r.get("ai_rationale"),
         ])
-    filename = "kalshi_15m_live_reports.csv" if mode == "live" else "kalshi_15m_win_loss_reports.csv"
+    prefix = f"kalshi_{asset.lower()}_" if asset and asset.lower() != "all" else "kalshi_"
+    tf_str = f"{timeframe}_" if timeframe and timeframe.lower() != "all" else ""
+    date_str = "today_" if date and date.lower() in ("today", "current") else ""
+    filename = f"{prefix}{tf_str}{date_str}live_reports.csv" if mode == "live" else f"{prefix}{tf_str}{date_str}win_loss_reports.csv"
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
@@ -4193,16 +4669,45 @@ async def export_win_loss_reports_csv(
 
 @app.get("/api/reports/win-loss/export.json")
 async def export_win_loss_reports_json(
+    bot_type: str | None = None,
     mode: str | None = None,
+    timeframe: str | None = None,
+    asset: str | None = None,
+    date: str | None = None,
 ) -> Response:
-    """Export 15-minute event Win/Loss reports as formatted JSON."""
+    """Export event Win/Loss reports as formatted JSON."""
     reports = state.win_loss_reports
+    if date and date.lower() in ("today", "current"):
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        today_et_prefix = et_now.strftime("%Y-%m-%d")
+        today_et_month_day = et_now.strftime("%B %d")
+        reports = [
+            r for r in reports
+            if (str(r.get("timestamp_utc", "")).startswith(today_et_prefix)
+                or today_et_month_day in str(r.get("cycle_time", ""))
+                or today_et_prefix.replace("-", "") in str(r.get("report_id", "")))
+        ]
+
     if mode and mode.lower() not in ("all", "combined"):
         if mode.lower() in ("live", "real"):
-            reports = [r for r in reports if r.get("execution_mode") == "live"]
+            reports = [r for r in reports if r.get("execution_mode") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-")]
         else:
-            reports = [r for r in reports if r.get("execution_mode") in ("simulated", "mock", "paper", None)]
-    filename = "kalshi_15m_live_reports.json" if mode == "live" else "kalshi_15m_win_loss_reports.json"
+            reports = [r for r in reports if r.get("execution_mode") in ("simulated", "mock", "paper", None) and not str(r.get("report_id", "")).startswith("WLR-LIVE-")]
+
+    if bot_type and bot_type.lower() not in ("all", "combined"):
+        reports = [r for r in reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
+
+    if timeframe and timeframe.lower() not in ("all", "combined"):
+        reports = [r for r in reports if str(r.get("timeframe", "15m")).lower() == timeframe.lower()]
+
+    if asset and asset.lower() not in ("all", "combined"):
+        asset_clean = asset.upper().strip()
+        reports = [r for r in reports if r.get("asset", "").upper() == asset_clean or f"KX{asset_clean}" in r.get("ticker", "").upper()]
+
+    prefix = f"kalshi_{asset.lower()}_" if asset and asset.lower() != "all" else "kalshi_"
+    tf_str = f"{timeframe}_" if timeframe and timeframe.lower() != "all" else ""
+    date_str = "today_" if date and date.lower() in ("today", "current") else ""
+    filename = f"{prefix}{tf_str}{date_str}live_reports.json" if mode == "live" else f"{prefix}{tf_str}{date_str}win_loss_reports.json"
     return Response(
         content=json.dumps(reports, indent=2),
         media_type="application/json",
@@ -4846,8 +5351,16 @@ def _build_full_state_payload() -> dict[str, Any]:
     else:
         # Dynamic digital option fair probability with time-to-expiry decay (Strictly MOCK mode only)
         diff_val = float(state.current_btc_price - strike_dec)
-        tau_fraction = max(5, remaining_secs) / 900.0
-        scale = max(35.0, 180.0 * math.sqrt(tau_fraction))
+        tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
+        cycle_duration = 300.0 if tf_val == "5m" else (3600.0 if tf_val == "1h" else 900.0)
+        tau_fraction = min(1.0, max(5, remaining_secs) / cycle_duration)
+        if state.active_asset == CryptoAsset.BTC:
+            scale = max(25.0, 105.0 * math.sqrt(tau_fraction)) if tf_val == "5m" else max(35.0, 180.0 * math.sqrt(tau_fraction))
+        else:
+            active_cfg = get_asset_config(state.active_asset)
+            base_diff = float(active_cfg.min_spot_diff)
+            multiplier = (105.0 / 25.0) if tf_val == "5m" else (180.0 / 35.0)
+            scale = max(base_diff, base_diff * multiplier * math.sqrt(tau_fraction))
         z = diff_val / scale
         try:
             p_yes = 1.0 / (1.0 + math.exp(-z))
@@ -5001,6 +5514,53 @@ def _build_full_state_payload() -> dict[str, Any]:
     diff = btc_spot - float(strike_dec)
     diff_pct = (diff / float(strike_dec)) * 100.0
 
+    # Single Source of Truth: Merge Standalone ground truth if active
+    now_mono = time.monotonic()
+    has_standalone = bool(hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 5.0))
+    if has_standalone:
+        sd = state._standalone_data
+        target_time_str = sd.get("target_time_str", target_time_str)
+        time_window_str = sd.get("time_window_str", time_window_str)
+        remaining_secs = int(sd.get("expiry_countdown_seconds", remaining_secs))
+        btc_spot = float(sd.get("spot_price", btc_spot))
+        strike_dec = Decimal(str(sd.get("target_strike", strike_dec)))
+        diff = float(sd.get("spot_diff", diff))
+        diff_pct = float(sd.get("spot_diff_pct", diff_pct))
+        best_yes_ask = float(sd.get("best_yes_ask") or best_yes_ask)
+        best_yes_bid = float(sd.get("best_yes_bid") or best_yes_bid)
+        best_no_ask = float(sd.get("best_no_ask") or best_no_ask)
+        best_no_bid = float(sd.get("best_no_bid") or best_no_bid)
+        if sd.get("orderbook_ladder"):
+            ladder = sd["orderbook_ladder"]
+
+        ai_data = {
+            "has_positive_edge": float(sd.get("edge_pct", 0.0)) > 0,
+            "recommended_side": "yes" if "BUY YES" in sd.get("rationale", "") else ("no" if "BUY NO" in sd.get("rationale", "") else "wait"),
+            "ai_prob": float(sd.get("best_yes_ask") or 0.5),
+            "p_up": float(sd.get("p_up", 0.50)),
+            "p_down": float(sd.get("p_down", 0.50)),
+            "p_wait": float(sd.get("p_wait", 0.00)),
+            "market_price": 0.48,
+            "expected_value": float(sd.get("ev", 0.0)),
+            "net_expected_value": float(sd.get("ev", 0.0)),
+            "statistical_edge": float(sd.get("edge_pct", 0.0)),
+            "recommended_contracts": 1 if "wait" not in sd.get("rationale", "").lower() else 0,
+            "active_playbook": sd.get("playbook", "3-Step Domination Bot"),
+            "rationale": sd.get("rationale", ""),
+            "vpin": float(sd.get("vpin", 0.15)),
+            "vpin_is_safe": bool(sd.get("vpin_is_safe", True)),
+        }
+
+        portfolio_data["balance"] = float(sd.get("balance", 0.0))
+        portfolio_data["equity"] = float(sd.get("balance", 0.0))
+        portfolio_data["realized_pnl"] = float(sd.get("today_pnl", 0.0))
+        portfolio_data["total_trades"] = int(sd.get("settled_cycles", 0))
+        portfolio_data["wins"] = int(sd.get("today_wins", 0))
+        portfolio_data["losses"] = int(sd.get("today_losses", 0))
+        portfolio_data["win_rate"] = float(sd.get("today_win_rate", 0.0))
+        if sd.get("recent_reports"):
+            state.win_loss_reports = sd["recent_reports"]
+
     cfg = TIMEFRAME_CONFIGS.get(state.active_timeframe, {})
     asset_cfg = get_asset_config(state.active_asset)
     title = f"{asset_cfg.name} {state.active_timeframe.value}"
@@ -5017,16 +5577,17 @@ def _build_full_state_payload() -> dict[str, Any]:
             "series": series,
             "ticker": state.active_ticker,
             "target_strike": float(strike_dec),
-            "target_strike_str": asset_cfg.format_price(strike_dec),
+            "target_strike_str": sd.get("target_strike_str", asset_cfg.format_price(strike_dec)) if has_standalone else asset_cfg.format_price(strike_dec),
             "target_time_str": target_time_str,
             "time_window_str": time_window_str,
             "current_btc_price": btc_spot,
-            "current_btc_price_str": asset_cfg.format_price(btc_spot),
+            "current_btc_price_str": sd.get("spot_price_str", asset_cfg.format_price(btc_spot)) if has_standalone else asset_cfg.format_price(btc_spot),
             "diff": round(diff, asset_cfg.price_decimals),
             "diff_pct": round(diff_pct, 3),
-            "diff_str": asset_cfg.format_diff(diff, diff_pct),
+            "diff_str": sd.get("moneyness_diff_str", asset_cfg.format_diff(diff, diff_pct)) if has_standalone else asset_cfg.format_diff(diff, diff_pct),
             "expiry_countdown_seconds": remaining_secs,
-            "expiry_countdown_str": f"{remaining_secs // 60:02d}:{remaining_secs % 60:02d}",
+            "expiry_countdown_str": sd.get("time_remaining_str", f"{remaining_secs // 60:02d}:{remaining_secs % 60:02d}") if has_standalone else f"{remaining_secs // 60:02d}:{remaining_secs % 60:02d}",
+            "timeframe": state.active_timeframe.value,
             "market_chance_pct": market_chance_pct,
             "volume_24h_str": state.volume_24h_str,
             "best_yes_ask": round(best_yes_ask, 3),
@@ -5061,6 +5622,7 @@ def _build_full_state_payload() -> dict[str, Any]:
             "timeframe": state.active_timeframe.value,
             "domination_discount_price": float(state.domination_discount_price),
             "standalone_lock_active": bool(get_active_lock_holder() and get_active_lock_holder()[1] != os.getpid()),
+            "standalone_sync_active": has_standalone,
             "lock_holder": get_active_lock_holder()[0] if (get_active_lock_holder() and get_active_lock_holder()[1] != os.getpid()) else None,
         },
         "bot_audit_status": {

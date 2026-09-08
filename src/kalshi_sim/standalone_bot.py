@@ -217,6 +217,7 @@ class StandaloneBotEngine:
         # Consecutive Loss Streak Breaker (Post-Mortem Fix — 9 consecutive overnight losses)
         self.consecutive_losses: int = 0
         self.max_consecutive_losses: int = 3  # Auto-disarm after 3 consecutive losses
+        self.engine_start_time: datetime = datetime.now(timezone.utc)
 
         self.last_decision: Optional[DominationDecision] = None
         self.last_eval_time: float = 0.0
@@ -235,8 +236,18 @@ class StandaloneBotEngine:
         self.twap_60s_price: Optional[Decimal] = None
         self.kalshi_ws_connected: bool = False
         self.spot_connected: bool = False
-        self.tasks: List[asyncio.Task] = []
+        self.timeframe: str = "15m"
         self._running = False
+        self.tasks: List[asyncio.Task] = []
+        self._eval_lock = asyncio.Lock()
+
+    def get_current_timeframe(self) -> str:
+        """Detect current active contract timeframe (5m or 15m)."""
+        if self.active_ticker:
+            t_upper = self.active_ticker.upper()
+            if "5M" in t_upper or "5MIN" in t_upper:
+                return "5m"
+        return self.timeframe
 
     def set_asset(self, asset: CryptoAsset) -> None:
         """Switch active underlying asset in the standalone engine."""
@@ -617,132 +628,148 @@ class StandaloneBotEngine:
 
     async def evaluate_and_execute(self) -> None:
         """Evaluate 3-step domination logic and route live orders through guardrails."""
-        now_mono = time.monotonic()
-        if now_mono - self.last_eval_time < 0.25:
+        if self._eval_lock.locked():
             return
-        self.last_eval_time = now_mono
+        async with self._eval_lock:
+            now_mono = time.monotonic()
+            if now_mono - self.last_eval_time < 0.25:
+                return
+            self.last_eval_time = now_mono
 
-        if not self.active_ticker or self.target_strike <= 0 or self.current_btc_spot <= 0:
-            return
+            if not self.active_ticker or self.target_strike <= 0 or self.current_btc_spot <= 0:
+                return
 
-        book = self.orderbook.get_book(self.active_ticker)
-        if not book or (not book.yes_book and not book.no_book):
-            return
+            book = self.orderbook.get_book(self.active_ticker)
+            if not book or (not book.yes_book and not book.no_book):
+                return
 
-        t_rem = self.get_time_to_expiry()
-        if t_rem <= 0:
-            return
+            t_rem = self.get_time_to_expiry()
+            if t_rem <= 0:
+                return
 
-        # 1. Strategy Evaluation
-        decision = self.bot.evaluate(
-            book=book,
-            spot_price=float(self.current_btc_spot),
-            target_strike=float(self.target_strike),
-            time_to_expiry_s=t_rem,
-            total_equity=self.balance_dollars,
-            max_position_size=1,
-            estimated_vpin=0.15,
-        )
-        self.last_decision = decision
-
-        # 2. Execution Gating: Check Arming
-        if not self.is_armed:
-            return
-
-        # 3. Check Signal Recommendation
-        if decision.recommended_side not in ("yes", "no") or decision.recommended_contracts <= 0:
-            return
-
-        # 4. Institutional Pre-Trade Guardrail Check
-        rec_side = decision.recommended_side
-        rec_size = min(decision.recommended_contracts, 1)  # Strictly 1 contract for each asset
-        est_price = Decimal(str(decision.limit_price))
-
-        is_allowed, g_reason, approved_size, _ = self.guardrails.validate_pre_trade_intent(
-            ticker=self.active_ticker,
-            side=rec_side,
-            requested_size=rec_size,
-            est_price=est_price,
-            total_equity=self.balance_dollars,
-            vpin=decision.vpin,
-            cycle_id=self.active_ticker,
-            is_bot=True,
-            bot_type="3_step_domination_bot",
-        )
-
-        if not is_allowed or approved_size <= 0:
-            logger.info("🛡️ [GUARDRAIL BLOCK] %s on %s: %s", rec_side.upper(), self.active_ticker, g_reason)
-            return
-
-        # 5. Anti-Burst Pre-Flight Check on Kalshi Open Orders
-        if self.order_client:
+            # 1. Strategy Evaluation
             try:
-                open_orders = await self.order_client.get_open_orders()
-                existing_for_ticker = [o for o in open_orders if o.get("ticker") == self.active_ticker]
-                if existing_for_ticker:
-                    logger.warning("⚠️ [ANTI-BURST] Resting order already active on Kalshi for %s. Suppressing duplicate.", self.active_ticker)
+                decision = self.bot.evaluate(
+                    book=book,
+                    spot_price=float(self.current_btc_spot),
+                    target_strike=float(self.target_strike),
+                    time_to_expiry_s=t_rem,
+                    total_equity=self.balance_dollars,
+                    max_position_size=1,
+                    estimated_vpin=0.15,
+                )
+                self.last_decision = decision
+            except Exception as eval_err:
+                logger.exception("❌ [EVALUATION ERROR] Error evaluating strategy: %s", eval_err)
+                return
+
+            # 2. Execution Gating: Check Arming
+            if not self.is_armed:
+                return
+
+            # 3. Check Signal Recommendation
+            if decision.recommended_side not in ("yes", "no") or decision.recommended_contracts <= 0:
+                return
+
+            # 4. Institutional Pre-Trade Guardrail Check
+            rec_side = decision.recommended_side
+            rec_size = min(decision.recommended_contracts, 1)  # Strictly 1 contract per trade, max 2 shares per cycle
+            est_price = Decimal(str(decision.limit_price))
+            target_ticker = self.active_ticker
+
+            is_allowed, g_reason, approved_size, _ = self.guardrails.validate_pre_trade_intent(
+                ticker=target_ticker,
+                side=rec_side,
+                requested_size=rec_size,
+                est_price=est_price,
+                total_equity=self.balance_dollars,
+                vpin=decision.vpin,
+                cycle_id=target_ticker,
+                is_bot=True,
+                bot_type="3_step_domination_bot",
+            )
+
+            if not is_allowed or approved_size <= 0:
+                logger.info("🛡️ [GUARDRAIL BLOCK] %s on %s: %s", rec_side.upper(), target_ticker, g_reason)
+                return
+
+            # 5. Anti-Burst Pre-Flight Check on Kalshi Open Orders
+            if self.order_client:
+                try:
+                    open_orders = await self.order_client.get_open_orders()
+                    existing_for_ticker = [o for o in open_orders if o.get("ticker") == target_ticker]
+                    if existing_for_ticker:
+                        logger.warning("⚠️ [ANTI-BURST] Resting order already active on Kalshi for %s. Suppressing duplicate.", target_ticker)
+                        self.guardrails.record_resting_order(
+                            order_id=existing_for_ticker[0].get("order_id", "ext_rest"),
+                            ticker=target_ticker,
+                            side=rec_side,
+                            size=approved_size,
+                            price=est_price,
+                            cycle_id=target_ticker,
+                            bot_type="3_step_domination_bot",
+                        )
+                        return
+                except Exception as e:
+                    logger.debug("Failed open order anti-burst check: %s", e)
+
+                # 6. Dispatch Live Order
+                logger.info(
+                    "🚀 [LIVE ORDER INCEPTION] %s %d contracts @ $%s on %s (Playbook: %s, Edge: +%.1f%%)",
+                    rec_side.upper(), approved_size, est_price, target_ticker, decision.active_playbook, decision.edge_pct * 100
+                )
+                try:
+                    order_res = await self.order_client.place_order(
+                        ticker=target_ticker,
+                        side=rec_side,
+                        count=approved_size,
+                        action="buy",
+                        order_type="limit",
+                        price_dollars=float(est_price),
+                        exchange_index=2,
+                    )
+                except Exception as exc:
+                    self.guardrails.release_in_flight_intent(target_ticker)
+                    logger.error("Failed to dispatch live order to Kalshi: %s", exc)
+                    return
+
+                if order_res:
+                    order_id = order_res.get("order_id", "live_ord")
+                    logger.info("✅ [ORDER PLACED] Order ID: %s", order_id)
                     self.guardrails.record_resting_order(
-                        order_id=existing_for_ticker[0].get("order_id", "ext_rest"),
-                        ticker=self.active_ticker,
+                        order_id=order_id,
+                        ticker=target_ticker,
                         side=rec_side,
                         size=approved_size,
                         price=est_price,
-                        cycle_id=self.active_ticker,
+                        cycle_id=target_ticker,
                         bot_type="3_step_domination_bot",
                     )
-                    return
-            except Exception as e:
-                logger.debug("Failed open order anti-burst check: %s", e)
-
-            # 6. Dispatch Live Order
-            logger.info(
-                "🚀 [LIVE ORDER INCEPTION] %s %d contracts @ $%s on %s (Playbook: %s, Edge: +%.1f%%)",
-                rec_side.upper(), approved_size, est_price, self.active_ticker, decision.active_playbook, decision.edge_pct * 100
-            )
-            order_res = await self.order_client.place_order(
-                ticker=self.active_ticker,
-                side=rec_side,
-                count=approved_size,
-                action="buy",
-                order_type="limit",
-                price_dollars=float(est_price),
-                exchange_index=2,
-            )
-            if order_res:
-                order_id = order_res.get("order_id", "live_ord")
-                logger.info("✅ [ORDER PLACED] Order ID: %s", order_id)
-                self.guardrails.record_resting_order(
-                    order_id=order_id,
-                    ticker=self.active_ticker,
-                    side=rec_side,
-                    size=approved_size,
-                    price=est_price,
-                    cycle_id=self.active_ticker,
-                    bot_type="3_step_domination_bot",
-                )
-                self.active_resting_orders[order_id] = {
-                    "ticker": self.active_ticker,
-                    "side": rec_side,
-                    "size": approved_size,
-                    "price": est_price,
-                    "placed_at": time.time(),
-                }
-                # Persist live trade to SQLite via DatabaseWriter
-                self.db_writer.enqueue_trade(
-                    trade_id=f"live_{order_id}",
-                    ticker=self.active_ticker,
-                    side=rec_side,
-                    size=approved_size,
-                    price=float(est_price),
-                    gross_value=float(est_price * Decimal(str(approved_size))),
-                    fees=0.0,
-                    vpin=decision.vpin,
-                    timeframe="15m",
-                    bot_type="3_step_domination_bot",
-                    execution_mode="live",
-                    status="resting",
-                )
-                await self.sync_balance()
+                    self.active_resting_orders[order_id] = {
+                        "ticker": target_ticker,
+                        "side": rec_side,
+                        "size": approved_size,
+                        "price": est_price,
+                        "placed_at": time.time(),
+                    }
+                    # Persist live trade to SQLite via DatabaseWriter
+                    self.db_writer.enqueue_trade(
+                        trade_id=f"live_{order_id}",
+                        ticker=target_ticker,
+                        side=rec_side,
+                        size=approved_size,
+                        price=float(est_price),
+                        gross_value=float(est_price * Decimal(str(approved_size))),
+                        fees=0.0,
+                        vpin=decision.vpin,
+                        timeframe=self.get_current_timeframe(),
+                        bot_type="3_step_domination_bot",
+                        execution_mode="live",
+                        status="resting",
+                    )
+                    await self.sync_balance()
+                else:
+                    self.guardrails.release_in_flight_intent(target_ticker)
 
     async def panic_cancel_all(self) -> int:
         """Cancel all open resting orders on Kalshi exchange and disarm bot."""
@@ -762,44 +789,56 @@ class StandaloneBotEngine:
                 logger.error("Error during panic cancel: %s", e)
         return cancelled_count
 
-    async def sweep_old_orders(self, keep_ticker: Optional[str] = None) -> int:
-        """Cancel all open resting orders on Kalshi exchange for finished or non-active contracts."""
+    async def sweep_old_orders(self, keep_ticker: Optional[str] = None, force_all: bool = False) -> int:
+        """Cancel all open resting orders on Kalshi exchange for finished, expired, or non-active contracts."""
         cancelled = 0
-        if not self.order_client:
-            return 0
-        try:
-            open_orders = await self.order_client.get_open_orders()
-            for o in open_orders:
-                t = o.get("ticker")
-                oid = o.get("order_id")
-                if oid and (keep_ticker is None or t != keep_ticker):
-                    try:
-                        await self.order_client.cancel_order(oid)
+        t_rem = self.get_time_to_expiry()
+        # If the active contract has expired or is in the <=45s pre-expiry window, do not keep it
+        is_active_expired = (self.active_market_close_dt is not None and t_rem <= 45.0)
+        effective_keep = None if (force_all or is_active_expired) else (keep_ticker or self.active_ticker)
+
+        if self.order_client:
+            try:
+                open_orders = await self.order_client.get_open_orders()
+                for o in open_orders:
+                    t = o.get("ticker")
+                    oid = o.get("order_id")
+                    if oid and (not effective_keep or t != effective_keep):
+                        try:
+                            success = await self.order_client.cancel_order(oid, ticker=t)
+                            if success:
+                                cancelled += 1
+                                logger.warning("🧹 [EXPIRED ORDER SWEEP] Cancelled resting order %s on finished/expired event %s", oid, t)
+                        except Exception as ce:
+                            logger.error("Error cancelling old order %s on %s: %s", oid, t, ce)
+            except Exception as e:
+                logger.error("Error fetching open orders during sweep: %s", e)
+
+        if self.active_resting_orders:
+            for oid, o_info in list(self.active_resting_orders.items()):
+                t = o_info.get("ticker")
+                if not effective_keep or t != effective_keep:
+                    self.active_resting_orders.pop(oid, None)
+                    if not self.order_client:
                         cancelled += 1
-                        logger.warning("🧹 [EXPIRED ORDER SWEEP] Cancelled resting order %s on finished event %s", oid, t)
-                    except Exception as ce:
-                        logger.debug("Error cancelling old order %s: %s", oid, ce)
-            if self.active_resting_orders:
-                for oid, o_info in list(self.active_resting_orders.items()):
-                    if keep_ticker is None or o_info.get("ticker") != keep_ticker:
-                        self.active_resting_orders.pop(oid, None)
-        except Exception as e:
-            logger.debug("Error during expired order sweep: %s", e)
+                        logger.warning("🧹 [EXPIRED ORDER SWEEP] Cleared virtual resting order %s on finished event %s", oid, t)
+
+        logger.info("🧹 [SWEEP SUMMARY] Cancelled %d resting order(s). Active ticker: %s (t_rem=%.0fs)", cancelled, self.active_ticker, t_rem)
         return cancelled
 
     async def _resting_order_watchdog_loop(self) -> None:
-        """Watch resting limit orders and auto-cancel prior to expiration (t_rem <= 45s) or once event is finished."""
+        """Watch resting limit orders and auto-cancel prior to expiration (t_rem <= 45s or <= 0s) or once event is finished."""
         while self._running:
             try:
                 t_rem = self.get_time_to_expiry()
                 if self.order_client:
-                    # 1. Pre-Expiry Cleanup for active contract (t_rem <= 45s)
-                    if 0 < t_rem <= 45.0:
+                    # 1. Pre-Expiry & Expired Cleanup for active contract (t_rem <= 45s, including <= 0)
+                    if t_rem <= 45.0:
                         if self.active_resting_orders:
                             for oid, o_info in list(self.active_resting_orders.items()):
                                 if o_info.get("ticker") == self.active_ticker:
                                     try:
-                                        await self.order_client.cancel_order(oid)
+                                        await self.order_client.cancel_order(oid, ticker=self.active_ticker)
                                         self.active_resting_orders.pop(oid, None)
                                         logger.warning(
                                             "🛑 [PRE-EXPIRY CLEANUP] Auto-cancelled unfilled resting order %s on %s at T=%.0fs.",
@@ -815,7 +854,7 @@ class StandaloneBotEngine:
                                 if o.get("ticker") == self.active_ticker:
                                     oid = o.get("order_id")
                                     if oid:
-                                        await self.order_client.cancel_order(oid)
+                                        await self.order_client.cancel_order(oid, ticker=self.active_ticker)
                                         logger.warning(
                                             "🛑 [PRE-EXPIRY CLEANUP] Auto-cancelled exchange open order %s on %s at T=%.0fs.",
                                             oid, self.active_ticker, t_rem
@@ -928,7 +967,17 @@ class StandaloneBotEngine:
                             pnl = revenue - cost
                             roi_pct = (pnl / cost * Decimal("100.0")) if cost > Decimal("0") else Decimal("0.0")
 
-                            settled_ts = s.get("settled_time") or datetime.now(timezone.utc).isoformat()
+                            raw_settled_time = s.get("settled_time")
+                            is_historical = False
+                            if self.is_live and raw_settled_time:
+                                try:
+                                    dt = datetime.fromisoformat(str(raw_settled_time).replace("Z", "+00:00"))
+                                    if dt < self.engine_start_time:
+                                        is_historical = True
+                                except Exception:
+                                    pass
+
+                            settled_ts = raw_settled_time or datetime.now(timezone.utc).isoformat()
                             cycle_time = format_cycle_time_from_iso(settled_ts)
 
                             # Resolve strike price
@@ -936,23 +985,37 @@ class StandaloneBotEngine:
                             if ticker == self.active_ticker:
                                 strike_price = self.target_strike
                             if strike_price <= Decimal("0.0"):
-                                strike_price = self.current_btc_spot if self.current_btc_spot > Decimal("0.0") else Decimal("79500.00")
+                                if self.current_btc_spot > Decimal("0.0"):
+                                    strike_price = self.current_btc_spot
+                                else:
+                                    fallback_strikes = {
+                                        CryptoAsset.BTC: Decimal("80000.00"),
+                                        CryptoAsset.ETH: Decimal("2500.00"),
+                                        CryptoAsset.SOL: Decimal("150.00"),
+                                        CryptoAsset.DOGE: Decimal("0.2000"),
+                                    }
+                                    strike_price = fallback_strikes.get(self.active_asset, Decimal("80000.00"))
 
                             step = self.active_cfg.strike_step
                             # Use real spot price at reconciliation time; fabricated strike±step as fallback
                             if self.current_btc_spot > Decimal("0.0"):
-                                settlement_btc_price = self.current_btc_spot
+                                settlement_spot_price = self.current_btc_spot
                             else:
-                                settlement_btc_price = strike_price + (step if market_result == "yes" else -step)
+                                settlement_spot_price = strike_price + (step if market_result == "yes" else -step)
                             balance_after = self.total_balance_dollars if self.total_balance_dollars > 0 else self.balance_dollars
+
+                            rep_tf = "5m" if ("5M" in ticker.upper() or "5MIN" in ticker.upper()) else "15m"
+                            rep_asset = self.active_asset.value
 
                             rep = {
                                 "report_id": report_id,
                                 "cycle_time": cycle_time,
                                 "ticker": ticker,
-                                "timeframe": "15m",
+                                "timeframe": rep_tf,
+                                "asset": rep_asset,
                                 "strike_price": float(strike_price),
-                                "settlement_btc_price": float(settlement_btc_price),
+                                "settlement_btc_price": float(settlement_spot_price),
+                                "settlement_spot_price": float(settlement_spot_price),
                                 "bot_side": trade_side,
                                 "contracts": size,
                                 "entry_price": float(entry_price),
@@ -1000,23 +1063,25 @@ class StandaloneBotEngine:
                             )
 
                             # Consecutive Loss Streak Breaker — auto-disarm after N consecutive losses
-                            if outcome == "loss":
-                                self.consecutive_losses += 1
-                                if self.consecutive_losses >= self.max_consecutive_losses and self.is_armed:
-                                    self.is_armed = False
-                                    logger.warning(
-                                        "🛑 [STREAK BREAKER] %d consecutive losses reached (max=%d). "
-                                        "Bot AUTO-DISARMED to prevent further hemorrhaging. "
-                                        "Manual re-arm required via /api/bot/arm.",
-                                        self.consecutive_losses, self.max_consecutive_losses,
-                                    )
-                            else:
-                                if self.consecutive_losses > 0:
-                                    logger.info(
-                                        "✅ [STREAK RESET] Win breaks %d-loss streak. Counter reset to 0.",
-                                        self.consecutive_losses,
-                                    )
-                                self.consecutive_losses = 0
+                            # Only evaluate for new live settlements that occurred during this running session.
+                            if not is_historical:
+                                if outcome == "loss":
+                                    self.consecutive_losses += 1
+                                    if self.consecutive_losses >= self.max_consecutive_losses and self.is_armed:
+                                        self.is_armed = False
+                                        logger.warning(
+                                            "🛑 [STREAK BREAKER] %d consecutive losses reached (max=%d). "
+                                            "Bot AUTO-DISARMED to prevent further hemorrhaging. "
+                                            "Manual re-arm required via /api/bot/arm.",
+                                            self.consecutive_losses, self.max_consecutive_losses,
+                                        )
+                                else:
+                                    if self.consecutive_losses > 0:
+                                        logger.info(
+                                            "✅ [STREAK RESET] Win breaks %d-loss streak. Counter reset to 0.",
+                                            self.consecutive_losses,
+                                        )
+                                    self.consecutive_losses = 0
 
                             logger.info(
                                 "🏆 [SETTLEMENT RECONCILED] %s: %s | Result: %s | PnL: %+.2f | Streak: %d",
@@ -1185,6 +1250,9 @@ async def get_state() -> Dict[str, Any]:
         "best_no_bid": float(app_engine.best_no_bid) if app_engine.best_no_bid is not None else None,
         "best_no_ask": float(app_engine.best_no_ask) if app_engine.best_no_ask is not None else None,
         "playbook": playbook,
+        "p_up": float(dec.p_up) if dec else 0.50,
+        "p_down": float(dec.p_down) if dec else 0.50,
+        "p_wait": float(dec.p_wait) if dec else 0.00,
         "edge_pct": edge,
         "ev": ev,
         "vpin": vpin,
@@ -1200,6 +1268,31 @@ async def get_state() -> Dict[str, Any]:
         "coinbase_connected": app_engine.coinbase_connected,
         "binance_connected": app_engine.binance_connected,
         "parameters": app_engine.get_parameters(),
+        "orderbook_ladder": [
+            {
+                "side": "yes",
+                "price_cents": f"{float(pr * 100):.1f}¢",
+                "price_raw": float(pr),
+                "contracts": int(qty),
+                "total": f"${float(pr * qty):,.0f}",
+                "depth_pct": min(100, max(8, int((float(qty) / (max([float(q) for q in list(b.yes_book.values()) + list(b.no_book.values())] or [1000.0]))) * 100))),
+            }
+            for b in [app_engine.orderbook.get_book(app_engine.active_ticker)]
+            if b
+            for pr, qty in sorted(b.yes_book.items(), key=lambda x: x[0], reverse=True)[:8]
+        ] + [
+            {
+                "side": "no",
+                "price_cents": f"{float(pr * 100):.1f}¢",
+                "price_raw": float(pr),
+                "contracts": int(qty),
+                "total": f"${float(pr * qty):,.0f}",
+                "depth_pct": min(100, max(8, int((float(qty) / (max([float(q) for q in list(b.yes_book.values()) + list(b.no_book.values())] or [1000.0]))) * 100))),
+            }
+            for b in [app_engine.orderbook.get_book(app_engine.active_ticker)]
+            if b
+            for pr, qty in sorted(b.no_book.items(), key=lambda x: x[0], reverse=True)[:8]
+        ],
     }
 
 
@@ -1318,13 +1411,97 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> Dict[str, Any]:
 
 
 @app.post("/api/bot/sweep-orders")
-async def sweep_orders() -> Dict[str, Any]:
+async def sweep_orders(force: bool = False) -> Dict[str, Any]:
     """Manually sweep and cancel all resting orders on finished or non-active events."""
     if not app_engine:
         raise HTTPException(status_code=503, detail="Engine not ready")
-    cancelled = await app_engine.sweep_old_orders(keep_ticker=app_engine.active_ticker)
-    logger.info("🧹 [MANUAL SWEEP] Cancelled %d order(s) for finished events.", cancelled)
-    return {"status": "SWEEP_COMPLETE", "cancelled_orders": cancelled}
+    cancelled = await app_engine.sweep_old_orders(keep_ticker=app_engine.active_ticker, force_all=force)
+    t_rem = app_engine.get_time_to_expiry()
+    logger.info("🧹 [MANUAL SWEEP] Cancelled %d order(s) for finished/expired events.", cancelled)
+    return {
+        "status": "SWEEP_COMPLETE",
+        "cancelled_orders": cancelled,
+        "active_ticker": app_engine.active_ticker,
+        "time_to_expiry_s": round(t_rem, 1),
+    }
+
+
+from kalshi_sim.win32_window import (
+    find_cockpit_windows,
+    is_always_on_top,
+    launch_widget_window,
+    resize_window,
+    set_always_on_top,
+    WIDGET_HEIGHT_EXPANDED,
+    WIDGET_HEIGHT_MINIMIZED,
+    WIDGET_WIDTH_EXPANDED,
+    WIDGET_WIDTH_MINIMIZED,
+)
+
+
+class WindowPinRequest(BaseModel):
+    topmost: bool = True
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class WindowResizeRequest(BaseModel):
+    width: int
+    height: int
+    topmost: Optional[bool] = None
+
+
+@app.get("/api/window/status")
+async def get_window_status() -> Dict[str, Any]:
+    """Check if Cockpit window is found and pinned as Always on Top."""
+    windows = find_cockpit_windows()
+    if not windows:
+        return {"available": False, "is_topmost": False, "windows_count": 0}
+    hwnd, title = windows[0]
+    topmost = is_always_on_top(hwnd)
+    return {
+        "available": True,
+        "is_topmost": topmost,
+        "hwnd": hwnd,
+        "title": title,
+        "windows_count": len(windows),
+    }
+
+
+@app.post("/api/window/pin")
+async def pin_window(req: WindowPinRequest) -> Dict[str, Any]:
+    """Toggle Always on Top (HWND_TOPMOST) for Cockpit window."""
+    windows = find_cockpit_windows()
+    if not windows:
+        raise HTTPException(status_code=404, detail="No Pocket Cockpit window found")
+    results = []
+    for hwnd, title in windows:
+        ok = set_always_on_top(hwnd, req.topmost)
+        if req.width and req.height:
+            resize_window(hwnd, req.width, req.height, topmost=req.topmost)
+        results.append({"hwnd": hwnd, "title": title, "topmost": req.topmost, "success": ok})
+    return {"status": "SUCCESS", "topmost": req.topmost, "windows": results}
+
+
+@app.post("/api/window/resize")
+async def resize_cockpit_window(req: WindowResizeRequest) -> Dict[str, Any]:
+    """Resize Cockpit window (e.g. for Minimized widget or Expanded mode)."""
+    windows = find_cockpit_windows()
+    if not windows:
+        raise HTTPException(status_code=404, detail="No Pocket Cockpit window found")
+    results = []
+    for hwnd, title in windows:
+        ok = resize_window(hwnd, req.width, req.height, topmost=req.topmost)
+        results.append({"hwnd": hwnd, "success": ok})
+    return {"status": "SUCCESS", "width": req.width, "height": req.height, "windows": results}
+
+
+@app.post("/api/window/launch-widget")
+async def spawn_widget_window() -> Dict[str, Any]:
+    """Launch Microsoft Edge or Chrome in chromeless app mode pinned as a floating desktop widget."""
+    port = 8001
+    ok = launch_widget_window(port=port, view="minimized")
+    return {"status": "LAUNCHED" if ok else "FAILED", "success": ok}
 
 
 # ---------------------------------------------------------------------------
@@ -1338,6 +1515,7 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", default=True, help="Enable live trading mode")
     parser.add_argument("--force", action="store_true", default=False, help="Force lock acquisition if stale")
     parser.add_argument("--no-browser", action="store_true", default=False, help="Do not open browser automatically")
+    parser.add_argument("--widget", action="store_true", default=False, help="Launch as a floating desktop widget (app mode + always on top)")
     parser.add_argument("--asset", type=str, default="BTC", choices=["BTC", "ETH", "SOL", "DOGE"], help="Active crypto asset (default: BTC)")
     args = parser.parse_args()
     if args.force:
@@ -1345,7 +1523,12 @@ def main() -> None:
     if args.asset:
         os.environ["KALSHI_ACTIVE_ASSET"] = args.asset.upper()
 
-    if not args.no_browser:
+    if args.widget:
+        def _delayed_widget():
+            time.sleep(1.2)
+            launch_widget_window(port=args.port, view="minimized")
+        threading.Thread(target=_delayed_widget, daemon=True).start()
+    elif not args.no_browser:
         def _delayed_open():
             time.sleep(1.2)
             try:

@@ -144,7 +144,7 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
                 <span>Kalshi Live Account</span>
                 {livePortfolio?.is_authenticated && (
                   <span className="font-mono text-[11px] text-emerald-300 ml-1 font-normal">
-                    (${livePortfolio.balance_dollars.toFixed(2)})
+                    (${Number(livePortfolio.balance_dollars || 0).toFixed(2)})
                   </span>
                 )}
               </button>
@@ -195,21 +195,21 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
             <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3">
               <div className="text-[11px] font-semibold text-[#8b949e] uppercase">Live Cash Balance</div>
               <div className={`text-lg font-mono font-extrabold mt-0.5 ${
-                (livePortfolio?.balance_dollars ?? 0) <= 0.05 ? 'text-amber-400' : 'text-emerald-400'
+                (Number(livePortfolio?.balance_dollars) || 0) <= 0.05 ? 'text-amber-400' : 'text-emerald-400'
               }`}>
-                ${(livePortfolio?.balance_dollars ?? 0).toFixed(2)}
+                ${(Number(livePortfolio?.balance_dollars) || 0).toFixed(2)}
               </div>
             </div>
             <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3">
               <div className="text-[11px] font-semibold text-[#8b949e] uppercase">Available Margin</div>
               <div className="text-lg font-mono font-extrabold text-white mt-0.5">
-                ${(livePortfolio?.available_margin ?? 0).toFixed(2)}
+                ${(Number(livePortfolio?.available_margin) || 0).toFixed(2)}
               </div>
             </div>
             <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3">
               <div className="text-[11px] font-semibold text-[#8b949e] uppercase">Payout Pending</div>
               <div className="text-lg font-mono font-extrabold text-blue-400 mt-0.5">
-                ${(livePortfolio?.payout_pending ?? 0).toFixed(2)}
+                ${(Number(livePortfolio?.payout_pending) || 0).toFixed(2)}
               </div>
             </div>
             <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3">

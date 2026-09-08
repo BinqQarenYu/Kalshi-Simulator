@@ -190,6 +190,20 @@ class ThreeStepDominationBot:
         logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
+    @staticmethod
+    def _safe_market_ask(
+        recommended_side: Optional[OrderSide],
+        best_yes_ask: Optional[Decimal],
+        best_no_ask: Optional[Decimal],
+    ) -> Optional[float]:
+        """Safely extract market ask float for the recommended side, never raising TypeError."""
+        if recommended_side == OrderSide.YES:
+            val = best_yes_ask
+        elif recommended_side == OrderSide.NO:
+            val = best_no_ask
+        else:
+            val = best_yes_ask if best_yes_ask is not None else best_no_ask
+        return float(val) if val is not None else None
 
     def evaluate(
         self,
@@ -248,7 +262,21 @@ class ThreeStepDominationBot:
             )
 
         # Classify Active Playbook by Expiration Countdown Window
-        # Standard Kalshi 15M cycle: T in [0, 900s]
+        ticker_str = (getattr(book, "market_ticker", "") or getattr(book, "ticker", "")) if book else ""
+        is_5m = ("5M" in ticker_str.upper() and "15M" not in ticker_str.upper()) or "5MIN" in ticker_str.upper()
+
+        # Dynamic Playbook Timing Thresholds:
+        # Standard 15M cycle: P3 in [45s, 240s], P2 in (240s, 600s], P1 in (600s, 900s], lock < 45s
+        # 5M Sprint cycle:    P3 in [20s, 80s],  P2 in (80s, 200s],   P1 in (200s, 300s], lock < 20s
+        if is_5m:
+            p3_min_s, p3_max_s = 20, 80
+            p2_min_s, p2_max_s = 80, 200
+            p1_min_s = 200
+        else:
+            p3_min_s, p3_max_s = 45, 240
+            p2_min_s, p2_max_s = 240, 600
+            p1_min_s = 600
+
         tau_mins = max(0.1, time_to_expiry_s / 60.0)
 
         # Candidate pricing at user discount limit ceiling (Option B - Resting Maker Limit)
@@ -257,9 +285,9 @@ class ThreeStepDominationBot:
         eff_no_price = min(best_no_ask, discount_price) if best_no_ask is not None else discount_price
 
         # -------------------------------------------------------------------
-        # PLAYBOOK 3: Late-Cycle High-Probability Gamma Snub (0:45s - 4:00m left)
+        # PLAYBOOK 3: Late-Cycle High-Probability Gamma Snub
         # -------------------------------------------------------------------
-        if 45 <= time_to_expiry_s <= 240:
+        if p3_min_s <= time_to_expiry_s <= p3_max_s:
             stage = "gamma_snub"
             playbook_title = "Playbook 3: Late-Cycle Gamma Snub"
 
@@ -307,7 +335,7 @@ class ThreeStepDominationBot:
                     f"No edge exceeding {self.min_edge_pct*100:.0f}% at ${discount_price:.2f} discount."
                 )
 
-            actual_ask_p3 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
+            actual_ask_p3 = self._safe_market_ask(ev_res.recommended_side, best_yes_ask, best_no_ask)
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -324,9 +352,9 @@ class ThreeStepDominationBot:
             )
 
         # -------------------------------------------------------------------
-        # PLAYBOOK 2: Mid-Cycle OFI Trend Drift (4:00m - 10:00m left)
+        # PLAYBOOK 2: Mid-Cycle OFI Trend Drift
         # -------------------------------------------------------------------
-        elif 240 < time_to_expiry_s <= 600:
+        elif p2_min_s < time_to_expiry_s <= p2_max_s:
             stage = "drift"
             playbook_title = "Playbook 2: Mid-Cycle OFI Trend Drift"
 
@@ -375,7 +403,7 @@ class ThreeStepDominationBot:
                     f"Spot Diff: {diff_str} | Awaiting high-conviction order flow edge."
                 )
 
-            actual_ask_p2 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
+            actual_ask_p2 = self._safe_market_ask(ev_res.recommended_side, best_yes_ask, best_no_ask)
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -392,9 +420,9 @@ class ThreeStepDominationBot:
             )
 
         # -------------------------------------------------------------------
-        # PLAYBOOK 1: Early Momentum Breakout (10:00m - 15:00m left)
+        # PLAYBOOK 1: Early Momentum Breakout
         # -------------------------------------------------------------------
-        elif time_to_expiry_s > 600:
+        elif time_to_expiry_s > p1_min_s:
             stage = "breakout"
             playbook_title = "Playbook 1: Early Momentum Breakout"
 
@@ -435,7 +463,7 @@ class ThreeStepDominationBot:
                     f"Spot Diff: {diff_str} | Scanning for momentum velocity across strike."
                 )
 
-            actual_ask_p1 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
+            actual_ask_p1 = self._safe_market_ask(ev_res.recommended_side, best_yes_ask, best_no_ask)
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -451,13 +479,13 @@ class ThreeStepDominationBot:
                 actual_market_ask=actual_ask_p1,
             )
 
-        # Expiry lock window (<45s)
+        # Expiry lock window (< p3_min_s)
         else:
             return self._build_wait_decision(
                 time_to_expiry_s=time_to_expiry_s,
                 spot_diff=spot_diff,
                 vpin=estimated_vpin,
-                rationale=f"Cycle Closing Window (T={int(time_to_expiry_s)}s < 45s). New entries locked for settlement.",
+                rationale=f"Cycle Closing Window (T={int(time_to_expiry_s)}s < {p3_min_s}s). New entries locked for settlement.",
             )
 
     def _build_decision(

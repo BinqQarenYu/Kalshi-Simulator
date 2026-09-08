@@ -19,25 +19,25 @@ logger = logging.getLogger(__name__)
 # Mapping per crypto asset and timeframe to Kalshi series tickers
 ASSET_TIMEFRAME_SERIES: dict[CryptoAsset, dict[Timeframe, list[str]]] = {
     CryptoAsset.BTC: {
-        Timeframe.FIVE_MIN: ["KXBTC15M"],
+        Timeframe.FIVE_MIN: ["KXBTC5M", "KXBTC15M"],
         Timeframe.FIFTEEN_MIN: ["KXBTC15M"],
         Timeframe.ONE_HOUR: ["KXBTCH"],
         Timeframe.DAILY: ["KXBTCD"],
     },
     CryptoAsset.ETH: {
-        Timeframe.FIVE_MIN: ["KXETH15M"],
+        Timeframe.FIVE_MIN: ["KXETH5M", "KXETH15M"],
         Timeframe.FIFTEEN_MIN: ["KXETH15M"],
         Timeframe.ONE_HOUR: ["KXETHD", "KXETH"],
         Timeframe.DAILY: ["KXETH"],
     },
     CryptoAsset.SOL: {
-        Timeframe.FIVE_MIN: ["KXSOL15M"],
+        Timeframe.FIVE_MIN: ["KXSOL5M", "KXSOL15M"],
         Timeframe.FIFTEEN_MIN: ["KXSOL15M"],
         Timeframe.ONE_HOUR: ["KXSOLD", "KXSOL"],
         Timeframe.DAILY: ["KXSOL"],
     },
     CryptoAsset.DOGE: {
-        Timeframe.FIVE_MIN: ["KXDOGE15M"],
+        Timeframe.FIVE_MIN: ["KXDOGE5M", "KXDOGE15M"],
         Timeframe.FIFTEEN_MIN: ["KXDOGE15M"],
         Timeframe.ONE_HOUR: ["KXDOGED", "KXDOGE"],
         Timeframe.DAILY: ["KXDOGE"],

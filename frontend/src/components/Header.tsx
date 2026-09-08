@@ -151,33 +151,52 @@ export const Header: React.FC<HeaderProps> = ({
 
               <span className="text-[#484f58]">/</span>
 
-              {/* Timeframe Selector Pills */}
               <div role="group" aria-label="Timeframe selection" className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
-                {['5m', '15m', '1h'].map((tf) => (
-                  <button
-                    key={tf}
-                    type="button"
-                    aria-pressed={timeframe === tf}
-                    onClick={() => {
-                      soundFX.playClickSound();
-                      onSelectTimeframe(tf);
-                    }}
-                    className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
-                      timeframe === tf
-                        ? 'bg-[#f7931a] text-black shadow-sm font-bold'
-                        : 'text-[#8b949e] hover:text-white'
-                    }`}
-                  >
-                    {tf.toUpperCase()}
-                  </button>
-                ))}
+                {['5m', '15m', '1h'].map((tf) => {
+                  const is5m = tf === '5m';
+                  const isSel = timeframe === tf;
+                  return (
+                    <button
+                      key={tf}
+                      type="button"
+                      aria-pressed={isSel}
+                      onClick={() => {
+                        soundFX.playClickSound();
+                        onSelectTimeframe(tf);
+                      }}
+                      className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
+                        isSel
+                          ? is5m
+                            ? 'bg-amber-500 text-black shadow-sm font-extrabold'
+                            : 'bg-[#f7931a] text-black shadow-sm font-bold'
+                          : 'text-[#8b949e] hover:text-white'
+                      }`}
+                      title={is5m ? '5M Expansion Sprint Cycle (Exclusive to Mother Dash Paper Live)' : `${tf.toUpperCase()} Market`}
+                    >
+                      <span>{tf.toUpperCase()}</span>
+                      {is5m && (
+                        <span className={`px-1 py-0.1 text-[8px] font-mono uppercase tracking-wider rounded ${
+                          isSel ? 'bg-black/25 text-black font-black' : 'bg-amber-500/20 text-amber-300 font-bold'
+                        }`}>
+                          PAPER
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            <div className="flex items-center gap-2.5 mt-0.5">
+            <div className="flex items-center gap-2.5 mt-0.5 flex-wrap">
               <h1 className="text-xl font-bold text-white tracking-tight">
                 {market.active_asset_name || currentAsset.label} {timeframe === '15m' ? '15 min' : timeframe === '5m' ? '5 min' : '1 hour'}
               </h1>
+              {timeframe === '5m' && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-300 font-extrabold text-[10px] tracking-wider uppercase shadow-sm">
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" />
+                  EXPANSION · PAPER LIVE ONLY
+                </span>
+              )}
               <div className="flex items-center gap-1.5 text-xs text-[#8b949e]">
                 <span className="text-white/90 font-medium">
                   {market.time_window_str || 'August 30, 4:00 - 4:15 PM ET'}
@@ -246,23 +265,29 @@ export const Header: React.FC<HeaderProps> = ({
                 : 'text-[#8b949e] hover:text-white border border-transparent'
             }`}
           >
-            <span>📄 Paper Trading</span>
+            <span>📄 Paper Trading {timeframe === '5m' && '(Active)'}</span>
           </button>
           <button
             type="button"
             aria-pressed={isLive}
+            disabled={timeframe === '5m'}
             onClick={() => {
+              if (timeframe === '5m') return;
               soundFX.playClickSound();
               onSelectTradingMode?.('live');
             }}
+            title={timeframe === '5m' ? '5M contracts are strictly Paper Live only. Live real-money trading is disabled.' : 'Switch to Live Trading'}
             className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 ${
-              isLive
+              timeframe === '5m'
+                ? 'opacity-40 cursor-not-allowed text-[#6e7681] border border-transparent select-none'
+                : isLive
                 ? 'bg-rose-500/25 text-rose-400 border border-rose-500/50 shadow-md shadow-rose-500/20 font-extrabold'
                 : 'text-[#8b949e] hover:text-white border border-transparent'
             }`}
           >
-            <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+            <span className={`h-2 w-2 rounded-full ${timeframe === '5m' ? 'bg-[#484f58]' : 'bg-rose-500 animate-pulse'}`} />
             <span>🔴 Live Trading</span>
+            {timeframe === '5m' && <span className="text-[10px] font-mono ml-0.5 text-amber-400/80">🔒</span>}
           </button>
         </div>
 
@@ -395,12 +420,12 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Live Kalshi Account Balance Badge */}
               <div
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#161b22] border border-emerald-500/40 text-xs font-mono shadow-sm shadow-emerald-500/10 cursor-default"
-                title={`Kalshi Live Account | Available Cash: $${(livePortfolio?.balance_dollars ?? 0.30).toFixed(2)} | Margin: $${(livePortfolio?.available_margin ?? 0.30).toFixed(2)}`}
+                title={`Kalshi Live Account | Available Cash: $${(Number(livePortfolio?.balance_dollars ?? 0.30) || 0.30).toFixed(2)} | Margin: $${(Number(livePortfolio?.available_margin ?? 0.30) || 0.30).toFixed(2)}`}
               >
                 <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
                 <span className="text-[#8b949e] font-sans font-semibold text-[11px]">Live Cash:</span>
                 <span className="font-bold text-emerald-400">
-                  ${(livePortfolio?.balance_dollars ?? 0.30).toFixed(2)}
+                  ${(Number(livePortfolio?.balance_dollars ?? 0.30) || 0.30).toFixed(2)}
                 </span>
               </div>
             </>

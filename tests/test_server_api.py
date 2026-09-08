@@ -27,7 +27,7 @@ def test_get_state_endpoint(client: TestClient) -> None:
     assert "orderbook_ladder" in data
     assert "ai_signals" in data
     assert "portfolio" in data
-    assert data["market"]["ticker"].startswith("KXBTC")
+    assert data["market"]["ticker"].startswith(("KXBTC", "KXETH", "KXSOL", "KXDOGE"))
 
 
 def test_update_settings_endpoint(client: TestClient) -> None:
@@ -290,7 +290,22 @@ def test_win_loss_reports_endpoint(client: TestClient) -> None:
         assert "win_rate_pct" in data["summary"]
         assert "total_pnl" in data["summary"]
         assert "profit_factor" in data["summary"]
+        assert "today_summary" in data
+        assert "dominion2_summary" in data
+        assert "total_today_reports" in data
         assert len(data["reports"]) > 0
+
+        # Query by date=today
+        resp_today = client.get("/api/reports/win-loss?date=today")
+        assert resp_today.status_code == 200
+        data_today = resp_today.json()
+        assert data_today["filter_date"] == "today"
+
+        # Query by bot_type
+        resp_bot = client.get("/api/reports/win-loss?bot_type=3_step_dom")
+        assert resp_bot.status_code == 200
+        data_bot = resp_bot.json()
+        assert data_bot["filter_bot_type"] == "3_step_dom"
 
 
 def test_win_loss_export_endpoints(client: TestClient) -> None:
@@ -301,12 +316,22 @@ def test_win_loss_export_endpoints(client: TestClient) -> None:
         assert "text/csv" in resp_csv.headers["content-type"]
         assert "report_id" in resp_csv.text and "bot_type" in resp_csv.text and "ticker" in resp_csv.text
 
+        # CSV export with date=today
+        resp_csv_today = client.get("/api/reports/win-loss/export.csv?date=today")
+        assert resp_csv_today.status_code == 200
+        assert "today_" in resp_csv_today.headers["content-disposition"]
+
         # JSON export
         resp_json = client.get("/api/reports/win-loss/export.json")
         assert resp_json.status_code == 200
         assert "application/json" in resp_json.headers["content-type"]
         reports_list = resp_json.json()
         assert isinstance(reports_list, list)
+
+        # JSON export with date=today and bot_type
+        resp_json_today = client.get("/api/reports/win-loss/export.json?date=today&bot_type=3_step_dom")
+        assert resp_json_today.status_code == 200
+        assert "today_" in resp_json_today.headers["content-disposition"]
 
 
 def test_cors_middleware_headers(client: TestClient) -> None:
@@ -433,3 +458,120 @@ def test_bot_arm_disarm_panic_endpoints(client: TestClient) -> None:
     assert resp_panic.status_code == 200
     assert resp_panic.json()["status"] == "PANIC_EXECUTED"
     assert resp_panic.json()["armed"] is False
+
+
+def test_mother_standalone_single_source_of_truth_sync(client: TestClient) -> None:
+    """Verify that Mother server synchronizes 100% of its market, timer, and balance state from Standalone Bot."""
+    import time
+    from unittest.mock import patch
+    from kalshi_sim.server import state, _build_full_state_payload
+
+    # Simulate Standalone Bot running with active lock
+    with patch("kalshi_sim.server.get_active_lock_holder", return_value=("standalone_bot", 99999)):
+        # Inject mock standalone telemetry into state
+        state._standalone_data = {
+            "active_ticker": "KXETH15M-TRUTH-15",
+            "active_asset": "ETH",
+            "active_asset_name": "Ethereum",
+            "target_strike": 2150.00,
+            "target_strike_str": "$2,150.00",
+            "spot_price": 2162.50,
+            "spot_price_str": "$2,162.50",
+            "spot_diff": 12.50,
+            "spot_diff_pct": 0.581,
+            "moneyness_diff_str": "+$12.50 (+0.581%)",
+            "expiry_countdown_seconds": 385,
+            "time_remaining_str": "06:25",
+            "target_time_str": "09:00am ET",
+            "time_window_str": "September 07, 08:45 - 09:00 AM ET",
+            "balance": 24.6462,
+            "today_pnl": 3.56,
+            "settled_cycles": 10,
+            "today_wins": 5,
+            "today_losses": 5,
+            "today_win_rate": 50.0,
+            "best_yes_ask": 0.58,
+            "best_yes_bid": 0.57,
+            "best_no_ask": 0.43,
+            "best_no_bid": 0.42,
+            "armed": True,
+            "playbook": "Playbook 2: OFI Drift",
+            "edge_pct": 14.5,
+            "ev": 0.04,
+            "vpin": 0.18,
+            "vpin_is_safe": True,
+            "rationale": "High conviction drift detected",
+            "orderbook_ladder": [
+                {"side": "yes", "price_cents": "57.0¢", "price_raw": 0.57, "contracts": 10, "total": "$6", "depth_pct": 80}
+            ],
+        }
+        state._last_standalone_sync = time.monotonic()
+
+        payload = _build_full_state_payload()
+        m = payload["market"]
+        p = payload["portfolio"]
+        s = payload["settings"]
+        ai = payload["ai_signals"]
+
+        # 1. Market parity
+        assert m["ticker"] == "KXETH15M-TRUTH-15"
+        assert m["target_strike"] == 2150.00
+        assert m["target_strike_str"] == "$2,150.00"
+        assert m["current_btc_price"] == 2162.50
+        assert m["current_btc_price_str"] == "$2,162.50"
+        assert m["diff"] == 12.50
+        assert m["expiry_countdown_seconds"] == 385
+        assert m["expiry_countdown_str"] == "06:25"
+        assert m["target_time_str"] == "09:00am ET"
+
+        # 2. Portfolio & PnL parity
+        assert p["balance"] == 24.6462
+        assert p["realized_pnl"] == 3.56
+        assert p["total_trades"] == 10
+        assert p["wins"] == 5
+        assert p["losses"] == 5
+        assert p["win_rate"] == 50.0
+
+        # 3. AI signal parity
+        assert ai["active_playbook"] == "Playbook 2: OFI Drift"
+        assert ai["statistical_edge"] == 14.5
+        assert ai["expected_value"] == 0.04
+        assert ai["p_up"] == 0.50
+
+        # 4. Settings & lock indicator
+        assert s["standalone_lock_active"] is True
+        assert s["standalone_sync_active"] is True
+        assert s["lock_holder"] == "standalone_bot"
+
+        # Clean up
+        state._standalone_data = None
+        state._last_standalone_sync = 0.0
+
+
+def test_sweep_orders_endpoint(client: TestClient) -> None:
+    """Verify POST /api/bot/sweep-orders returns SWEEP_COMPLETE and cleans resting orders."""
+    from unittest.mock import patch
+    with patch("kalshi_sim.server.get_active_lock_holder", return_value=None):
+        # Test sweep when idle
+        resp = client.post("/api/bot/sweep-orders")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SWEEP_COMPLETE"
+        assert "cancelled_orders" in data
+        assert "time_to_expiry_s" in data
+
+        # Test sweep with simulated resting orders
+        from kalshi_sim.server import state
+        if state.sim_agent is not None:
+            state.sim_agent.active_resting_orders = {
+                "order-old-1": {"ticker": "KXBTC15M-OLD-TICKER", "price": 0.45},
+                "order-active-1": {"ticker": state.active_ticker or "KXBTC15M-ACTIVE", "price": 0.48},
+            }
+            resp2 = client.post("/api/bot/sweep-orders?force=true")
+            assert resp2.status_code == 200
+            data2 = resp2.json()
+            assert data2["status"] == "SWEEP_COMPLETE"
+            # Force true should sweep all resting orders
+            assert len(state.sim_agent.active_resting_orders) == 0
+
+

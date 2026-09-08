@@ -63,6 +63,22 @@ function formatSecondsToTime(sec: number): string {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+/** Monotonically unwrap seconds array across midnight boundaries */
+function unwrapSeconds(rawSecsArray: number[]): number[] {
+  if (rawSecsArray.length === 0) return [];
+  const result: number[] = [rawSecsArray[0]];
+  let offset = 0;
+  for (let i = 1; i < rawSecsArray.length; i++) {
+    let s = rawSecsArray[i] + offset;
+    if (s < result[i - 1] - 43200) {
+      offset += 86400;
+      s += 86400;
+    }
+    result.push(s);
+  }
+  return result;
+}
+
 export const TargetChart: React.FC<TargetChartProps> = React.memo(({
   market,
   chart,
@@ -84,6 +100,14 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
   const assetMeta = getAssetMeta(market.active_asset);
   const decimals = market.active_asset_decimals ?? assetMeta.decimals;
 
+  // Smooth floating springs for Y-axis bounds & spot price (glides up and down without abrupt teleporting)
+  const smoothMinPriceRef = useRef<number | null>(null);
+  const smoothMaxPriceRef = useRef<number | null>(null);
+  const displayedSpotPriceRef = useRef<number>(market.current_btc_price);
+  const initialTimeSecs = chart.length > 0 ? parseTimeToSeconds(chart[chart.length - 1].time) : (Date.now() / 1000) % 86400;
+  const lastDataSecsRef = useRef<number>(initialTimeSecs || (Date.now() / 1000) % 86400);
+  const lastDataPerfTimeRef = useRef<number>(performance.now());
+
   // Helper references for coordinate projection in mouse events
   const chartLayoutRef = useRef<{
     minPrice: number;
@@ -91,8 +115,7 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
     priceRange: number;
     chartStartX: number;
     chartEndX: number;
-    stepX: number;
-    points: ChartPoint[];
+    points: { x: number; y: number; price: number; time: string; secs: number }[];
     width: number;
     height: number;
     padTop: number;
@@ -101,13 +124,12 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
     minPrice: 0,
     maxPrice: 0,
     priceRange: 100,
-    chartStartX: 55,
+    chartStartX: 52,
     chartEndX: 500,
-    stepX: 10,
     points: [],
     width: 600,
     height: 250,
-    padTop: 30,
+    padTop: 28,
     padBottom: 42,
   });
 
@@ -118,21 +140,49 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
     dpr: window.devicePixelRatio || 1,
   });
 
-  // Memoize trajectory points with pre-parsed seconds to eliminate ~216,000 string splits/min and 3,600 array allocations/sec in 60FPS RAF loop
+  // Synchronize chart timeframe selector with active market timeframe
+  useEffect(() => {
+    if (market.timeframe === '5m') {
+      setSelectedTimeframe('5M');
+    } else if (market.timeframe === '15m') {
+      setSelectedTimeframe('15M');
+    } else if (market.timeframe === '1h') {
+      setSelectedTimeframe('1H');
+    }
+  }, [market.timeframe]);
+
+  // Memoize trajectory points with pre-parsed & unwrapped seconds
   const processedPoints = useMemo<(ChartPoint & { secs: number })[]>(() => {
     const buf = assetMeta.defaultBuffer;
-    const raw: ChartPoint[] = chart.length >= 2 ? chart : [
+    let baseChart = chart;
+    if (selectedTimeframe === 'LIVE') {
+      baseChart = chart.slice(-60);
+    } else if (selectedTimeframe === '5M') {
+      baseChart = chart.slice(-180);
+    }
+    const raw: ChartPoint[] = baseChart.length >= 2 ? baseChart : [
       { time: '00:00:01', price: market.target_strike - buf * 0.2, target: market.target_strike },
       { time: '00:00:05', price: market.target_strike - buf * 0.4, target: market.target_strike },
       { time: '00:00:10', price: market.target_strike - buf * 0.7, target: market.target_strike },
       { time: '00:00:15', price: market.target_strike - buf * 1.0, target: market.target_strike },
       { time: '00:00:20', price: market.current_btc_price, target: market.target_strike },
     ];
-    return raw.map((p) => ({
+    const rawSecs = raw.map((p) => parseTimeToSeconds(p.time));
+    const unwrapped = unwrapSeconds(rawSecs);
+    return raw.map((p, i) => ({
       ...p,
-      secs: parseTimeToSeconds(p.time),
+      secs: unwrapped[i] ?? parseTimeToSeconds(p.time),
     }));
-  }, [chart, market.target_strike, market.current_btc_price, assetMeta.defaultBuffer]);
+  }, [chart, market.target_strike, market.current_btc_price, assetMeta.defaultBuffer, selectedTimeframe]);
+
+  // Synchronize wall clock anchor whenever new point data arrives
+  useEffect(() => {
+    if (processedPoints.length > 0) {
+      const latest = processedPoints[processedPoints.length - 1];
+      lastDataSecsRef.current = latest.secs;
+      lastDataPerfTimeRef.current = performance.now();
+    }
+  }, [processedPoints]);
 
   // Track container resize with ResizeObserver
   useEffect(() => {
@@ -164,9 +214,11 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
 
   /**
    * Main Animated Canvas Render Loop (60FPS liquid streaming animation)
+   * - Time continuously and seamlessly slides to the left every millisecond
+   * - Price head and Y-axis smoothly float/lerp up and down
    */
   useEffect(() => {
-    let startTime = performance.now();
+    const startTime = performance.now();
 
     const render = (currentTime: number) => {
       const canvas = canvasRef.current;
@@ -184,26 +236,59 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
+      // 1. Continuous Live Time Tracking (Conveyor belt moves smoothly left at 60 FPS)
+      const elapsedSinceData = (currentTime - lastDataPerfTimeRef.current) / 1000.0;
+      const clampedElapsed = Math.min(30.0, Math.max(0.0, elapsedSinceData));
+      const currentLiveSecs = lastDataSecsRef.current + clampedElapsed;
+
+      let windowSecs = 60;
+      if (selectedTimeframe === '5M') windowSecs = 300;
+      else if (selectedTimeframe === '15M') windowSecs = 900;
+      else if (selectedTimeframe === '1H') windowSecs = 3600;
+
+      const tEnd = currentLiveSecs;
+      const tStart = tEnd - windowSecs;
+
+      // 2. Smooth Lerp for Spot Price (glides smoothly up and down without abrupt teleporting)
+      const targetSpotPrice = market.current_btc_price;
+      if (displayedSpotPriceRef.current === 0 || isNaN(displayedSpotPriceRef.current)) {
+        displayedSpotPriceRef.current = targetSpotPrice;
+      } else {
+        displayedSpotPriceRef.current += (targetSpotPrice - displayedSpotPriceRef.current) * 0.15;
+      }
+      const currentPrice = displayedSpotPriceRef.current;
       const targetStrike = market.target_strike;
-      const currentPrice = market.current_btc_price;
       const isUp = currentPrice >= targetStrike;
 
-      // 1. Calculate strictly proportional Y-bounds with dynamic unit steps
+      // Chart Padding & Coordinate Bounds
+      const padTop = 28;
+      const padBottom = 42; // Generous bottom margin for dedicated X-axis time ticker
+      const plotHeight = height - padTop - padBottom;
+      const chartStartX = 52;
+      const chartEndX = width - 85;
+      const plotWidth = chartEndX - chartStartX;
+
+      // Continuous time-to-X coordinate mapping (every point smoothly moves left)
+      const getX = (secs: number) => {
+        const frac = (secs - tStart) / windowSecs;
+        return chartStartX + Math.max(0, Math.min(1, frac)) * plotWidth;
+      };
+
+      // 3. Proportional Vertical Y-bounds with dynamic unit steps (.5 or fractional)
       const baseBuffer = assetMeta.defaultBuffer;
       let rawMin = Math.min(targetStrike, currentPrice) - baseBuffer;
       let rawMax = Math.max(targetStrike, currentPrice) + baseBuffer;
 
-      if (processedPoints.length > 0) {
-        for (let i = 0; i < processedPoints.length; i++) {
-          const p = processedPoints[i].price;
-          if (p < rawMin) rawMin = p;
-          if (p > rawMax) rawMax = p;
+      for (let i = 0; i < processedPoints.length; i++) {
+        const pt = processedPoints[i];
+        if (pt.secs >= tStart - 15 && pt.secs <= tEnd + 15) {
+          if (pt.price < rawMin) rawMin = pt.price;
+          if (pt.price > rawMax) rawMax = pt.price;
         }
-        rawMin -= assetMeta.minBuffer;
-        rawMax += assetMeta.minBuffer * 1.5;
       }
+      rawMin -= assetMeta.minBuffer;
+      rawMax += assetMeta.minBuffer * 1.5;
 
-      // Proportional vertical span calculation (adaptive to asset price scale)
       const span = rawMax - rawMin;
       let tickStep = 0.5;
       if (decimals >= 4) {
@@ -226,14 +311,26 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
         else tickStep = 0.05;
       }
 
-      // Align minPrice and maxPrice to nice tick boundaries
-      const minPrice = Math.floor(rawMin / tickStep) * tickStep;
-      const maxPrice = Math.ceil(rawMax / tickStep) * tickStep;
-      const priceRange = maxPrice - minPrice || (baseBuffer * 2);
+      const targetMin = Math.floor(rawMin / tickStep) * tickStep;
+      const targetMax = Math.ceil(rawMax / tickStep) * tickStep;
 
-      const padTop = 28;
-      const padBottom = 42; // Generous bottom margin for dedicated X-axis time ticker
-      const plotHeight = height - padTop - padBottom;
+      // Smooth exponential lerp on vertical boundaries to eliminate jitter/snapping
+      if (
+        smoothMinPriceRef.current === null ||
+        smoothMaxPriceRef.current === null ||
+        isNaN(smoothMinPriceRef.current) ||
+        isNaN(smoothMaxPriceRef.current)
+      ) {
+        smoothMinPriceRef.current = targetMin;
+        smoothMaxPriceRef.current = targetMax;
+      } else {
+        smoothMinPriceRef.current += (targetMin - smoothMinPriceRef.current) * 0.08;
+        smoothMaxPriceRef.current += (targetMax - smoothMaxPriceRef.current) * 0.08;
+      }
+
+      const minPrice: number = smoothMinPriceRef.current ?? targetMin;
+      const maxPrice: number = smoothMaxPriceRef.current ?? targetMax;
+      const priceRange: number = Math.max(0.0001, maxPrice - minPrice);
 
       // Strictly linear proportional Y coordinate mapping
       const getY = (p: number) => {
@@ -241,10 +338,7 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
         return padTop + (1 - Math.max(0, Math.min(1, normalized))) * plotHeight;
       };
 
-      const chartStartX = 52;
-      const chartEndX = width - 85;
-
-      // 2. Draw Horizontal Proportional Grid Lines & Adaptive Price Labels
+      // 4. Draw Horizontal Proportional Grid Lines & Adaptive Price Labels
       ctx.lineWidth = 1;
       ctx.font = '10px "JetBrains Mono", Inter, sans-serif';
       ctx.textAlign = 'right';
@@ -256,22 +350,24 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
         const p = minPrice + i * tickStep;
         const y = getY(p);
 
-        ctx.strokeStyle = 'rgba(33, 38, 45, 0.85)';
-        ctx.beginPath();
-        ctx.moveTo(chartStartX, y);
-        ctx.lineTo(chartEndX, y);
-        ctx.stroke();
+        if (y >= padTop - 2 && y <= height - padBottom + 2) {
+          ctx.strokeStyle = 'rgba(33, 38, 45, 0.85)';
+          ctx.beginPath();
+          ctx.moveTo(chartStartX, y);
+          ctx.lineTo(chartEndX, y);
+          ctx.stroke();
 
-        // Format price label with asset decimal precision
-        ctx.fillStyle = '#6e7681';
-        const formattedPrice = p.toLocaleString('en-US', {
-          minimumFractionDigits: decimals >= 4 ? 4 : (tickStep < 1 ? (tickStep < 0.1 ? 2 : 1) : 0),
-          maximumFractionDigits: decimals,
-        });
-        ctx.fillText(`$${formattedPrice}`, width - 8, y + 3.5);
+          // Format price label with asset decimal precision
+          ctx.fillStyle = '#6e7681';
+          const formattedPrice = p.toLocaleString('en-US', {
+            minimumFractionDigits: decimals >= 4 ? 4 : (tickStep < 1 ? (tickStep < 0.1 ? 2 : 1) : 0),
+            maximumFractionDigits: decimals,
+          });
+          ctx.fillText(`$${formattedPrice}`, width - 8, y + 3.5);
+        }
       }
 
-      // 3. Left-Axis Strike Delta Labels (Scaled per Asset Microstructure)
+      // 5. Left-Axis Strike Delta Labels (Scaled per Asset Microstructure)
       const deltaOffsets = assetMeta.deltaOffsets;
       ctx.font = 'bold 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'left';
@@ -280,34 +376,35 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
         const p = targetStrike + delta;
         if (p >= minPrice - assetMeta.minBuffer && p <= maxPrice + assetMeta.minBuffer) {
           const y = getY(p);
+          if (y >= padTop - 5 && y <= height - padBottom + 5) {
+            let color = '#f7931a'; // + $0 orange baseline
+            if (delta > 0) {
+              color = delta >= assetMeta.minSpotDiff ? '#00d084' : '#ff7b7b';
+            } else if (delta < 0) {
+              color = '#ff4d4d';
+            }
 
-          let color = '#f7931a'; // + $0 orange baseline
-          if (delta > 0) {
-            color = delta >= assetMeta.minSpotDiff ? '#00d084' : '#ff7b7b';
-          } else if (delta < 0) {
-            color = '#ff4d4d';
-          }
+            ctx.fillStyle = color;
+            const labelText = formatAssetDelta(delta, market.active_asset);
+            ctx.fillText(labelText, 8, y + 3.5);
 
-          ctx.fillStyle = color;
-          const labelText = formatAssetDelta(delta, market.active_asset);
-          ctx.fillText(labelText, 8, y + 3.5);
-
-          // Red/Green dotted threshold guidelines across chart
-          if (Math.abs(delta) === assetMeta.thresholdGuideline) {
-            ctx.save();
-            ctx.setLineDash([3, 3]);
-            ctx.strokeStyle = delta > 0 ? 'rgba(0, 208, 132, 0.7)' : 'rgba(255, 77, 77, 0.7)';
-            ctx.lineWidth = 1.2;
-            ctx.beginPath();
-            ctx.moveTo(chartStartX, y);
-            ctx.lineTo(chartEndX, y);
-            ctx.stroke();
-            ctx.restore();
+            // Red/Green dotted threshold guidelines across chart
+            if (Math.abs(delta) === assetMeta.thresholdGuideline) {
+              ctx.save();
+              ctx.setLineDash([3, 3]);
+              ctx.strokeStyle = delta > 0 ? 'rgba(0, 208, 132, 0.7)' : 'rgba(255, 77, 77, 0.7)';
+              ctx.lineWidth = 1.2;
+              ctx.beginPath();
+              ctx.moveTo(chartStartX, y);
+              ctx.lineTo(chartEndX, y);
+              ctx.stroke();
+              ctx.restore();
+            }
           }
         }
       });
 
-      // 4. Target Strike Line (K) & Collision-Proof Centered Badge
+      // 6. Target Strike Line (K) & Collision-Proof Centered Badge
       const rawTargetY = getY(targetStrike);
       const targetY = Math.max(padTop + 8, Math.min(height - padBottom - 8, rawTargetY));
 
@@ -338,40 +435,63 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       ctx.textAlign = 'left';
       ctx.fillText(targetLabel, pillX, pillY + 1.5);
 
-      // 5. Trajectory Points & Live Leftward Motion Stream
-      const points = processedPoints;
+      // 7. Trajectory Points Construction with Seamless Continuous Leftward Stream
+      const visible = processedPoints.filter((p) => p.secs >= tStart - 15 && p.secs <= tEnd);
+      const renderPoints: { x: number; y: number; price: number; secs: number; time: string }[] = [];
 
-      const tStart = points[0].secs;
-      const tEnd = points[points.length - 1].secs;
-      const timeSpanSecs = tEnd > tStart ? tEnd - tStart : points.length * 2;
-
-      // Map time or index to smooth continuous X
-      const getX = (idx: number) => {
-        if (timeSpanSecs > 0 && tEnd > tStart) {
-          const t = points[idx].secs;
-          const frac = (t - tStart) / timeSpanSecs;
-          return chartStartX + Math.max(0, Math.min(1, frac)) * (chartEndX - chartStartX);
+      if (visible.length === 0) {
+        renderPoints.push({
+          x: chartStartX,
+          y: getY(currentPrice),
+          price: currentPrice,
+          secs: tStart,
+          time: formatSecondsToTime(tStart),
+        });
+      } else {
+        if (visible[0].secs > tStart) {
+          renderPoints.push({
+            x: chartStartX,
+            y: getY(visible[0].price),
+            price: visible[0].price,
+            secs: tStart,
+            time: formatSecondsToTime(tStart),
+          });
         }
-        return chartStartX + (idx / (points.length - 1 || 1)) * (chartEndX - chartStartX);
-      };
+        for (const pt of visible) {
+          renderPoints.push({
+            x: getX(pt.secs),
+            y: getY(pt.price),
+            price: pt.price,
+            secs: pt.secs,
+            time: pt.time,
+          });
+        }
+      }
 
-      const stepX = (chartEndX - chartStartX) / (points.length - 1 || 1);
+      // Anchor head to live edge at chartEndX
+      renderPoints.push({
+        x: chartEndX,
+        y: getY(currentPrice),
+        price: currentPrice,
+        secs: tEnd,
+        time: formatSecondsToTime(tEnd),
+      });
 
+      // Update layout ref for mouse hover projection
       chartLayoutRef.current = {
         minPrice,
         maxPrice,
         priceRange,
         chartStartX,
         chartEndX,
-        stepX,
-        points,
+        points: renderPoints,
         width,
         height,
         padTop,
         padBottom,
       };
 
-      // 6. Dynamic Color Gradient & Flow Aura (Emerald Green if UP, Coral Red if DOWN)
+      // 8. Dynamic Area Gradient Fill (Emerald Green if UP, Coral Red if DOWN)
       const gradient = ctx.createLinearGradient(0, 0, 0, height);
       if (isUp) {
         gradient.addColorStop(0, 'rgba(0, 208, 132, 0.25)');
@@ -385,16 +505,13 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
 
       // Draw Smooth Bezier Area Fill
       ctx.beginPath();
-      points.forEach((pt, idx) => {
-        const x = getX(idx);
-        const y = getY(pt.price);
+      renderPoints.forEach((pt, idx) => {
         if (idx === 0) {
-          ctx.moveTo(x, y);
+          ctx.moveTo(pt.x, pt.y);
         } else {
-          const prevX = getX(idx - 1);
-          const prevY = getY(points[idx - 1].price);
-          const cpX = (prevX + x) / 2;
-          ctx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
+          const prev = renderPoints[idx - 1];
+          const cpX = (prev.x + pt.x) / 2;
+          ctx.bezierCurveTo(cpX, prev.y, cpX, pt.y, pt.x, pt.y);
         }
       });
       ctx.lineTo(chartEndX, height - padBottom);
@@ -403,36 +520,37 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       ctx.fillStyle = gradient;
       ctx.fill();
 
-      // Draw Main Trajectory Line
-      ctx.beginPath();
-      points.forEach((pt, idx) => {
-        const x = getX(idx);
-        const y = getY(pt.price);
-        if (idx === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          const prevX = getX(idx - 1);
-          const prevY = getY(points[idx - 1].price);
-          const cpX = (prevX + x) / 2;
-          ctx.bezierCurveTo(cpX, prevY, cpX, y, x, y);
-        }
-      });
+      // 9. Draw Main Glowing Trajectory Line
+      ctx.save();
+      ctx.shadowColor = isUp ? 'rgba(0, 208, 132, 0.45)' : 'rgba(247, 147, 26, 0.45)';
+      ctx.shadowBlur = 8;
       ctx.strokeStyle = isUp ? '#00d084' : '#f7931a';
       ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      renderPoints.forEach((pt, idx) => {
+        if (idx === 0) {
+          ctx.moveTo(pt.x, pt.y);
+        } else {
+          const prev = renderPoints[idx - 1];
+          const cpX = (prev.x + pt.x) / 2;
+          ctx.bezierCurveTo(cpX, prev.y, cpX, pt.y, pt.x, pt.y);
+        }
+      });
       ctx.stroke();
+      ctx.restore();
 
-      // 7. Live Animated Radar Beacon on Current Price Head ("Play" Motion)
+      // 10. Live Animated Radar Beacon on Current Price Head ("Play" Motion)
       const lastX = chartEndX;
       const lastY = getY(currentPrice);
       const elapsed = (currentTime - startTime) / 1000.0;
       const pulsePhase = (elapsed % 1.5) / 1.5; // 0 to 1 cycle every 1.5s
-      const pulseRadius = 4 + pulsePhase * 14;
+      const pulseRadius = 4 + pulsePhase * 15;
       const pulseAlpha = Math.max(0, 1.0 - pulsePhase);
 
-      // Expanding radar beacon ring
+      // Expanding radar beacon wave
       ctx.strokeStyle = isUp
-        ? `rgba(0, 208, 132, ${pulseAlpha * 0.8})`
-        : `rgba(247, 147, 26, ${pulseAlpha * 0.8})`;
+        ? `rgba(0, 208, 132, ${pulseAlpha * 0.85})`
+        : `rgba(247, 147, 26, ${pulseAlpha * 0.85})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(lastX, lastY, pulseRadius, 0, Math.PI * 2);
@@ -444,71 +562,63 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       ctx.arc(lastX, lastY, 7, 0, Math.PI * 2);
       ctx.fill();
 
-      // Solid inner core
+      // Solid bright inner core
       ctx.fillStyle = isUp ? '#00d084' : '#f7931a';
       ctx.beginPath();
       ctx.arc(lastX, lastY, 4.5, 0, Math.PI * 2);
       ctx.fill();
 
       // Floating Live Directional Delta Pill on Head
-      const diffVal = market?.diff ?? 0;
-      const diffStr = market.diff_str
-        ? market.diff_str.split(' ')[0]
-        : (diffVal >= 0 ? `▲ +$${diffVal.toFixed(decimals)}` : `▼ -$${Math.abs(diffVal).toFixed(decimals)}`);
+      const diffVal = currentPrice - targetStrike;
+      const diffPct = targetStrike > 0 ? (diffVal / targetStrike) * 100.0 : 0.0;
+      const diffStr = diffVal >= 0
+        ? `▲ +$${diffVal.toFixed(decimals >= 4 ? 4 : 2)}`
+        : `▼ -$${Math.abs(diffVal).toFixed(decimals >= 4 ? 4 : 2)}`;
       const tagBg = isUp ? '#00d084' : '#ff4d4d';
 
-      ctx.fillStyle = tagBg;
+      const badgeText = `${diffStr} (${diffPct >= 0 ? '+' : ''}${diffPct.toFixed(3)}%)`;
       ctx.font = 'bold 10px "JetBrains Mono", Inter, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(`${diffStr} (${(market?.diff_pct ?? 0) >= 0 ? '+' : ''}${(market?.diff_pct ?? 0).toFixed(3)}%)`, lastX + 10, lastY + 3.5);
+      const badgeWidth = ctx.measureText(badgeText).width;
+      const badgeX = lastX + 10;
+      const badgeY = Math.max(padTop + 2, Math.min(height - padBottom - 18, lastY - 8));
 
-      // 8. Continuous Leftward-Flowing Time Axis (Non-Overlapping Time Ticks)
+      ctx.fillStyle = 'rgba(13, 17, 23, 0.90)';
+      ctx.fillRect(badgeX - 4, badgeY - 2, badgeWidth + 8, 16);
+      ctx.strokeStyle = tagBg;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(badgeX - 4, badgeY - 2, badgeWidth + 8, 16);
+
+      ctx.fillStyle = tagBg;
+      ctx.textAlign = 'left';
+      ctx.fillText(badgeText, badgeX, badgeY + 10);
+
+      // 11. Continuous Leftward-Flowing Time Axis (Timestamps glide smoothly to the left)
       ctx.fillStyle = '#6e7681';
       ctx.font = '10px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
 
-      if (timeSpanSecs > 0 && tEnd > tStart) {
-        // Choose nice second step (e.g., 10s, 15s, 30s)
-        let timeStepSecs = 15;
-        if (timeSpanSecs > 180) timeStepSecs = 60;
-        else if (timeSpanSecs > 90) timeStepSecs = 30;
-        else if (timeSpanSecs > 45) timeStepSecs = 15;
-        else timeStepSecs = 10;
+      let timeStepSecs = 15;
+      if (windowSecs > 600) timeStepSecs = 120;
+      else if (windowSecs > 180) timeStepSecs = 60;
+      else if (windowSecs > 90) timeStepSecs = 30;
+      else timeStepSecs = 15;
 
-        const firstTickSec = Math.ceil(tStart / timeStepSecs) * timeStepSecs;
+      const firstTickSec = Math.ceil(tStart / timeStepSecs) * timeStepSecs;
+      for (let tSec = firstTickSec; tSec <= tEnd; tSec += timeStepSecs) {
+        const tickX = getX(tSec);
+        if (tickX >= chartStartX && tickX <= chartEndX) {
+          // Little tick mark
+          ctx.strokeStyle = 'rgba(48, 54, 61, 0.7)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(tickX, height - padBottom);
+          ctx.lineTo(tickX, height - padBottom + 4);
+          ctx.stroke();
 
-        for (let tSec = firstTickSec; tSec <= tEnd; tSec += timeStepSecs) {
-          const frac = (tSec - tStart) / timeSpanSecs;
-          const tickX = chartStartX + frac * (chartEndX - chartStartX);
-
-          if (tickX >= chartStartX - 5 && tickX <= chartEndX + 5) {
-            // Little tick mark
-            ctx.strokeStyle = 'rgba(48, 54, 61, 0.7)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(tickX, height - padBottom);
-            ctx.lineTo(tickX, height - padBottom + 4);
-            ctx.stroke();
-
-            // Time text smoothly moving left
-            const timeLabel = formatSecondsToTime(tSec);
-            ctx.fillText(timeLabel, tickX, height - 12);
-          }
+          // Time text smoothly moving left
+          const timeLabel = formatSecondsToTime(tSec);
+          ctx.fillText(timeLabel, tickX, height - 12);
         }
-      } else if (points.length >= 3) {
-        // Fallback for initial bootstrap points
-        const tickIndices = [
-          0,
-          Math.floor(points.length / 2),
-          points.length - 1,
-        ];
-        tickIndices.forEach((idx) => {
-          const pt = points[idx];
-          if (pt) {
-            const x = chartStartX + idx * stepX;
-            ctx.fillText(pt.time, x, height - 12);
-          }
-        });
       }
 
       animFrameRef.current = requestAnimationFrame(render);
@@ -521,7 +631,7 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [processedPoints, market]);
+  }, [processedPoints, market, selectedTimeframe, decimals, assetMeta]);
 
   /**
    * Handle Mouse Movement across Canvas to calculate nearest snap point.
@@ -538,7 +648,7 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       const rect = container.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
 
-      const { chartStartX, chartEndX, stepX, points, minPrice, priceRange, height, padTop, padBottom } =
+      const { chartStartX, chartEndX, points, height, padBottom } =
         chartLayoutRef.current;
 
       if (!points.length || mouseX < chartStartX - 10 || mouseX > chartEndX + 10) {
@@ -548,31 +658,29 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
         return;
       }
 
-      const relativeX = mouseX - chartStartX;
-      const index = Math.max(0, Math.min(points.length - 1, Math.round(relativeX / (stepX || 1))));
-      const snappedPt = points[index];
-
-      if (!snappedPt) {
-        tooltip.style.opacity = '0';
-        crosshair.style.opacity = '0';
-        snapDot.style.opacity = '0';
-        return;
+      // Find closest point by X distance
+      let closestPt = points[0];
+      let minDistance = Math.abs(points[0].x - mouseX);
+      for (let i = 1; i < points.length; i++) {
+        const d = Math.abs(points[i].x - mouseX);
+        if (d < minDistance) {
+          minDistance = d;
+          closestPt = points[i];
+        }
       }
 
-      const snapX = chartStartX + index * stepX;
-      const normalized = (snappedPt.price - minPrice) / priceRange;
-      const plotHeight = height - padTop - padBottom;
-      const snapY = padTop + (1 - Math.max(0, Math.min(1, normalized))) * plotHeight;
+      const snapX = closestPt.x;
+      const snapY = closestPt.y;
 
-      const diff = snappedPt.price - market.target_strike;
-      const diffPct = (diff / market.target_strike) * 100;
+      const diff = closestPt.price - market.target_strike;
+      const diffPct = market.target_strike > 0 ? (diff / market.target_strike) * 100 : 0;
 
       const timeEl = tooltip.querySelector('.tt-time');
       const priceEl = tooltip.querySelector('.tt-price');
       const diffEl = tooltip.querySelector('.tt-diff');
 
-      if (timeEl) timeEl.textContent = snappedPt.time;
-      if (priceEl) priceEl.textContent = `$${snappedPt.price.toLocaleString('en-US', { minimumFractionDigits: decimals >= 4 ? 4 : 2, maximumFractionDigits: decimals })}`;
+      if (timeEl) timeEl.textContent = closestPt.time;
+      if (priceEl) priceEl.textContent = `$${closestPt.price.toLocaleString('en-US', { minimumFractionDigits: decimals >= 4 ? 4 : 2, maximumFractionDigits: decimals })}`;
 
       if (diffEl) {
         const sign = (diff ?? 0) >= 0 ? '+' : '';
@@ -593,7 +701,7 @@ export const TargetChart: React.FC<TargetChartProps> = React.memo(({
       snapDot.style.transform = `translate(${snapX - 4.5}px, ${snapY - 4.5}px)`;
       snapDot.style.opacity = '1';
     },
-    [market.target_strike]
+    [market.target_strike, decimals]
   );
 
   const handleMouseLeave = useCallback(() => {

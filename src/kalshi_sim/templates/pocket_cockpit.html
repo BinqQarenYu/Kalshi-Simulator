@@ -38,6 +38,9 @@
     .btn-disarm.disarmed { background: #44403c; color: #fafaf9; }
     .btn-panic { background: #450a0a; color: #fecaca; border: 1px solid var(--red); grid-column: span 2; padding: 12px; }
     .btn-panic:hover { background: var(--red); color: #fff; box-shadow: 0 0 20px var(--red-glow); }
+    .btn-sweep { background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4); grid-column: span 2; padding: 10px; font-size: 0.82rem; }
+    .btn-sweep:hover { background: rgba(14, 165, 233, 0.22); color: #fff; border-color: #38bdf8; box-shadow: 0 0 16px rgba(14, 165, 233, 0.3); }
+    .btn-sweep:active { transform: scale(0.98); }
 
     /* KPI Grid */
     .kpi-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
@@ -87,10 +90,77 @@
     .dot-err { background: var(--red); }
 
     /* Multi-Asset Selector Bar */
-    .asset-bar { display: flex; gap: 8px; justify-content: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
+    .asset-bar { display: flex; gap: 8px; justify-content: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
     .asset-btn { flex: 1; padding: 8px 10px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--muted); font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
     .asset-btn:hover { color: var(--text); background: rgba(255,255,255,0.03); }
-    .asset-btn.active { background: #1e2230; color: #fff; border: 1px solid #30363d; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+    .asset-btn.active { background: #1c2233; color: #fff; border: 1px solid #334155; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+
+    /* Header Actions */
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .btn-view-toggle {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-view-toggle:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      border-color: #3b82f6;
+    }
+
+    /* Active pinned style */
+    .btn-view-toggle.active-pin {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: var(--green);
+      color: var(--green);
+      box-shadow: 0 0 8px var(--green-glow);
+    }
+
+    /* Minimized Mode (Exact Match to User Uploaded Compact Cockpit) */
+    body.minimized {
+      padding: 8px 10px;
+      min-height: auto;
+      overflow: hidden;
+    }
+    .container.minimized {
+      max-width: 510px;
+      gap: 10px;
+    }
+    body.minimized .expandable {
+      display: none !important;
+    }
+
+    /* Drawer Toggle at bottom of controls */
+    .drawer-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 5px 10px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px dashed rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.7rem;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.2s ease;
+      margin-top: 2px;
+    }
+    .drawer-toggle:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
   </style>
 </head>
 <body>
@@ -99,10 +169,16 @@
     <!-- Top Header -->
     <div class="header">
       <div class="title">
-        <span>⚡ 3-STEP DOMINION</span>
+        <span style="color: #f59e0b;">⚡</span>
+        <span>3-STEP DOMINION</span>
         <span style="font-size: 0.8rem; color: var(--muted); font-weight: 400;">(24/7 Standalone Engine)</span>
       </div>
-      <div id="liveStatusBadge" class="status-badge badge-standby">STANDBY</div>
+      <div class="header-right">
+        <button id="btnPinFloat" class="btn-view-toggle" onclick="togglePinFloat()" title="Float on Top of Desktop (Always-on-Top Widget)">📌 Float</button>
+        <button id="btnPopout" class="btn-view-toggle" onclick="launchPopoutWidget()" title="Open as Floating Desktop Widget">🗗 Popout</button>
+        <button id="viewToggleBtn" class="btn-view-toggle" onclick="toggleViewMode()" title="Toggle Minimized / Detailed View">⤢ Expand</button>
+        <div id="liveStatusBadge" class="status-badge badge-standby">STANDBY</div>
+      </div>
     </div>
 
     <!-- Multi-Asset Switcher Bar -->
@@ -114,7 +190,7 @@
         <span style="color: #627eea;">Ξ</span> ETH
       </button>
       <button id="assetBtn-SOL" class="asset-btn" onclick="switchAsset('SOL')">
-        <span style="color: #14f195;">◎</span> SOL
+        <span style="color: #10b981;">●</span> SOL
       </button>
       <button id="assetBtn-DOGE" class="asset-btn" onclick="switchAsset('DOGE')">
         <span style="color: #e1b303;">Ð</span> DOGE
@@ -132,12 +208,22 @@
         <span style="font-size: 0.72rem; font-weight: 400;">STANDBY / SAFE MODE</span>
       </button>
       <button class="btn btn-panic" onclick="panicHalt()">
-        🛑 EMERGENCY PANIC: CANCEL ALL ORDERS & STOP
+        🔴 EMERGENCY PANIC: CANCEL ALL ORDERS & STOP
+      </button>
+      <button id="btnSweepOrders" class="btn btn-sweep" onclick="sweepOrders()" title="Always enabled: Sweep and cancel resting orders on expired or finished events">
+        <span id="sweepBtnLabel">🧹 SWEEP EXPIRED EVENT ORDERS</span>
+        <span id="sweepStatusSub" style="font-size: 0.68rem; font-weight: 400; color: #7dd3fc;">AUTO-SWEEP ACTIVE • 1-CLICK MANUAL SWEEP</span>
       </button>
     </div>
 
+    <!-- Collapsible Drawer Toggle -->
+    <div id="drawerToggle" class="drawer-toggle" onclick="toggleViewMode()">
+      <span id="drawerToggleIcon">▾</span>
+      <span id="drawerToggleText">Show Institutional Telemetry & Parameters</span>
+    </div>
+
     <!-- 5 Primary KPI Cards (Full Kalshi Parity) -->
-    <div class="kpi-grid">
+    <div class="kpi-grid expandable">
       <div class="kpi-card">
         <div class="kpi-label">Kalshi Live Balance</div>
         <div id="balVal" class="kpi-val text-green">$0.00</div>
@@ -159,14 +245,14 @@
         <div id="spotHeroSub" class="kpi-sub">Diff: +$0.00 (+0.00%)</div>
       </div>
       <div class="kpi-card span-2">
-        <div class="kpi-label">Active 15M Countdown</div>
+        <div class="kpi-label" id="cycleLabel">Active Countdown</div>
         <div id="cycleVal" class="kpi-val">--:--</div>
         <div id="cycleSub" class="kpi-sub">Waiting for event...</div>
       </div>
     </div>
 
     <!-- 3-Step Dominion Settings & Parameters Panel -->
-    <div class="panel">
+    <div class="panel expandable">
       <div class="panel-title">
         <span>⚙️ Strategy Parameters & Guardrails</span>
         <button onclick="saveParameters()" class="btn-save-sm">💾 Apply & Save</button>
@@ -250,7 +336,7 @@
     </div>
 
     <!-- Strategy & Microstructure Telemetry -->
-    <div class="panel">
+    <div class="panel expandable">
       <div class="panel-title">
         <span>Microstructure Telemetry</span>
         <span id="playbookBadge" style="color: var(--blue);">PLAYBOOK: NONE</span>
@@ -290,7 +376,7 @@
     </div>
 
     <!-- Recent Settled Cycles -->
-    <div class="panel" id="recentSettlementsPanel">
+    <div class="panel expandable" id="recentSettlementsPanel">
       <div class="panel-title">
         <span>Today's Settled Cycles</span>
         <span id="settledSummaryBadge" style="color: var(--green);">+$0.00</span>
@@ -301,7 +387,7 @@
     </div>
 
     <!-- Live Event Log -->
-    <div class="panel">
+    <div class="panel expandable">
       <div class="panel-title">Live Execution Log</div>
       <div id="logBox" class="log-box">
         <div class="log-line"><span class="log-time">[INIT]</span> Pocket Cockpit connected to Standalone Engine.</div>
@@ -309,7 +395,7 @@
     </div>
 
     <!-- Health Badges -->
-    <div class="health-bar">
+    <div class="health-bar expandable">
       <div class="health-tag"><div id="dotWs" class="dot"></div> Kalshi L2 Book</div>
       <div class="health-tag"><div id="dotSpot" class="dot"></div> BRTI Index (CF Benchmarks / Kalshi 5Hz)</div>
       <div class="health-tag"><div class="dot"></div> Guardrails (1-2 Cts Cap)</div>
@@ -448,15 +534,62 @@
     }
 
     async function sweepOrders() {
+      const btn = document.getElementById('btnSweepOrders');
+      const sub = document.getElementById('sweepStatusSub');
+      const label = document.getElementById('sweepBtnLabel');
+      
       try {
-        appendLog('🧹 Sweeping resting orders for finished events...');
+        if (btn) {
+          btn.style.opacity = '0.7';
+          btn.style.pointerEvents = 'none';
+          if (sub) sub.textContent = 'SWEEPING IN PROGRESS...';
+          if (label) label.textContent = '🧹 SWEEPING ORDERS...';
+        }
+        appendLog('🧹 [SWEEP] Initiating sweep for expired and finished event orders...');
         const res = await fetch('/api/bot/sweep-orders', { method: 'POST' });
         if (res.ok) {
           const data = await res.json();
-          appendLog(`🧹 [SWEEP COMPLETE] Cancelled ${data.cancelled_orders} resting order(s) for finished events.`);
+          const count = data.cancelled_orders || 0;
+          if (count > 0) {
+            appendLog(`🧹 [SWEEP COMPLETE] Cancelled ${count} resting order(s) on finished/expired events.`);
+            if (sub) {
+              sub.textContent = `CLEARED ${count} EXPIRED ORDER(S)`;
+              sub.style.color = '#34d399';
+            }
+          } else {
+            appendLog('🧹 [SWEEP COMPLETE] No stale or expired orders found. All books clean.');
+            if (sub) {
+              sub.textContent = 'ALL BOOKS CLEAN (0 STALE)';
+              sub.style.color = '#38bdf8';
+            }
+          }
+          await fetchState();
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          appendLog(`❌ [SWEEP FAILED] HTTP ${res.status}: ${errData.detail || 'Failed'}`);
+          if (sub) {
+            sub.textContent = 'SWEEP ERROR (SEE LOG)';
+            sub.style.color = '#f87171';
+          }
         }
       } catch (err) {
         appendLog('❌ Error sweeping orders: ' + err);
+        if (sub) {
+          sub.textContent = 'NETWORK ERROR';
+          sub.style.color = '#f87171';
+        }
+      } finally {
+        setTimeout(() => {
+          if (btn) {
+            btn.style.opacity = '1';
+            btn.style.pointerEvents = 'auto';
+            if (label) label.textContent = '🧹 SWEEP EXPIRED EVENT ORDERS';
+            if (sub) {
+              sub.textContent = 'AUTO-SWEEP ACTIVE • 1-CLICK MANUAL SWEEP';
+              sub.style.color = '#7dd3fc';
+            }
+          }
+        }, 3000);
       }
     }
 
@@ -536,6 +669,9 @@
         spotHeroSubEl.innerHTML = diffBadge;
 
         // 5. Active Cycle Countdown
+        const tfName = data.active_timeframe ? data.active_timeframe.toUpperCase() : ((data.active_ticker && data.active_ticker.includes('5M')) ? '5M' : '15M');
+        const cycleLabelEl = document.getElementById('cycleLabel');
+        if (cycleLabelEl) cycleLabelEl.textContent = `Active ${tfName} Countdown`;
         document.getElementById('cycleVal').textContent = data.time_remaining_str || '--:--';
         document.getElementById('cycleSub').textContent = data.active_ticker || 'No active cycle';
 
@@ -630,7 +766,139 @@
       }
     }
 
-    // Load initial parameters and start polling
+    let isMinimized = true;
+    let isPinned = false;
+
+    async function checkPinStatus() {
+      try {
+        const res = await fetch('/api/window/status');
+        if (res.ok) {
+          const d = await res.json();
+          if (d.available) {
+            isPinned = d.is_topmost;
+            updatePinUI();
+          }
+        }
+      } catch (err) {
+        console.debug('Window status check:', err);
+      }
+    }
+
+    function updatePinUI() {
+      const btn = document.getElementById('btnPinFloat');
+      if (!btn) return;
+      if (isPinned) {
+        btn.textContent = '📌 Pinned';
+        btn.classList.add('active-pin');
+        btn.title = 'Window is Floating on Top of Desktop (Click to Unpin)';
+      } else {
+        btn.textContent = '📌 Float';
+        btn.classList.remove('active-pin');
+        btn.title = 'Float on Top of Desktop (Always-on-Top Widget)';
+      }
+    }
+
+    async function togglePinFloat() {
+      const targetState = !isPinned;
+      try {
+        const res = await fetch('/api/window/pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topmost: targetState,
+            width: 515,
+            height: isMinimized ? 310 : 780
+          })
+        });
+        if (res.ok) {
+          isPinned = targetState;
+          updatePinUI();
+          appendLog(isPinned ? '📌 [WIDGET PINNED] Window is now floating on top of desktop.' : '📍 [WIDGET UNPINNED] Floating window unpinned.');
+        } else {
+          appendLog('❌ Failed to toggle floating window pin.');
+        }
+      } catch (err) {
+        appendLog('❌ Error toggling window pin: ' + err);
+      }
+    }
+
+    async function launchPopoutWidget() {
+      appendLog('🚀 Launching chromeless floating desktop widget...');
+      try {
+        const res = await fetch('/api/window/launch-widget', { method: 'POST' });
+        if (res.ok) {
+          appendLog('✅ Floating widget launched! Check your desktop.');
+        } else {
+          appendLog('❌ Failed to spawn widget.');
+        }
+      } catch (err) {
+        appendLog('❌ Error launching widget: ' + err);
+      }
+    }
+
+    function toggleViewMode() {
+      setViewMode(!isMinimized);
+    }
+
+    function setViewMode(minimized) {
+      isMinimized = minimized;
+      localStorage.setItem('pocket_cockpit_minimized', isMinimized ? 'true' : 'false');
+
+      const body = document.body;
+      const container = document.querySelector('.container');
+      const toggleBtn = document.getElementById('viewToggleBtn');
+      const drawerIcon = document.getElementById('drawerToggleIcon');
+      const drawerText = document.getElementById('drawerToggleText');
+
+      if (isMinimized) {
+        body.classList.add('minimized');
+        container.classList.add('minimized');
+        if (toggleBtn) toggleBtn.innerHTML = '⤢ Expand';
+        if (drawerIcon) drawerIcon.textContent = '▾';
+        if (drawerText) drawerText.textContent = 'Show Institutional Telemetry & Parameters';
+      } else {
+        body.classList.remove('minimized');
+        container.classList.remove('minimized');
+        if (toggleBtn) toggleBtn.innerHTML = '⤡ Minimize';
+        if (drawerIcon) drawerIcon.textContent = '▴';
+        if (drawerText) drawerText.textContent = 'Collapse to Minimized Cockpit';
+      }
+
+      // Sync native OS window size if running as desktop widget or pinned
+      fetch('/api/window/resize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          width: 515,
+          height: isMinimized ? 310 : 780,
+          topmost: isPinned ? true : undefined
+        })
+      }).catch(() => {});
+    }
+
+    function initViewMode() {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('widget') === '1') {
+        const pop = document.getElementById('btnPopout');
+        if (pop) pop.style.display = 'none';
+        isPinned = true;
+        updatePinUI();
+      } else {
+        checkPinStatus();
+      }
+
+      if (urlParams.get('view') === 'expanded' || urlParams.get('expand') === 'true') {
+        setViewMode(false);
+      } else if (urlParams.get('view') === 'minimized' || urlParams.get('min') === '1') {
+        setViewMode(true);
+      } else {
+        const saved = localStorage.getItem('pocket_cockpit_minimized');
+        setViewMode(saved === null ? true : saved === 'true');
+      }
+    }
+
+    // Initialize view mode, load initial parameters and start polling
+    initViewMode();
     loadParameters();
     setInterval(fetchState, 1000);
     fetchState();
