@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { OrderBookLadderRow } from '../types';
+import { soundFX } from '../utils/audioFX';
 
 interface OrderBookLadderProps {
   ladder: OrderBookLadderRow[];
@@ -17,11 +18,10 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
     return ladder.filter((r) => r.side === filterSide);
   }, [ladder, filterSide]);
 
-  const yesRows = useMemo(() => ladder.filter((r) => r.side === 'yes'), [ladder]);
-  const noRows = useMemo(() => ladder.filter((r) => r.side === 'no'), [ladder]);
-
-  const bestYes = yesRows[0];
-  const bestNo = noRows[0];
+  // Performance Optimization: Use find() short-circuit lookup to locate best YES/NO prices
+  // without allocating two intermediate filtered arrays on every L2 orderbook tick update.
+  const bestYes = useMemo(() => ladder.find((r) => r.side === 'yes'), [ladder]);
+  const bestNo = useMemo(() => ladder.find((r) => r.side === 'no'), [ladder]);
 
   const spreadCents = useMemo(() => {
     if (!bestYes || !bestNo) return null;
@@ -39,12 +39,15 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
     <div className="bg-[#0d1117] p-3 sm:p-4 rounded-xl border border-[#21262d]/60 shadow-inner">
       {/* Top Controls: Filter Pills & Spread Pill */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#21262d]">
-        <div role="group" aria-label="Order book depth filter" className="flex items-center gap-1.5 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
+        <div role="group" aria-label="Filter order book depth" className="flex items-center gap-1.5 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
           <button
             type="button"
             aria-pressed={filterSide === 'all'}
-            onClick={() => setFilterSide('all')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
+            onClick={() => {
+              soundFX.playClickSound();
+              setFilterSide('all');
+            }}
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
               filterSide === 'all'
                 ? 'bg-slate-700 text-white shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
@@ -55,8 +58,11 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
           <button
             type="button"
             aria-pressed={filterSide === 'yes'}
-            onClick={() => setFilterSide('yes')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+            onClick={() => {
+              soundFX.playClickSound();
+              setFilterSide('yes');
+            }}
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
               filterSide === 'yes'
                 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-emerald-400'
@@ -68,8 +74,11 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
           <button
             type="button"
             aria-pressed={filterSide === 'no'}
-            onClick={() => setFilterSide('no')}
-            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+            onClick={() => {
+              soundFX.playClickSound();
+              setFilterSide('no');
+            }}
+            className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
               filterSide === 'no'
                 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-amber-400'
@@ -112,16 +121,27 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
             const depthBg = isYes ? 'rgba(16, 185, 129, 0.16)' : 'rgba(245, 158, 11, 0.16)';
             const hoverBorder = isYes ? 'hover:border-emerald-500/40' : 'hover:border-amber-500/40';
 
+            const handleSelect = () => {
+              soundFX.playClickSound();
+              onSelectPrice(parseFloat((row.price_raw * 100).toFixed(1)));
+            };
+
             return (
               <button
                 type="button"
                 key={`${row.side}-${row.price_cents}-${idx}`}
-                onClick={() => onSelectPrice(parseFloat((row.price_raw * 100).toFixed(1)))}
-                title={`Click to set Limit Order at ${row.price_cents}`}
-                aria-label={`Select limit order price ${row.price_cents} for ${row.side.toUpperCase()}, ${(row.price_raw * 100).toFixed(0)}% probability, ${row.contracts.toLocaleString()} contracts`}
-                className={`w-full text-left relative grid grid-cols-4 py-2 px-1.5 cursor-pointer hover:bg-[#161b22] focus-visible:outline-none focus-visible:ring-2 ${
-                  isYes ? 'focus-visible:ring-emerald-400' : 'focus-visible:ring-amber-400'
-                } rounded items-center group transition-all border border-transparent ${hoverBorder}`}
+                role="button"
+                tabIndex={0}
+                aria-label={`Set limit price to ${row.price_cents} for ${row.side.toUpperCase()} contract`}
+                onClick={handleSelect}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleSelect();
+                  }
+                }}
+                title={`Click or press Enter to set Limit Order at ${row.price_cents}`}
+                className={`relative grid grid-cols-4 py-2 px-1.5 cursor-pointer hover:bg-[#161b22] rounded items-center group transition-all border border-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#f7931a] ${hoverBorder}`}
               >
                 {/* Instantaneous Hardware-Accelerated Depth Bar */}
                 <div
