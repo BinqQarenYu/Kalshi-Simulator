@@ -127,7 +127,8 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
             };
 
             return (
-              <div
+              <button
+                type="button"
                 key={`${row.side}-${row.price_cents}-${idx}`}
                 role="button"
                 tabIndex={0}
@@ -176,7 +177,7 @@ export const OrderBookLadder: React.FC<OrderBookLadderProps> = React.memo(({
                 <div className="col-span-1 text-right text-[#8b949e] group-hover:text-white font-medium z-10">
                   {row.total}
                 </div>
-              </div>
+              </button>
             );
           })
         )}
