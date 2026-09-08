@@ -41,6 +41,10 @@ import {
   CheckCircle2,
   AlertTriangle,
   Play,
+  Calendar,
+  Filter,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 import { PriceHero } from './PriceHero';
 import { TargetChart } from './TargetChart';
@@ -53,7 +57,14 @@ import { LiveGuardrailsCard } from './LiveGuardrailsCard';
 import { AIMicrostructureCard } from './AIMicrostructureCard';
 import { BabyBotConsole } from './BabyBotConsole';
 import { HistoricalAnalyticsTab } from './HistoricalAnalyticsTab';
-import { WinLossReportsModal } from './WinLossReportsModal';
+import { 
+  WinLossReportsModal,
+  TraderCategory,
+  getTraderCategory,
+  getTraderBadge,
+  isLiveReport,
+  isTodayReport,
+} from './WinLossReportsModal';
 import { soundFX } from '../utils/audioFX';
 import { ContinuousTrainingTelemetry } from '../types';
 
@@ -148,6 +159,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [journalAssetFilter, setJournalAssetFilter] = useState<'ALL' | 'BTC' | 'ETH' | 'SOL' | 'DOGE'>('ALL');
   const [journalTimeframeFilter, setJournalTimeframeFilter] = useState<'ALL' | '5M' | '15M'>('ALL');
+  const [journalBotFilter, setJournalBotFilter] = useState<TraderCategory>('all');
+  const [journalDateScope, setJournalDateScope] = useState<'all' | 'today'>('all');
   const [trainerActionLoading, setTrainerActionLoading] = useState(false);
 
   const handleToggleTrainer = async () => {
@@ -255,7 +268,9 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           ? r.report_id.replace('WLR-LIVE-', '#L-').replace('WLR-SIM-', '#S-').slice(-7)
           : `#${idx + 1000}`;
         const time = r.cycle_time || (r.timestamp_utc ? new Date(r.timestamp_utc).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false }) : '--:--:--');
-        const bot = formatBotDisplayName(r.bot_type || r.strategy_id);
+        const category = getTraderCategory(r);
+        const badge = getTraderBadge(category);
+        const bot = badge.name;
         const strike = formatStrikePrice(Number(r.strike_price || 0), asset);
         const side = (r.bot_side || 'YES').toUpperCase();
         const price = `$${Number(r.entry_price || 0.48).toFixed(2)}`;
@@ -263,11 +278,15 @@ export const ParentHub: React.FC<ParentHubProps> = ({
         const pnlNum = Number(r.pnl || 0);
         const pnl = `${pnlNum >= 0 ? '+' : '−'}$${Math.abs(pnlNum).toFixed(2)}`;
         const tag = r.execution_mode === 'live' ? 'live-fill' : (r.ai_rationale ? r.ai_rationale.slice(0, 14) : 'microstructure');
+        const isLive = isLiveReport(r);
+        const isToday = isTodayReport(r);
 
         return {
           id,
           time,
           bot,
+          category,
+          badge,
           tf,
           asset,
           strike,
@@ -275,9 +294,12 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           price,
           outcome,
           pnl,
+          pnlNum,
           tag,
+          isLive,
+          isToday,
           spotPrice: r.settlement_spot_price != null ? formatStrikePrice(Number(r.settlement_spot_price), asset) : undefined,
-          executionMode: r.execution_mode || 'simulated',
+          executionMode: isLive ? 'live' : 'simulated',
           rawReport: r,
         };
       });
@@ -285,23 +307,90 @@ export const ParentHub: React.FC<ParentHubProps> = ({
 
     // Default demonstration records matching micro-bankroll rules ($0.48 entry, 1 contract)
     return [
-      { id: '#3480', time: '07:14:55', bot: 'ONNX Macro', tf: '15M', asset: 'ETH', strike: '$3,398.00', side: 'NO', price: '$0.42', outcome: 'WIN', pnl: '+$0.58', tag: 'macro-trend', spotPrice: undefined, executionMode: 'simulated' },
-      { id: '#3466', time: '06:58:21', bot: '3-Step Dom', tf: '15M', asset: 'BTC', strike: '$90,850.00', side: 'YES', price: '$0.48', outcome: 'WIN', pnl: '+$0.52', tag: 'spot-drift', spotPrice: undefined, executionMode: 'live' },
-      { id: '#3448', time: '06:45:00', bot: 'SOL Mean-Rev', tf: '15M', asset: 'SOL', strike: '$235.40', side: 'YES', price: '$0.48', outcome: 'WIN', pnl: '+$0.52', tag: 'atr-squeeze', spotPrice: undefined, executionMode: 'simulated' },
-      { id: '#3429', time: '06:30:00', bot: '3-Step Dom', tf: '15M', asset: 'BTC', strike: '$90,710.00', side: 'NO', price: '$0.48', outcome: 'WIN', pnl: '+$0.52', tag: 'reclaim-fail', spotPrice: undefined, executionMode: 'live' },
-      { id: '#3411', time: '06:15:11', bot: 'ETH Trend', tf: '5M', asset: 'ETH', strike: '$3,360.00', side: 'YES', price: '$0.48', outcome: 'WIN', pnl: '+$0.52', tag: 'trend-cont', spotPrice: undefined, executionMode: 'simulated' },
-      { id: '#3400', time: '06:00:00', bot: '3-Step Dom', tf: '15M', asset: 'BTC', strike: '$90,580.00', side: 'YES', price: '$0.48', outcome: 'LOSS', pnl: '−$0.48', tag: 'book-thin', spotPrice: undefined, executionMode: 'live' },
+      { id: '#3480', time: '07:14:55', bot: 'Macro ONNX Fusion', category: 'macro_onnx' as TraderCategory, badge: getTraderBadge('macro_onnx'), tf: '15M', asset: 'ETH', strike: '$3,398.00', side: 'NO', price: '$0.42', outcome: 'WIN', pnl: '+$0.58', pnlNum: 0.58, tag: 'macro-trend', isLive: false, isToday: true, spotPrice: undefined, executionMode: 'simulated' },
+      { id: '#3466', time: '06:58:21', bot: 'Live Production', category: 'live' as TraderCategory, badge: getTraderBadge('live'), tf: '15M', asset: 'BTC', strike: '$90,850.00', side: 'YES', price: '$0.48', outcome: 'WIN', pnl: '+$0.52', pnlNum: 0.52, tag: 'spot-drift', isLive: true, isToday: true, spotPrice: undefined, executionMode: 'live' },
+      { id: '#3448', time: '06:45:00', bot: 'Dominion 2 (Multi-Asset)', category: 'dominion_2' as TraderCategory, badge: getTraderBadge('dominion_2'), tf: '15M', asset: 'SOL', strike: '$235.40', side: 'YES', price: '$0.48', outcome: 'WIN', pnl: '+$0.52', pnlNum: 0.52, tag: 'atr-squeeze', isLive: false, isToday: true, spotPrice: undefined, executionMode: 'simulated' },
+      { id: '#3429', time: '06:30:00', bot: '3-Step Domination', category: '3_step_dom' as TraderCategory, badge: getTraderBadge('3_step_dom'), tf: '15M', asset: 'BTC', strike: '$90,710.00', side: 'NO', price: '$0.48', outcome: 'WIN', pnl: '+$0.52', pnlNum: 0.52, tag: 'reclaim-fail', isLive: true, isToday: true, spotPrice: undefined, executionMode: 'live' },
+      { id: '#3411', time: '06:15:11', bot: 'Macro Trend Dominion', category: 'macro_trend' as TraderCategory, badge: getTraderBadge('macro_trend'), tf: '5M', asset: 'ETH', strike: '$3,360.00', side: 'YES', price: '$0.48', outcome: 'WIN', pnl: '+$0.52', pnlNum: 0.52, tag: 'trend-cont', isLive: false, isToday: true, spotPrice: undefined, executionMode: 'simulated' },
+      { id: '#3400', time: '06:00:00', bot: '3-Step Domination', category: '3_step_dom' as TraderCategory, badge: getTraderBadge('3_step_dom'), tf: '15M', asset: 'BTC', strike: '$90,580.00', side: 'YES', price: '$0.48', outcome: 'LOSS', pnl: '−$0.48', pnlNum: -0.48, tag: 'book-thin', isLive: true, isToday: false, spotPrice: undefined, executionMode: 'live' },
     ];
   }, [reports]);
 
   const filteredExecutions = useMemo(() => {
     return journalExecutions.filter((item) => {
-      if (selectedTag && item.tag !== selectedTag) return false;
+      // 1. Date Scope: if 'trades' subtab, default to today unless user picked 'all'
+      const shouldFilterToday = journalSubNav === 'trades' ? journalDateScope !== 'all' : journalDateScope === 'today';
+      if (shouldFilterToday && !item.isToday) return false;
+
+      // 2. Who Traded (Bot Filter)
+      if (journalBotFilter !== 'all') {
+        if (journalBotFilter === 'live') {
+          if (!item.isLive) return false;
+        } else if (item.category !== journalBotFilter) {
+          return false;
+        }
+      }
+
+      // 3. Asset Filter
       if (journalAssetFilter !== 'ALL' && item.asset !== journalAssetFilter) return false;
+
+      // 4. Timeframe Filter
       if (journalTimeframeFilter !== 'ALL' && item.tf !== journalTimeframeFilter) return false;
+
+      // 5. Tag Filter
+      if (selectedTag && item.tag !== selectedTag) return false;
+
       return true;
     });
-  }, [journalExecutions, selectedTag, journalAssetFilter, journalTimeframeFilter]);
+  }, [journalExecutions, journalSubNav, journalDateScope, journalBotFilter, journalAssetFilter, journalTimeframeFilter, selectedTag]);
+
+  const journalStats = useMemo(() => {
+    const total = filteredExecutions.length;
+    const wins = filteredExecutions.filter((x) => x.outcome === 'WIN').length;
+    const losses = filteredExecutions.filter((x) => x.outcome === 'LOSS').length;
+    const winRate = total > 0 ? (wins / total) * 100 : 0;
+    const netPnl = filteredExecutions.reduce((acc, x) => acc + (x.pnlNum || 0), 0);
+
+    const todayItems = journalExecutions.filter((x) => x.isToday);
+    const todayTotal = todayItems.length;
+    const todayWins = todayItems.filter((x) => x.outcome === 'WIN').length;
+    const todayLosses = todayItems.filter((x) => x.outcome === 'LOSS').length;
+    const todayWinRate = todayTotal > 0 ? (todayWins / todayTotal) * 100 : 0;
+    const todayPnl = todayItems.reduce((acc, x) => acc + (x.pnlNum || 0), 0);
+
+    const liveItems = journalExecutions.filter((x) => x.isLive);
+    const liveTotal = liveItems.length;
+    const liveWins = liveItems.filter((x) => x.outcome === 'WIN').length;
+    const liveLosses = liveItems.filter((x) => x.outcome === 'LOSS').length;
+    const liveWinRate = liveTotal > 0 ? (liveWins / liveTotal) * 100 : 0;
+    const livePnl = liveItems.reduce((acc, x) => acc + (x.pnlNum || 0), 0);
+
+    const botStatsMap: Record<TraderCategory, { count: number; wins: number; pnl: number }> = {
+      all: { count: journalExecutions.length, wins: journalExecutions.filter(x => x.outcome === 'WIN').length, pnl: journalExecutions.reduce((acc, x) => acc + (x.pnlNum || 0), 0) },
+      '3_step_dom': { count: 0, wins: 0, pnl: 0 },
+      macro_onnx: { count: 0, wins: 0, pnl: 0 },
+      dominion_2: { count: 0, wins: 0, pnl: 0 },
+      macro_trend: { count: 0, wins: 0, pnl: 0 },
+      onnx_ml: { count: 0, wins: 0, pnl: 0 },
+      live: { count: liveTotal, wins: liveWins, pnl: livePnl },
+    };
+
+    journalExecutions.forEach((x) => {
+      const cat = x.category as TraderCategory;
+      if (cat !== 'live' && botStatsMap[cat]) {
+        botStatsMap[cat].count += 1;
+        if (x.outcome === 'WIN') botStatsMap[cat].wins += 1;
+        botStatsMap[cat].pnl += x.pnlNum || 0;
+      }
+    });
+
+    return {
+      filtered: { total, wins, losses, winRate, netPnl },
+      today: { total: todayTotal, wins: todayWins, losses: todayLosses, winRate: todayWinRate, netPnl: todayPnl },
+      live: { total: liveTotal, wins: liveWins, losses: liveLosses, winRate: liveWinRate, netPnl: livePnl },
+      botStatsMap,
+    };
+  }, [filteredExecutions, journalExecutions]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#0f1319] text-white font-sans">
@@ -917,9 +1006,45 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           {/* 3. JOURNAL VIEW */}
           {primaryNav === 'journal' && (
             <div className="space-y-6">
-              {/* Journal Sub-Header with Asset, Timeframe Filters, and Full Modal Trigger */}
+              {/* Journal Sub-Header with Date Scope, Asset, Timeframe Filters, and Full Modal Trigger */}
               <div className="bg-[#12161a] border border-[#262d35] rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 font-mono">
                 <div className="flex flex-wrap items-center gap-4">
+                  {/* Date Scope Filter */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase font-bold text-[#8c9ba5] flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                      Scope:
+                    </span>
+                    <div className="flex items-center gap-1 bg-[#171c22] p-0.5 rounded-lg border border-[#262d35]">
+                      <button
+                        onClick={() => {
+                          soundFX.playClickSound();
+                          setJournalDateScope('today');
+                        }}
+                        className={`px-2.5 py-1 rounded text-[11px] font-bold transition flex items-center gap-1.5 ${
+                          (journalSubNav === 'trades' ? journalDateScope !== 'all' : journalDateScope === 'today')
+                            ? 'bg-emerald-500 text-black shadow-sm font-extrabold'
+                            : 'text-[#8c9ba5] hover:text-white'
+                        }`}
+                      >
+                        <span>📅 Today's Report</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          soundFX.playClickSound();
+                          setJournalDateScope('all');
+                        }}
+                        className={`px-2.5 py-1 rounded text-[11px] font-bold transition flex items-center gap-1.5 ${
+                          (journalSubNav === 'trades' ? journalDateScope === 'all' : journalDateScope !== 'today')
+                            ? 'bg-[#1e293b] text-white shadow-sm font-extrabold'
+                            : 'text-[#8c9ba5] hover:text-white'
+                        }`}
+                      >
+                        <span>🌐 All History</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Asset Filter */}
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] uppercase font-bold text-[#8c9ba5]">Asset:</span>
@@ -970,22 +1095,216 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                 {/* Modal Trigger */}
                 <button
                   onClick={() => setIsWinLossModalOpen(true)}
-                  className="px-3.5 py-1.5 rounded-lg bg-[#00bda5]/15 text-[#2dd4bf] hover:bg-[#00bda5]/25 border border-[#00bda5]/30 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                  className="px-3.5 py-1.5 rounded-lg bg-[#00bda5]/15 text-[#2dd4bf] hover:bg-[#00bda5]/25 border border-[#00bda5]/30 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm"
                 >
                   <span>📋 Full 15M Win/Loss Audit Modal</span>
                   <ExternalLink className="w-3.5 h-3.5" />
                 </button>
               </div>
 
+              {/* Institutional KPI Summary Header Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 font-mono">
+                {/* 1. Filtered Win Rate */}
+                <div className="bg-[#12161a] border border-[#262d35] rounded-xl p-4 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-[#8c9ba5] text-xs">
+                    <span className="uppercase font-bold">Filtered Win Rate</span>
+                    <Award className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-2xl font-black text-white">
+                      {journalStats.filtered.winRate.toFixed(1)}%
+                    </span>
+                    <span className="text-xs text-[#8c9ba5]">
+                      ({journalStats.filtered.wins}W / {journalStats.filtered.losses}L)
+                    </span>
+                  </div>
+                  <div className="mt-2 w-full bg-[#1e242b] h-1.5 rounded-full overflow-hidden">
+                    <div
+                      className="bg-emerald-400 h-full rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min(100, journalStats.filtered.winRate)}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Filtered Realized P&L */}
+                <div className="bg-[#12161a] border border-[#262d35] rounded-xl p-4 flex flex-col justify-between">
+                  <div className="flex items-center justify-between text-[#8c9ba5] text-xs">
+                    <span className="uppercase font-bold">Filtered Net P&L</span>
+                    {journalStats.filtered.netPnl >= 0 ? (
+                      <TrendingUp className="w-4 h-4 text-emerald-400" />
+                    ) : (
+                      <TrendingDown className="w-4 h-4 text-rose-400" />
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className={`text-2xl font-black ${
+                      journalStats.filtered.netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}>
+                      {journalStats.filtered.netPnl >= 0 ? '+' : '−'}$
+                      {Math.abs(journalStats.filtered.netPnl).toFixed(2)}
+                    </span>
+                    <span className="text-xs text-[#8c9ba5]">
+                      ({journalStats.filtered.total} trades)
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[10px] text-[#8c9ba5] flex items-center justify-between">
+                    <span>1 contract micro-sizing</span>
+                    <span className="text-emerald-400">$0.48 entry cap</span>
+                  </div>
+                </div>
+
+                {/* 3. Today's Report Card (Interactive) */}
+                <div
+                  onClick={() => {
+                    soundFX.playClickSound();
+                    setJournalDateScope('today');
+                  }}
+                  className={`border rounded-xl p-4 flex flex-col justify-between transition cursor-pointer ${
+                    (journalSubNav === 'trades' ? journalDateScope !== 'all' : journalDateScope === 'today')
+                      ? 'bg-emerald-950/20 border-emerald-500/50 shadow-md shadow-emerald-950/30'
+                      : 'bg-[#12161a] border-[#262d35] hover:border-emerald-500/30'
+                  }`}
+                  title="Click to view Today's Trades exclusively"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="uppercase font-bold text-emerald-300 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5" />
+                      📅 Today's Report
+                    </span>
+                    {(journalSubNav === 'trades' ? journalDateScope !== 'all' : journalDateScope === 'today') && (
+                      <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/40 font-bold">
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className={`text-2xl font-black ${
+                      journalStats.today.netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}>
+                      {journalStats.today.netPnl >= 0 ? '+' : '−'}$
+                      {Math.abs(journalStats.today.netPnl).toFixed(2)}
+                    </span>
+                    <span className="text-xs text-[#8c9ba5]">
+                      ({journalStats.today.winRate.toFixed(0)}% WR)
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[10px] text-[#8c9ba5] flex items-center justify-between">
+                    <span>{journalStats.today.total} trades today (ET)</span>
+                    <span className="text-emerald-300 underline text-[10px]">Filter Today &rsaquo;</span>
+                  </div>
+                </div>
+
+                {/* 4. Total Live Report Card (Interactive) */}
+                <div
+                  onClick={() => {
+                    soundFX.playClickSound();
+                    setJournalBotFilter(journalBotFilter === 'live' ? 'all' : 'live');
+                  }}
+                  className={`border rounded-xl p-4 flex flex-col justify-between transition cursor-pointer ${
+                    journalBotFilter === 'live'
+                      ? 'bg-rose-950/20 border-rose-500/50 shadow-md shadow-rose-950/30'
+                      : 'bg-[#12161a] border-[#262d35] hover:border-rose-500/30'
+                  }`}
+                  title="Click to toggle Total Live Execution Report"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="uppercase font-bold text-rose-300 flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5" />
+                      🔴 Total Live Report
+                    </span>
+                    {journalBotFilter === 'live' && (
+                      <span className="text-[10px] bg-rose-500/20 text-rose-300 px-1.5 py-0.5 rounded border border-rose-500/40 font-bold">
+                        FILTERED
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className={`text-2xl font-black ${
+                      journalStats.live.netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}>
+                      {journalStats.live.netPnl >= 0 ? '+' : '−'}$
+                      {Math.abs(journalStats.live.netPnl).toFixed(2)}
+                    </span>
+                    <span className="text-xs text-[#8c9ba5]">
+                      ({journalStats.live.winRate.toFixed(0)}% WR)
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[10px] text-[#8c9ba5] flex items-center justify-between">
+                    <span>{journalStats.live.total} real Kalshi fills</span>
+                    <span className="text-rose-300">$0.00 Maker fee</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* "Who Traded" Strategy Performance Breakdown Bar */}
+              <div className="p-3 bg-[#12161a] rounded-xl border border-[#262d35] space-y-2 font-mono">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Bot className="w-4 h-4 text-[#00bda5]" />
+                    <span className="text-xs font-bold uppercase tracking-wider text-white">
+                      Who Traded — Bot & Strategy Breakdown
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-[#8c9ba5]">
+                    Click strategy to filter executions
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {(['all', '3_step_dom', 'macro_onnx', 'dominion_2', 'macro_trend', 'onnx_ml', 'live'] as TraderCategory[]).map((cat) => {
+                    const badge = getTraderBadge(cat);
+                    const st = journalStats.botStatsMap[cat] || { count: 0, wins: 0, pnl: 0 };
+                    const isSelected = journalBotFilter === cat;
+                    const wr = st.count > 0 ? ((st.wins / st.count) * 100).toFixed(0) : '0';
+                    return (
+                      <button
+                        key={cat}
+                        onClick={() => {
+                          soundFX.playClickSound();
+                          setJournalBotFilter(cat);
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition flex items-center gap-2 border cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#00bda5] text-black border-[#00bda5] shadow-sm font-extrabold'
+                            : 'bg-[#171c22] text-[#8c9ba5] hover:text-white border-[#262d35]'
+                        }`}
+                      >
+                        <span>{cat === 'all' ? '🌐 ALL' : `${badge.icon} ${badge.short}`}</span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
+                          isSelected ? 'bg-black/20 text-black' : 'bg-[#12161a] text-[#2dd4bf]'
+                        }`}>
+                          {st.count}
+                        </span>
+                        {st.count > 0 && (
+                          <span className={`text-[10px] font-mono ${
+                            isSelected
+                              ? 'text-black font-extrabold'
+                              : st.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                          }`}>
+                            {st.pnl >= 0 ? '+' : '−'}${Math.abs(st.pnl).toFixed(2)} ({wr}%)
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Journal Table Card */}
               <div className="bg-[#12161a] border border-[#262d35] rounded-xl p-5 space-y-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-bold uppercase tracking-wider text-white">
-                    {journalSubNav === 'settlements'
-                      ? 'Historical Contract Settlements Ledger'
-                      : journalSubNav === 'reports'
-                      ? '15-Minute Event Outcome Reports'
-                      : 'Today\'s Trade Executions Ledger'}
+                  <h2 className="text-sm font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                    <span>
+                      {journalSubNav === 'settlements'
+                        ? 'Historical Contract Settlements Ledger'
+                        : journalSubNav === 'reports'
+                        ? '15-Minute Event Outcome Reports'
+                        : 'Today\'s Trade Executions Ledger'}
+                    </span>
+                    {journalBotFilter !== 'all' && (
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-[#00bda5]/20 text-[#2dd4bf] border border-[#00bda5]/40 font-mono font-bold">
+                        Filter: {getTraderBadge(journalBotFilter).short}
+                      </span>
+                    )}
                   </h2>
                   <div className="text-xs font-mono text-[#8c9ba5]">
                     Showing {filteredExecutions.length} records
@@ -998,7 +1317,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                       <tr>
                         <th className="py-2.5 px-4">Record ID</th>
                         <th className="py-2.5 px-4">Time (ET)</th>
-                        <th className="py-2.5 px-4">Strategy</th>
+                        <th className="py-2.5 px-4">Who Traded (Strategy)</th>
+                        <th className="py-2.5 px-4">Mode</th>
                         <th className="py-2.5 px-4">Cycle</th>
                         <th className="py-2.5 px-4">Asset</th>
                         <th className="py-2.5 px-4">Strike</th>
@@ -1015,7 +1335,21 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                         <tr key={idx} className={idx % 2 === 0 ? 'bg-[#171c22]/40' : 'bg-[#13171c]/40'}>
                           <td className="py-2 px-4 text-[#8c9ba5] font-mono">{t.id}</td>
                           <td className="py-2 px-4 text-[#8c9ba5]">{t.time}</td>
-                          <td className="py-2 px-4 font-semibold text-white">{t.bot}</td>
+                          <td className="py-2 px-4">
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-bold border ${t.badge.color}`}>
+                              <span>{t.badge.icon}</span>
+                              <span>{t.badge.short}</span>
+                            </span>
+                          </td>
+                          <td className="py-2 px-4">
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-extrabold ${
+                              t.isLive
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                                : 'bg-slate-700/40 text-slate-300 border border-slate-600/30'
+                            }`}>
+                              {t.isLive ? 'LIVE' : 'PAPER'}
+                            </span>
+                          </td>
                           <td className="py-2 px-4">
                             <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
                               t.tf === '5M' ? 'bg-[#d9a752]/20 text-[#d9a752]' : 'bg-[#00bda5]/20 text-[#2dd4bf]'

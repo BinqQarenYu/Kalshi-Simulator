@@ -28,7 +28,7 @@ SWP_SHOWWINDOW = 0x0040
 SWP_NOACTIVATE = 0x0010
 
 WIDGET_WIDTH_MINIMIZED = 515
-WIDGET_HEIGHT_MINIMIZED = 245
+WIDGET_HEIGHT_MINIMIZED = 310
 WIDGET_WIDTH_EXPANDED = 515
 WIDGET_HEIGHT_EXPANDED = 780
 
@@ -86,10 +86,17 @@ def find_cockpit_windows(title_sub: str = "pocket cockpit") -> List[Tuple[int, s
     if not u32:
         return []
 
-    # Attach thread to interactive 'Default' desktop to find user-facing browser windows
-    h_default = u32.OpenDesktopW("Default", 0, False, 0x01FF)
-    if h_default:
-        u32.SetThreadDesktop(h_default)
+    h_default = None
+    try:
+        # Attach process to interactive 'WinSta0' window station and 'Default' desktop
+        h_winsta = u32.OpenWindowStationW("WinSta0", False, 0x037F)
+        if h_winsta:
+            u32.SetProcessWindowStation(h_winsta)
+            h_default = u32.OpenDesktopW("Default", 0, False, 0x01FF)
+            if h_default:
+                u32.SetThreadDesktop(h_default)
+    except Exception as e:
+        logger.debug("Desktop attach note: %s", e)
 
     found: List[Tuple[int, str]] = []
 
@@ -99,15 +106,16 @@ def find_cockpit_windows(title_sub: str = "pocket cockpit") -> List[Tuple[int, s
             buf = ctypes.create_unicode_buffer(length + 1)
             u32.GetWindowTextW(hwnd, buf, length + 1)
             title = buf.value
-            if title_sub.lower() in title.lower():
+            t_low = title.lower()
+            if any(sub in t_low for sub in [title_sub.lower(), "pocket cockpit", "3-step dominion", "standalone engine"]):
                 found.append((hwnd, title))
-        return 1
+        return True
 
-    wndproc = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p)
+    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
     if h_default:
-        u32.EnumDesktopWindows(h_default, wndproc(_enum_cb), 0)
+        u32.EnumDesktopWindows(h_default, EnumWindowsProc(_enum_cb), 0)
     else:
-        u32.EnumWindows(wndproc(_enum_cb), 0)
+        u32.EnumWindows(EnumWindowsProc(_enum_cb), 0)
 
     return found
 

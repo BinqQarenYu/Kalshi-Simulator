@@ -386,7 +386,7 @@ def test_standalone_bot_sweep_old_orders(tmp_path):
 
         cancelled = await engine.sweep_old_orders(keep_ticker="KXBTC15M-ACTIVE")
         assert cancelled == 1
-        mock_client.cancel_order.assert_called_once_with("old_order_1")
+        mock_client.cancel_order.assert_called_once_with("old_order_1", ticker="KXBTC15M-OLD1")
 
     asyncio.run(_run())
 

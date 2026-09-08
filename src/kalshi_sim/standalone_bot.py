@@ -217,6 +217,7 @@ class StandaloneBotEngine:
         # Consecutive Loss Streak Breaker (Post-Mortem Fix — 9 consecutive overnight losses)
         self.consecutive_losses: int = 0
         self.max_consecutive_losses: int = 3  # Auto-disarm after 3 consecutive losses
+        self.engine_start_time: datetime = datetime.now(timezone.utc)
 
         self.last_decision: Optional[DominationDecision] = None
         self.last_eval_time: float = 0.0
@@ -647,16 +648,20 @@ class StandaloneBotEngine:
                 return
 
             # 1. Strategy Evaluation
-            decision = self.bot.evaluate(
-                book=book,
-                spot_price=float(self.current_btc_spot),
-                target_strike=float(self.target_strike),
-                time_to_expiry_s=t_rem,
-                total_equity=self.balance_dollars,
-                max_position_size=1,
-                estimated_vpin=0.15,
-            )
-            self.last_decision = decision
+            try:
+                decision = self.bot.evaluate(
+                    book=book,
+                    spot_price=float(self.current_btc_spot),
+                    target_strike=float(self.target_strike),
+                    time_to_expiry_s=t_rem,
+                    total_equity=self.balance_dollars,
+                    max_position_size=1,
+                    estimated_vpin=0.15,
+                )
+                self.last_decision = decision
+            except Exception as eval_err:
+                logger.exception("❌ [EVALUATION ERROR] Error evaluating strategy: %s", eval_err)
+                return
 
             # 2. Execution Gating: Check Arming
             if not self.is_armed:
@@ -784,44 +789,56 @@ class StandaloneBotEngine:
                 logger.error("Error during panic cancel: %s", e)
         return cancelled_count
 
-    async def sweep_old_orders(self, keep_ticker: Optional[str] = None) -> int:
-        """Cancel all open resting orders on Kalshi exchange for finished or non-active contracts."""
+    async def sweep_old_orders(self, keep_ticker: Optional[str] = None, force_all: bool = False) -> int:
+        """Cancel all open resting orders on Kalshi exchange for finished, expired, or non-active contracts."""
         cancelled = 0
-        if not self.order_client:
-            return 0
-        try:
-            open_orders = await self.order_client.get_open_orders()
-            for o in open_orders:
-                t = o.get("ticker")
-                oid = o.get("order_id")
-                if oid and (keep_ticker is None or t != keep_ticker):
-                    try:
-                        await self.order_client.cancel_order(oid)
+        t_rem = self.get_time_to_expiry()
+        # If the active contract has expired or is in the <=45s pre-expiry window, do not keep it
+        is_active_expired = (self.active_market_close_dt is not None and t_rem <= 45.0)
+        effective_keep = None if (force_all or is_active_expired) else (keep_ticker or self.active_ticker)
+
+        if self.order_client:
+            try:
+                open_orders = await self.order_client.get_open_orders()
+                for o in open_orders:
+                    t = o.get("ticker")
+                    oid = o.get("order_id")
+                    if oid and (not effective_keep or t != effective_keep):
+                        try:
+                            success = await self.order_client.cancel_order(oid, ticker=t)
+                            if success:
+                                cancelled += 1
+                                logger.warning("🧹 [EXPIRED ORDER SWEEP] Cancelled resting order %s on finished/expired event %s", oid, t)
+                        except Exception as ce:
+                            logger.error("Error cancelling old order %s on %s: %s", oid, t, ce)
+            except Exception as e:
+                logger.error("Error fetching open orders during sweep: %s", e)
+
+        if self.active_resting_orders:
+            for oid, o_info in list(self.active_resting_orders.items()):
+                t = o_info.get("ticker")
+                if not effective_keep or t != effective_keep:
+                    self.active_resting_orders.pop(oid, None)
+                    if not self.order_client:
                         cancelled += 1
-                        logger.warning("🧹 [EXPIRED ORDER SWEEP] Cancelled resting order %s on finished event %s", oid, t)
-                    except Exception as ce:
-                        logger.debug("Error cancelling old order %s: %s", oid, ce)
-            if self.active_resting_orders:
-                for oid, o_info in list(self.active_resting_orders.items()):
-                    if keep_ticker is None or o_info.get("ticker") != keep_ticker:
-                        self.active_resting_orders.pop(oid, None)
-        except Exception as e:
-            logger.debug("Error during expired order sweep: %s", e)
+                        logger.warning("🧹 [EXPIRED ORDER SWEEP] Cleared virtual resting order %s on finished event %s", oid, t)
+
+        logger.info("🧹 [SWEEP SUMMARY] Cancelled %d resting order(s). Active ticker: %s (t_rem=%.0fs)", cancelled, self.active_ticker, t_rem)
         return cancelled
 
     async def _resting_order_watchdog_loop(self) -> None:
-        """Watch resting limit orders and auto-cancel prior to expiration (t_rem <= 45s) or once event is finished."""
+        """Watch resting limit orders and auto-cancel prior to expiration (t_rem <= 45s or <= 0s) or once event is finished."""
         while self._running:
             try:
                 t_rem = self.get_time_to_expiry()
                 if self.order_client:
-                    # 1. Pre-Expiry Cleanup for active contract (t_rem <= 45s)
-                    if 0 < t_rem <= 45.0:
+                    # 1. Pre-Expiry & Expired Cleanup for active contract (t_rem <= 45s, including <= 0)
+                    if t_rem <= 45.0:
                         if self.active_resting_orders:
                             for oid, o_info in list(self.active_resting_orders.items()):
                                 if o_info.get("ticker") == self.active_ticker:
                                     try:
-                                        await self.order_client.cancel_order(oid)
+                                        await self.order_client.cancel_order(oid, ticker=self.active_ticker)
                                         self.active_resting_orders.pop(oid, None)
                                         logger.warning(
                                             "🛑 [PRE-EXPIRY CLEANUP] Auto-cancelled unfilled resting order %s on %s at T=%.0fs.",
@@ -837,7 +854,7 @@ class StandaloneBotEngine:
                                 if o.get("ticker") == self.active_ticker:
                                     oid = o.get("order_id")
                                     if oid:
-                                        await self.order_client.cancel_order(oid)
+                                        await self.order_client.cancel_order(oid, ticker=self.active_ticker)
                                         logger.warning(
                                             "🛑 [PRE-EXPIRY CLEANUP] Auto-cancelled exchange open order %s on %s at T=%.0fs.",
                                             oid, self.active_ticker, t_rem
@@ -950,7 +967,17 @@ class StandaloneBotEngine:
                             pnl = revenue - cost
                             roi_pct = (pnl / cost * Decimal("100.0")) if cost > Decimal("0") else Decimal("0.0")
 
-                            settled_ts = s.get("settled_time") or datetime.now(timezone.utc).isoformat()
+                            raw_settled_time = s.get("settled_time")
+                            is_historical = False
+                            if self.is_live and raw_settled_time:
+                                try:
+                                    dt = datetime.fromisoformat(str(raw_settled_time).replace("Z", "+00:00"))
+                                    if dt < self.engine_start_time:
+                                        is_historical = True
+                                except Exception:
+                                    pass
+
+                            settled_ts = raw_settled_time or datetime.now(timezone.utc).isoformat()
                             cycle_time = format_cycle_time_from_iso(settled_ts)
 
                             # Resolve strike price
@@ -963,8 +990,8 @@ class StandaloneBotEngine:
                                 else:
                                     fallback_strikes = {
                                         CryptoAsset.BTC: Decimal("80000.00"),
-                                        CryptoAsset.ETH: Decimal("3000.00"),
-                                        CryptoAsset.SOL: Decimal("180.00"),
+                                        CryptoAsset.ETH: Decimal("2500.00"),
+                                        CryptoAsset.SOL: Decimal("150.00"),
                                         CryptoAsset.DOGE: Decimal("0.2000"),
                                     }
                                     strike_price = fallback_strikes.get(self.active_asset, Decimal("80000.00"))
@@ -1036,23 +1063,25 @@ class StandaloneBotEngine:
                             )
 
                             # Consecutive Loss Streak Breaker — auto-disarm after N consecutive losses
-                            if outcome == "loss":
-                                self.consecutive_losses += 1
-                                if self.consecutive_losses >= self.max_consecutive_losses and self.is_armed:
-                                    self.is_armed = False
-                                    logger.warning(
-                                        "🛑 [STREAK BREAKER] %d consecutive losses reached (max=%d). "
-                                        "Bot AUTO-DISARMED to prevent further hemorrhaging. "
-                                        "Manual re-arm required via /api/bot/arm.",
-                                        self.consecutive_losses, self.max_consecutive_losses,
-                                    )
-                            else:
-                                if self.consecutive_losses > 0:
-                                    logger.info(
-                                        "✅ [STREAK RESET] Win breaks %d-loss streak. Counter reset to 0.",
-                                        self.consecutive_losses,
-                                    )
-                                self.consecutive_losses = 0
+                            # Only evaluate for new live settlements that occurred during this running session.
+                            if not is_historical:
+                                if outcome == "loss":
+                                    self.consecutive_losses += 1
+                                    if self.consecutive_losses >= self.max_consecutive_losses and self.is_armed:
+                                        self.is_armed = False
+                                        logger.warning(
+                                            "🛑 [STREAK BREAKER] %d consecutive losses reached (max=%d). "
+                                            "Bot AUTO-DISARMED to prevent further hemorrhaging. "
+                                            "Manual re-arm required via /api/bot/arm.",
+                                            self.consecutive_losses, self.max_consecutive_losses,
+                                        )
+                                else:
+                                    if self.consecutive_losses > 0:
+                                        logger.info(
+                                            "✅ [STREAK RESET] Win breaks %d-loss streak. Counter reset to 0.",
+                                            self.consecutive_losses,
+                                        )
+                                    self.consecutive_losses = 0
 
                             logger.info(
                                 "🏆 [SETTLEMENT RECONCILED] %s: %s | Result: %s | PnL: %+.2f | Streak: %d",
@@ -1382,13 +1411,19 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> Dict[str, Any]:
 
 
 @app.post("/api/bot/sweep-orders")
-async def sweep_orders() -> Dict[str, Any]:
+async def sweep_orders(force: bool = False) -> Dict[str, Any]:
     """Manually sweep and cancel all resting orders on finished or non-active events."""
     if not app_engine:
         raise HTTPException(status_code=503, detail="Engine not ready")
-    cancelled = await app_engine.sweep_old_orders(keep_ticker=app_engine.active_ticker)
-    logger.info("🧹 [MANUAL SWEEP] Cancelled %d order(s) for finished events.", cancelled)
-    return {"status": "SWEEP_COMPLETE", "cancelled_orders": cancelled}
+    cancelled = await app_engine.sweep_old_orders(keep_ticker=app_engine.active_ticker, force_all=force)
+    t_rem = app_engine.get_time_to_expiry()
+    logger.info("🧹 [MANUAL SWEEP] Cancelled %d order(s) for finished/expired events.", cancelled)
+    return {
+        "status": "SWEEP_COMPLETE",
+        "cancelled_orders": cancelled,
+        "active_ticker": app_engine.active_ticker,
+        "time_to_expiry_s": round(t_rem, 1),
+    }
 
 
 from kalshi_sim.win32_window import (

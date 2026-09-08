@@ -190,6 +190,20 @@ class ThreeStepDominationBot:
         logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
+    @staticmethod
+    def _safe_market_ask(
+        recommended_side: Optional[OrderSide],
+        best_yes_ask: Optional[Decimal],
+        best_no_ask: Optional[Decimal],
+    ) -> Optional[float]:
+        """Safely extract market ask float for the recommended side, never raising TypeError."""
+        if recommended_side == OrderSide.YES:
+            val = best_yes_ask
+        elif recommended_side == OrderSide.NO:
+            val = best_no_ask
+        else:
+            val = best_yes_ask if best_yes_ask is not None else best_no_ask
+        return float(val) if val is not None else None
 
     def evaluate(
         self,
@@ -321,7 +335,7 @@ class ThreeStepDominationBot:
                     f"No edge exceeding {self.min_edge_pct*100:.0f}% at ${discount_price:.2f} discount."
                 )
 
-            actual_ask_p3 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
+            actual_ask_p3 = self._safe_market_ask(ev_res.recommended_side, best_yes_ask, best_no_ask)
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -389,7 +403,7 @@ class ThreeStepDominationBot:
                     f"Spot Diff: {diff_str} | Awaiting high-conviction order flow edge."
                 )
 
-            actual_ask_p2 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
+            actual_ask_p2 = self._safe_market_ask(ev_res.recommended_side, best_yes_ask, best_no_ask)
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -449,7 +463,7 @@ class ThreeStepDominationBot:
                     f"Spot Diff: {diff_str} | Scanning for momentum velocity across strike."
                 )
 
-            actual_ask_p1 = float(best_yes_ask if ev_res.recommended_side == OrderSide.YES else (best_no_ask or Decimal("0.50"))) if (best_yes_ask is not None or best_no_ask is not None) else None
+            actual_ask_p1 = self._safe_market_ask(ev_res.recommended_side, best_yes_ask, best_no_ask)
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,

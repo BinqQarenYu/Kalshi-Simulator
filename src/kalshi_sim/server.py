@@ -3492,6 +3492,78 @@ async def panic_halt() -> dict[str, Any]:
     return {"status": "PANIC_EXECUTED", "cancelled_orders": res.get("cancelled_orders", 0), "armed": False}
 
 
+@app.post("/api/bot/sweep-orders")
+async def sweep_orders_endpoint(force: bool = False) -> dict[str, Any]:
+    """Sweep and cancel resting orders on expired or finished events across live exchange and local simulators."""
+    # 1. If standalone bot is running as active lock holder, forward request to it
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                url = f"http://127.0.0.1:8001/api/bot/sweep-orders?force={str(force).lower()}"
+                async with session.post(url, timeout=aiohttp.ClientTimeout(total=3.0)) as fwd_resp:
+                    if fwd_resp.status == 200:
+                        return await fwd_resp.json()
+        except Exception as fwd_exc:
+            logger.warning("Failed forwarding sweep to standalone bot: %s", fwd_exc)
+
+    cancelled = 0
+    client = state.order_client
+    if client is None and state.sim_agent and hasattr(state.sim_agent, "_order_client"):
+        client = state.sim_agent._order_client
+
+    active_ticker = getattr(state, "active_ticker", None)
+    if not active_ticker and state.sim_agent and hasattr(state.sim_agent, "active_ticker"):
+        active_ticker = state.sim_agent.active_ticker
+
+    t_rem = 900.0
+    if state.sim_agent and hasattr(state.sim_agent, "time_to_expiry_s"):
+        t_rem = float(state.sim_agent.time_to_expiry_s)
+
+    is_active_expired = t_rem <= 45.0
+    effective_keep = None if (force or is_active_expired) else active_ticker
+
+    # If exchange order client is available, sweep live exchange open orders
+    if client and hasattr(client, "get_open_orders"):
+        try:
+            open_orders = await client.get_open_orders()
+            for o in open_orders:
+                t = o.get("ticker")
+                oid = o.get("order_id")
+                if oid and (not effective_keep or t != effective_keep):
+                    try:
+                        success = await client.cancel_order(oid, ticker=t)
+                        if success:
+                            cancelled += 1
+                            logger.warning("🧹 [SERVER SWEEP] Cancelled exchange resting order %s on %s", oid, t)
+                    except Exception as ce:
+                        logger.error("Error cancelling old order %s on %s: %s", oid, t, ce)
+        except Exception as e:
+            logger.error("Error fetching open orders in server sweep: %s", e)
+
+    # If simulation agent has virtual resting orders, clear them
+    if state.sim_agent and hasattr(state.sim_agent, "active_resting_orders"):
+        resting = getattr(state.sim_agent, "active_resting_orders", {})
+        if resting:
+            for oid, o_info in list(resting.items()):
+                t = o_info.get("ticker") if isinstance(o_info, dict) else None
+                if not effective_keep or (t and t != effective_keep):
+                    resting.pop(oid, None)
+                    if not client:
+                        cancelled += 1
+                        logger.warning("🧹 [SERVER SWEEP] Cleared simulated resting order %s on %s", oid, t)
+
+    logger.info("🧹 [SERVER SWEEP COMPLETE] Cancelled %d order(s). Active: %s (t_rem=%.0fs)", cancelled, active_ticker, t_rem)
+    return {
+        "status": "SWEEP_COMPLETE",
+        "cancelled_orders": cancelled,
+        "active_ticker": active_ticker,
+        "time_to_expiry_s": round(t_rem, 1),
+    }
+
+
+
 class ParametersUpdateRequest(BaseModel):
     discount_limit_price: Optional[float] = Field(default=None, ge=0.10, le=0.50, description="Maker discount limit price ceiling")
     max_contracts: Optional[int] = Field(default=None, ge=1, le=1, description="Max contracts per cycle trade (strictly 1)")
@@ -4399,8 +4471,9 @@ async def get_win_loss_reports_endpoint(
     execution_mode: str | None = None,
     timeframe: str | None = None,
     asset: str | None = None,
+    date: str | None = None,
 ) -> dict[str, Any]:
-    """Retrieve event Win/Loss reports (5M / 15M) with overall, Domination Bot, ONNX ML Bot, and Live breakdowns."""
+    """Retrieve event Win/Loss reports (5M / 15M) with overall, Domination Bot, ONNX ML Bot, Today's, and Live breakdowns."""
     if state.mode == "live":
         await sync_live_settlements()
 
@@ -4425,6 +4498,7 @@ async def get_win_loss_reports_endpoint(
     all_reports = state.win_loss_reports
     macro_reports = [r for r in all_reports if r.get("bot_type") in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot")]
     dom_reports = [r for r in all_reports if r.get("bot_type") in ("3_step_domination_bot", "domination_bot", "domination")]
+    dom2_reports = [r for r in all_reports if r.get("bot_type") in ("dominion_2_bot", "dominion2", "dominion_v2")]
     onnx_reports = [r for r in all_reports if r.get("bot_type") in ("onnx_ml_bot", "onnx_microstructure_bot", "onnx")]
     live_reports = [
         r for r in all_reports
@@ -4435,13 +4509,26 @@ async def get_win_loss_reports_endpoint(
         if r.get("execution_mode") in ("simulated", "mock", "paper", None) and not str(r.get("report_id", "")).startswith("WLR-LIVE-")
     ]
 
+    et_now = datetime.now(ZoneInfo("America/New_York"))
+    today_et_prefix = et_now.strftime("%Y-%m-%d")
+    today_et_month_day = et_now.strftime("%B %d")
+    today_reports = [
+        r for r in all_reports
+        if (str(r.get("timestamp_utc", "")).startswith(today_et_prefix)
+            or today_et_month_day in str(r.get("cycle_time", ""))
+            or today_et_prefix.replace("-", "") in str(r.get("report_id", "")))
+    ]
+
     filtered_reports = all_reports
+    if date and date.lower() in ("today", "current"):
+        filtered_reports = today_reports
+
     exec_m = mode or execution_mode
     if exec_m and exec_m.lower() not in ("all", "combined"):
         if exec_m.lower() in ("live", "real"):
-            filtered_reports = live_reports
+            filtered_reports = [r for r in filtered_reports if r in live_reports]
         elif exec_m.lower() in ("simulated", "mock", "paper"):
-            filtered_reports = sim_reports
+            filtered_reports = [r for r in filtered_reports if r in sim_reports]
 
     if bot_type and bot_type.lower() not in ("all", "combined"):
         filtered_reports = [r for r in filtered_reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
@@ -4462,13 +4549,17 @@ async def get_win_loss_reports_endpoint(
         "all_summary": _calculate_15m_metrics(all_reports),
         "macro_trend_summary": _calculate_15m_metrics(macro_reports),
         "domination_summary": _calculate_15m_metrics(dom_reports),
+        "dominion2_summary": _calculate_15m_metrics(dom2_reports),
         "onnx_summary": _calculate_15m_metrics(onnx_reports),
         "live_summary": _calculate_15m_metrics(live_reports),
         "sim_summary": _calculate_15m_metrics(sim_reports),
+        "today_summary": _calculate_15m_metrics(today_reports),
+        "total_today_reports": len(today_reports),
         "filter_bot_type": bot_type or "all",
         "filter_mode": exec_m or "all",
         "filter_timeframe": timeframe or "all",
         "filter_asset": asset or "all",
+        "filter_date": date or "all",
         "reports": filtered_reports[:limit],
         "live_reports": live_reports[:limit],
         "total_live_reports": len(live_reports),
@@ -4481,8 +4572,9 @@ async def export_win_loss_reports_csv(
     mode: str | None = None,
     timeframe: str | None = None,
     asset: str | None = None,
+    date: str | None = None,
 ) -> Response:
-    """Export event Win/Loss reports as a CSV document with bot_type, asset, timeframe, and execution_mode."""
+    """Export event Win/Loss reports as a CSV document with bot_type, asset, timeframe, date, and execution_mode."""
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
@@ -4511,6 +4603,17 @@ async def export_win_loss_reports_csv(
         "ai_rationale",
     ])
     reports = state.win_loss_reports
+    if date and date.lower() in ("today", "current"):
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        today_et_prefix = et_now.strftime("%Y-%m-%d")
+        today_et_month_day = et_now.strftime("%B %d")
+        reports = [
+            r for r in reports
+            if (str(r.get("timestamp_utc", "")).startswith(today_et_prefix)
+                or today_et_month_day in str(r.get("cycle_time", ""))
+                or today_et_prefix.replace("-", "") in str(r.get("report_id", "")))
+        ]
+
     if mode and mode.lower() not in ("all", "combined"):
         if mode.lower() in ("live", "real"):
             reports = [r for r in reports if r.get("execution_mode") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-")]
@@ -4555,7 +4658,8 @@ async def export_win_loss_reports_csv(
         ])
     prefix = f"kalshi_{asset.lower()}_" if asset and asset.lower() != "all" else "kalshi_"
     tf_str = f"{timeframe}_" if timeframe and timeframe.lower() != "all" else ""
-    filename = f"{prefix}{tf_str}live_reports.csv" if mode == "live" else f"{prefix}{tf_str}win_loss_reports.csv"
+    date_str = "today_" if date and date.lower() in ("today", "current") else ""
+    filename = f"{prefix}{tf_str}{date_str}live_reports.csv" if mode == "live" else f"{prefix}{tf_str}{date_str}win_loss_reports.csv"
     return Response(
         content=output.getvalue(),
         media_type="text/csv",
@@ -4565,17 +4669,33 @@ async def export_win_loss_reports_csv(
 
 @app.get("/api/reports/win-loss/export.json")
 async def export_win_loss_reports_json(
+    bot_type: str | None = None,
     mode: str | None = None,
     timeframe: str | None = None,
     asset: str | None = None,
+    date: str | None = None,
 ) -> Response:
     """Export event Win/Loss reports as formatted JSON."""
     reports = state.win_loss_reports
+    if date and date.lower() in ("today", "current"):
+        et_now = datetime.now(ZoneInfo("America/New_York"))
+        today_et_prefix = et_now.strftime("%Y-%m-%d")
+        today_et_month_day = et_now.strftime("%B %d")
+        reports = [
+            r for r in reports
+            if (str(r.get("timestamp_utc", "")).startswith(today_et_prefix)
+                or today_et_month_day in str(r.get("cycle_time", ""))
+                or today_et_prefix.replace("-", "") in str(r.get("report_id", "")))
+        ]
+
     if mode and mode.lower() not in ("all", "combined"):
         if mode.lower() in ("live", "real"):
             reports = [r for r in reports if r.get("execution_mode") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-")]
         else:
             reports = [r for r in reports if r.get("execution_mode") in ("simulated", "mock", "paper", None) and not str(r.get("report_id", "")).startswith("WLR-LIVE-")]
+
+    if bot_type and bot_type.lower() not in ("all", "combined"):
+        reports = [r for r in reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
 
     if timeframe and timeframe.lower() not in ("all", "combined"):
         reports = [r for r in reports if str(r.get("timeframe", "15m")).lower() == timeframe.lower()]
@@ -4586,7 +4706,8 @@ async def export_win_loss_reports_json(
 
     prefix = f"kalshi_{asset.lower()}_" if asset and asset.lower() != "all" else "kalshi_"
     tf_str = f"{timeframe}_" if timeframe and timeframe.lower() != "all" else ""
-    filename = f"{prefix}{tf_str}live_reports.json" if mode == "live" else f"{prefix}{tf_str}win_loss_reports.json"
+    date_str = "today_" if date and date.lower() in ("today", "current") else ""
+    filename = f"{prefix}{tf_str}{date_str}live_reports.json" if mode == "live" else f"{prefix}{tf_str}{date_str}win_loss_reports.json"
     return Response(
         content=json.dumps(reports, indent=2),
         media_type="application/json",

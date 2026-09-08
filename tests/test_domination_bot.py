@@ -314,3 +314,47 @@ def test_domination_bot_razor_tight_proximity_veto() -> None:
     assert d_doge.recommended_side == "wait"
     assert "Razor-Tight Proximity Veto" in d_doge.rationale
 
+
+def test_domination_bot_extreme_volatility_swing_empty_ask_no_crash() -> None:
+    """Verify that during extreme swings (+-$125) with one-sided empty book, evaluate does not crash with TypeError."""
+    from kalshi_sim.schemas import CryptoAsset
+
+    bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+
+    # 1. Massive upward swing (+125.0): no_book is empty -> best_yes_ask is None, but YES is recommended
+    book_up = L2BookState(market_ticker="KXBTC15M-T79000")
+    book_up.yes_book = {Decimal("0.95"): Decimal("50")}
+    book_up.no_book = {}  # Empty NO book -> best_no_bid is None -> best_yes_ask is None
+
+    for t_rem in [120.0, 350.0, 750.0]:
+        decision_up = bot.evaluate(
+            book=book_up,
+            spot_price=79125.0,  # +$125.00 swing
+            target_strike=79000.0,
+            time_to_expiry_s=t_rem,
+            total_equity=Decimal("25.00"),
+            max_position_size=1,
+            estimated_vpin=0.15,
+        )
+        assert decision_up is not None
+        assert decision_up.p_up > 0.90
+
+    # 2. Massive downward swing (-125.0): yes_book is empty -> best_no_ask is None, but NO is recommended
+    book_down = L2BookState(market_ticker="KXBTC15M-T79000")
+    book_down.yes_book = {}  # Empty YES book -> best_yes_bid is None -> best_no_ask is None
+    book_down.no_book = {Decimal("0.95"): Decimal("50")}
+
+    for t_rem in [120.0, 350.0, 750.0]:
+        decision_down = bot.evaluate(
+            book=book_down,
+            spot_price=78875.0,  # -$125.00 swing
+            target_strike=79000.0,
+            time_to_expiry_s=t_rem,
+            total_equity=Decimal("25.00"),
+            max_position_size=1,
+            estimated_vpin=0.15,
+        )
+        assert decision_down is not None
+        assert decision_down.p_down > 0.90
+
+

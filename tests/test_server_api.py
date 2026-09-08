@@ -290,7 +290,22 @@ def test_win_loss_reports_endpoint(client: TestClient) -> None:
         assert "win_rate_pct" in data["summary"]
         assert "total_pnl" in data["summary"]
         assert "profit_factor" in data["summary"]
+        assert "today_summary" in data
+        assert "dominion2_summary" in data
+        assert "total_today_reports" in data
         assert len(data["reports"]) > 0
+
+        # Query by date=today
+        resp_today = client.get("/api/reports/win-loss?date=today")
+        assert resp_today.status_code == 200
+        data_today = resp_today.json()
+        assert data_today["filter_date"] == "today"
+
+        # Query by bot_type
+        resp_bot = client.get("/api/reports/win-loss?bot_type=3_step_dom")
+        assert resp_bot.status_code == 200
+        data_bot = resp_bot.json()
+        assert data_bot["filter_bot_type"] == "3_step_dom"
 
 
 def test_win_loss_export_endpoints(client: TestClient) -> None:
@@ -301,12 +316,22 @@ def test_win_loss_export_endpoints(client: TestClient) -> None:
         assert "text/csv" in resp_csv.headers["content-type"]
         assert "report_id" in resp_csv.text and "bot_type" in resp_csv.text and "ticker" in resp_csv.text
 
+        # CSV export with date=today
+        resp_csv_today = client.get("/api/reports/win-loss/export.csv?date=today")
+        assert resp_csv_today.status_code == 200
+        assert "today_" in resp_csv_today.headers["content-disposition"]
+
         # JSON export
         resp_json = client.get("/api/reports/win-loss/export.json")
         assert resp_json.status_code == 200
         assert "application/json" in resp_json.headers["content-type"]
         reports_list = resp_json.json()
         assert isinstance(reports_list, list)
+
+        # JSON export with date=today and bot_type
+        resp_json_today = client.get("/api/reports/win-loss/export.json?date=today&bot_type=3_step_dom")
+        assert resp_json_today.status_code == 200
+        assert "today_" in resp_json_today.headers["content-disposition"]
 
 
 def test_cors_middleware_headers(client: TestClient) -> None:
@@ -521,4 +546,32 @@ def test_mother_standalone_single_source_of_truth_sync(client: TestClient) -> No
         # Clean up
         state._standalone_data = None
         state._last_standalone_sync = 0.0
+
+
+def test_sweep_orders_endpoint(client: TestClient) -> None:
+    """Verify POST /api/bot/sweep-orders returns SWEEP_COMPLETE and cleans resting orders."""
+    from unittest.mock import patch
+    with patch("kalshi_sim.server.get_active_lock_holder", return_value=None):
+        # Test sweep when idle
+        resp = client.post("/api/bot/sweep-orders")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "SWEEP_COMPLETE"
+        assert "cancelled_orders" in data
+        assert "time_to_expiry_s" in data
+
+        # Test sweep with simulated resting orders
+        from kalshi_sim.server import state
+        if state.sim_agent is not None:
+            state.sim_agent.active_resting_orders = {
+                "order-old-1": {"ticker": "KXBTC15M-OLD-TICKER", "price": 0.45},
+                "order-active-1": {"ticker": state.active_ticker or "KXBTC15M-ACTIVE", "price": 0.48},
+            }
+            resp2 = client.post("/api/bot/sweep-orders?force=true")
+            assert resp2.status_code == 200
+            data2 = resp2.json()
+            assert data2["status"] == "SWEEP_COMPLETE"
+            # Force true should sweep all resting orders
+            assert len(state.sim_agent.active_resting_orders) == 0
+
 
