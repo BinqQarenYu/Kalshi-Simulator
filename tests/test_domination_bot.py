@@ -263,51 +263,119 @@ def test_domination_bot_multi_asset_evaluation() -> None:
     assert sol_decision.spot_diff == 2.0
 
 
-def test_domination_bot_razor_tight_proximity_veto() -> None:
-    """Verify that any razor-tight event (|Diff| < 2x min_spot_diff) is vetoed across all crypto assets."""
+def test_domination_bot_dynamic_proximity_threshold() -> None:
+    """Verify dynamic volatility-scaled proximity threshold calculations and clamps across all assets."""
+    from kalshi_sim.schemas import CryptoAsset
+    import math
+
+    # 1. BTC: min_spot_diff=35.0, typical_1m_vol=14.0
+    # Floor = 35.0 * 1.15 = 40.25, Ceiling = 35.0 * 2.15 = 75.25
+    btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    
+    # At T=900s (15 mins): 1.4 * 14.0 * sqrt(15) ~= 75.91 -> clamped to ceiling 75.25
+    assert btc_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(75.25, abs=1e-2)
+
+    # At T=600s (10 mins): 1.4 * 14.0 * sqrt(10) ~= 61.98 -> within bounds
+    assert btc_bot.get_dynamic_proximity_threshold(600.0) == pytest.approx(61.98, abs=0.1)
+
+    # At T=360s (6 mins): 1.4 * 14.0 * sqrt(6) ~= 48.01 -> within bounds
+    assert btc_bot.get_dynamic_proximity_threshold(360.0) == pytest.approx(48.01, abs=0.1)
+
+    # At T=120s (2 mins): 1.4 * 14.0 * sqrt(2) ~= 27.72 -> clamped to floor 40.25
+    assert btc_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(40.25, abs=1e-2)
+
+    # At T=30s (0.5 mins): clamped to floor 40.25
+    assert btc_bot.get_dynamic_proximity_threshold(30.0) == pytest.approx(40.25, abs=1e-2)
+
+    # 2. ETH: min_spot_diff=2.50, typical_1m_vol=0.60
+    # Floor = 2.50 * 1.15 = 2.875, Ceiling = 2.50 * 2.15 = 5.375
+    # At T=900s: 1.4 * 0.60 * sqrt(15) ~= 3.25 (between 2.875 and 5.375)
+    eth_bot = ThreeStepDominationBot(asset=CryptoAsset.ETH)
+    assert eth_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(3.25, abs=0.1)
+    assert eth_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(2.875, abs=1e-2)  # Clamped to floor
+
+    # 3. SOL: min_spot_diff=0.50, typical_1m_vol=0.04
+    # Floor = 0.50 * 1.15 = 0.575, Ceiling = 0.50 * 2.15 = 1.075
+    sol_bot = ThreeStepDominationBot(asset=CryptoAsset.SOL)
+    assert sol_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(0.575, abs=1e-2)  # Clamped to floor because 1.4*0.04*sqrt(15) = 0.217 < 0.575
+    assert sol_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(0.575, abs=1e-2)
+
+    # 4. DOGE: min_spot_diff=0.0005, typical_1m_vol=0.000045
+    # Floor = 0.0005 * 1.15 = 0.000575, Ceiling = 0.0005 * 2.15 = 0.001075
+    doge_bot = ThreeStepDominationBot(asset=CryptoAsset.DOGE)
+    assert doge_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(0.000575, abs=1e-6)
+
+
+def test_domination_bot_dynamic_moat_unlocks_mid_cycle_entry() -> None:
+    """Demonstrate that dynamic moat unlocks profitable mid-cycle trades ($55 diff) that the static $70 rule killed."""
     from kalshi_sim.schemas import CryptoAsset
 
-    # BTC: min_spot_diff = 35.0, 2x = 70.0. Diff = $40.00 -> VETO
+    btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.48"): Decimal("100")}
+    book.no_book = {Decimal("0.52"): Decimal("100")}
+
+    # At T=360s (6 mins left), dynamic moat is ~48.01. Spot diff is +$55.00.
+    # Under old static $70 rule, this was vetoed as razor-tight.
+    # Under dynamic moat, $55 > $48.01 -> NO VETO, order proceeds!
+    decision = btc_bot.evaluate(
+        book=book,
+        spot_price=78705.0,  # +$55.00
+        target_strike=78650.0,
+        time_to_expiry_s=360.0,
+        total_equity=Decimal("100.00"),
+        max_position_size=1,
+        estimated_vpin=0.15,
+    )
+    assert decision.recommended_side == "yes"
+    assert "Razor-Tight" not in decision.rationale
+
+
+def test_domination_bot_razor_tight_proximity_veto() -> None:
+    """Verify that any razor-tight event (|Diff| < dynamic moat) is vetoed across all crypto assets."""
+    from kalshi_sim.schemas import CryptoAsset
+
+    # BTC: at T=120s, dynamic moat floor is $40.25. Diff = $20.00 (< $40.25) -> VETO
     btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
     book = L2BookState(market_ticker="KXBTC15M-T78650")
     book.yes_book = {Decimal("0.55"): Decimal("100")}
     book.no_book = {Decimal("0.45"): Decimal("100")}
     d_btc = btc_bot.evaluate(
         book=book,
-        spot_price=78690.0,  # +$40.00 (< $70.00)
+        spot_price=78670.0,  # +$20.00 (< $40.25 floor)
         target_strike=78650.0,
         time_to_expiry_s=120.0,
     )
     assert d_btc.recommended_side == "wait"
     assert "Razor-Tight Proximity Veto" in d_btc.rationale
 
-    # ETH: min_spot_diff = 2.50, 2x = 5.00. Diff = $3.00 -> VETO
+    # ETH: at T=120s, dynamic moat floor is $2.875. Diff = $1.50 (< $2.875) -> VETO
     eth_bot = ThreeStepDominationBot(asset=CryptoAsset.ETH)
     d_eth = eth_bot.evaluate(
         book=book,
-        spot_price=2103.0,  # +$3.00 (< $5.00)
+        spot_price=2101.50,  # +$1.50 (< $2.875 floor)
         target_strike=2100.0,
         time_to_expiry_s=120.0,
     )
     assert d_eth.recommended_side == "wait"
     assert "Razor-Tight Proximity Veto" in d_eth.rationale
 
-    # SOL: min_spot_diff = 0.50, 2x = 1.00. Diff = $0.75 -> VETO
+    # SOL: at T=120s, dynamic moat floor is $0.575. Diff = $0.30 (< $0.575) -> VETO
     sol_bot = ThreeStepDominationBot(asset=CryptoAsset.SOL)
     d_sol = sol_bot.evaluate(
         book=book,
-        spot_price=130.75,  # +$0.75 (< $1.00)
+        spot_price=130.30,  # +$0.30 (< $0.575 floor)
         target_strike=130.00,
         time_to_expiry_s=120.0,
     )
     assert d_sol.recommended_side == "wait"
     assert "Razor-Tight Proximity Veto" in d_sol.rationale
 
-    # DOGE: min_spot_diff = 0.0005, 2x = 0.0010. Diff = $0.0007 -> VETO
+    # DOGE: at T=120s, dynamic moat floor is $0.000575. Diff = $0.000300 (< $0.000575) -> VETO
     doge_bot = ThreeStepDominationBot(asset=CryptoAsset.DOGE)
     d_doge = doge_bot.evaluate(
         book=book,
-        spot_price=0.090700,  # +$0.000700 (< $0.001000)
+        spot_price=0.090300,  # +$0.000300 (< $0.000575 floor)
         target_strike=0.090000,
         time_to_expiry_s=120.0,
     )

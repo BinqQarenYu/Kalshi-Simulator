@@ -190,6 +190,25 @@ class ThreeStepDominationBot:
         logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
+    def get_dynamic_proximity_threshold(self, time_to_expiry_s: float) -> float:
+        """Compute time-and-volatility-scaled minimum spot distance threshold.
+
+        Calculates the required safety moat in dollars:
+            threshold = clamp(floor, z_moat * sigma_1m * sqrt(tau_mins), ceiling)
+
+        - Hard Floor: Ensures we never enter within strike noise (1.15x min_spot_diff, ~$40.25 for BTC).
+        - Hard Ceiling: Caps threshold at 2.15x min_spot_diff (~$75.25 for BTC) to prevent chasing impossible moats.
+        - Scales automatically with asset volatility and remaining cycle duration.
+        """
+        tau_mins = max(0.2, time_to_expiry_s / 60.0)
+        expected_noise = self.typical_1m_volatility * math.sqrt(tau_mins)
+        dynamic_moat = 1.4 * expected_noise
+
+        floor_moat = self.min_spot_diff * 1.15
+        ceiling_moat = self.min_spot_diff * 2.15
+
+        return max(floor_moat, min(ceiling_moat, dynamic_moat))
+
     @staticmethod
     def _safe_market_ask(
         recommended_side: Optional[OrderSide],
@@ -245,11 +264,10 @@ class ThreeStepDominationBot:
 
         cfg = get_asset_config(self.asset)
 
-        # Step 0.5: Minimum Spot-Strike Distance Filter (HARDENED — never bet razor-tight events)
-        # Post-mortem: 9 consecutive losses from entries where spot was barely above strike.
-        # Doubled dead zone to 2x min_spot_diff to completely eliminate coin-flip territory.
-        # BTC: |diff| must be > $70. ETH: > $5. SOL: > $1. DOGE: > $0.001.
-        razor_tight_threshold = self.min_spot_diff * 2.0
+        # Step 0.5: Dynamic Volatility-Scaled Spot-Strike Distance Filter
+        # Replaces rigid static 2x buffer with continuous volatility and time-decay moat.
+        # Clamped between Hard Floor (1.15x min_spot_diff) and Hard Ceiling (2.15x min_spot_diff).
+        razor_tight_threshold = self.get_dynamic_proximity_threshold(time_to_expiry_s)
         if abs(spot_diff) < razor_tight_threshold:
             diff_str = cfg.format_diff(spot_diff)
             thresh_str = cfg.format_price(razor_tight_threshold)
@@ -257,8 +275,9 @@ class ThreeStepDominationBot:
                 time_to_expiry_s=time_to_expiry_s,
                 spot_diff=spot_diff,
                 vpin=estimated_vpin,
-                rationale=f"Razor-Tight Proximity Veto: |Diff|={abs(spot_diff):.{cfg.price_decimals}f} < {thresh_str} threshold (2x min_spot_diff). "
-                          f"{cfg.name} is too close to strike — never bet razor-tight events, skipping.",
+                rationale=f"Razor-Tight Proximity Veto (Dynamic Volatility Moat): |Diff|={abs(spot_diff):.{cfg.price_decimals}f} < {thresh_str} "
+                          f"({self.asset.value} vol-adjusted threshold at T={int(time_to_expiry_s)}s). "
+                          f"Asset too close to strike for current volatility regime, skipping.",
             )
 
         # Classify Active Playbook by Expiration Countdown Window
@@ -563,10 +582,11 @@ class ThreeStepDominationBot:
                 )
 
             # Marginal Zone Edge Boost (Post-Mortem Fix — 9 consecutive losses from thin-edge trades)
-            # Hard veto catches |spot_diff| < 2x min_spot_diff. This secondary filter catches
-            # the 2x-3x transition zone where signals exist but are still weak.
+            # Dynamic moat catches |spot_diff| < dynamic_threshold. This secondary filter catches
+            # the transition zone up to 1.5x of that threshold where signals exist but are still developing.
             # Require 12% minimum edge to filter noise trades that don't survive reversals.
-            marginal_zone_upper = self.min_spot_diff * 3.0
+            razor_tight_threshold = self.get_dynamic_proximity_threshold(time_to_expiry_s)
+            marginal_zone_upper = razor_tight_threshold * 1.5
             marginal_min_edge = 12.0  # 12% minimum edge in marginal territory
             if abs(spot_diff) < marginal_zone_upper and edge_pct < marginal_min_edge:
                 diff_str = cfg.format_diff(spot_diff)
@@ -576,7 +596,7 @@ class ThreeStepDominationBot:
                     vpin=vpin,
                     rationale=(
                         f"Marginal Zone Veto: |Diff|={abs(spot_diff):.{cfg.price_decimals}f} < {marginal_zone_upper:.{cfg.price_decimals}f} "
-                        f"(1.5x min_spot_diff). Edge={edge_pct:.1f}% < {marginal_min_edge:.0f}% "
+                        f"(1.5x dynamic moat). Edge={edge_pct:.1f}% < {marginal_min_edge:.0f}% "
                         f"marginal threshold. Signal too weak to survive 15-min reversal risk."
                     ),
                 )
