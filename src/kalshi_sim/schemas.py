@@ -379,66 +379,159 @@ class TradeEvent(BaseModel):
 # Internal — Reconstructed L2 Book State
 # ---------------------------------------------------------------------------
 
+class _BookDict(dict):
+    """Dictionary subclass that increments a version counter on mutations.
+
+    Used by L2BookState to invalidate cached top-of-book levels in O(1) time.
+    """
+    __slots__ = ("_version",)
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._version: int = 0
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(key, value)
+        self._version += 1
+
+    def __delitem__(self, key) -> None:
+        super().__delitem__(key)
+        self._version += 1
+
+    def pop(self, key, default=...):
+        self._version += 1
+        if default is ...:
+            return super().pop(key)
+        return super().pop(key, default)
+
+    def popitem(self):
+        self._version += 1
+        return super().popitem()
+
+    def clear(self) -> None:
+        super().clear()
+        self._version += 1
+
+    def update(self, *args, **kwargs) -> None:
+        super().update(*args, **kwargs)
+        self._version += 1
+
+    def __ior__(self, other):
+        super().__ior__(other)
+        self._version += 1
+        return self
+
+    def setdefault(self, key, default=None):
+        if key not in self:
+            self._version += 1
+        return super().setdefault(key, default)
+
+
 class L2BookState:
     """In-memory reconstructed L2 order book for a single market.
 
     Not a Pydantic model — mutable state optimised for fast updates.
+    Uses version-backed dict tracking (_BookDict) to cache top-of-book levels,
+    eliminating redundant O(N) dict scans on repeated best_yes_bid / best_yes_ask / spread reads.
     """
 
     __slots__ = (
         "market_ticker",
         "last_seq",
-        "yes_book",
-        "no_book",
+        "_yes_book",
+        "_no_book",
         "last_update",
         "_stale",
         "is_spot",
+        "_cached_best_yes_bid",
+        "_cached_yes_version",
+        "_cached_best_no_bid",
+        "_cached_no_version",
+        "_cached_best_yes_ask_spot",
+        "_cached_spot_ask_version",
     )
 
     def __init__(self, market_ticker: str, is_spot: bool = False) -> None:
         self.market_ticker = market_ticker
         self.is_spot = is_spot
         self.last_seq: int = -1
-        self.yes_book: dict[Decimal, Decimal] = {}  # price → qty (Bids in spot or YES in binary)
-        self.no_book: dict[Decimal, Decimal] = {}   # price → qty (Asks in spot or NO in binary)
+        self._yes_book: _BookDict = _BookDict()  # price → qty (Bids in spot or YES in binary)
+        self._no_book: _BookDict = _BookDict()   # price → qty (Asks in spot or NO in binary)
         self.last_update: datetime = datetime.now(timezone.utc)
         self._stale: bool = True
+        self._cached_best_yes_bid: Decimal | None = None
+        self._cached_yes_version: int = -1
+        self._cached_best_no_bid: Decimal | None = None
+        self._cached_no_version: int = -1
+        self._cached_best_yes_ask_spot: Decimal | None = None
+        self._cached_spot_ask_version: int = -1
+
+    @property
+    def yes_book(self) -> dict[Decimal, Decimal]:
+        return self._yes_book
+
+    @yes_book.setter
+    def yes_book(self, val: dict[Decimal, Decimal]) -> None:
+        if isinstance(val, _BookDict):
+            self._yes_book = val
+        else:
+            self._yes_book = _BookDict(val)
+        self._cached_yes_version = -1
+
+    @property
+    def no_book(self) -> dict[Decimal, Decimal]:
+        return self._no_book
+
+    @no_book.setter
+    def no_book(self, val: dict[Decimal, Decimal]) -> None:
+        if isinstance(val, _BookDict):
+            self._no_book = val
+        else:
+            self._no_book = _BookDict(val)
+        self._cached_no_version = -1
+        self._cached_spot_ask_version = -1
 
     # -- Properties ----------------------------------------------------------
 
     @property
     def best_yes_bid(self) -> Decimal | None:
-        if not self.yes_book:
-            return None
-        return max(self.yes_book.keys())
+        yb = self._yes_book
+        if yb._version != self._cached_yes_version:
+            self._cached_best_yes_bid = max(yb.keys()) if yb else None
+            self._cached_yes_version = yb._version
+        return self._cached_best_yes_bid
 
     @property
     def best_no_bid(self) -> Decimal | None:
-        if not self.no_book:
-            return None
-        return max(self.no_book.keys())
+        nb = self._no_book
+        if nb._version != self._cached_no_version:
+            self._cached_best_no_bid = max(nb.keys()) if nb else None
+            self._cached_no_version = nb._version
+        return self._cached_best_no_bid
 
     @property
     def best_yes_ask(self) -> Decimal | None:
         """In a spot market, yes ask is the lowest ask price. In binary, yes ask = 1 - best_no_bid."""
         if self.is_spot:
-            if not self.no_book:
-                return None
-            return min(self.no_book.keys())
-        nb = self.best_no_bid
-        if nb is None:
+            nb = self._no_book
+            if nb._version != self._cached_spot_ask_version:
+                self._cached_best_yes_ask_spot = min(nb.keys()) if nb else None
+                self._cached_spot_ask_version = nb._version
+            return self._cached_best_yes_ask_spot
+        nb_bid = self.best_no_bid
+        if nb_bid is None:
             return None
-        return Decimal("1") - nb
+        return Decimal("1") - nb_bid
 
     @property
     def best_no_ask(self) -> Decimal | None:
         """In a spot market, no ask returns best_yes_bid. In binary, no ask = 1 - best_yes_bid."""
         if self.is_spot:
             return self.best_yes_bid
-        yb = self.best_yes_bid
-        if yb is None:
+        yb_bid = self.best_yes_bid
+        if yb_bid is None:
             return None
-        return Decimal("1") - yb
+        return Decimal("1") - yb_bid
 
     @property
     def spread(self) -> Decimal | None:

@@ -27,3 +27,7 @@
 ## 2026-08-28 - Small Array NumPy Overhead vs Pure Python List Precomputation
 **Learning:** Calling `np.median` or creating tiny 15-28 element NumPy arrays inside high-frequency per-tick loops adds C-API array construction and boxing overhead that is significantly slower than native Python list sorting and pre-computed tuple lookups.
 **Action:** Pre-compute exponential decay tuples in `__init__`, use fast list sorting for small rolling deques (≤100 items), and use reciprocal multiplication (`1.0 / baseline_volume`) to reduce feature extraction latency from ~160μs to ~95μs per tick.
+
+## 2026-08-29 - O(1) Version-Backed Top-of-Book Lookups via Dict Subclassing
+**Learning:** Accessing properties like `best_yes_bid`, `best_yes_ask`, `spread`, and `mid_price` repeatedly during high-frequency tick processing caused redundant linear dict key scans (`max(yes_book.keys())`), especially when queried multiple times per delta.
+**Action:** Subclass `dict` (`_BookDict`) to track mutations with a monotonic integer version counter `_version`. `L2BookState` checks `_version` against cached versions, converting repeated top-of-book reads into $O(1)$ lookups without breaking dict interface compatibility.
