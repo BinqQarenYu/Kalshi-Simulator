@@ -225,8 +225,11 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
               {/* Champion: Dual-ONNX Arbitrage Bot */}
               <button
+                type="button"
+                role="option"
+                aria-selected={isDualOnnx}
                 onClick={() => handleStrategyChange('dual_onnx')}
-                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                   isDualOnnx
                     ? 'bg-cyan-500/20 border border-cyan-500/50'
                     : 'hover:bg-[#21262d] border border-transparent'
