@@ -399,8 +399,10 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Emergency Kill Switch Button */}
               {isKillSwitchTripped ? (
                 <button
+                  type="button"
+                  aria-label="Resume live trading after circuit breaker trip"
                   onClick={onResumeTrading}
-                  className="flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold rounded-xl shadow-md shadow-emerald-500/20 active:scale-95 transition-all"
+                  className="flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold rounded-xl shadow-md shadow-emerald-500/20 active:scale-95 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                   title="Circuit breaker tripped. Click to resume live trading"
                 >
                   <Play className="h-3.5 w-3.5 fill-current" />
@@ -408,8 +410,10 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               ) : (
                 <button
+                  type="button"
+                  aria-label="Emergency Stop: Immediately halt all live orders"
                   onClick={onKillSwitch}
-                  className="flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-red-500/30 active:scale-95 transition-all animate-pulse"
+                  className="flex items-center gap-2 px-3.5 py-1.5 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-red-500/30 active:scale-95 transition-all animate-pulse focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
                   title="EMERGENCY STOP: Immediately halt all live orders"
                 >
                   <AlertOctagon className="h-4 w-4 fill-current" />
@@ -490,9 +494,11 @@ export const Header: React.FC<HeaderProps> = ({
               {/* Test Bot Action Button */}
               {onTestBot && (
                 <button
+                  type="button"
+                  aria-label="Test active strategy bot: Execute an immediate AI trade decision"
                   onClick={handleRunBotTest}
                   disabled={isTesting}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-xl shadow-md active:scale-95 transition-all disabled:opacity-50 ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-white text-xs font-bold rounded-xl shadow-md active:scale-95 transition-all disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                     activeStrategyBot === '3_step_domination_bot'
                       ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 shadow-amber-500/20'
                       : activeStrategyBot === 'macro_onnx'
@@ -525,8 +531,10 @@ export const Header: React.FC<HeaderProps> = ({
               {/* 15M Win/Loss Reports Button */}
               {onOpenReports && (
                 <button
+                  type="button"
+                  aria-label="View 15-Minute Event Win/Loss Reports"
                   onClick={onOpenReports}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] text-emerald-400 hover:text-emerald-300 text-xs font-bold rounded-xl transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] text-emerald-400 hover:text-emerald-300 text-xs font-bold rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                   title="View 15-Minute Event Win/Loss Reports"
                 >
                   <Award className="h-3.5 w-3.5" />
@@ -541,8 +549,10 @@ export const Header: React.FC<HeaderProps> = ({
 
               {/* Reset Capital Button */}
               <button
+                type="button"
+                aria-label="Reset simulation capital to $100"
                 onClick={onReset}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#8b949e] hover:text-white bg-[#161b22] border border-[#30363d] hover:bg-[#21262d] transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[#8b949e] hover:text-white bg-[#161b22] border border-[#30363d] hover:bg-[#21262d] transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
                 title="Reset Simulation Capital"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
@@ -554,8 +564,10 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Agent_integrity_check Suite Button (Always visible) */}
           {onOpenIntegrity && (
             <button
+              type="button"
+              aria-label="Open Agent Integrity Verification status panel"
               onClick={onOpenIntegrity}
-              className={`flex items-center gap-1.5 px-3 py-1.5 border text-xs font-bold rounded-xl transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 border text-xs font-bold rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                 (integrityStatus?.status ?? 'HEALTHY') === 'HEALTHY'
                   ? 'bg-[#161b22] hover:bg-[#21262d] border-cyan-500/30 text-cyan-400 hover:text-cyan-300'
                   : (integrityStatus?.status ?? 'HEALTHY') === 'WARNING'
