@@ -144,41 +144,65 @@ class KalshiOrderflowFeatureExtractor:
             for t in latest_trades:
                 self.process_trade(t)
 
-        bids, asks = book.get_depth(self.target_depth)
-        if not bids or not asks:
-            return np.zeros(28, dtype=np.float32)
+        # Performance optimization: Fast-path raw tuple extraction using get_depth_tuples
+        # to avoid instantiating ~30 Pydantic OrderBookLevel wrapper objects per tick call.
+        if hasattr(book, "get_depth_tuples"):
+            top_yes, top_no = book.get_depth_tuples(self.target_depth)
+            if not top_yes or not top_no:
+                return np.zeros(28, dtype=np.float32)
 
-        # 1. Price Mechanics
-        best_bid = float(bids[0].price)
-        is_spot = getattr(book, "is_spot", False) or best_bid > 10.0
+            best_bid = float(top_yes[0][0])
+            is_spot = getattr(book, "is_spot", False) or best_bid > 10.0
 
-        if is_spot:
-            best_ask = float(asks[0].price) if asks else (best_bid + 0.01)
-            if best_ask <= best_bid:
-                best_ask = best_bid + 0.01
-            # Spot continuous asset spread scaled to match normalized continuous asset training distribution (~0.010 mean)
-            mid = (best_bid + best_ask) / 2.0
-            spread_bps = float(max(0.0001, ((best_ask - best_bid) / mid) * 100.0))
+            if is_spot:
+                best_ask = float(top_no[0][0]) if top_no else (best_bid + 0.01)
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                mid = (best_bid + best_ask) / 2.0
+                spread_bps = float(max(0.0001, ((best_ask - best_bid) / mid) * 100.0))
+            else:
+                best_ask = float(Decimal("1.0") - top_no[0][0]) if top_no else (best_bid + 0.01)
+                if best_bid <= 0:
+                    best_bid = 0.01
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                spread_bps = float(max(0.001, min(0.25, best_ask - best_bid)))
+
+            bid_sizes = [float(qty) for _, qty in top_yes]
+            ask_sizes = [float(qty) for _, qty in top_no]
         else:
-            # Yes Ask in binary options is 1.0 - Best No Bid
-            best_ask = float(Decimal("1.0") - asks[0].price) if asks else (best_bid + 0.01)
-            if best_bid <= 0:
-                best_bid = 0.01
-            if best_ask <= best_bid:
-                best_ask = best_bid + 0.01
-            # Binary contract spread scaled to match normalized continuous asset training distribution
-            spread_bps = float(max(0.001, min(0.25, best_ask - best_bid)))
+            bids, asks = book.get_depth(self.target_depth)
+            if not bids or not asks:
+                return np.zeros(28, dtype=np.float32)
+
+            best_bid = float(bids[0].price)
+            is_spot = getattr(book, "is_spot", False) or best_bid > 10.0
+
+            if is_spot:
+                best_ask = float(asks[0].price) if asks else (best_bid + 0.01)
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                mid = (best_bid + best_ask) / 2.0
+                spread_bps = float(max(0.0001, ((best_ask - best_bid) / mid) * 100.0))
+            else:
+                best_ask = float(Decimal("1.0") - asks[0].price) if asks else (best_bid + 0.01)
+                if best_bid <= 0:
+                    best_bid = 0.01
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                spread_bps = float(max(0.001, min(0.25, best_ask - best_bid)))
+
+            bid_sizes = [float(lv.quantity) for lv in bids]
+            ask_sizes = [float(lv.quantity) for lv in asks]
 
         # 2. Spatial Volumes
-        len_bids = len(bids)
-        len_asks = len(asks)
+        len_bids = len(bid_sizes)
+        len_asks = len(ask_sizes)
         target_depth = self.target_depth
 
-        bid_sizes = [float(lv.quantity) for lv in bids]
         if len_bids < target_depth:
             bid_sizes.extend([0.0] * (target_depth - len_bids))
 
-        ask_sizes = [float(lv.quantity) for lv in asks]
         if len_asks < target_depth:
             ask_sizes.extend([0.0] * (target_depth - len_asks))
 
