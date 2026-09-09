@@ -14,6 +14,7 @@ import pytest
 from kalshi_sim.auth import (
     async_validate_credentials,
     get_auth_headers,
+    get_ssl_context,
     get_ws_auth_headers,
     load_private_key,
     sign_request,
@@ -198,3 +199,18 @@ def test_no_hardcoded_api_key_id_fallback():
     import os
     with patch.dict(os.environ, {}, clear=True):
         assert os.getenv("KALSHI_API_KEY_ID") is None
+
+
+def test_get_ssl_context_security():
+    """Test that get_ssl_context returns a verified SSL context and raises on failure without unverified fallback."""
+    import ssl
+    ctx = get_ssl_context()
+    assert isinstance(ctx, ssl.SSLContext)
+    # Check that SSL certificate verification is enabled
+    assert ctx.verify_mode != ssl.CERT_NONE
+
+    # Test failure behavior when both system default context and certifi fail
+    with patch("ssl.create_default_context", side_effect=Exception("System CA store error")):
+        with patch.dict("sys.modules", {"certifi": None}):
+            with pytest.raises(RuntimeError, match="Failed to create secure SSL context"):
+                get_ssl_context()

@@ -171,11 +171,15 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
       <div className="flex items-center justify-between border-b border-[#21262d] pb-3">
         <div className="relative" ref={dropdownRef}>
           <button
+            type="button"
+            aria-expanded={isDropdownOpen}
+            aria-haspopup="listbox"
+            aria-label="Select quantitative trading strategy bot"
             onClick={() => {
               soundFX.playClickSound();
               setIsDropdownOpen(!isDropdownOpen);
             }}
-            className="flex items-center gap-2 px-3 py-1.5 bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded-xl transition-all shadow-sm group"
+            className="flex items-center gap-2 px-3 py-1.5 bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded-xl transition-all shadow-sm group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             title="Click to switch strategy bot"
           >
             {isDualOnnx ? (
@@ -214,7 +218,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
           {/* Strategy Dropdown Menu */}
           {isDropdownOpen && (
-            <div className="absolute left-0 top-full mt-2 w-72 bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl z-50 p-2 flex flex-col gap-1 animate-in fade-in zoom-in-95">
+            <div role="listbox" aria-label="Quantitative trading strategy options" className="absolute left-0 top-full mt-2 w-72 bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl z-50 p-2 flex flex-col gap-1 animate-in fade-in zoom-in-95">
               <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-[#21262d]">
                 Select Quantitative Trading Bot
               </div>
@@ -249,8 +253,11 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
               {/* Macro ONNX Bot */}
               <button
+                type="button"
+                role="option"
+                aria-selected={isMacroOnnx}
                 onClick={() => handleStrategyChange('macro_onnx')}
-                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
                   isMacroOnnx
                     ? 'bg-purple-500/20 border border-purple-500/50'
                     : 'hover:bg-[#21262d] border border-transparent'
@@ -277,8 +284,11 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
               {/* Bot: Macro Trend Dominion */}
               <button
+                type="button"
+                role="option"
+                aria-selected={isMacroTrend}
                 onClick={() => handleStrategyChange('macro_trend_dominion')}
-                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                   isMacroTrend
                     ? 'bg-cyan-500/15 border border-cyan-500/40'
                     : 'hover:bg-[#21262d] border border-transparent'
@@ -305,8 +315,11 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
               {/* Bot 0: Dominion 2 Bot (Anti-Pin Scalper) */}
               <button
+                type="button"
+                role="option"
+                aria-selected={isDominion2}
                 onClick={() => handleStrategyChange('dominion_2_bot')}
-                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
                   isDominion2
                     ? 'bg-emerald-500/15 border border-emerald-500/40'
                     : 'hover:bg-[#21262d] border border-transparent'
@@ -333,8 +346,11 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
               {/* Bot 1: 3-Step Domination Bot */}
               <button
+                type="button"
+                role="option"
+                aria-selected={is3StepBot}
                 onClick={() => handleStrategyChange('3_step_domination_bot')}
-                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                   is3StepBot
                     ? 'bg-amber-500/15 border border-amber-500/40'
                     : 'hover:bg-[#21262d] border border-transparent'
@@ -361,8 +377,11 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
               {/* Bot 2: ONNX Microstructure Bot */}
               <button
+                type="button"
+                role="option"
+                aria-selected={isOnnxBot}
                 onClick={() => handleStrategyChange('onnx_microstructure_bot')}
-                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                   isOnnxBot
                     ? 'bg-blue-500/15 border border-blue-500/40'
                     : 'hover:bg-[#21262d] border border-transparent'
@@ -484,17 +503,20 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               <span>QUICK PRESETS</span>
               <span className="font-mono text-gray-400">Target Entry Price</span>
             </div>
-            <div className="grid grid-cols-5 gap-1.5">
+            <div role="group" aria-label="Quick discount price presets" className="grid grid-cols-5 gap-1.5">
               {[0.30, 0.35, 0.40, 0.45, 0.48].map((preset) => {
                 const isActive = Math.abs(localDiscount - preset) < 0.005;
                 return (
                   <button
                     key={preset}
+                    type="button"
+                    aria-pressed={isActive}
+                    aria-label={`Set discount ceiling to ${(preset * 100).toFixed(0)} cents`}
                     onClick={() => {
                       soundFX.playClickSound();
                       handleDiscountChange(preset);
                     }}
-                    className={`py-1.5 px-2 rounded-lg text-xs font-mono font-bold transition-all border ${
+                    className={`py-1.5 px-2 rounded-lg text-xs font-mono font-bold transition-all border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                       isActive
                         ? 'bg-amber-500/25 border-amber-400 text-amber-300 shadow-sm shadow-amber-500/30 scale-[1.02]'
                         : 'bg-[#0d1117] border-[#30363d] text-gray-300 hover:border-amber-500/50 hover:bg-[#21262d]'
@@ -510,22 +532,28 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
           {/* Precision Range Slider */}
           <div className="flex flex-col gap-1.5">
             <div className="flex justify-between items-center text-[10px] font-semibold text-[#8b949e]">
-              <span>FINE-TUNE DISCOUNT CEILING</span>
+              <label htmlFor="discount-range-slider">FINE-TUNE DISCOUNT CEILING</label>
               <span className="font-mono text-amber-300 font-bold">${localDiscount.toFixed(2)}</span>
             </div>
             <input
+              id="discount-range-slider"
               type="range"
               min="0.15"
               max="0.50"
               step="0.01"
               value={localDiscount}
+              aria-label="Fine-tune discount limit price ceiling"
+              aria-valuemin={0.15}
+              aria-valuemax={0.50}
+              aria-valuenow={localDiscount}
+              aria-valuetext={`$${localDiscount.toFixed(2)} (${(localDiscount * 100).toFixed(0)} cents)`}
               onChange={(e) => {
                 const val = parseFloat(e.target.value);
                 setLocalDiscount(val);
               }}
               onPointerUp={() => handleDiscountChange(localDiscount)}
               onKeyUp={() => handleDiscountChange(localDiscount)}
-              className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-amber-400"
+              className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             />
             <div className="flex justify-between text-[9px] font-mono text-gray-500">
               <span>15¢ (Deep Value)</span>
