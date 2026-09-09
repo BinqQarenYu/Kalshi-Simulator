@@ -57,6 +57,7 @@ from kalshi_sim.ml.ai_worker import AIWorker
 from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
+from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
 from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
 from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine
 from kalshi_sim.notifications import TelemetryAlertDispatcher
@@ -143,6 +144,8 @@ def resolve_bot_instance(bot_id: str) -> Any:
         return Dominion2Bot()
     elif bot_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend", "macro_trend_dominion", "macro_trend_dominion_bot"):
         return MacroTrendDominionBot()
+    elif bot_id in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+        return DualONNXArbitrageBot()
     return None
 
 
@@ -3632,6 +3635,16 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
     return {"status": "UPDATED", "parameters": payload}
 
 
+@app.get("/api/bot/dual-onnx")
+async def get_dual_onnx_telemetry() -> dict[str, Any]:
+    """Retrieve the latest Dual-ONNX Contradiction Arbitrage state and preflight gates."""
+    payload = _build_full_state_payload()
+    return {
+        "dual_onnx_telemetry": payload.get("dual_onnx_telemetry"),
+        "preflight_gates": payload.get("preflight_gates"),
+    }
+
+
 @app.get("/api/bot/strategies")
 async def get_bot_strategies() -> dict[str, Any]:
 
@@ -3639,6 +3652,23 @@ async def get_bot_strategies() -> dict[str, Any]:
     return {
         "active_strategy": state.active_strategy_bot,
         "strategies": [
+            {
+                "id": "dual_onnx",
+                "name": "Dual-ONNX Contradiction Arbitrage",
+                "description": "Dual-Brain Cross-Market Arbitrage Engine: Fuses QuoLas Spot Microscope (Binance Lead) with Kalshi Contract Order Flow (Lag CLOB) to exploit market microstructure mispricings and momentum scalps.",
+                "active": state.active_strategy_bot == "dual_onnx",
+                "badge": "Dual-Brain Contradiction Arbitrage (New)",
+                "icon": "Layers",
+                "features": [
+                    "Dual ONNX Neural Inferences (Spot Lead vs Contract Lag)",
+                    "Contradiction Arbitrage Mode (Discount Entry on Divergence)",
+                    "Agreement Mode (Momentum Scalping on Consensus)",
+                    "Micro-Bankroll 1-Contract Hard Allocation",
+                    "Dynamic Moat Gate (1.15x - 2.15x Strike Zone)",
+                    "Adaptive 4-Pillar Pre-Flight Gate",
+                    "Toxic VPIN & Chop Veto Protection",
+                ],
+            },
             {
                 "id": "macro_onnx",
                 "name": "Macro ONNX Bot",
@@ -3728,14 +3758,16 @@ async def get_bot_strategies() -> dict[str, Any]:
 async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
     """Switch active strategy bot."""
     strat_id = req.strategy_id
-    if strat_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+    if strat_id in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+        strat_id = "dual_onnx"
+    elif strat_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
         strat_id = "macro_onnx"
     elif strat_id in ("macro_trend", "macro_trend_dominion_bot"):
         strat_id = "macro_trend_dominion"
     elif strat_id in ("dominion2", "dominion_v2"):
         strat_id = "dominion_2_bot"
 
-    if strat_id not in ("macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
+    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
         raise HTTPException(status_code=400, detail=f"Invalid strategy_id: {req.strategy_id}")
 
     # Enforce Pre-Deployment Audit Certification Gate
@@ -5581,6 +5613,97 @@ def _build_full_state_payload() -> dict[str, Any]:
     title = f"{asset_cfg.name} {state.active_timeframe.value}"
     series = asset_cfg.series_ticker_15m
 
+    # -----------------------------------------------------------------------
+    # Dual-ONNX Telemetry & 4-Pillar Pre-Flight Gates
+    # -----------------------------------------------------------------------
+    abs_diff = abs(diff)
+    required_moat = 47.60  # 1.36x Sweet spot
+    moat_floor = 40.25     # 1.15x Floor
+    moat_ceiling = 75.25   # 2.15x Ceiling
+    moat_pass = abs_diff >= moat_floor
+    moat_status = "PASS" if moat_pass else "VETO"
+    moat_reason = (
+        f"Separation ${abs_diff:.2f} >= ${moat_floor:.2f} (Floor)"
+        if moat_pass
+        else f"Strike Noise Trap: |Diff| ${abs_diff:.2f} < Min Moat ${moat_floor:.2f}"
+    )
+
+    vpin_val = float(ai_data.get("vpin", 0.15))
+    vpin_pass = vpin_val < 0.60
+    vpin_status = "PASS" if vpin_pass else "VETO"
+    vpin_reason = (
+        f"Flow toxicity safe ({vpin_val:.2f} < 0.60)"
+        if vpin_pass
+        else f"High Toxicity Flow Veto ({vpin_val:.2f} >= 0.60)"
+    )
+
+    cycle_locked = False
+    if state.sim_agent and hasattr(state.sim_agent, "_guardrails"):
+        cycle_key = state.active_ticker
+        cycle_locked = cycle_key in state.sim_agent._guardrails._cycle_locks
+    cycle_status = "LOCKED" if cycle_locked else "READY"
+    cycle_reason = "1 trade per cycle lock active" if cycle_locked else "Cycle ready for execution"
+
+    ev_val = float(ai_data.get("expected_value", ai_data.get("ev_yes", 0.0)))
+    edge_val = float(ai_data.get("statistical_edge", ai_data.get("edge_yes", 0.0)))
+    rec_side = ai_data.get("recommended_side", "wait")
+    edge_pass = (edge_val >= 0.05 or ev_val >= 0.04) and (rec_side in ("yes", "no"))
+    edge_status = "PASS" if edge_pass else "WAIT"
+    edge_reason = (
+        f"EV +${ev_val:.2f} / Edge {edge_val * 100:.1f}%"
+        if edge_pass
+        else "Waiting for statistical edge > 5%"
+    )
+
+    preflight_gates = {
+        "moat_gate": {
+            "status": moat_status,
+            "label": "Dynamic Moat",
+            "current_diff": round(diff, 2),
+            "abs_diff": round(abs_diff, 2),
+            "required_moat": required_moat,
+            "floor": moat_floor,
+            "sweet_spot": required_moat,
+            "ceiling": moat_ceiling,
+            "reason": moat_reason,
+        },
+        "vpin_gate": {
+            "status": vpin_status,
+            "label": "VPIN Safety",
+            "current_vpin": round(vpin_val, 3),
+            "threshold": 0.60,
+            "reason": vpin_reason,
+        },
+        "cycle_lock_gate": {
+            "status": cycle_status,
+            "label": "Cycle Lock",
+            "locked": cycle_locked,
+            "reason": cycle_reason,
+        },
+        "edge_gate": {
+            "status": edge_status,
+            "label": "Edge / EV",
+            "edge_pct": round(edge_val * 100.0, 1),
+            "ev": round(ev_val, 2),
+            "reason": edge_reason,
+        },
+    }
+
+    dual_telemetry = {
+        "regime": ai_data.get("regime", "CHOP_WAIT"),
+        "action": ai_data.get("action", "HOLD"),
+        "side": ai_data.get("recommended_side", "wait"),
+        "quolas_signal": ai_data.get("quolas_signal", ai_data.get("onnx_signal", "WAIT")),
+        "quolas_confidence": float(ai_data.get("quolas_confidence", ai_data.get("onnx_confidence", 0.50))),
+        "kalshi_signal": ai_data.get("kalshi_signal", "WAIT"),
+        "kalshi_confidence": float(ai_data.get("kalshi_confidence", 0.50)),
+        "recommended_limit_price": float(ai_data.get("recommended_limit_price", 0.48)),
+        "expected_value": float(ai_data.get("expected_value", 0.0)),
+        "recommended_contracts": int(ai_data.get("recommended_contracts", 1)),
+        "rationale": ai_data.get("rationale", ""),
+        "active": state.active_strategy_bot == "dual_onnx",
+    }
+
     return {
         "timestamp": now_utc.isoformat(),
         "market": {
@@ -5651,6 +5774,8 @@ def _build_full_state_payload() -> dict[str, Any]:
         "token_credit_status": state.token_credit_agent.get_status(),
         "btc_orderflow": state.btc_orderflow_feed.get_orderflow_summary() if hasattr(state, "btc_orderflow_feed") and state.btc_orderflow_feed else None,
         "continuous_training": state.continuous_trainer.get_status() if hasattr(state, "continuous_trainer") and state.continuous_trainer else None,
+        "dual_onnx_telemetry": dual_telemetry,
+        "preflight_gates": preflight_gates,
     }
 
 

@@ -19,6 +19,7 @@ import {
   Sparkles,
   Crown,
   Shield,
+  Layers,
 } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
 import { getAssetMeta } from '../utils/assets';
@@ -77,8 +78,9 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   };
 
   const activeStrategy = signals.strategy_id || '3_step_domination_bot';
-  const isMacroOnnx = activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion';
-  const isMacroTrend = !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend');
+  const isDualOnnx = activeStrategy === 'dual_onnx' || activeStrategy === 'dual_onnx_bot' || activeStrategy === 'dual_onnx_arbitrage';
+  const isMacroOnnx = !isDualOnnx && (activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion');
+  const isMacroTrend = !isDualOnnx && !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend');
   const isDominion2 = activeStrategy === 'dominion_2_bot';
   const is3StepBot = activeStrategy === '3_step_domination_bot';
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';
@@ -176,7 +178,11 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             className="flex items-center gap-2 px-3 py-1.5 bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded-xl transition-all shadow-sm group"
             title="Click to switch strategy bot"
           >
-            {isMacroOnnx ? (
+            {isDualOnnx ? (
+              <div className="h-5 w-5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center">
+                <Layers className="h-3.5 w-3.5 text-cyan-300" />
+              </div>
+            ) : isMacroOnnx ? (
               <div className="h-5 w-5 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
                 <Cpu className="h-3.5 w-3.5 text-purple-300" />
               </div>
@@ -200,7 +206,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
             <div className="text-left">
               <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                <span>{isMacroOnnx ? 'Macro ONNX Bot' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2 Bot' : is3StepBot ? '3-Step Domination Bot' : 'ONNX Microstructure Bot'}</span>
+                <span>{isDualOnnx ? 'Dual-ONNX Arbitrage' : isMacroOnnx ? 'Macro ONNX Bot' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2 Bot' : is3StepBot ? '3-Step Domination Bot' : 'ONNX Microstructure Bot'}</span>
                 <ChevronDown className={`h-3 w-3 text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
               </div>
             </div>
@@ -213,7 +219,35 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 Select Quantitative Trading Bot
               </div>
 
-              {/* Champion: Macro ONNX Bot */}
+              {/* Champion: Dual-ONNX Arbitrage Bot */}
+              <button
+                onClick={() => handleStrategyChange('dual_onnx')}
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${
+                  isDualOnnx
+                    ? 'bg-cyan-500/20 border border-cyan-500/50'
+                    : 'hover:bg-[#21262d] border border-transparent'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="h-7 w-7 rounded-lg bg-cyan-500/25 border border-cyan-500/50 flex items-center justify-center shrink-0 mt-0.5">
+                    <Layers className="h-4 w-4 text-cyan-300" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>Dual-ONNX Arbitrage</span>
+                      <span className="px-1.5 py-0.2 text-[9px] font-mono bg-cyan-500/30 text-cyan-200 border border-cyan-500/40 rounded-full font-bold">
+                        Dual-Brain (New)
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
+                      Spot Microscope vs Kalshi Lag • Contradiction Discount Snipe
+                    </p>
+                  </div>
+                </div>
+                {isDualOnnx && <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-1" />}
+              </button>
+
+              {/* Macro ONNX Bot */}
               <button
                 onClick={() => handleStrategyChange('macro_onnx')}
                 className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all ${

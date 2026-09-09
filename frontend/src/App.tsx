@@ -194,6 +194,8 @@ export function App() {
               window.history.replaceState({}, '', url.toString());
             }
           }}
+          dualOnnxTelemetry={data.dual_onnx_telemetry}
+          preflightGates={data.preflight_gates}
         />
       </div>
     );
@@ -232,6 +234,8 @@ export function App() {
       onClosePosition={closePosition}
       onCancelOrder={cancelOrder}
       onResetCircuitBreaker={resetCircuitBreaker}
+      dualOnnxTelemetry={data.dual_onnx_telemetry}
+      preflightGates={data.preflight_gates}
     />
   );
 }

@@ -28,6 +28,7 @@ from kalshi_sim.db import DatabaseWriter, get_db_writer
 from kalshi_sim.execution_logger import ExecutionLogger
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
+from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
 from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
@@ -99,6 +100,7 @@ class SimulationAgent:
         self._portfolio_dominion2 = Portfolio(starting_balance=starting_capital)
         self._portfolio_domination = Portfolio(starting_balance=starting_capital)
         self._portfolio_onnx = Portfolio(starting_balance=starting_capital)
+        self._portfolio_dual_onnx = Portfolio(starting_balance=starting_capital)
         self._simulator = OrderSimulator()
         self._exec_logger = ExecutionLogger(data_dir=data_dir)
         self._onnx_engine = KalshiONNXEngine(model_path=model_path)
@@ -106,6 +108,7 @@ class SimulationAgent:
         self._macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_onnx", strategy_name="Macro ONNX Bot")
         self._dominion2_bot = Dominion2Bot()
         self._domination_bot = ThreeStepDominationBot()
+        self._dual_onnx_bot = DualONNXArbitrageBot()
         self.active_strategy_bot: str = "3_step_domination_bot"
         self.execution_mode: str = "simulated"
         self._db_writer = db_writer or get_db_writer()
@@ -116,6 +119,7 @@ class SimulationAgent:
             ("dominion_2_bot", self._dominion2_bot),
             ("macro_trend_dominion", self._macro_trend_bot),
             ("macro_onnx", self._macro_trend_bot),
+            ("dual_onnx", self._dual_onnx_bot),
         ]:
             self.bot_auditor.audit_bot(b_id, b_inst, mode=self.execution_mode)
 
@@ -151,6 +155,8 @@ class SimulationAgent:
             return self._portfolio_dominion2
         elif self.active_strategy_bot == "onnx_microstructure_bot":
             return self._portfolio_onnx
+        elif self.active_strategy_bot in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+            return self._portfolio_dual_onnx
         return self._portfolio_domination
 
     @property
@@ -240,12 +246,16 @@ class SimulationAgent:
             return self._domination_bot
         elif bot_id == "onnx_microstructure_bot":
             return self._onnx_engine
+        elif bot_id in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+            return self._dual_onnx_bot
         return None
 
     def set_active_strategy(self, strategy_id: str) -> None:
         """Switch active strategy bot with mandatory pre-deployment audit certification gate."""
         target = strategy_id
-        if target in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+        if target in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+            target = "dual_onnx"
+        elif target in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
             target = "macro_onnx"
         elif target in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
             target = "macro_trend_dominion"

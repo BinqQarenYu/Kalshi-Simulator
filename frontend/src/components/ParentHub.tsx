@@ -20,6 +20,8 @@ import {
   ComplianceStatus,
   SystemResourceMetrics,
   WinLossEventReport,
+  DualONNXTelemetry,
+  PreflightGates,
 } from '../types';
 import {
   BarChart3,
@@ -115,6 +117,8 @@ interface ParentHubProps {
   onClosePosition?: (ticker: string, executionMode?: 'paper' | 'live') => Promise<any>;
   onCancelOrder?: (orderId: string, executionMode?: 'paper' | 'live') => Promise<any>;
   onResetCircuitBreaker?: () => Promise<any>;
+  dualOnnxTelemetry?: DualONNXTelemetry;
+  preflightGates?: PreflightGates;
 }
 
 export const ParentHub: React.FC<ParentHubProps> = ({
@@ -148,6 +152,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   onClosePosition,
   onCancelOrder,
   onResetCircuitBreaker,
+  dualOnnxTelemetry,
+  preflightGates,
 }) => {
   const [primaryNav, setPrimaryNav] = useState<PrimaryNav>('analytics');
   const [settingsSubNav, setSettingsSubNav] = useState<SettingsSubNav>('defaults');
@@ -1541,7 +1547,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           {primaryNav === 'analytics' && analyticsSubNav === 'workbench' && (
             <div className="space-y-4">
               {/* Compact Price Hero */}
-              <PriceHero market={market} />
+              <PriceHero market={market} preflightGates={preflightGates} />
 
               {/* 60 FPS Trajectory Spline Chart */}
               <TargetChart
@@ -1653,6 +1659,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               consecutiveLosses={consecutiveLosses}
               selectedBotId={selectedBotId}
               onSelectBot={handleSelectBot}
+              dualOnnxTelemetry={dualOnnxTelemetry}
+              preflightGates={preflightGates}
             />
           </div>
         ) : (

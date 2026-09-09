@@ -11,7 +11,7 @@
  */
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { MarketState, AISignals, Position, LivePortfolioState } from '../types';
+import { MarketState, AISignals, Position, LivePortfolioState, DualONNXTelemetry, PreflightGates } from '../types';
 import {
   AlertOctagon,
   Zap,
@@ -52,6 +52,21 @@ export interface BotProfile {
 }
 
 export const BOT_PROFILES: Record<string, BotProfile> = {
+  'dual_onnx': {
+    id: 'dual_onnx',
+    name: 'Dual-ONNX Contradiction Arbitrage',
+    shortName: 'Dual-ONNX Arb',
+    version: 'v1.0 (Arbitrage)',
+    lane: 'LANE 2 (SHADOW PAPER)',
+    laneBadge: 'shadow',
+    asset: 'BTC',
+    timeframe: '15m',
+    telemetryType: 'onnx',
+    description: 'QuoLas Spot Microscope (Binance Lead) vs Kalshi Contract Momentum (Lag CLOB) Arbitrage Matrix',
+    hardCapContracts: 1,
+    discountCeiling: 0.48,
+    playbook: 'Contradiction Arbitrage · Asymmetric Discount Snipe',
+  },
   '3_step_domination_bot': {
     id: '3_step_domination_bot',
     name: '3-Step Dominion v3.2',
@@ -174,6 +189,8 @@ interface BabyBotConsoleProps {
   consecutiveLosses?: number;
   selectedBotId?: string;
   onSelectBot?: (botId: string) => void;
+  dualOnnxTelemetry?: DualONNXTelemetry;
+  preflightGates?: PreflightGates;
 }
 
 export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
@@ -191,6 +208,8 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   consecutiveLosses = 0,
   selectedBotId = '3_step_domination_bot',
   onSelectBot,
+  dualOnnxTelemetry,
+  preflightGates,
 }) => {
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [killHoldProgress, setKillHoldProgress] = useState(0);
@@ -356,12 +375,13 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const isConfidencePassing = parseFloat(onnxConfidence) >= (botParams.min_confidence || 0.70);
 
   // Dual-ONNX Specific Telemetry (QuoLas Spot + Built-in Kalshi Microstructure)
-  const quolasSignal = (aiSignals?.quolas_signal || (isDiffPositive ? 'UP' : 'DOWN')).toUpperCase();
-  const quolasConfidence = Math.round((aiSignals?.quolas_confidence ?? 0.842) * 100);
-  const kalshiSignal = (aiSignals?.kalshi_signal || (aiSignals?.recommended_side === 'yes' ? 'UP' : aiSignals?.recommended_side === 'no' ? 'DOWN' : 'WAIT')).toUpperCase();
-  const kalshiConfidence = Math.round((aiSignals?.kalshi_confidence ?? (aiSignals?.onnx_confidence ? aiSignals.onnx_confidence : 0.728)) * 100);
+  const quolasSignal = (dualOnnxTelemetry?.quolas_signal || aiSignals?.quolas_signal || (isDiffPositive ? 'UP' : 'DOWN')).toUpperCase();
+  const quolasConfidence = Math.round((dualOnnxTelemetry?.quolas_confidence ?? aiSignals?.quolas_confidence ?? 0.842) * 100);
+  const kalshiSignal = (dualOnnxTelemetry?.kalshi_signal || aiSignals?.kalshi_signal || (aiSignals?.recommended_side === 'yes' ? 'UP' : aiSignals?.recommended_side === 'no' ? 'DOWN' : 'WAIT')).toUpperCase();
+  const kalshiConfidence = Math.round((dualOnnxTelemetry?.kalshi_confidence ?? aiSignals?.kalshi_confidence ?? (aiSignals?.onnx_confidence ? aiSignals.onnx_confidence : 0.728)) * 100);
 
   const dualRegime = useMemo(() => {
+    if (dualOnnxTelemetry?.regime) return dualOnnxTelemetry.regime;
     if (aiSignals?.dual_onnx_regime) return aiSignals.dual_onnx_regime;
     if (isVpinToxic) return 'TOXIC_VETO';
     if (quolasSignal === 'UP' && kalshiSignal === 'UP') return 'MOMENTUM_SCALP';
@@ -369,9 +389,10 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     if (quolasSignal === 'UP' && kalshiSignal !== 'UP') return 'CONTRADICTION_ARBITRAGE';
     if (quolasSignal === 'DOWN' && kalshiSignal !== 'DOWN') return 'CONTRADICTION_ARBITRAGE';
     return 'CHOP_WAIT';
-  }, [aiSignals?.dual_onnx_regime, isVpinToxic, quolasSignal, kalshiSignal]);
+  }, [dualOnnxTelemetry?.regime, aiSignals?.dual_onnx_regime, isVpinToxic, quolasSignal, kalshiSignal]);
 
   const dualRationale = useMemo(() => {
+    if (dualOnnxTelemetry?.rationale) return dualOnnxTelemetry.rationale;
     if (dualRegime === 'TOXIC_VETO') {
       return `VPIN toxicity (${vpin.toFixed(2)} ≥ ${(botParams.vpin_toxic_threshold || 0.70).toFixed(2)}). Heavy institutional toxic flow detected; adverse selection veto active.`;
     }
@@ -382,7 +403,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       return `Dual consensus confirmed: QuoLas Spot (${quolasSignal} ${quolasConfidence}%) & Kalshi CLOB (${kalshiSignal} ${kalshiConfidence}%) aligned. Scaling momentum entry ≤ $${botParams.momentum_max_price?.toFixed(2) || '0.62'}.`;
     }
     return `Awaiting high-confidence orderflow impulse. Both models filtering noise below ${((botParams.min_confidence || 0.70) * 100).toFixed(0)}% threshold.`;
-  }, [dualRegime, vpin, botParams, quolasSignal, quolasConfidence, kalshiSignal, kalshiConfidence]);
+  }, [dualOnnxTelemetry?.rationale, dualRegime, vpin, botParams, quolasSignal, quolasConfidence, kalshiSignal, kalshiConfidence]);
 
   // Hold-to-arm kill switch logic
   const handleHoldStart = () => {
@@ -501,12 +522,13 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           Model:
         </span>
         {[
+          BOT_PROFILES['dual_onnx'],
           BOT_PROFILES['3_step_domination_bot'],
           BOT_PROFILES['macro_onnx'],
           BOT_PROFILES['dominion_2_bot'],
           BOT_PROFILES['ofi_sprint_scalper'],
           BOT_PROFILES['macro_trend_dominion'],
-        ].map((profile) => {
+        ].filter(Boolean).map((profile) => {
           const isActive =
             activeProfile.id === profile.id ||
             (profile.id === 'macro_onnx' && activeProfile.id === 'onnx_microstructure_bot');
@@ -646,6 +668,93 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         </div>
       </div>
 
+      {/* 4.5. THE "WHY NO TRADE?" PRE-FLIGHT DIAGNOSTIC HUD (Pillar 2) */}
+      <div className="px-3 py-2 bg-[#090c10] border-b border-[#262d35] font-mono text-[10px]">
+        <div className="flex items-center justify-between pb-1.5 text-[#8c9ba5]">
+          <span className="text-[9px] uppercase font-bold tracking-wider flex items-center gap-1 text-gray-300">
+            <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+            Pre-Flight Gates (Why No Trade?)
+          </span>
+          <span className="text-[8px] text-gray-500">Continuous Microstructure Guardian</span>
+        </div>
+
+        <div className="grid grid-cols-4 gap-1.5">
+          {/* Gate 1: Dynamic Moat */}
+          <div 
+            className={`p-1.5 rounded border text-center transition-all ${
+              (preflightGates?.moat_gate?.status ?? (Math.abs(diffVal) >= 40.25 ? 'PASS' : 'VETO')) === 'PASS'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-amber-500/15 border-amber-500/40 text-amber-300 ring-1 ring-amber-500/30'
+            }`}
+            title={preflightGates?.moat_gate?.reason || `Moat: |Diff| $${Math.abs(diffVal).toFixed(2)} vs $40.25 Floor`}
+          >
+            <div className="text-[8px] text-gray-400 uppercase font-bold">Dynamic Moat</div>
+            <div className="font-bold text-[10px] mt-0.5">
+              {(preflightGates?.moat_gate?.status ?? (Math.abs(diffVal) >= 40.25 ? 'PASS' : 'VETO'))}
+            </div>
+          </div>
+
+          {/* Gate 2: VPIN Safety */}
+          <div 
+            className={`p-1.5 rounded border text-center transition-all ${
+              (preflightGates?.vpin_gate?.status ?? (vpin < 0.60 ? 'PASS' : 'VETO')) === 'PASS'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-rose-500/15 border-rose-500/40 text-rose-300 ring-1 ring-rose-500/30'
+            }`}
+            title={preflightGates?.vpin_gate?.reason || `VPIN: ${vpin.toFixed(2)} vs 0.60 Threshold`}
+          >
+            <div className="text-[8px] text-gray-400 uppercase font-bold">VPIN Safety</div>
+            <div className="font-bold text-[10px] mt-0.5">
+              {(preflightGates?.vpin_gate?.status ?? (vpin < 0.60 ? 'PASS' : 'VETO'))}
+            </div>
+          </div>
+
+          {/* Gate 3: Cycle Lock */}
+          <div 
+            className={`p-1.5 rounded border text-center transition-all ${
+              (preflightGates?.cycle_lock_gate?.status ?? 'READY') === 'READY'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+            }`}
+            title={preflightGates?.cycle_lock_gate?.reason || '1 trade per 15M cycle protection'}
+          >
+            <div className="text-[8px] text-gray-400 uppercase font-bold">Cycle Lock</div>
+            <div className="font-bold text-[10px] mt-0.5">
+              {(preflightGates?.cycle_lock_gate?.status ?? 'READY')}
+            </div>
+          </div>
+
+          {/* Gate 4: Edge / EV */}
+          <div 
+            className={`p-1.5 rounded border text-center transition-all ${
+              (preflightGates?.edge_gate?.status ?? (aiSignals?.recommended_side !== 'wait' ? 'PASS' : 'WAIT')) === 'PASS'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-slate-800/80 border-slate-700 text-slate-400'
+            }`}
+            title={preflightGates?.edge_gate?.reason || 'Waiting for statistical edge > 5%'}
+          >
+            <div className="text-[8px] text-gray-400 uppercase font-bold">Edge / EV</div>
+            <div className="font-bold text-[10px] mt-0.5">
+              {(preflightGates?.edge_gate?.status ?? (aiSignals?.recommended_side !== 'wait' ? 'PASS' : 'WAIT'))}
+            </div>
+          </div>
+        </div>
+
+        {/* Dynamic Veto Explanation Bar */}
+        {((preflightGates?.moat_gate?.status === 'VETO') || (preflightGates?.vpin_gate?.status === 'VETO') || (preflightGates?.cycle_lock_gate?.status === 'LOCKED')) && (
+          <div className="mt-2 px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 rounded text-[9px] text-amber-200 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
+            <span>
+              {preflightGates?.vpin_gate?.status === 'VETO'
+                ? preflightGates.vpin_gate.reason
+                : preflightGates?.cycle_lock_gate?.status === 'LOCKED'
+                ? preflightGates.cycle_lock_gate.reason
+                : preflightGates?.moat_gate?.reason || 'Proximity Veto: Trapped inside strike noise trap.'}
+            </span>
+          </div>
+        )}
+      </div>
+
       {/* 5. STRATEGY-SPECIFIC TELEMETRY DECK */}
       {activeProfile.telemetryType === 'onnx' ? (
         // --- ONNX Macro Net v2: Dual-Brain Neural Telemetry Deck ---
@@ -655,7 +764,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
             <div className="flex items-center gap-2">
               <Cpu className="w-4 h-4 text-purple-400" />
               <span className="text-xs font-bold text-white uppercase tracking-wider">
-                Dual-Brain ONNX Macro Net v2
+                {activeProfile.name}
               </span>
             </div>
             <span
@@ -674,6 +783,44 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
               {dualRegime === 'TOXIC_VETO' && '🛡️ TOXIC VETO'}
               {dualRegime === 'CHOP_WAIT' && '⏸️ CHOP WAIT'}
             </span>
+          </div>
+
+          {/* Central Glowing Arbitrage Badge (Pillar 1) */}
+          <div className="text-center py-0.5">
+            <div className={`w-full py-1.5 px-2.5 rounded-xl font-mono text-[11px] font-extrabold uppercase border shadow-md flex items-center justify-center gap-2 transition-all ${
+              dualRegime === 'CONTRADICTION_ARBITRAGE'
+                ? 'bg-cyan-500/15 text-cyan-300 border-cyan-400/50 shadow-cyan-500/20 ring-1 ring-cyan-400/40 animate-pulse'
+                : dualRegime === 'MOMENTUM_SCALP'
+                ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/50 shadow-emerald-500/20 ring-1 ring-emerald-400/40 animate-pulse'
+                : dualRegime === 'TOXIC_VETO'
+                ? 'bg-rose-500/15 text-rose-300 border-rose-400/50 shadow-rose-500/20'
+                : 'bg-[#151921] text-gray-400 border-gray-700'
+            }`}>
+              {dualRegime === 'CONTRADICTION_ARBITRAGE' && (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                  <span>💎 ASYMMETRIC DISCOUNT (BUY {(dualOnnxTelemetry?.side || (quolasSignal === 'UP' ? 'YES' : 'NO')).toUpperCase()} @ {((dualOnnxTelemetry?.recommended_limit_price ?? botParams.discount_limit_price ?? 0.48) * 100).toFixed(0)}¢)</span>
+                </>
+              )}
+              {dualRegime === 'MOMENTUM_SCALP' && (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span>⚡ MOMENTUM VELOCITY SCALP (BUY {(dualOnnxTelemetry?.side || (quolasSignal === 'UP' ? 'YES' : 'NO')).toUpperCase()})</span>
+                </>
+              )}
+              {dualRegime === 'TOXIC_VETO' && (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-rose-400" />
+                  <span>🔴 TOXIC VETO (SPOT DUMP / HIGH VPIN)</span>
+                </>
+              )}
+              {dualRegime === 'CHOP_WAIT' && (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-gray-500" />
+                  <span>⏸️ CAPITAL PRESERVATION (CHOP WAIT)</span>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Dual-Brain Twin Cards: QuoLas (Spot) vs Kalshi (Binary CLOB) */}

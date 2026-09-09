@@ -124,6 +124,7 @@ export interface BtcOrderflowSummary {
 }
 
 export type StrategyBotId =
+  | 'dual_onnx'
   | 'macro_onnx'
   | 'macro_trend_dominion'
   | 'dominion_2_bot'
@@ -377,6 +378,52 @@ export interface DashboardState {
   };
   btc_orderflow?: BtcOrderflowSummary;
   continuous_training?: ContinuousTrainingTelemetry;
+  dual_onnx_telemetry?: DualONNXTelemetry;
+  preflight_gates?: PreflightGates;
+}
+
+export interface DualONNXTelemetry {
+  regime: 'MOMENTUM_SCALP' | 'CONTRADICTION_ARBITRAGE' | 'CHOP_WAIT' | 'TOXIC_VETO' | string;
+  action: string;
+  side: string | null;
+  quolas_signal: string;
+  quolas_confidence: number;
+  kalshi_signal: string;
+  kalshi_confidence: number;
+  recommended_limit_price: number;
+  expected_value: number;
+  recommended_contracts: number;
+  rationale: string;
+  active: boolean;
+}
+
+export interface PreflightGate {
+  status: 'PASS' | 'VETO' | 'READY' | 'LOCKED' | 'WAIT';
+  label: string;
+  reason: string;
+  [key: string]: any;
+}
+
+export interface PreflightGates {
+  moat_gate: PreflightGate & {
+    current_diff: number;
+    abs_diff: number;
+    required_moat: number;
+    floor: number;
+    sweet_spot: number;
+    ceiling: number;
+  };
+  vpin_gate: PreflightGate & {
+    current_vpin: number;
+    threshold: number;
+  };
+  cycle_lock_gate: PreflightGate & {
+    locked: boolean;
+  };
+  edge_gate: PreflightGate & {
+    edge_pct: number;
+    ev: number;
+  };
 }
 
 export interface ContinuousTrainingTelemetry {
