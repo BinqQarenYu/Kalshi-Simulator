@@ -462,17 +462,20 @@ class L2BookState:
 
     # -- Depth ---------------------------------------------------------------
 
-    def get_depth(self, n: int = 15) -> tuple[list[OrderBookLevel], list[OrderBookLevel]]:
-        """Return top *n* bid and ask levels, sorted best-first.
+    def get_depth_tuples(self, n: int = 15) -> tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:
+        """Return top *n* bid and ask (price, quantity) tuples, sorted best-first.
 
-        Performance optimization: Sort primitive (price, quantity) dict items first
-        using operator.itemgetter(0) and slice top n before instantiating Pydantic
-        OrderBookLevel objects. This avoids creating hundreds of discarded Pydantic
-        models on every depth snapshot query (~5x speedup, ~85% memory allocation reduction).
+        Performance optimization: Returns primitive dict item tuples directly without
+        instantiating Pydantic OrderBookLevel objects. This avoids creating hundreds of
+        discarded Pydantic models per tick when feeding ML pipelines.
         """
         top_yes = sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]
         top_no = sorted(self.no_book.items(), key=_PRICE_GETTER, reverse=not self.is_spot)[:n]
+        return top_yes, top_no
 
+    def get_depth(self, n: int = 15) -> tuple[list[OrderBookLevel], list[OrderBookLevel]]:
+        """Return top *n* bid and ask levels as OrderBookLevel models, sorted best-first."""
+        top_yes, top_no = self.get_depth_tuples(n)
         bids = [OrderBookLevel(price=p, quantity=q) for p, q in top_yes]
         asks = [OrderBookLevel(price=p, quantity=q) for p, q in top_no]
         return bids, asks
