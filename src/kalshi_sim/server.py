@@ -144,8 +144,11 @@ def resolve_bot_instance(bot_id: str) -> Any:
         return Dominion2Bot()
     elif bot_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend", "macro_trend_dominion", "macro_trend_dominion_bot"):
         return MacroTrendDominionBot()
-    elif bot_id in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
-        return DualONNXArbitrageBot()
+    elif bot_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+        if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
+            return state.dual_onnx_bot
+        state.dual_onnx_bot = DualONNXArbitrageBot()
+        return state.dual_onnx_bot
     return None
 
 
@@ -293,6 +296,9 @@ class ServerState:
             max_recent_tick_files=15,
             enabled=True,
         )
+
+        # The ONNX Strategy Execution Instance (Dual-Brain Contradiction & Momentum Arbitrage)
+        self.dual_onnx_bot = DualONNXArbitrageBot()
 
         # 15-Minute Event Win/Loss Reports Ledger (Disk-Persisted, No Auto-Reset)
         self.win_loss_reports: list[dict[str, Any]] = self.load_persisted_reports()
@@ -3591,26 +3597,54 @@ class ParametersUpdateRequest(BaseModel):
     min_take_profit_roi: Optional[float] = Field(default=None, ge=5.0, le=100.0, description="Minimum take profit ROI percentage")
     min_confidence: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Minimum ONNX neural net confidence")
     momentum_max_price: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Maximum allowable entry price for momentum trades")
+    brain_priority_mode: Optional[str] = Field(default=None, description="Brain priority arbitration mode: TREND_ALIGNED_SCALP, CONTRADICTION_SNIPER, UNANIMOUS_CONSENSUS")
+    contract_scaling_mode: Optional[str] = Field(default=None, description="Contract sizing mode: TIER_0_STRICT_1, TIER_1_CONVICTION_2, TIER_2_KELLY")
+    volatility_floor: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="Dead chop cutoff threshold in dollars ($)")
+    volatility_ceiling: Optional[float] = Field(default=None, ge=10.0, le=500.0, description="News event / high chaos cutoff in dollars ($)")
+    entry_discount_depth: Optional[float] = Field(default=None, ge=0.10, le=0.65, description="Entry discount limit depth ceiling ($0.35 - $0.50)")
+    tape_confirmation_ticks: Optional[int] = Field(default=None, ge=1, le=10, description="Number of consecutive orderflow tape ticks required for entry confirmation")
+    taker_cross_ev_threshold: Optional[float] = Field(default=None, ge=0.01, le=0.30, description="Minimum EV required to pay taker spread/fee")
+    dynamic_moat_multiplier: Optional[float] = Field(default=None, ge=0.5, le=3.0, description="Dynamic moat volatility multiplier")
 
 
 @app.get("/api/bot/parameters")
 async def get_bot_parameters() -> dict[str, Any]:
     """Return live strategy parameters and guardrail thresholds (forwarded to Standalone Bot if active)."""
     holder = get_active_lock_holder()
+    res: dict[str, Any] = {}
     if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
         try:
             connector = create_aiohttp_connector()
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get("http://127.0.0.1:8001/api/bot/parameters", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
                     if resp.status == 200:
-                        return await resp.json()
+                        res = await resp.json()
         except Exception as e:
             logger.debug("Failed fetching parameters from standalone bot: %s", e)
 
-    inst = resolve_bot_instance(state.active_strategy_bot)
-    if inst and hasattr(inst, "get_parameters"):
-        return inst.get_parameters()
-    return {"status": "NO_PARAMETERS"}
+    if not res:
+        inst = resolve_bot_instance(state.active_strategy_bot)
+        if inst and hasattr(inst, "get_parameters"):
+            res = inst.get_parameters()
+        else:
+            res = {"status": "NO_PARAMETERS"}
+
+    # Merge dual_onnx strategy dials so client consoles always receive current dials
+    if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
+        onnx_params = state.dual_onnx_bot.get_parameters()
+        for k in (
+            "brain_priority_mode",
+            "contract_scaling_mode",
+            "volatility_floor",
+            "volatility_ceiling",
+            "entry_discount_depth",
+            "tape_confirmation_ticks",
+            "taker_cross_ev_threshold",
+            "dynamic_moat_multiplier",
+        ):
+            if k not in res:
+                res[k] = onnx_params.get(k)
+    return res
 
 
 @app.post("/api/bot/parameters")
@@ -3618,6 +3652,7 @@ async def get_bot_parameters() -> dict[str, Any]:
 async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
     """Dynamically update strategy parameters (forwarded to Standalone Bot if active)."""
     payload = req.model_dump(exclude_none=True)
+    res: dict[str, Any] = {}
     holder = get_active_lock_holder()
     if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
         try:
@@ -3625,14 +3660,39 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.post("http://127.0.0.1:8001/api/bot/parameters", json=payload, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
                     if resp.status == 200:
-                        return await resp.json()
+                        res = await resp.json()
         except Exception as e:
             logger.warning("Failed updating parameters on standalone bot: %s", e)
 
-    inst = resolve_bot_instance(state.active_strategy_bot)
-    if inst and hasattr(inst, "update_parameters"):
-        return inst.update_parameters(**payload)
-    return {"status": "UPDATED", "parameters": payload}
+    # Always keep dual_onnx_bot updated with strategy dials
+    if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
+        state.dual_onnx_bot.update_parameters(**payload)
+
+    if not res:
+        inst = resolve_bot_instance(state.active_strategy_bot)
+        if inst and hasattr(inst, "update_parameters"):
+            res = inst.update_parameters(**payload)
+        else:
+            res = {"status": "UPDATED", "parameters": payload}
+
+    # Ensure updated strategy dials are merged in response
+    if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
+        onnx_params = state.dual_onnx_bot.get_parameters()
+        for k in (
+            "brain_priority_mode",
+            "contract_scaling_mode",
+            "volatility_floor",
+            "volatility_ceiling",
+            "entry_discount_depth",
+            "tape_confirmation_ticks",
+            "taker_cross_ev_threshold",
+            "dynamic_moat_multiplier",
+        ):
+            if k in payload or k not in res:
+                res[k] = onnx_params.get(k)
+                if "parameters" in res and isinstance(res["parameters"], dict):
+                    res["parameters"][k] = onnx_params.get(k)
+    return res
 
 
 @app.get("/api/bot/dual-onnx")
@@ -3654,16 +3714,18 @@ async def get_bot_strategies() -> dict[str, Any]:
         "strategies": [
             {
                 "id": "dual_onnx",
-                "name": "Dual-ONNX Contradiction Arbitrage",
+                "strategy_id": "the_onnx_strategy",
+                "name": "The ONNX Strategy (Dual-Brain Arbitrage)",
                 "description": "Dual-Brain Cross-Market Arbitrage Engine: Fuses QuoLas Spot Microscope (Binance Lead) with Kalshi Contract Order Flow (Lag CLOB) to exploit market microstructure mispricings and momentum scalps.",
-                "active": state.active_strategy_bot == "dual_onnx",
-                "badge": "Dual-Brain Contradiction Arbitrage (New)",
+                "active": state.active_strategy_bot in ("dual_onnx", "the_onnx_strategy"),
+                "badge": "The ONNX Strategy (Active Dials)",
                 "icon": "Layers",
                 "features": [
+                    "5 Strategy Execution Dials (Priority, Sizing Armor, Volatility, Discount, Tape)",
                     "Dual ONNX Neural Inferences (Spot Lead vs Contract Lag)",
                     "Contradiction Arbitrage Mode (Discount Entry on Divergence)",
                     "Agreement Mode (Momentum Scalping on Consensus)",
-                    "Micro-Bankroll 1-Contract Hard Allocation",
+                    "Micro-Bankroll 1-Contract Hard Allocation Sizing Armor",
                     "Dynamic Moat Gate (1.15x - 2.15x Strike Zone)",
                     "Adaptive 4-Pillar Pre-Flight Gate",
                     "Toxic VPIN & Chop Veto Protection",
@@ -3758,7 +3820,7 @@ async def get_bot_strategies() -> dict[str, Any]:
 async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
     """Switch active strategy bot."""
     strat_id = req.strategy_id
-    if strat_id in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+    if strat_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
         strat_id = "dual_onnx"
     elif strat_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
         strat_id = "macro_onnx"
@@ -5689,6 +5751,7 @@ def _build_full_state_payload() -> dict[str, Any]:
         },
     }
 
+    dual_bot = getattr(state, "dual_onnx_bot", None)
     dual_telemetry = {
         "regime": ai_data.get("regime", "CHOP_WAIT"),
         "action": ai_data.get("action", "HOLD"),
@@ -5701,7 +5764,18 @@ def _build_full_state_payload() -> dict[str, Any]:
         "expected_value": float(ai_data.get("expected_value", 0.0)),
         "recommended_contracts": int(ai_data.get("recommended_contracts", 1)),
         "rationale": ai_data.get("rationale", ""),
-        "active": state.active_strategy_bot == "dual_onnx",
+        "active": state.active_strategy_bot in ("dual_onnx", "the_onnx_strategy"),
+        # The 5 Strategy Execution Dials
+        "brain_priority_mode": getattr(dual_bot, "brain_priority_mode", "TREND_ALIGNED_SCALP"),
+        "contract_scaling_mode": getattr(dual_bot, "contract_scaling_mode", "TIER_0_STRICT_1"),
+        "volatility_floor": float(getattr(dual_bot, "volatility_floor", 10.0)),
+        "volatility_ceiling": float(getattr(dual_bot, "volatility_ceiling", 45.0)),
+        "entry_discount_depth": float(getattr(dual_bot, "entry_discount_depth", 0.48)),
+        "tape_confirmation_ticks": getattr(dual_bot, "tape_confirmation_ticks", 2),
+        "taker_cross_ev_threshold": float(getattr(dual_bot, "taker_cross_ev_threshold", 0.08)),
+        "dynamic_moat_multiplier": float(getattr(dual_bot, "dynamic_moat_multiplier", 1.15)),
+        "current_atr": float(getattr(dual_bot, "current_atr", 14.0)),
+        "tape_streak": getattr(dual_bot, "tape_streak", 0),
     }
 
     return {

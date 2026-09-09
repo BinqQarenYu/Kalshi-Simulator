@@ -395,6 +395,42 @@ export interface DualONNXTelemetry {
   recommended_contracts: number;
   rationale: string;
   active: boolean;
+  // The 5 Strategy Execution Dials
+  brain_priority_mode?: 'TREND_ALIGNED_SCALP' | 'CONTRADICTION_SNIPER' | 'UNANIMOUS_CONSENSUS' | string;
+  contract_scaling_mode?: 'TIER_0_STRICT_1' | 'TIER_1_CONVICTION_2' | 'TIER_2_KELLY' | string;
+  volatility_floor?: number;
+  volatility_ceiling?: number;
+  entry_discount_depth?: number;
+  tape_confirmation_ticks?: number;
+  taker_cross_ev_threshold?: number;
+  dynamic_moat_multiplier?: number;
+  current_atr?: number;
+  tape_streak?: number;
+}
+
+export interface BotParameters {
+  strategy_id?: string;
+  strategy_name?: string;
+  brain_priority_mode?: 'TREND_ALIGNED_SCALP' | 'CONTRADICTION_SNIPER' | 'UNANIMOUS_CONSENSUS' | string;
+  contract_scaling_mode?: 'TIER_0_STRICT_1' | 'TIER_1_CONVICTION_2' | 'TIER_2_KELLY' | string;
+  volatility_floor?: number;
+  volatility_ceiling?: number;
+  entry_discount_depth?: number;
+  tape_confirmation_ticks?: number;
+  taker_cross_ev_threshold?: number;
+  dynamic_moat_multiplier?: number;
+  discount_limit_price?: number;
+  discount_ceiling?: number;
+  max_contracts?: number;
+  min_confidence?: number;
+  min_ev_dollars?: number;
+  min_edge_pct?: number;
+  min_spot_diff?: number;
+  vpin_toxic_threshold?: number;
+  momentum_max_price?: number;
+  take_profit_price_threshold?: number;
+  min_take_profit_roi?: number;
+  [key: string]: any;
 }
 
 export interface PreflightGate {

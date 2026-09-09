@@ -423,3 +423,179 @@ def test_gateway_fallback_and_inference(tmp_path: Path) -> None:
     assert q_res["signal"] == "WAIT"
     assert k_res["signal"] == "WAIT"
     assert q_res["confidence"] == 1.0
+
+
+def test_the_onnx_strategy_identity_and_dials_introspection() -> None:
+    """Verify The ONNX Strategy identity, default parameters, and dial introspection."""
+    bot = DualONNXArbitrageBot()
+    assert bot.STRATEGY_ID == "the_onnx_strategy"
+    assert bot.STRATEGY_NAME == "The ONNX Strategy"
+
+    params = bot.get_parameters()
+    assert params["strategy_id"] == "the_onnx_strategy"
+    assert params["strategy_name"] == "The ONNX Strategy"
+    assert params["brain_priority_mode"] == "TREND_ALIGNED_SCALP"
+    assert params["contract_scaling_mode"] == "TIER_0_STRICT_1"
+    assert params["volatility_floor"] == 10.0
+    assert params["volatility_ceiling"] == 45.0
+    assert params["entry_discount_depth"] == 0.48
+    assert params["tape_confirmation_ticks"] == 2
+    assert params["max_contracts"] == 1
+
+
+def test_dial_1_brain_priority_modes(spot_l2_book: L2BookState, kalshi_l2_book: L2BookState) -> None:
+    """Verify Dial 1: Brain Priority Mode arbitration behavior."""
+    # 1. UNANIMOUS_CONSENSUS requires both models to agree
+    bot_consensus = DualONNXArbitrageBot(brain_priority_mode="UNANIMOUS_CONSENSUS")
+    # Divergent signals: Spot UP, Kalshi DOWN -> Vetoed in UNANIMOUS_CONSENSUS
+    dec = bot_consensus.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        kalshi_inference={"signal": "DOWN", "confidence": 0.75, "vpin_score": 0.20, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
+    )
+    assert dec.action == "HOLD"
+    assert "Consensus veto" in dec.rationale
+
+    # 2. TREND_ALIGNED_SCALP allows Spot Lead Scalp on divergence
+    bot_scalp = DualONNXArbitrageBot(brain_priority_mode="TREND_ALIGNED_SCALP")
+    dec_scalp = bot_scalp.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        kalshi_inference={"signal": "DOWN", "confidence": 0.75, "vpin_score": 0.20, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
+    )
+    assert dec_scalp.action == "BUY_YES"
+    assert dec_scalp.regime == DualONNXRegime.CONTRADICTION_ARBITRAGE
+
+
+def test_dial_2_sizing_armor_modes(spot_l2_book: L2BookState, kalshi_l2_book: L2BookState) -> None:
+    """Verify Dial 2: Contract Sizing Armor (Tier 0 Flat 1 vs Tier 1 Conviction 2)."""
+    # Tier 0: Strictly 1 contract even with high bankroll & high confidence
+    bot_tier0 = DualONNXArbitrageBot(contract_scaling_mode="TIER_0_STRICT_1")
+    dec0 = bot_tier0.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.90, "vpin_score": 0.15, "vpin_veto": False},
+        kalshi_inference={"signal": "UP", "confidence": 0.90, "vpin_score": 0.15, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
+        market_state={"bankroll": "150.00"},
+    )
+    assert dec0.recommended_contracts == 1
+
+    # Tier 1: Scales to 2 contracts when bankroll >= $75, confidence >= 0.75, EV >= +$0.06
+    bot_tier1 = DualONNXArbitrageBot(contract_scaling_mode="TIER_1_CONVICTION_2")
+    dec1 = bot_tier1.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.90, "vpin_score": 0.15, "vpin_veto": False},
+        kalshi_inference={"signal": "UP", "confidence": 0.90, "vpin_score": 0.15, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
+        market_state={"bankroll": "100.00"},
+    )
+    assert dec1.recommended_contracts == 2
+
+    # Tier 1: Armor protects micro-bankroll (< $75) by keeping 1 contract
+    dec1_micro = bot_tier1.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.90, "vpin_score": 0.15, "vpin_veto": False},
+        kalshi_inference={"signal": "UP", "confidence": 0.90, "vpin_score": 0.15, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
+        market_state={"bankroll": "25.00"},
+    )
+    assert dec1_micro.recommended_contracts == 1
+
+
+def test_dial_3_volatility_regime_filters(spot_l2_book: L2BookState, kalshi_l2_book: L2BookState) -> None:
+    """Verify Dial 3: Volatility Floor (Dead chop shield) and Ceiling (News spike shield)."""
+    # Dead chop veto when volatility < floor
+    bot_chop = DualONNXArbitrageBot(volatility_floor=Decimal("15.0"), typical_1m_volatility=8.0)
+    dec_chop = bot_chop.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        kalshi_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
+    )
+    assert dec_chop.action == "HOLD"
+    assert "Volatility floor veto" in dec_chop.rationale
+
+    # Panic spike veto when volatility > ceiling
+    bot_panic = DualONNXArbitrageBot(volatility_ceiling=Decimal("40.0"), typical_1m_volatility=55.0)
+    dec_panic = bot_panic.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        kalshi_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
+    )
+    assert dec_panic.action == "HOLD"
+    assert "Volatility ceiling veto" in dec_panic.rationale
+
+
+def test_dial_4_entry_discount_depth_maker_resting(spot_l2_book: L2BookState, kalshi_l2_book: L2BookState) -> None:
+    """Verify Dial 4: Entry Discount Depth enforces Maker resting ceiling and $0 fee."""
+    bot = DualONNXArbitrageBot(entry_discount_depth=Decimal("0.40"))
+    # In contradiction arbitrage, when best ask ($0.44) > discount ceiling ($0.40), it rests as maker at $0.40
+    dec = bot.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        kalshi_inference={"signal": "DOWN", "confidence": 0.75, "vpin_score": 0.20, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
+    )
+    assert dec.action == "BUY_YES"
+    assert dec.recommended_limit_price <= Decimal("0.40")
+    assert "Maker Resting ($0.00 fee)" in dec.rationale
+
+
+def test_dial_5_tape_confirmation_guard(spot_l2_book: L2BookState, kalshi_l2_book: L2BookState) -> None:
+    """Verify Dial 5: Tape Confirmation Guard rejects orders when trade prints are insufficient."""
+    bot = DualONNXArbitrageBot(tape_confirmation_ticks=2)
+
+    # 0 trades provided -> Tape confirmation veto
+    dec_empty = bot.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        kalshi_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        latest_kalshi_trades=[],
+    )
+    assert dec_empty.action == "HOLD"
+    assert "Tape confirmation veto" in dec_empty.rationale
+
+    # 1 trade provided (< 2) -> Tape confirmation veto
+    dec_one = bot.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        kalshi_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}],
+    )
+    assert dec_one.action == "HOLD"
+    assert "Tape confirmation veto" in dec_one.rationale
+
+    # 2 trades provided (>= 2) -> Passes tape confirmation
+    dec_two = bot.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        kalshi_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+        latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
+    )
+    assert dec_two.action == "BUY_YES"
+

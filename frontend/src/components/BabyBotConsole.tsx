@@ -32,6 +32,7 @@ import {
   ShieldCheck,
   Scale,
   Lock,
+  Sparkles,
 } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
 
@@ -52,20 +53,35 @@ export interface BotProfile {
 }
 
 export const BOT_PROFILES: Record<string, BotProfile> = {
-  'dual_onnx': {
-    id: 'dual_onnx',
-    name: 'Dual-ONNX Contradiction Arbitrage',
-    shortName: 'Dual-ONNX Arb',
-    version: 'v1.0 (Arbitrage)',
+  'the_onnx_strategy': {
+    id: 'the_onnx_strategy',
+    name: 'The ONNX Strategy',
+    shortName: 'ONNX Strategy',
+    version: 'v1.0 (Quant Dials)',
     lane: 'LANE 2 (SHADOW PAPER)',
     laneBadge: 'shadow',
     asset: 'BTC',
     timeframe: '15m',
     telemetryType: 'onnx',
-    description: 'QuoLas Spot Microscope (Binance Lead) vs Kalshi Contract Momentum (Lag CLOB) Arbitrage Matrix',
+    description: 'The ONNX Strategy: Dual-Brain Spot Lead vs Kalshi Lag CLOB with 5 Precision Execution Dials',
     hardCapContracts: 1,
     discountCeiling: 0.48,
-    playbook: 'Contradiction Arbitrage · Asymmetric Discount Snipe',
+    playbook: 'Trend Aligned Scalp · Volatility Regime Shield · Sizing Armor',
+  },
+  'dual_onnx': {
+    id: 'dual_onnx',
+    name: 'The ONNX Strategy (Dual-Brain)',
+    shortName: 'ONNX Strategy',
+    version: 'v1.0 (Quant Dials)',
+    lane: 'LANE 2 (SHADOW PAPER)',
+    laneBadge: 'shadow',
+    asset: 'BTC',
+    timeframe: '15m',
+    telemetryType: 'onnx',
+    description: 'The ONNX Strategy: Dual-Brain Spot Lead vs Kalshi Lag CLOB with 5 Precision Execution Dials',
+    hardCapContracts: 1,
+    discountCeiling: 0.48,
+    playbook: 'Trend Aligned Scalp · Volatility Regime Shield · Sizing Armor',
   },
   '3_step_domination_bot': {
     id: '3_step_domination_bot',
@@ -218,6 +234,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const [isParamsOpen, setIsParamsOpen] = useState(false);
   const [botParams, setBotParams] = useState<Record<string, any>>({
     discount_limit_price: 0.48,
+    entry_discount_depth: 0.48,
     momentum_max_price: 0.62,
     min_confidence: 0.70,
     min_ev_dollars: 0.02,
@@ -226,6 +243,13 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     vpin_toxic_threshold: 0.60,
     take_profit_price_threshold: 0.95,
     min_take_profit_roi: 20.0,
+    brain_priority_mode: 'TREND_ALIGNED_SCALP',
+    contract_scaling_mode: 'TIER_0_STRICT_1',
+    volatility_floor: 10.0,
+    volatility_ceiling: 45.0,
+    tape_confirmation_ticks: 2,
+    taker_cross_ev_threshold: 0.08,
+    dynamic_moat_multiplier: 1.15,
   });
   const [isSavingParams, setIsSavingParams] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
@@ -236,7 +260,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const activeProfile = useMemo(() => {
     return (
       BOT_PROFILES[selectedBotId] ||
-      (selectedBotId.includes('onnx') ? BOT_PROFILES['macro_onnx'] : BOT_PROFILES['3_step_domination_bot'])
+      (selectedBotId.includes('onnx') ? BOT_PROFILES['the_onnx_strategy'] || BOT_PROFILES['macro_onnx'] : BOT_PROFILES['3_step_domination_bot'])
     );
   }, [selectedBotId]);
 
@@ -293,7 +317,15 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     if (activeProfile.telemetryType === 'onnx') {
       setBotParams((prev) => ({
         ...prev,
+        brain_priority_mode: 'TREND_ALIGNED_SCALP',
+        contract_scaling_mode: 'TIER_0_STRICT_1',
+        volatility_floor: 10.0,
+        volatility_ceiling: 45.0,
+        entry_discount_depth: 0.48,
         discount_limit_price: 0.48,
+        tape_confirmation_ticks: 2,
+        taker_cross_ev_threshold: 0.08,
+        dynamic_moat_multiplier: 1.15,
         momentum_max_price: 0.62,
         min_confidence: 0.70,
         min_ev_dollars: 0.02,
@@ -323,7 +355,15 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     try {
       soundFX.playClickSound();
       const payload: Record<string, any> = {
-        discount_limit_price: botParams.discount_limit_price,
+        brain_priority_mode: botParams.brain_priority_mode,
+        contract_scaling_mode: botParams.contract_scaling_mode,
+        volatility_floor: botParams.volatility_floor,
+        volatility_ceiling: botParams.volatility_ceiling,
+        entry_discount_depth: botParams.entry_discount_depth ?? botParams.discount_limit_price,
+        discount_limit_price: botParams.entry_discount_depth ?? botParams.discount_limit_price,
+        tape_confirmation_ticks: botParams.tape_confirmation_ticks,
+        taker_cross_ev_threshold: botParams.taker_cross_ev_threshold,
+        dynamic_moat_multiplier: botParams.dynamic_moat_multiplier,
         momentum_max_price: botParams.momentum_max_price,
         min_confidence: botParams.min_confidence,
         min_ev_dollars: botParams.min_ev_dollars,
@@ -343,7 +383,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       });
       if (res.ok) {
         soundFX.playWinSound();
-        setSaveSuccessMsg('✅ Parameters updated & active');
+        setSaveSuccessMsg('✅ Strategy Dials updated & active');
         setTimeout(() => setSaveSuccessMsg(null), 2500);
       } else {
         setSaveSuccessMsg('⚠️ Failed to save');
@@ -355,6 +395,25 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       setIsSavingParams(false);
     }
   };
+
+  // Dial 3: Volatility ATR status
+  const currentAtr = dualOnnxTelemetry?.current_atr ?? 14.0;
+  const volFloor = typeof botParams.volatility_floor === 'number' ? botParams.volatility_floor : 10.0;
+  const volCeil = typeof botParams.volatility_ceiling === 'number' ? botParams.volatility_ceiling : 45.0;
+  const isDeadChop = currentAtr < volFloor;
+  const isPanicCeiling = currentAtr > volCeil;
+  const isSafeVol = !isDeadChop && !isPanicCeiling;
+
+  // Dial 4: Entry Discount Max Win ROI
+  const entryDiscount = typeof botParams.entry_discount_depth === 'number'
+    ? botParams.entry_discount_depth
+    : (typeof botParams.discount_limit_price === 'number' ? botParams.discount_limit_price : 0.48);
+  const maxWinRoi = entryDiscount > 0 ? (((1.0 - entryDiscount) / entryDiscount) * 100).toFixed(1) : '0';
+
+  // Dial 5: Tape confirmation streak
+  const tapeStreak = dualOnnxTelemetry?.tape_streak ?? 0;
+  const reqTapeTicks = botParams.tape_confirmation_ticks ?? 2;
+  const isTapeConfirmed = tapeStreak >= reqTapeTicks;
 
   // VPIN toxicity check
   const vpin = aiSignals?.vpin ?? 0.28;
@@ -1132,219 +1191,437 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         {isParamsOpen && (
           <div className="p-4 bg-[#12161a] border-t border-[#1f262d] space-y-3 font-mono text-xs">
             {activeProfile.telemetryType === 'onnx' ? (
-              /* Dedicated 8-Parameter Dual-ONNX Grid */
-              <div className="grid grid-cols-2 gap-2.5">
-                {/* 1. Contradiction Maker Ceiling ($) */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 inline-block" />
-                    Maker Ceiling ($)
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"What is the maximum price you will pay when QuoLas detects a leading spot move before Kalshi adjusts?"</i><br />
-                        <b>How it works:</b> Places lowball maker resting orders at or below this discount ceiling.<br />
-                        <b>Why it matters:</b> Guarantees $0 Kalshi exchange taker fees while capturing lead-lag mispricings.
+              /* THE ONNX STRATEGY — 5 STRATEGY DIALS COCKPIT MATRIX */
+              <div className="space-y-3.5">
+                {/* Header Banner */}
+                <div className="p-2.5 rounded-lg bg-gradient-to-r from-cyan-950/40 via-purple-950/30 to-slate-900 border border-cyan-500/30 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-cyan-400" />
+                    <div>
+                      <div className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <span>THE ONNX STRATEGY</span>
+                        <span className="px-1.5 py-0.2 rounded text-[9px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono">
+                          5 DIALS COCKPIT
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-slate-400">
+                        Dual-Brain Spot Lead vs Kalshi Lag CLOB · Microstructure Arbitrage
                       </div>
                     </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-cyan-500/30 rounded px-2 py-1 focus-within:border-cyan-400">
-                    <span className="text-cyan-500 mr-1">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.10"
-                      max="0.65"
-                      value={botParams.discount_limit_price ?? 0.48}
-                      onChange={(e) => setBotParams({ ...botParams, discount_limit_price: parseFloat(e.target.value) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
-                    />
+                  </div>
+                  <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    SWEETSPOTS ACTIVE
+                  </span>
+                </div>
+
+                {/* DIAL 1: Brain Priority Mode (Full Width Segmented Selector) */}
+                <div className="space-y-1.5 p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d]">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block animate-pulse" />
+                      Dial 1: Brain Priority Mode
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-cyan-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Quant Arbitration Arbiter:</b><br />
+                          • <b>Trend Aligned Scalp (Sweetspot):</b> QuoLas Binance Spot Microscope leads; Kalshi binary CLOB lags. Exploits directional momentum.<br />
+                          • <b>Contradiction Sniper:</b> Strict divergence required. Spot and Kalshi must oppose to snipe mispriced discount contracts.<br />
+                          • <b>Unanimous Consensus:</b> Both models must agree 100% on direction (ultra-safe).
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-[9px] font-mono text-cyan-400 font-bold">
+                      {(botParams.brain_priority_mode || 'TREND_ALIGNED_SCALP').replace(/_/g, ' ')}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      {
+                        mode: 'TREND_ALIGNED_SCALP',
+                        label: 'Trend Scalp',
+                        badge: 'Sweetspot',
+                        desc: 'Spot Lead · CLOB Lag',
+                      },
+                      {
+                        mode: 'CONTRADICTION_SNIPER',
+                        label: 'Contradiction',
+                        badge: 'Divergence',
+                        desc: 'Discount Hunter',
+                      },
+                      {
+                        mode: 'UNANIMOUS_CONSENSUS',
+                        label: 'Consensus',
+                        badge: 'Ultra-Safe',
+                        desc: '100% Agreement',
+                      },
+                    ].map((opt) => {
+                      const isActive = (botParams.brain_priority_mode || 'TREND_ALIGNED_SCALP') === opt.mode;
+                      return (
+                        <button
+                          key={opt.mode}
+                          type="button"
+                          onClick={() => {
+                            soundFX.playClickSound();
+                            setBotParams({ ...botParams, brain_priority_mode: opt.mode });
+                          }}
+                          className={`p-2 rounded border text-left transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-cyan-500/15 border-cyan-400 text-white shadow-lg shadow-cyan-500/10 ring-1 ring-cyan-400/40'
+                              : 'bg-[#10141b] border-[#222933] text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold">{opt.label}</span>
+                            <span className={`text-[8px] font-mono px-1 rounded ${
+                              isActive ? 'bg-cyan-400/20 text-cyan-300 font-semibold' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {opt.badge}
+                            </span>
+                          </div>
+                          <div className="text-[8px] text-slate-400 mt-0.5 truncate">{opt.desc}</div>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* 2. Momentum Entry Cap ($) */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-purple-400 inline-block" />
-                    Momentum Cap ($)
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"How high will you chase when both brains agree and momentum accelerates?"</i><br />
-                        <b>How it works:</b> Caps aggressive limit orders when QuoLas and Kalshi CLOB align on directional impulse.<br />
-                        <b>Why it matters:</b> Prevents buying over-extended contracts where payout-to-risk ratio degrades.
+                {/* DIAL 2: Micro-Bankroll Sizing Armor */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-amber-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5 text-amber-400" />
+                      Dial 2: Sizing Mode & Bankroll Armor
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-amber-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Micro-Bankroll Sizing Armor:</b><br />
+                          Enforces exactly 1 contract per trade for bankrolls &lt; $75 to guarantee zero drawdown blowup.<br />
+                          Tier 1 (2 contracts) unlocks conditionally only when bankroll reaches $75+, AI confidence ≥ 75%, and Net EV ≥ +$0.06.
+                        </div>
                       </div>
+                    </label>
+                    <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-amber-400" />
+                      &lt; $75 ARMOR LOCKED
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 rounded border bg-amber-500/10 border-amber-500/40 text-amber-300 flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] font-bold flex items-center gap-1">
+                          <Lock className="w-3 h-3 text-amber-400" />
+                          TIER 0: STRICT 1-CT
+                        </div>
+                        <div className="text-[8px] text-amber-400/80">Micro-Bankroll Armor (Enforced)</div>
+                      </div>
+                      <span className="text-xs font-bold font-mono px-2 py-0.5 bg-amber-400 text-black rounded font-black">
+                        1 CT
+                      </span>
                     </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-purple-500/30 rounded px-2 py-1 focus-within:border-purple-400">
-                    <span className="text-purple-400 mr-1">$</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.50"
-                      max="0.85"
-                      value={botParams.momentum_max_price ?? 0.62}
-                      onChange={(e) => setBotParams({ ...botParams, momentum_max_price: parseFloat(e.target.value) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
-                    />
+
+                    <div className="p-2 rounded border bg-[#0e1217] border-slate-800 text-slate-500 flex items-center justify-between opacity-60">
+                      <div>
+                        <div className="text-[10px] font-semibold flex items-center gap-1">
+                          <span>TIER 1: CONVICTION 2-CT</span>
+                        </div>
+                        <div className="text-[8px] text-slate-500">Unlocks at &ge; $75 Bankroll</div>
+                      </div>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 bg-slate-800 text-slate-400 rounded">
+                        LOCKED
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                {/* 3. Min Dual AI Confidence */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 inline-block" />
-                    Min Conviction
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"The AI Conviction Bar."</i><br />
-                        <b>How it works:</b> Softmax confidence threshold required from both neural models before emitting an order.<br />
-                        <b>Why it matters:</b> 0.70 means neural net must be 70% certain of winning; eliminates low-conviction chop.
+                {/* DIAL 3: Volatility Regime Window (Floor & Ceiling) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-purple-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />
+                      Dial 3: Volatility Regime Window (1m ATR)
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-purple-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Regime Window Protection:</b><br />
+                          • <b>Floor ($10):</b> Dead chop shield. Refuses entry in flat, stationary order flow.<br />
+                          • <b>Ceiling ($45):</b> News panic shield. Halts orders during violent spike chaos where adverse selection is extreme.
+                        </div>
+                      </div>
+                    </label>
+
+                    {/* Live ATR Badge */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[9px] font-mono text-slate-400">
+                        1m ATR: <b className="text-white font-mono">${currentAtr.toFixed(1)}</b>
+                      </span>
+                      <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded border font-bold ${
+                        isSafeVol
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : isDeadChop
+                          ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                          : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                      }`}>
+                        {isSafeVol ? 'SAFE REGIME' : isDeadChop ? 'CHOP VETO' : 'PANIC VETO'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <div className="text-[9px] text-slate-400 flex items-center justify-between">
+                        <span>Floor (Dead Chop Cutoff)</span>
+                        <span className="text-purple-400 font-mono">${volFloor.toFixed(0)}</span>
+                      </div>
+                      <div className="flex items-center bg-[#10141a] border border-purple-500/30 rounded px-2 py-1">
+                        <span className="text-purple-400 mr-1">$</span>
+                        <input
+                          type="number"
+                          step="1.0"
+                          min="0"
+                          max="50"
+                          value={botParams.volatility_floor ?? 10.0}
+                          onChange={(e) => setBotParams({ ...botParams, volatility_floor: parseFloat(e.target.value) })}
+                          className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                        />
                       </div>
                     </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.50"
-                      max="0.99"
-                      value={botParams.min_confidence ?? 0.70}
-                      onChange={(e) => setBotParams({ ...botParams, min_confidence: parseFloat(e.target.value) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
-                    />
+
+                    <div className="space-y-1">
+                      <div className="text-[9px] text-slate-400 flex items-center justify-between">
+                        <span>Ceiling (News Spike Cutoff)</span>
+                        <span className="text-purple-400 font-mono">${volCeil.toFixed(0)}</span>
+                      </div>
+                      <div className="flex items-center bg-[#10141a] border border-purple-500/30 rounded px-2 py-1">
+                        <span className="text-purple-400 mr-1">$</span>
+                        <input
+                          type="number"
+                          step="1.0"
+                          min="20"
+                          max="200"
+                          value={botParams.volatility_ceiling ?? 45.0}
+                          onChange={(e) => setBotParams({ ...botParams, volatility_ceiling: parseFloat(e.target.value) })}
+                          className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                {/* 4. Min Net EV ($) */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-                    Min Net EV ($)
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"Minimum expected statistical profit per trade."</i><br />
-                        <b>How it works:</b> Expected value calculation factoring in maker/taker fees, binary contract payout ($1.00), and win probability.<br />
-                        <b>Why it matters:</b> Rejects setups yielding pennies; demands structural mathematical edge.
+                {/* DIAL 4: Entry Discount Depth Ceiling ($0.35 - $0.50) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" />
+                      Dial 4: Entry Discount Depth Ceiling
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-cyan-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Asymmetric Discount Hunter:</b><br />
+                          Resting maker order price ceiling (e.g. $0.48).<br />
+                          • Guarantees <b>$0.00 Maker Fee</b> on Kalshi.<br />
+                          • At $0.48 entry, winning $1.00 binary yields <b>+{maxWinRoi}% net ROI</b>.
+                        </div>
                       </div>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
+                        +{maxWinRoi}% MAX ROI
+                      </span>
+                      <span className="text-xs font-mono font-bold text-cyan-300">
+                        ${entryDiscount.toFixed(2)} ({(entryDiscount * 100).toFixed(0)}¢)
+                      </span>
                     </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
-                    <span className="text-slate-500 mr-1">$</span>
+                  </div>
+
+                  {/* Slider Control */}
+                  <div className="space-y-1">
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
+                      type="range"
+                      min="0.35"
                       max="0.50"
-                      value={botParams.min_ev_dollars ?? 0.02}
-                      onChange={(e) => setBotParams({ ...botParams, min_ev_dollars: parseFloat(e.target.value) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
-                    />
-                  </div>
-                </div>
-
-                {/* 5. VPIN Shark Cutoff */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 inline-block" />
-                    VPIN Cutoff
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"The Shark Detector / Toxicity Veto."</i><br />
-                        <b>How it works:</b> Measures volume toxicity from institutional whales.<br />
-                        <b>Why it matters:</b> Instantly cancels resting orders and vetoes entry when whales attack the order book.
-                      </div>
-                    </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="0.10"
-                      max="0.95"
-                      value={botParams.vpin_toxic_threshold ?? 0.60}
-                      onChange={(e) => setBotParams({ ...botParams, vpin_toxic_threshold: parseFloat(e.target.value) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
-                    />
-                  </div>
-                </div>
-
-                {/* 6. Max Contracts (Hard Invariant) */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
-                    <Lock className="w-3 h-3 text-amber-400" />
-                    Max Sizing (Cap)
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"Micro-Bankroll Sizing Armor."</i><br />
-                        <b>How it works:</b> Hard-coded 1 contract limit per asset per cycle enforced across all execution lanes.<br />
-                        <b>Why it matters:</b> Zero overleveraging risk; guarantees total micro-bankroll protection.
-                      </div>
-                    </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-amber-500/30 rounded px-2 py-1 text-amber-400 font-bold text-xs">
-                    <Lock className="w-3 h-3 mr-1.5 opacity-70" />
-                    <span>1 Contract (Locked)</span>
-                  </div>
-                </div>
-
-                {/* 7. Spot Moat / Buffer ($) */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 inline-block" />
-                    Spot Moat ($)
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"The Moat / Buffer Zone from Strike."</i><br />
-                        <b>How it works:</b> Refuses trades when Bitcoin is hovering right on the strike pin.<br />
-                        <b>Why it matters:</b> Prevents gambling on 50/50 coin-flip noise when spot crosses the strike line.
-                      </div>
-                    </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
-                    <span className="text-slate-500 mr-1">$</span>
-                    <input
-                      type="number"
-                      step="1.0"
-                      min="0"
-                      max="200"
-                      value={botParams.min_spot_diff ?? 21.0}
-                      onChange={(e) => setBotParams({ ...botParams, min_spot_diff: parseFloat(e.target.value) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
-                    />
-                  </div>
-                </div>
-
-                {/* 8. Take Profit Price ($) */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-                    Take Profit ($)
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br />
-                        <b>How it works:</b> Sells winning contract before expiration when bid reaches this price.<br />
-                        <b>Why it matters:</b> Cashes in 95¢ guaranteed profit instead of gambling the final seconds for 5¢.
-                      </div>
-                    </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
-                    <span className="text-slate-500 mr-1">$</span>
-                    <input
-                      type="number"
                       step="0.01"
-                      min="0.50"
-                      max="0.99"
-                      value={botParams.take_profit_price_threshold ?? 0.95}
-                      onChange={(e) => setBotParams({ ...botParams, take_profit_price_threshold: parseFloat(e.target.value) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                      value={entryDiscount}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setBotParams({
+                          ...botParams,
+                          entry_discount_depth: val,
+                          discount_limit_price: val,
+                        });
+                      }}
+                      className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
                     />
+                    <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <span>$0.35 (Deep Discount · +185% ROI)</span>
+                      <span className="text-cyan-400 font-semibold">$0.48 (Sweetspot · +108% ROI)</span>
+                      <span>$0.50 (Even Money · +100% ROI)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DIAL 5: Orderflow Tape Confirmation (Anti-Spoofing Shield) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" />
+                      Dial 5: Orderflow Tape Confirmation
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-indigo-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Anti-Spoofing Tape Shield:</b><br />
+                          Requires consecutive confirmed market trade prints in the directional impulse before placing orders.<br />
+                          Filters out phantom ghost bids and resting order spoofing.
+                        </div>
+                      </div>
+                    </label>
+
+                    {/* Streak indicator */}
+                    <span className={`text-[9px] font-mono px-2 py-0.5 rounded border font-bold ${
+                      isTapeConfirmed
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                    }`}>
+                      {tapeStreak} / {reqTapeTicks} PRINTS CONFIRMED
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { ticks: 1, label: '1 Tick', sub: 'Fast Entry' },
+                      { ticks: 2, label: '2 Ticks', sub: 'Sweetspot (300ms)' },
+                      { ticks: 3, label: '3 Ticks', sub: 'Heavy Armor' },
+                    ].map((opt) => {
+                      const isSel = (botParams.tape_confirmation_ticks ?? 2) === opt.ticks;
+                      return (
+                        <button
+                          key={opt.ticks}
+                          type="button"
+                          onClick={() => {
+                            soundFX.playClickSound();
+                            setBotParams({ ...botParams, tape_confirmation_ticks: opt.ticks });
+                          }}
+                          className={`p-1.5 rounded border text-center transition-all cursor-pointer ${
+                            isSel
+                              ? 'bg-indigo-500/20 border-indigo-400 text-white shadow ring-1 ring-indigo-400/40'
+                              : 'bg-[#10141a] border-[#222933] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <div className="text-[10px] font-bold">{opt.label}</div>
+                          <div className="text-[8px] text-slate-400">{opt.sub}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Secondary Pre-Flight Guardrails Grid */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="text-[9px] font-mono text-slate-400 uppercase tracking-wider font-bold">
+                    PRE-FLIGHT GUARDRAILS & EV THRESHOLDS
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {/* Taker Cross EV Gate */}
+                    <div className="space-y-0.5 p-1.5 rounded bg-[#0a0d12] border border-[#1e242d]">
+                      <div className="text-[8px] text-slate-400">Taker Cross EV</div>
+                      <div className="flex items-center bg-[#10141a] border border-[#252c36] rounded px-1.5 py-0.5">
+                        <span className="text-slate-500 text-[10px] mr-1">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          max="0.30"
+                          value={botParams.taker_cross_ev_threshold ?? 0.08}
+                          onChange={(e) => setBotParams({ ...botParams, taker_cross_ev_threshold: parseFloat(e.target.value) })}
+                          className="w-full bg-transparent text-white font-mono outline-none text-[11px]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Dynamic Moat Multiplier */}
+                    <div className="space-y-0.5 p-1.5 rounded bg-[#0a0d12] border border-[#1e242d]">
+                      <div className="text-[8px] text-slate-400">Dynamic Moat</div>
+                      <div className="flex items-center bg-[#10141a] border border-[#252c36] rounded px-1.5 py-0.5">
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0.5"
+                          max="2.5"
+                          value={botParams.dynamic_moat_multiplier ?? 1.15}
+                          onChange={(e) => setBotParams({ ...botParams, dynamic_moat_multiplier: parseFloat(e.target.value) })}
+                          className="w-full bg-transparent text-white font-mono outline-none text-[11px]"
+                        />
+                        <span className="text-slate-500 text-[10px] ml-1">x</span>
+                      </div>
+                    </div>
+
+                    {/* Min Conviction */}
+                    <div className="space-y-0.5 p-1.5 rounded bg-[#0a0d12] border border-[#1e242d]">
+                      <div className="text-[8px] text-slate-400">Min Conviction</div>
+                      <div className="flex items-center bg-[#10141a] border border-[#252c36] rounded px-1.5 py-0.5">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.50"
+                          max="0.99"
+                          value={botParams.min_confidence ?? 0.70}
+                          onChange={(e) => setBotParams({ ...botParams, min_confidence: parseFloat(e.target.value) })}
+                          className="w-full bg-transparent text-white font-mono outline-none text-[11px]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Min EV */}
+                    <div className="space-y-0.5 p-1.5 rounded bg-[#0a0d12] border border-[#1e242d]">
+                      <div className="text-[8px] text-slate-400">Min Net EV</div>
+                      <div className="flex items-center bg-[#10141a] border border-[#252c36] rounded px-1.5 py-0.5">
+                        <span className="text-slate-500 text-[10px] mr-1">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          max="0.50"
+                          value={botParams.min_ev_dollars ?? 0.02}
+                          onChange={(e) => setBotParams({ ...botParams, min_ev_dollars: parseFloat(e.target.value) })}
+                          className="w-full bg-transparent text-white font-mono outline-none text-[11px]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* VPIN Cutoff */}
+                    <div className="space-y-0.5 p-1.5 rounded bg-[#0a0d12] border border-[#1e242d]">
+                      <div className="text-[8px] text-slate-400">VPIN Shark Veto</div>
+                      <div className="flex items-center bg-[#10141a] border border-[#252c36] rounded px-1.5 py-0.5">
+                        <input
+                          type="number"
+                          step="0.05"
+                          min="0.10"
+                          max="0.95"
+                          value={botParams.vpin_toxic_threshold ?? 0.60}
+                          onChange={(e) => setBotParams({ ...botParams, vpin_toxic_threshold: parseFloat(e.target.value) })}
+                          className="w-full bg-transparent text-white font-mono outline-none text-[11px]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Take Profit Price */}
+                    <div className="space-y-0.5 p-1.5 rounded bg-[#0a0d12] border border-[#1e242d]">
+                      <div className="text-[8px] text-slate-400">Take Profit Cap</div>
+                      <div className="flex items-center bg-[#10141a] border border-[#252c36] rounded px-1.5 py-0.5">
+                        <span className="text-slate-500 text-[10px] mr-1">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.50"
+                          max="0.99"
+                          value={botParams.take_profit_price_threshold ?? 0.95}
+                          onChange={(e) => setBotParams({ ...botParams, take_profit_price_threshold: parseFloat(e.target.value) })}
+                          className="w-full bg-transparent text-white font-mono outline-none text-[11px]"
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1524,10 +1801,10 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                 <button
                   onClick={handleResetDefaults}
                   type="button"
-                  title="Reset to recommended quant defaults"
+                  title="Reset to recommended quant sweetspots"
                   className="px-2.5 py-1.5 rounded bg-[#171c22] hover:bg-[#222933] text-slate-300 hover:text-white border border-[#262d35] text-[10px] font-bold transition-all cursor-pointer"
                 >
-                  Reset Defaults
+                  {activeProfile.telemetryType === 'onnx' ? 'Reset Quant Sweetspots' : 'Reset Defaults'}
                 </button>
                 <button
                   onClick={handleSaveParameters}
@@ -1535,7 +1812,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#00bda5] text-black font-bold text-xs hover:bg-[#2dd4bf] transition-all shadow cursor-pointer disabled:opacity-50"
                 >
                   {isSavingParams ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                  <span>Apply & Save</span>
+                  <span>{activeProfile.telemetryType === 'onnx' ? 'Apply Strategy Dials' : 'Apply & Save'}</span>
                 </button>
               </div>
             </div>

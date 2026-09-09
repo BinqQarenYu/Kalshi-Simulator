@@ -41,32 +41,51 @@ def _classify_signal(sig: str) -> str:
 
 
 class DualONNXArbitrageBot:
-    """Institutional High-Frequency Dual-ONNX Contradiction Arbitrage Strategy Engine."""
+    """The ONNX Strategy: Institutional High-Frequency Dual-Brain Arbitrage Engine."""
 
-    STRATEGY_ID = "dual_onnx_contradiction"
-    STRATEGY_NAME = "Dual-ONNX Contradiction Arbitrage"
+    STRATEGY_ID = "the_onnx_strategy"
+    STRATEGY_NAME = "The ONNX Strategy"
 
     def __init__(
         self,
         gateway: Optional[DualONNXGateway] = None,
         discount_ceiling: Decimal = Decimal("0.48"),
+        entry_discount_depth: Optional[Union[Decimal, float, str]] = None,
         momentum_max_price: Decimal = Decimal("0.62"),
         min_ev_dollars: Decimal = Decimal("0.02"),
-        min_confidence: float = 0.52,
+        min_confidence: float = 0.60,
+        brain_priority_mode: str = "TREND_ALIGNED_SCALP",
+        contract_scaling_mode: str = "TIER_0_STRICT_1",
+        volatility_floor: Decimal = Decimal("10.0"),
+        volatility_ceiling: Decimal = Decimal("45.0"),
+        tape_confirmation_ticks: int = 2,
+        taker_cross_ev_threshold: Decimal = Decimal("0.04"),
+        dynamic_moat_multiplier: float = 1.36,
         vpin_toxic_threshold: float = 0.70,
         fee_per_contract: Decimal = Decimal("0.01"),
         typical_1m_volatility: float = 14.0,
         asset: Union[CryptoAsset, str] = CryptoAsset.BTC,
     ) -> None:
         self.gateway = gateway or DualONNXGateway()
-        self.discount_ceiling = Decimal(str(discount_ceiling))
+        effective_discount = entry_discount_depth if entry_discount_depth is not None else discount_ceiling
+        self.entry_discount_depth = Decimal(str(effective_discount))
+        self.discount_ceiling = self.entry_discount_depth
         self.momentum_max_price = Decimal(str(momentum_max_price))
         self.min_ev_dollars = Decimal(str(min_ev_dollars))
         self.min_confidence = float(min_confidence)
+        self.brain_priority_mode = str(brain_priority_mode).upper()
+        self.contract_scaling_mode = str(contract_scaling_mode).upper()
+        self.volatility_floor = Decimal(str(volatility_floor))
+        self.volatility_ceiling = Decimal(str(volatility_ceiling))
+        self.tape_confirmation_ticks = int(tape_confirmation_ticks)
+        self.taker_cross_ev_threshold = Decimal(str(taker_cross_ev_threshold))
+        self.dynamic_moat_multiplier = float(dynamic_moat_multiplier)
         self.vpin_toxic_threshold = float(vpin_toxic_threshold)
         self.fee_per_contract = Decimal(str(fee_per_contract))
         self.typical_1m_volatility = float(typical_1m_volatility)
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
+        self.current_atr: float = self.typical_1m_volatility
+        self.tape_streak: int = 0
 
     def get_parameters(self) -> Dict[str, Any]:
         """Return current live strategy parameters."""
@@ -74,35 +93,75 @@ class DualONNXArbitrageBot:
             "strategy_id": self.STRATEGY_ID,
             "strategy_name": self.STRATEGY_NAME,
             "asset": self.asset.value,
-            "discount_ceiling": float(self.discount_ceiling),
+            "brain_priority_mode": self.brain_priority_mode,
+            "contract_scaling_mode": self.contract_scaling_mode,
+            "volatility_floor": float(self.volatility_floor),
+            "volatility_ceiling": float(self.volatility_ceiling),
+            "entry_discount_depth": float(self.entry_discount_depth),
+            "discount_ceiling": float(self.entry_discount_depth),
+            "tape_confirmation_ticks": self.tape_confirmation_ticks,
+            "discount_limit_price": float(self.entry_discount_depth),
             "momentum_max_price": float(self.momentum_max_price),
             "min_ev_dollars": float(self.min_ev_dollars),
             "min_confidence": round(self.min_confidence, 4),
+            "taker_cross_ev_threshold": float(self.taker_cross_ev_threshold),
+            "dynamic_moat_multiplier": round(self.dynamic_moat_multiplier, 2),
             "vpin_toxic_threshold": round(self.vpin_toxic_threshold, 3),
             "fee_per_contract": float(self.fee_per_contract),
             "typical_1m_volatility": self.typical_1m_volatility,
+            "max_contracts": 1,
         }
 
     def update_parameters(
         self,
         discount_ceiling: Optional[Union[float, Decimal, str]] = None,
+        entry_discount_depth: Optional[Union[float, Decimal, str]] = None,
+        discount_limit_price: Optional[Union[float, Decimal, str]] = None,
         momentum_max_price: Optional[Union[float, Decimal, str]] = None,
         min_ev_dollars: Optional[Union[float, Decimal, str]] = None,
         min_confidence: Optional[float] = None,
+        brain_priority_mode: Optional[str] = None,
+        contract_scaling_mode: Optional[str] = None,
+        volatility_floor: Optional[Union[float, Decimal, str]] = None,
+        volatility_ceiling: Optional[Union[float, Decimal, str]] = None,
+        tape_confirmation_ticks: Optional[int] = None,
+        taker_cross_ev_threshold: Optional[Union[float, Decimal, str]] = None,
+        dynamic_moat_multiplier: Optional[float] = None,
         vpin_toxic_threshold: Optional[float] = None,
         fee_per_contract: Optional[Union[float, Decimal, str]] = None,
         typical_1m_volatility: Optional[float] = None,
         asset: Optional[Union[CryptoAsset, str]] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """Dynamically update strategy parameters on the fly."""
-        if discount_ceiling is not None:
-            self.discount_ceiling = max(Decimal("0.10"), min(Decimal("0.85"), Decimal(str(discount_ceiling))))
+        disc = entry_discount_depth if entry_discount_depth is not None else (discount_ceiling if discount_ceiling is not None else discount_limit_price)
+        if disc is not None:
+            self.entry_discount_depth = max(Decimal("0.10"), min(Decimal("0.85"), Decimal(str(disc))))
+            self.discount_ceiling = self.entry_discount_depth
         if momentum_max_price is not None:
             self.momentum_max_price = max(Decimal("0.50"), min(Decimal("0.85"), Decimal(str(momentum_max_price))))
         if min_ev_dollars is not None:
             self.min_ev_dollars = max(Decimal("0.00"), min(Decimal("0.50"), Decimal(str(min_ev_dollars))))
         if min_confidence is not None:
-            self.min_confidence = max(0.34, min(0.99, float(min_confidence)))
+            self.min_confidence = max(0.40, min(0.95, float(min_confidence)))
+        if brain_priority_mode is not None:
+            bpm = str(brain_priority_mode).upper()
+            if bpm in ("TREND_ALIGNED_SCALP", "CONTRADICTION_SNIPER", "UNANIMOUS_CONSENSUS"):
+                self.brain_priority_mode = bpm
+        if contract_scaling_mode is not None:
+            csm = str(contract_scaling_mode).upper()
+            if csm in ("TIER_0_STRICT_1", "TIER_1_CONVICTION_2", "TIER_2_KELLY"):
+                self.contract_scaling_mode = csm
+        if volatility_floor is not None:
+            self.volatility_floor = max(Decimal("1.0"), Decimal(str(volatility_floor)))
+        if volatility_ceiling is not None:
+            self.volatility_ceiling = max(self.volatility_floor + Decimal("1.0"), Decimal(str(volatility_ceiling)))
+        if tape_confirmation_ticks is not None:
+            self.tape_confirmation_ticks = max(1, min(3, int(tape_confirmation_ticks)))
+        if taker_cross_ev_threshold is not None:
+            self.taker_cross_ev_threshold = max(Decimal("0.00"), min(Decimal("0.20"), Decimal(str(taker_cross_ev_threshold))))
+        if dynamic_moat_multiplier is not None:
+            self.dynamic_moat_multiplier = max(0.80, min(2.50, float(dynamic_moat_multiplier)))
         if vpin_toxic_threshold is not None:
             self.vpin_toxic_threshold = max(0.40, min(0.95, float(vpin_toxic_threshold)))
         if fee_per_contract is not None:
@@ -112,7 +171,7 @@ class DualONNXArbitrageBot:
         if asset is not None:
             self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
 
-        logger.info("[DUAL-ONNX BOT] Parameters updated: %s", self.get_parameters())
+        logger.info("[THE ONNX STRATEGY] Parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
     def evaluate(
@@ -223,6 +282,84 @@ class DualONNXArbitrageBot:
                 rationale=f"Spot brain neutral or low confidence ({q_conf:.2f} < {self.min_confidence:.2f}).",
             )
 
+        # 4b. Volatility Window Guard (Dial 3)
+        curr_vol = self.typical_1m_volatility
+        self.current_atr = curr_vol
+        self.tape_streak = len(latest_kalshi_trades) if latest_kalshi_trades is not None else 0
+        if curr_vol < float(self.volatility_floor):
+            return DualONNXDecision(
+                action="HOLD",
+                regime=DualONNXRegime.CHOP_WAIT,
+                side=None,
+                quolas_signal=q_sig,
+                quolas_confidence=q_conf,
+                kalshi_signal=k_sig,
+                kalshi_confidence=k_conf,
+                recommended_limit_price=Decimal("0.00"),
+                expected_value=Decimal("0.00"),
+                recommended_contracts=0,
+                rationale=f"Volatility floor veto: 1m volatility {curr_vol:.1f} < min {float(self.volatility_floor):.1f} (Dead chop shield).",
+            )
+        if curr_vol > float(self.volatility_ceiling):
+            return DualONNXDecision(
+                action="HOLD",
+                regime=DualONNXRegime.CHOP_WAIT,
+                side=None,
+                quolas_signal=q_sig,
+                quolas_confidence=q_conf,
+                kalshi_signal=k_sig,
+                kalshi_confidence=k_conf,
+                recommended_limit_price=Decimal("0.00"),
+                expected_value=Decimal("0.00"),
+                recommended_contracts=0,
+                rationale=f"Volatility ceiling veto: 1m volatility {curr_vol:.1f} > max {float(self.volatility_ceiling):.1f} (High-volatility panic shield).",
+            )
+
+        # 4c. Anti-Spoof Tape Confirmation Guard (Dial 5)
+        if latest_kalshi_trades is not None and len(latest_kalshi_trades) < self.tape_confirmation_ticks:
+            return DualONNXDecision(
+                action="HOLD",
+                regime=DualONNXRegime.CHOP_WAIT,
+                side=None,
+                quolas_signal=q_sig,
+                quolas_confidence=q_conf,
+                kalshi_signal=k_sig,
+                kalshi_confidence=k_conf,
+                recommended_limit_price=Decimal("0.00"),
+                expected_value=Decimal("0.00"),
+                recommended_contracts=0,
+                rationale=f"Tape confirmation veto: Insufficient prints ({len(latest_kalshi_trades)} < {self.tape_confirmation_ticks}) (Anti-spoof shield).",
+            )
+
+        # 4d. Brain Priority Arbiter (Dial 1)
+        if self.brain_priority_mode == "UNANIMOUS_CONSENSUS":
+            if q_sig != k_sig or q_sig == "WAIT":
+                return DualONNXDecision(
+                    action="HOLD",
+                    regime=DualONNXRegime.CHOP_WAIT,
+                    side=None,
+                    quolas_signal=q_sig,
+                    quolas_confidence=q_conf,
+                    kalshi_signal=k_sig,
+                    kalshi_confidence=k_conf,
+                    recommended_limit_price=Decimal("0.00"),
+                    expected_value=Decimal("0.00"),
+                    recommended_contracts=0,
+                    rationale=f"Consensus veto: Spot ({q_sig}) != Kalshi ({k_sig}) in UNANIMOUS_CONSENSUS mode.",
+                )
+
+        # Sizing rule calculator (Dial 2)
+        def _get_contracts(confidence_val: float, net_ev: Decimal) -> int:
+            if self.contract_scaling_mode == "TIER_1_CONVICTION_2":
+                bankroll = Decimal("25.0")
+                if market_state and hasattr(market_state, "bankroll"):
+                    bankroll = Decimal(str(market_state.bankroll))
+                elif isinstance(market_state, dict) and "bankroll" in market_state:
+                    bankroll = Decimal(str(market_state["bankroll"]))
+                if bankroll >= Decimal("75.0") and confidence_val >= 0.75 and net_ev >= Decimal("0.06"):
+                    return 2
+            return 1
+
         # 5. Extract Best Bids and Asks on Kalshi CLOB
         best_yes_ask = kalshi_l2.best_yes_ask
         best_yes_bid = kalshi_l2.best_yes_bid
@@ -236,9 +373,8 @@ class DualONNXArbitrageBot:
             best_no_bid = Decimal("1.00") - best_yes_ask
 
         # 6. Estimate Probability of Win (Analytical Spot Diffusion + ONNX Confidence)
-        # Spot digital probability: Phi(spot_diff / (sigma * sqrt(T/60)))
         t_minutes = max(0.1, time_to_expiry_s / 60.0)
-        sigma_t = max(1.0, self.typical_1m_volatility * math.sqrt(t_minutes))
+        sigma_t = max(1.0, self.typical_1m_volatility * math.sqrt(t_minutes) * (self.dynamic_moat_multiplier / 1.36))
         z_score = spot_diff / sigma_t
         p_spot_digital = _standard_normal_cdf(z_score)
 
@@ -253,17 +389,31 @@ class DualONNXArbitrageBot:
             p_win = 0.60 * q_conf + 0.20 * k_conf + 0.20 * p_spot_digital
             p_win = max(0.05, min(0.95, p_win))
 
-            # Limit Price: Willing to take marketable ask up to momentum_max_price
-            if best_yes_ask is not None and best_yes_ask <= self.momentum_max_price:
+            can_cross = (
+                self.taker_cross_ev_threshold > Decimal("0.00")
+                and best_yes_ask is not None
+                and best_yes_ask <= self.momentum_max_price
+            )
+            taker_ev = (
+                Decimal(str(p_win)) * Decimal("1.00") - best_yes_ask - self.fee_per_contract
+                if best_yes_ask is not None
+                else Decimal("-1.00")
+            )
+
+            if can_cross and taker_ev >= self.taker_cross_ev_threshold:
                 limit_price = best_yes_ask
+                fee = self.fee_per_contract
+                exec_type = f"Taker Sweep (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f})"
             elif best_yes_bid is not None:
                 limit_price = min(self.momentum_max_price, best_yes_bid + Decimal("0.01"))
+                fee = Decimal("0.00")
+                exec_type = "Maker Resting ($0.00 fee)"
             else:
-                limit_price = Decimal("0.50")
+                limit_price = min(self.momentum_max_price, self.entry_discount_depth)
+                fee = Decimal("0.00")
+                exec_type = "Maker Resting ($0.00 fee)"
 
-            # EV Calculation: p_win * ($1.00 - price) - (1 - p_win) * price - fee
-            # Simplifies to: p_win * $1.00 - price - fee
-            ev = Decimal(str(p_win)) * Decimal("1.00") - limit_price - self.fee_per_contract
+            ev = Decimal(str(p_win)) * Decimal("1.00") - limit_price - fee
 
             if ev < self.min_ev_dollars:
                 return DualONNXDecision(
@@ -280,6 +430,7 @@ class DualONNXArbitrageBot:
                     rationale=f"Momentum Scalp EV ${ev:.3f} below minimum ${self.min_ev_dollars:.3f}.",
                 )
 
+            ct = _get_contracts(q_conf, ev)
             return DualONNXDecision(
                 action=action,
                 regime=regime,
@@ -290,8 +441,8 @@ class DualONNXArbitrageBot:
                 kalshi_confidence=k_conf,
                 recommended_limit_price=limit_price,
                 expected_value=ev.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
-                recommended_contracts=1,
-                rationale=f"Dual UP Momentum Scalp: Spot ({q_conf:.2f}) & Kalshi ({k_conf:.2f}) aligned | Limit: ${limit_price:.2f} | EV: +${ev:.2f}.",
+                recommended_contracts=ct,
+                rationale=f"Dual UP Momentum Scalp [{exec_type}]: Spot ({q_conf:.2f}) & Kalshi ({k_conf:.2f}) aligned | Limit: ${limit_price:.2f} | EV: +${ev:.2f}.",
             )
 
         # Case B: Both DOWN -> MOMENTUM_SCALP (BUY_NO)
@@ -304,14 +455,31 @@ class DualONNXArbitrageBot:
             p_win = 0.60 * q_conf + 0.20 * k_conf + 0.20 * (1.0 - p_spot_digital)
             p_win = max(0.05, min(0.95, p_win))
 
-            if best_no_ask is not None and best_no_ask <= self.momentum_max_price:
+            can_cross = (
+                self.taker_cross_ev_threshold > Decimal("0.00")
+                and best_no_ask is not None
+                and best_no_ask <= self.momentum_max_price
+            )
+            taker_ev = (
+                Decimal(str(p_win)) * Decimal("1.00") - best_no_ask - self.fee_per_contract
+                if best_no_ask is not None
+                else Decimal("-1.00")
+            )
+
+            if can_cross and taker_ev >= self.taker_cross_ev_threshold:
                 limit_price = best_no_ask
+                fee = self.fee_per_contract
+                exec_type = f"Taker Sweep (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f})"
             elif best_no_bid is not None:
                 limit_price = min(self.momentum_max_price, best_no_bid + Decimal("0.01"))
+                fee = Decimal("0.00")
+                exec_type = "Maker Resting ($0.00 fee)"
             else:
-                limit_price = Decimal("0.50")
+                limit_price = min(self.momentum_max_price, self.entry_discount_depth)
+                fee = Decimal("0.00")
+                exec_type = "Maker Resting ($0.00 fee)"
 
-            ev = Decimal(str(p_win)) * Decimal("1.00") - limit_price - self.fee_per_contract
+            ev = Decimal(str(p_win)) * Decimal("1.00") - limit_price - fee
 
             if ev < self.min_ev_dollars:
                 return DualONNXDecision(
@@ -328,6 +496,7 @@ class DualONNXArbitrageBot:
                     rationale=f"Momentum Scalp EV ${ev:.3f} below minimum ${self.min_ev_dollars:.3f}.",
                 )
 
+            ct = _get_contracts(q_conf, ev)
             return DualONNXDecision(
                 action=action,
                 regime=regime,
@@ -338,8 +507,8 @@ class DualONNXArbitrageBot:
                 kalshi_confidence=k_conf,
                 recommended_limit_price=limit_price,
                 expected_value=ev.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
-                recommended_contracts=1,
-                rationale=f"Dual DOWN Momentum Scalp: Spot ({q_conf:.2f}) & Kalshi ({k_conf:.2f}) aligned | Limit: ${limit_price:.2f} | EV: +${ev:.2f}.",
+                recommended_contracts=ct,
+                rationale=f"Dual DOWN Momentum Scalp [{exec_type}]: Spot ({q_conf:.2f}) & Kalshi ({k_conf:.2f}) aligned | Limit: ${limit_price:.2f} | EV: +${ev:.2f}.",
             )
 
         # Case C: Spot UP, Kalshi DOWN -> CONTRADICTION_ARBITRAGE (BUY_YES at discount)
@@ -352,16 +521,31 @@ class DualONNXArbitrageBot:
             p_win = 0.80 * q_conf + 0.20 * p_spot_digital
             p_win = max(0.10, min(0.95, p_win))
 
-            # Contradiction Arbitrage limit pricing:
-            # We strictly demand a discount <= discount_ceiling (e.g. $0.48).
-            # If best ask is available and <= discount_ceiling, execute immediately at best ask.
-            # Otherwise, place a passive limit order at discount_ceiling.
-            if best_yes_ask is not None and best_yes_ask <= self.discount_ceiling:
-                limit_price = best_yes_ask
-            else:
-                limit_price = self.discount_ceiling
+            can_cross = (
+                self.taker_cross_ev_threshold > Decimal("0.00")
+                and best_yes_ask is not None
+                and best_yes_ask <= self.entry_discount_depth
+            )
+            taker_ev = (
+                Decimal(str(p_win)) * Decimal("1.00") - best_yes_ask - self.fee_per_contract
+                if best_yes_ask is not None
+                else Decimal("-1.00")
+            )
 
-            ev = Decimal(str(p_win)) * Decimal("1.00") - limit_price - self.fee_per_contract
+            if can_cross and taker_ev >= self.taker_cross_ev_threshold:
+                limit_price = best_yes_ask
+                fee = self.fee_per_contract
+                exec_type = f"Taker Discount Snipe (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f})"
+            elif best_yes_bid is not None:
+                limit_price = min(self.entry_discount_depth, best_yes_bid + Decimal("0.01"))
+                fee = Decimal("0.00")
+                exec_type = "Maker Resting ($0.00 fee)"
+            else:
+                limit_price = self.entry_discount_depth
+                fee = Decimal("0.00")
+                exec_type = "Maker Resting ($0.00 fee)"
+
+            ev = Decimal(str(p_win)) * Decimal("1.00") - limit_price - fee
 
             if ev < self.min_ev_dollars:
                 return DualONNXDecision(
@@ -378,6 +562,7 @@ class DualONNXArbitrageBot:
                     rationale=f"Contradiction Arbitrage EV ${ev:.3f} below minimum ${self.min_ev_dollars:.3f}.",
                 )
 
+            ct = _get_contracts(q_conf, ev)
             return DualONNXDecision(
                 action=action,
                 regime=regime,
@@ -388,8 +573,8 @@ class DualONNXArbitrageBot:
                 kalshi_confidence=k_conf,
                 recommended_limit_price=limit_price,
                 expected_value=ev.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
-                recommended_contracts=1,
-                rationale=f"Contradiction Arbitrage: Spot UP ({q_conf:.2f}) vs Kalshi {k_sig} ({k_conf:.2f}) | Sniping discount YES at ${limit_price:.2f} <= ${self.discount_ceiling:.2f} | EV: +${ev:.2f}.",
+                recommended_contracts=ct,
+                rationale=f"Contradiction Arbitrage [{exec_type}]: Spot UP ({q_conf:.2f}) vs Kalshi {k_sig} ({k_conf:.2f}) | Sniping discount YES at ${limit_price:.2f} <= ${self.entry_discount_depth:.2f} | EV: +${ev:.2f}.",
             )
 
         # Case D: Spot DOWN, Kalshi UP -> CONTRADICTION_ARBITRAGE (BUY_NO at discount)
@@ -402,12 +587,31 @@ class DualONNXArbitrageBot:
             p_win = 0.80 * q_conf + 0.20 * (1.0 - p_spot_digital)
             p_win = max(0.10, min(0.95, p_win))
 
-            if best_no_ask is not None and best_no_ask <= self.discount_ceiling:
-                limit_price = best_no_ask
-            else:
-                limit_price = self.discount_ceiling
+            can_cross = (
+                self.taker_cross_ev_threshold > Decimal("0.00")
+                and best_no_ask is not None
+                and best_no_ask <= self.entry_discount_depth
+            )
+            taker_ev = (
+                Decimal(str(p_win)) * Decimal("1.00") - best_no_ask - self.fee_per_contract
+                if best_no_ask is not None
+                else Decimal("-1.00")
+            )
 
-            ev = Decimal(str(p_win)) * Decimal("1.00") - limit_price - self.fee_per_contract
+            if can_cross and taker_ev >= self.taker_cross_ev_threshold:
+                limit_price = best_no_ask
+                fee = self.fee_per_contract
+                exec_type = f"Taker Discount Snipe (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f})"
+            elif best_no_bid is not None:
+                limit_price = min(self.entry_discount_depth, best_no_bid + Decimal("0.01"))
+                fee = Decimal("0.00")
+                exec_type = "Maker Resting ($0.00 fee)"
+            else:
+                limit_price = self.entry_discount_depth
+                fee = Decimal("0.00")
+                exec_type = "Maker Resting ($0.00 fee)"
+
+            ev = Decimal(str(p_win)) * Decimal("1.00") - limit_price - fee
 
             if ev < self.min_ev_dollars:
                 return DualONNXDecision(
@@ -424,6 +628,7 @@ class DualONNXArbitrageBot:
                     rationale=f"Contradiction Arbitrage EV ${ev:.3f} below minimum ${self.min_ev_dollars:.3f}.",
                 )
 
+            ct = _get_contracts(q_conf, ev)
             return DualONNXDecision(
                 action=action,
                 regime=regime,
@@ -434,8 +639,8 @@ class DualONNXArbitrageBot:
                 kalshi_confidence=k_conf,
                 recommended_limit_price=limit_price,
                 expected_value=ev.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
-                recommended_contracts=1,
-                rationale=f"Contradiction Arbitrage: Spot DOWN ({q_conf:.2f}) vs Kalshi {k_sig} ({k_conf:.2f}) | Sniping discount NO at ${limit_price:.2f} <= ${self.discount_ceiling:.2f} | EV: +${ev:.2f}.",
+                recommended_contracts=ct,
+                rationale=f"Contradiction Arbitrage [{exec_type}]: Spot DOWN ({q_conf:.2f}) vs Kalshi {k_sig} ({k_conf:.2f}) | Sniping discount NO at ${limit_price:.2f} <= ${self.entry_discount_depth:.2f} | EV: +${ev:.2f}.",
             )
 
         # Fallback default: CHOP_WAIT
