@@ -31,3 +31,7 @@
 ## 2026-08-29 - Pydantic Model Instantiation Bypass in High-Frequency ML Feature Extraction
 **Learning:** Calling `book.get_depth(15)` inside the per-tick feature extraction loop instantiated ~30 Pydantic `OrderBookLevel` objects on every tick, triggering Pydantic model validation and object allocation overhead that consumed ~66% of tick processing time.
 **Action:** Implemented `book.get_depth_tuples(n)` on `L2BookState` to return raw `(price, quantity)` tuple pairs directly and fast-path feature extraction, reducing ML feature extraction latency from ~95μs to ~32μs per tick (~3x throughput boost).
+
+## 2026-08-30 - Throttled Hot-Reload File Stat Checks on High-Frequency Inference Hot-Path
+**Learning:** Calling `Path.exists()` and `Path.stat()` synchronously inside `KalshiONNXEngine.process_orderbook_tick` on every orderbook tick added ~11.6µs of OS filesystem call overhead per tick, consuming ~12% of total tick processing time.
+**Action:** Rate-limit hot-reload filesystem checks to at most once per second using `time.monotonic()`, saving ~11.6µs per tick while preserving model hot-reloading responsiveness.
