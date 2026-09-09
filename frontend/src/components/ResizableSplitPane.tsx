@@ -111,7 +111,7 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
     return [null, null, null];
   }, [leftPanel, centerPanel, rightPanel, children]);
 
-  // Handle Drag Start
+  // Handle Mouse Drag Start
   const handleMouseDown = useCallback((gutterIndex: 0 | 1, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -121,6 +121,15 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
 
     // Apply global drag styles to body to prevent text selection and cursor flickers
     document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  // Handle Touch Drag Start (Mobile / Touch Devices)
+  const handleTouchStart = useCallback((gutterIndex: 0 | 1, e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    isDraggingRef.current = true;
+    activeGutterRef.current = gutterIndex;
+    setActiveGutter(gutterIndex);
     document.body.style.userSelect = 'none';
   }, []);
 
@@ -141,9 +150,9 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
     [defaultSizes, onResize, onResizeEnd, storageKey]
   );
 
-  // Global mousemove & mouseup listeners
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
+  // Core resize calculator from clientX
+  const updateSizesFromClientX = useCallback(
+    (clientX: number) => {
       if (!isDraggingRef.current || activeGutterRef.current === null || !containerRef.current) {
         return;
       }
@@ -152,7 +161,7 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
       const containerWidth = rect.width;
       if (containerWidth <= 0) return;
 
-      const mouseX = e.clientX - rect.left;
+      const mouseX = clientX - rect.left;
       const currentSizes = sizesRef.current;
       const gutter = activeGutterRef.current;
 
@@ -205,9 +214,24 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
         setSizes(nextSizes);
         onResize?.(nextSizes);
       }
+    },
+    [maxPercentageSizes, minPercentageSizes, minPixelSizes, onResize]
+  );
+
+  // Global mouse & touch listeners
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      updateSizesFromClientX(e.clientX);
     };
 
-    const handleMouseUp = () => {
+    const handleTouchMove = (e: TouchEvent) => {
+      if (isDraggingRef.current && e.touches.length > 0) {
+        e.preventDefault();
+        updateSizesFromClientX(e.touches[0].clientX);
+      }
+    };
+
+    const handleEnd = () => {
       if (isDraggingRef.current) {
         isDraggingRef.current = false;
         activeGutterRef.current = null;
@@ -232,21 +256,24 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
     };
 
     window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
+    window.addEventListener('touchend', handleEnd);
+    window.addEventListener('touchcancel', handleEnd);
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mouseup', handleEnd);
+      window.removeEventListener('touchmove', handleTouchMove);
+      window.removeEventListener('touchend', handleEnd);
+      window.removeEventListener('touchcancel', handleEnd);
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
     };
   }, [
-    minPercentageSizes,
-    minPixelSizes,
-    maxPercentageSizes,
     storageKey,
-    onResize,
     onResizeEnd,
+    updateSizesFromClientX,
   ]);
 
   return (
@@ -276,6 +303,7 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
         aria-valuenow={sizes[0]}
         aria-label="Resize left and center panels"
         onMouseDown={(e) => handleMouseDown(0, e)}
+        onTouchStart={(e) => handleTouchStart(0, e)}
         onDoubleClick={() => handleDoubleClick(0)}
         onMouseEnter={() => setHoveredGutter(0)}
         onMouseLeave={() => setHoveredGutter(null)}
@@ -324,6 +352,7 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
         aria-valuenow={sizes[2]}
         aria-label="Resize center and right panels"
         onMouseDown={(e) => handleMouseDown(1, e)}
+        onTouchStart={(e) => handleTouchStart(1, e)}
         onDoubleClick={() => handleDoubleClick(1)}
         onMouseEnter={() => setHoveredGutter(1)}
         onMouseLeave={() => setHoveredGutter(null)}

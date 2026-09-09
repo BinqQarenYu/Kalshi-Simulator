@@ -313,7 +313,16 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
 
   // Reset parameters to quant optimal defaults
   const handleResetDefaults = () => {
-    soundFX.playClickSound();
+    soundFX.playWinSound();
+    const moatByAsset: Record<string, number> = {
+      BTC: 21.0,
+      ETH: 1.80,
+      SOL: 0.15,
+      DOGE: 0.002,
+    };
+    const activeAssetKey = (market?.active_asset || activeProfile.asset || 'BTC').toUpperCase();
+    const assetMoat = moatByAsset[activeAssetKey] ?? 21.0;
+
     if (activeProfile.telemetryType === 'onnx') {
       setBotParams((prev) => ({
         ...prev,
@@ -330,21 +339,28 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         min_confidence: 0.70,
         min_ev_dollars: 0.02,
         vpin_toxic_threshold: 0.60,
-        min_spot_diff: 21.0,
+        min_spot_diff: assetMoat,
         take_profit_price_threshold: 0.95,
         max_contracts: 1,
       }));
+      setSaveSuccessMsg('🎯 Quant Sweetspots preset loaded');
+      setTimeout(() => setSaveSuccessMsg(null), 2500);
     } else {
       setBotParams((prev) => ({
         ...prev,
         discount_limit_price: 0.48,
+        momentum_max_price: 0.62,
+        min_confidence: 0.70,
         min_edge_pct: 6.0,
         min_ev_dollars: 0.02,
         vpin_toxic_threshold: 0.60,
-        min_spot_diff: 21.0,
+        min_spot_diff: assetMoat,
         take_profit_price_threshold: 0.95,
+        min_take_profit_roi: 20.0,
         max_contracts: 1,
       }));
+      setSaveSuccessMsg('🎯 Quant Sweetspots preset loaded');
+      setTimeout(() => setSaveSuccessMsg(null), 2500);
     }
   };
 
@@ -1235,7 +1251,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                     {[
                       {
                         mode: 'TREND_ALIGNED_SCALP',
@@ -1307,7 +1323,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div className="p-2 rounded border bg-amber-500/10 border-amber-500/40 text-amber-300 flex items-center justify-between">
                       <div>
                         <div className="text-[10px] font-bold flex items-center gap-1">
@@ -1368,7 +1384,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div className="space-y-1">
                       <div className="text-[9px] text-slate-400 flex items-center justify-between">
                         <span>Floor (Dead Chop Cutoff)</span>
@@ -1409,19 +1425,20 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   </div>
                 </div>
 
-                {/* DIAL 4: Entry Discount Depth Ceiling ($0.35 - $0.50) */}
+                {/* DIAL 4: Entry Discount Depth Ceiling ($0.35 - $0.65) */}
                 <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" />
-                      Dial 4: Entry Discount Depth Ceiling
+                      Dial 4: Entry Discount Depth Ceiling ($0.35 - $0.65)
                       <div className="group relative cursor-help">
                         <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
                         <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-cyan-500/40 z-50 shadow-2xl leading-snug">
                           <b>Asymmetric Discount Hunter:</b><br />
-                          Resting maker order price ceiling (e.g. $0.48).<br />
+                          Resting maker order price ceiling (e.g. $0.48, max $0.65).<br />
                           • Guarantees <b>$0.00 Maker Fee</b> on Kalshi.<br />
-                          • At $0.48 entry, winning $1.00 binary yields <b>+{maxWinRoi}% net ROI</b>.
+                          • At $0.48 entry, winning $1.00 binary yields <b>+{maxWinRoi}% net ROI</b>.<br />
+                          • Up to <b>$0.65</b> ceiling allows capturing fills during rapid momentum shifts.
                         </div>
                       </div>
                     </label>
@@ -1441,7 +1458,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                     <input
                       type="range"
                       min="0.35"
-                      max="0.50"
+                      max="0.65"
                       step="0.01"
                       value={entryDiscount}
                       onChange={(e) => {
@@ -1457,7 +1474,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                     <div className="flex justify-between text-[8px] text-slate-500 font-mono">
                       <span>$0.35 (Deep Discount · +185% ROI)</span>
                       <span className="text-cyan-400 font-semibold">$0.48 (Sweetspot · +108% ROI)</span>
-                      <span>$0.50 (Even Money · +100% ROI)</span>
+                      <span>$0.65 (Maker Ceiling Max · +54% ROI)</span>
                     </div>
                   </div>
                 </div>
@@ -1522,7 +1539,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   <div className="text-[9px] font-mono text-slate-400 uppercase tracking-wider font-bold">
                     PRE-FLIGHT GUARDRAILS & EV THRESHOLDS
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                     {/* Taker Cross EV Gate */}
                     <div className="space-y-0.5 p-1.5 rounded bg-[#0a0d12] border border-[#1e242d]">
                       <div className="text-[8px] text-slate-400">Taker Cross EV</div>
@@ -1792,19 +1809,27 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
             )}
 
             {/* Footer with Reset Defaults & Apply & Save */}
-            <div className="flex items-center justify-between pt-2 border-t border-[#1f262d]">
-              <span className="text-[10px] text-[#8c9ba5] flex items-center gap-1">
-                <span>Target:</span>
-                <span className="text-white font-semibold">{activeProfile.name}</span>
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-[#1f262d]">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-[#8c9ba5] flex items-center gap-1">
+                  <span>Target:</span>
+                  <span className="text-white font-semibold">{activeProfile.name}</span>
+                </span>
+                {saveSuccessMsg && (
+                  <span className="text-[10px] font-mono text-emerald-400 font-bold animate-pulse">
+                    {saveSuccessMsg}
+                  </span>
+                )}
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleResetDefaults}
                   type="button"
                   title="Reset to recommended quant sweetspots"
-                  className="px-2.5 py-1.5 rounded bg-[#171c22] hover:bg-[#222933] text-slate-300 hover:text-white border border-[#262d35] text-[10px] font-bold transition-all cursor-pointer"
+                  className="px-2.5 py-1.5 rounded bg-[#171c22] hover:bg-[#222933] text-amber-300 hover:text-amber-200 border border-amber-500/30 text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1"
                 >
-                  {activeProfile.telemetryType === 'onnx' ? 'Reset Quant Sweetspots' : 'Reset Defaults'}
+                  <span>🎯</span>
+                  <span>{activeProfile.telemetryType === 'onnx' ? 'Reset Quant Sweetspots' : 'Sweetspots Preset'}</span>
                 </button>
                 <button
                   onClick={handleSaveParameters}

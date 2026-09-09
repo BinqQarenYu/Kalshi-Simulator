@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { ONNXSettingsPanel } from './ONNXSettingsPanel';
+import { ResizableSplitPane } from './ResizableSplitPane';
 import {
   MarketState,
   OrderBookLadderRow,
@@ -454,10 +455,20 @@ export const ParentHub: React.FC<ParentHubProps> = ({
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#0f1319] text-white font-sans">
-      {/* =========================================================================
-          COLUMN 1: Primary Navigation Sidebar (200px)
-          ========================================================================= */}
-      <aside className="w-[200px] bg-[#12161a] border-r border-[#262d35] p-4 flex flex-col justify-between shrink-0 select-none">
+      <ResizableSplitPane
+        storageKey="kalshi_parenthub_layout_sizes"
+        defaultSizes={[22, 53, 25]}
+        minPixelSizes={[280, 420, 260]}
+        minPercentageSizes={[14, 30, 15]}
+        maxPercentageSizes={[40, 75, 45]}
+        panelClassNames={['h-full overflow-hidden', 'h-full overflow-hidden', 'h-full overflow-hidden']}
+        className="w-full h-full"
+        leftPanel={
+          <div className="w-full h-full flex flex-row overflow-hidden select-none">
+            {/* =========================================================================
+                COLUMN 1: Primary Navigation Sidebar (150-170px)
+                ========================================================================= */}
+            <aside className="w-[150px] md:w-[170px] bg-[#12161a] border-r border-[#262d35] p-3 flex flex-col justify-between shrink-0 select-none">
         <div>
           {/* Brand Header */}
           <div className="flex items-center gap-2 mb-8 text-[#00bda5] font-extrabold text-xl tracking-tight">
@@ -542,10 +553,10 @@ export const ParentHub: React.FC<ParentHubProps> = ({
         </div>
       </aside>
 
-      {/* =========================================================================
-          COLUMN 2: Contextual Secondary Sub-Navigation (220px)
-          ========================================================================= */}
-      <aside className="w-[220px] bg-[#12161a] border-r border-[#262d35] p-4 flex flex-col shrink-0 select-none overflow-y-auto">
+            {/* =========================================================================
+                COLUMN 2: Contextual Secondary Sub-Navigation (Flex-1 inside Left Panel)
+                ========================================================================= */}
+            <aside className="flex-1 min-w-0 bg-[#12161a] p-3 flex flex-col shrink-0 select-none overflow-y-auto">
         <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8c9ba5] mb-3">
           {primaryNav.toUpperCase()} SECTIONS
         </h3>
@@ -670,11 +681,10 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           </nav>
         )}
       </aside>
-
-      {/* =========================================================================
-          COLUMN 3: Main Central Workbench View (Flex 1)
-          ========================================================================= */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto bg-[#0f1319]">
+    </div>
+  }
+  centerPanel={
+    <main className="w-full h-full flex flex-col min-w-0 overflow-y-auto bg-[#0f1319]">
         {/* Top Header & Breadcrumbs */}
         <header className="px-6 py-3 border-b border-[#262d35] flex items-center justify-between bg-[#12161a]/60 backdrop-blur sticky top-0 z-20">
           <div>
@@ -1610,11 +1620,9 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           )}
         </div>
       </main>
-
-      {/* =========================================================================
-          COLUMN 4: Right Rail / Docked Baby Bot & Timeline (320px)
-          ========================================================================= */}
-      <aside className="w-[340px] bg-[#12161a] border-l border-[#262d35] flex flex-col shrink-0 overflow-y-auto select-none">
+    }
+    rightPanel={
+      <aside className="w-full h-full bg-[#12161a] flex flex-col shrink-0 overflow-y-auto select-none">
         {/* If Baby Bot is docked (not popped out into standalone window), render here */}
         {!isPoppedOutBabyBot ? (
           <div className="p-3 border-b border-[#262d35]">
@@ -1756,6 +1764,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           </div>
         </div>
       </aside>
+    }
+  />
 
       {/* Promotion Workflow Modal */}
       {isPromoteModalOpen && (
