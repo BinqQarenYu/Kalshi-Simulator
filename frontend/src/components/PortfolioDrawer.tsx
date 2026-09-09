@@ -109,14 +109,22 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
         ) : (
           /* Paper Trading Mode Header */
           <div className="flex items-center gap-2">
-            <div className="flex bg-[#161b22] p-0.5 rounded-xl border border-[#30363d] text-xs font-semibold">
+            <div
+              role="tablist"
+              aria-label="Account switcher"
+              className="flex bg-[#161b22] p-0.5 rounded-xl border border-[#30363d] text-xs font-semibold"
+            >
               <button
+                id="tab-paper-account"
                 type="button"
+                role="tab"
+                aria-selected={activeAccountTab === 'paper'}
+                aria-controls="panel-paper-account"
                 onClick={() => {
                   soundFX.playClickSound();
                   setActiveAccountTab('paper');
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                   activeAccountTab === 'paper'
                     ? 'bg-[#30363d] text-white font-bold shadow-sm'
                     : 'text-[#8b949e] hover:text-white'
@@ -129,12 +137,16 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
                 </span>
               </button>
               <button
+                id="tab-live-account"
                 type="button"
+                role="tab"
+                aria-selected={activeAccountTab === 'live'}
+                aria-controls="panel-live-account"
                 onClick={() => {
                   soundFX.playClickSound();
                   setActiveAccountTab('live');
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
                   activeAccountTab === 'live'
                     ? 'bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/40 shadow-sm'
                     : 'text-[#8b949e] hover:text-white'
@@ -189,7 +201,12 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
 
       {/* LIVE ACCOUNT VIEW (Shown in Live Mode or when Live tab selected in Paper mode) */}
       {(isLive || activeAccountTab === 'live') && (
-        <div className="flex flex-col gap-4">
+        <div
+          id="panel-live-account"
+          role="tabpanel"
+          aria-labelledby={isLive ? undefined : "tab-live-account"}
+          className="flex flex-col gap-4"
+        >
           {/* Live Metrics Row */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 border-b border-[#21262d] pb-4">
             <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-3">
@@ -300,7 +317,12 @@ export const PortfolioDrawer: React.FC<PortfolioDrawerProps> = ({
 
       {/* PAPER SIMULATOR VIEW (Only shown in Paper Trading Mode) */}
       {!isLive && activeAccountTab === 'paper' && (
-        <div className="flex flex-col gap-4">
+        <div
+          id="panel-paper-account"
+          role="tabpanel"
+          aria-labelledby="tab-paper-account"
+          className="flex flex-col gap-4"
+        >
           {/* Metrics Row */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 border-b border-[#21262d] pb-4">
             {/* Total Equity */}
