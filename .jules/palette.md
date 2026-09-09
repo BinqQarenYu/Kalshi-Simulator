@@ -22,3 +22,7 @@
 ## 2026-09-07 - Order Book Ladder Keyboard Navigation and Filter Controls
 **Learning:** Interactive list/table rows (like order book price levels) implemented as `<div>` elements are invisible to keyboard tab order and screen reader action queues unless marked with `role="button"`, `tabIndex={0}`, explicit `aria-label`, and `onKeyDown` handlers for `Enter`/`Space`.
 **Action:** When converting interactive container elements (e.g. order book price rows) into accessible controls, add `role="button"`, `tabIndex={0}`, descriptive `aria-label`, `onKeyDown` keyboard event listeners, `focus-visible:ring-*` focus outlines, and sound feedback (`soundFX.playClickSound()`).
+
+## 2026-09-10 - Header Action Controls Keyboard Accessibility and ARIA Labels
+**Learning:** Top navigation action controls combining icon graphics and text (e.g., Emergency Stop, Test Bot, Reports, Capital Reset, and Integrity Verification) often lack explicit `type="button"`, explicit `aria-label` descriptions, and color-matched focus ring indicators (`focus-visible:ring-2`), creating ambiguous screen reader context and low contrast during keyboard tab navigation.
+**Action:** Always supply explicit `type="button"`, descriptive `aria-label` attributes, and theme-matched `focus-visible:ring-2` focus rings on top navigation header action controls.

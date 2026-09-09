@@ -27,12 +27,18 @@ def load_private_key(pem_source: str | Path) -> RSAPrivateKey:
     Returns:
         RSAPrivateKey: The loaded RSA private key instance.
     """
-    if isinstance(pem_source, Path) or (
-        isinstance(pem_source, str)
-        and len(pem_source) < 260
-        and "\n" not in pem_source
-        and Path(pem_source).exists()
-    ):
+    # SECURITY: Safely validate if pem_source is a file path to prevent OSError (e.g., File name too long)
+    # or unhandled filesystem exceptions when raw PEM / Base64 key strings are passed.
+    is_file_path = False
+    if isinstance(pem_source, Path):
+        is_file_path = True
+    elif isinstance(pem_source, str) and "\n" not in pem_source and len(pem_source) < 1024:
+        try:
+            is_file_path = Path(pem_source).is_file()
+        except (OSError, ValueError):
+            is_file_path = False
+
+    if is_file_path:
         pem_bytes = Path(pem_source).read_bytes()
     else:
         content = str(pem_source).strip()
