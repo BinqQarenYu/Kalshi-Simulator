@@ -87,6 +87,7 @@ class ThreeStepDominationBot:
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
         max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
         discount_limit_price: Decimal = Decimal("0.48"),  # Configurable discount sniper ceiling
+        min_confidence: float = 0.70,  # 70% model conviction threshold
         asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
@@ -107,7 +108,8 @@ class ThreeStepDominationBot:
         self.fee_per_contract = fee_per_contract
         self.min_spot_diff = min_spot_diff if min_spot_diff is not None else float(cfg.min_spot_diff)
         self.max_entry_price = Decimal(str(max_entry_price))
-        self.discount_limit_price = max(Decimal("0.10"), min(Decimal("0.50"), discount_limit_price))
+        self.discount_limit_price = max(Decimal("0.10"), min(Decimal("0.65"), Decimal(str(discount_limit_price))))
+        self.min_confidence = min_confidence if min_confidence <= 1.0 else (min_confidence / 100.0)
 
         # Underlying Stage 2 EV & Quarter-Kelly Optimizer
         self._ev_engine = StatisticalEVEngine(
@@ -132,7 +134,7 @@ class ThreeStepDominationBot:
     def set_discount_limit_price(self, new_price: Decimal | float | str) -> None:
         """Dynamically update the maker discount limit price ceiling."""
         dec_price = Decimal(str(new_price))
-        clamped = max(Decimal("0.10"), min(Decimal("0.85"), dec_price))
+        clamped = max(Decimal("0.10"), min(Decimal("0.65"), dec_price))
         self.discount_limit_price = clamped
         logger.info("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
 
@@ -142,7 +144,7 @@ class ThreeStepDominationBot:
             "asset": self.asset.value if hasattr(self, "asset") else "BTC",
             "discount_limit_price": float(self.discount_limit_price),
             "momentum_max_price": float(self.max_entry_price),
-            "min_confidence": round(float(self.min_edge_pct) * 100.0, 1),
+            "min_confidence": round(float(self.min_confidence) * 100.0, 1) if self.min_confidence <= 1.0 else round(float(self.min_confidence), 1),
             "min_edge_pct": round(float(self.min_edge_pct) * 100.0, 1),
             "min_ev_dollars": float(self.min_ev_dollars),
             "min_spot_diff": float(self.min_spot_diff),
@@ -177,8 +179,7 @@ class ThreeStepDominationBot:
             val = float(min_confidence)
             if val > 1.0:
                 val = val / 100.0
-            self.min_edge_pct = max(0.01, min(0.50, val))
-            self._ev_engine.min_edge_pct = self.min_edge_pct
+            self.min_confidence = max(0.50, min(0.99, val))
         if min_edge_pct is not None:
             val = float(min_edge_pct)
             if val > 1.0:
@@ -562,6 +563,18 @@ class ThreeStepDominationBot:
 
         # Dynamic Two-Tier Entry Price Cap (Q3 Winning Choice)
         if ev_res.recommended_side in (OrderSide.YES, OrderSide.NO) and ev_res.recommended_contracts > 0:
+            target_prob = p_up if ev_res.recommended_side == OrderSide.YES else p_down
+            if target_prob < self.min_confidence:
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=vpin,
+                    rationale=(
+                        f"AI Conviction Veto: {ev_res.recommended_side.value.upper()} model conviction={target_prob*100:.1f}% "
+                        f"< {self.min_confidence*100:.0f}% threshold. Awaiting higher statistical conviction."
+                    ),
+                )
+
             target_ask = actual_market_ask if actual_market_ask is not None else float(ev_res.market_price)
             # Tier 1: Absolute hard ceiling above $0.72 (inverted R:R suicide)
             if target_ask > 0.72:

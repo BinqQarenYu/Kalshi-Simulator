@@ -143,12 +143,12 @@ def test_domination_bot_dynamic_discount_update() -> None:
     bot.set_discount_limit_price(0.30)
     assert bot.discount_limit_price == Decimal("0.30")
 
-    # Clamped within safe boundaries [0.10, 0.50]
+    # Clamped within safe boundaries [0.10, 0.65]
     bot.set_discount_limit_price(0.05)
     assert bot.discount_limit_price == Decimal("0.10")
 
     bot.set_discount_limit_price(0.75)
-    assert bot.discount_limit_price == Decimal("0.50")
+    assert bot.discount_limit_price == Decimal("0.65")
 
 
 def test_domination_bot_asset_calibration() -> None:

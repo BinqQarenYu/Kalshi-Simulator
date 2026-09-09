@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Save, AlertTriangle, Cpu, Activity, RefreshCw } from 'lucide-react';
 
 export const ONNXSettingsPanel: React.FC = () => {
@@ -101,7 +101,7 @@ export const ONNXSettingsPanel: React.FC = () => {
           </label>
           <div className="relative">
             <span className="absolute left-2 top-2 text-[#8c9ba5] text-sm">$</span>
-            <input type="number" step="0.01" min="0.10" max="0.85"
+            <input type="number" step="0.01" min="0.10" max="0.65"
               value={params.discount_limit_price || 0.48}
               onChange={e => handleChange('discount_limit_price', e.target.value)}
               className="w-full bg-[#0a0c10] border border-[#262d35] rounded p-2 pl-6 text-white text-sm focus:outline-none focus:border-purple-500"

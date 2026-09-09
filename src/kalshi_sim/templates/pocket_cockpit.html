@@ -73,8 +73,14 @@
     .input-wrap:focus-within { border-color: var(--blue); }
     .input-wrap input { background: transparent; border: none; color: var(--text); font-family: monospace; font-size: 0.85rem; font-weight: 600; width: 100%; outline: none; }
     .input-wrap .prefix, .input-wrap .suffix { color: var(--muted); font-size: 0.8rem; margin: 0 4px; }
-    .btn-save-sm { background: #064e3b; color: #a7f3d0; border: 1px solid var(--green); cursor: pointer; padding: 5px 12px; border-radius: 6px; font-weight: 700; font-size: 0.78rem; transition: all 0.2s; }
-    .btn-save-sm:hover { background: var(--green); color: #022c22; box-shadow: 0 0 10px var(--green-glow); }
+    .btn-save-sm { background: #064e3b; color: #a7f3d0; border: 1px solid var(--green); cursor: pointer; padding: 6px 14px; border-radius: 6px; font-weight: 700; font-size: 0.78rem; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-save-sm:hover:not(:disabled) { background: var(--green); color: #022c22; box-shadow: 0 0 12px var(--green-glow); }
+    .btn-save-sm:disabled { opacity: 0.6; cursor: not-allowed; }
+    .btn-save-sm.unsaved { background: #047857; color: #fff; border-color: #34d399; box-shadow: 0 0 14px rgba(52, 211, 153, 0.4); }
+    .btn-sweetspot-sm { background: rgba(245, 158, 11, 0.12); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); cursor: pointer; padding: 6px 12px; border-radius: 6px; font-weight: 700; font-size: 0.78rem; transition: all 0.2s; display: inline-flex; align-items: center; gap: 5px; }
+    .btn-sweetspot-sm:hover { background: rgba(245, 158, 11, 0.22); color: #fff; border-color: #f59e0b; box-shadow: 0 0 12px rgba(245, 158, 11, 0.3); }
+    .sweetspot-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.68rem; color: #34d399; margin-top: 2px; font-family: monospace; }
+    .unsaved-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--amber); display: inline-block; }
     .btn-sweep-sm { background: rgba(255,255,255,0.04); color: #cbd5e1; border: 1px solid var(--border); cursor: pointer; padding: 5px 10px; border-radius: 6px; font-size: 0.75rem; transition: all 0.2s; }
     .btn-sweep-sm:hover { background: rgba(255,255,255,0.08); border-color: var(--muted); }
 
@@ -281,16 +287,37 @@
     <div class="panel expandable">
       <div class="panel-title">
         <span>⚙️ Strategy Parameters & Guardrails</span>
-        <button onclick="saveParameters()" class="btn-save-sm">💾 Apply & Save</button>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="btnSweetspots" onclick="loadSweetspots()" class="btn-sweetspot-sm" title="Load Quant Sweetspots ($0.48 Maker / $0.62 Mom / $0.95 TP / 1 Ct)">🎯 Sweetspots</button>
+          <button id="btnSaveParams" onclick="saveParameters()" class="btn-save-sm">💾 Apply & Save</button>
+        </div>
       </div>
       <div class="params-grid">
         <div class="param-item">
-          <label class="param-label">Discount Limit Price (Maker Ceiling) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"What is the absolute maximum price you are willing to pay?"</i><br><b>How it works:</b> Places a 'lowball offer' below market value.<br><b>Why it matters:</b> Guarantees  Kalshi exchange fees and protects against sudden crashes.</div></div></label>
+          <label class="param-label">Discount Limit Price (Maker Ceiling) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"What is the absolute maximum price you are willing to pay?"</i><br><b>How it works:</b> Places a 'lowball offer' below market value.<br><b>Why it matters:</b> Guarantees $0 Kalshi maker fees and captures discount entries.</div></div></label>
           <div class="input-wrap">
             <span class="prefix">$</span>
-            <input id="inputDiscountPrice" type="number" step="0.01" min="0.10" max="0.85" value="0.62" />
+            <input id="inputDiscountPrice" type="number" step="0.01" min="0.10" max="0.65" value="0.48" oninput="markUnsaved()" />
           </div>
-          <span class="param-hint">Resting limit price ceiling ($0.10 - $0.85)</span>
+          <span class="sweetspot-badge">★ Sweetspot: $0.48 ($0 Maker fee)</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Momentum Entry Cap ($) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"How high will you chase when momentum accelerates?"</i><br><b>How it works:</b> Limits market-taking price during sudden directional breakouts.<br><b>Why it matters:</b> Prevents buying over-extended contracts where payout-to-risk ratio degrades.</div></div></label>
+          <div class="input-wrap">
+            <span class="prefix">$</span>
+            <input id="inputMomentumPrice" type="number" step="0.01" min="0.50" max="0.85" value="0.62" oninput="markUnsaved()" />
+          </div>
+          <span class="sweetspot-badge">★ Sweetspot: $0.62 max</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Min AI Confidence % <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The AI Conviction Bar."</i><br><b>How it works:</b> Softmax confidence threshold required before an order proposal is emitted.<br><b>Why it matters:</b> Eliminates low-conviction chop near 50/50.</div></div></label>
+          <div class="input-wrap">
+            <input id="inputMinConfidence" type="number" step="1" min="50" max="99" value="70" oninput="markUnsaved()" />
+            <span class="suffix">%</span>
+          </div>
+          <span class="sweetspot-badge">★ Sweetspot: 70% conviction</span>
         </div>
 
         <div class="param-item">
@@ -299,60 +326,60 @@
             <input id="inputMaxContracts" type="number" step="1" min="1" max="1" value="1" readonly title="Hard-capped to strictly 1 contract per asset" />
             <span class="suffix">cts</span>
           </div>
-          <span class="param-hint">1 contract / asset cap (Sole 3-Step Dominion)</span>
+          <span class="sweetspot-badge">🔒 Invariant: 1 contract (Locked)</span>
         </div>
 
         <div class="param-item">
           <label class="param-label">Min Edge % (Statistical Alpha) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"How rigged must the game be before you play?"</i><br><b>How it works:</b> Demands a mathematical advantage over the market price.<br><b>Why it matters:</b> A 6% edge means we only trade when we have a massive statistical advantage.</div></div></label>
           <div class="input-wrap">
-            <input id="inputMinEdge" type="number" step="0.5" min="1.0" max="50.0" value="6.0" />
+            <input id="inputMinEdge" type="number" step="0.5" min="1.0" max="50.0" value="6.0" oninput="markUnsaved()" />
             <span class="suffix">%</span>
           </div>
-          <span class="param-hint">Minimum edge required to enter</span>
+          <span class="sweetspot-badge">★ Sweetspot: 6.0%</span>
         </div>
 
         <div class="param-item">
           <label class="param-label">Min Net EV ($/Contract) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"Minimum expected profit per trade."</i><br><b>How it works:</b> The average profit if you played this setup 1,000 times.<br><b>Why it matters:</b> Ignores trades that only yield pennies. Demands structural profit.</div></div></label>
           <div class="input-wrap">
             <span class="prefix">$</span>
-            <input id="inputMinEv" type="number" step="0.01" min="0.01" max="0.50" value="0.02" />
+            <input id="inputMinEv" type="number" step="0.01" min="0.01" max="0.50" value="0.02" oninput="markUnsaved()" />
           </div>
-          <span class="param-hint">Minimum dollar expected value</span>
+          <span class="sweetspot-badge">★ Sweetspot: $0.02 / contract</span>
         </div>
 
         <div class="param-item">
           <label class="param-label">Min Spot Distance (|Spot - Strike|) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Moat / Buffer Zone."</i><br><b>How it works:</b> Refuses trades when Bitcoin is hovering right on the strike line.<br><b>Why it matters:</b> Keeps you out of 50/50 coin-flip noise.</div></div></label>
           <div class="input-wrap">
             <span class="prefix">$</span>
-            <input id="inputMinSpotDiff" type="number" step="1.0" min="0" max="200" value="21.00" />
+            <input id="inputMinSpotDiff" type="number" step="1.0" min="0" max="200" value="21.00" oninput="markUnsaved()" />
           </div>
-          <span id="minSpotDiffHint" class="param-hint">Skip coin-flip chop near strike ($21.00 BTC)</span>
+          <span id="minSpotDiffHint" class="sweetspot-badge">★ Sweetspot: $21.00 BTC</span>
         </div>
 
         <div class="param-item">
           <label class="param-label">VPIN Toxicity Veto <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Shark Detector."</i><br><b>How it works:</b> Tracks if massive institutions are dumping/pumping Bitcoin right now.<br><b>Why it matters:</b> Instantly vetoes trades if a flash-crash is detected in the order flow.</div></div></label>
           <div class="input-wrap">
-            <input id="inputVpinThreshold" type="number" step="0.05" min="0.10" max="0.95" value="0.60" />
+            <input id="inputVpinThreshold" type="number" step="0.05" min="0.10" max="0.95" value="0.60" oninput="markUnsaved()" />
           </div>
-          <span class="param-hint">Order flow adverse selection cutoff</span>
+          <span class="sweetspot-badge">★ Sweetspot: 0.60 cutoff</span>
         </div>
 
         <div class="param-item">
           <label class="param-label">Take Profit Price Ceiling <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br><b>How it works:</b> Automatically sells the contract early if you are winning big.<br><b>Why it matters:</b> Cashes out guaranteed profit instead of risking everything for the final 5 pennies.</div></div></label>
           <div class="input-wrap">
             <span class="prefix">$</span>
-            <input id="inputTakeProfitPrice" type="number" step="0.01" min="0.50" max="0.99" value="0.95" />
+            <input id="inputTakeProfitPrice" type="number" step="0.01" min="0.50" max="0.99" value="0.95" oninput="markUnsaved()" />
           </div>
-          <span class="param-hint">Tail risk ceiling for early exit</span>
+          <span class="sweetspot-badge">★ Sweetspot: $0.95 (Cash in 95¢)</span>
         </div>
 
         <div class="param-item">
           <label class="param-label">Min Take Profit ROI % <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"How much profit is good enough to leave early?"</i><br><b>How it works:</b> Ensures you walk away with at least a 20% return on your investment.<br><b>Why it matters:</b> Stops the bot from panic-selling for a 1% profit.</div></div></label>
           <div class="input-wrap">
-            <input id="inputTakeProfitRoi" type="number" step="5" min="5" max="100" value="20.0" />
+            <input id="inputTakeProfitRoi" type="number" step="5" min="5" max="100" value="20.0" oninput="markUnsaved()" />
             <span class="suffix">%</span>
           </div>
-          <span class="param-hint">Minimum profit % for early harvest</span>
+          <span class="sweetspot-badge">★ Sweetspot: 20%</span>
         </div>
       </div>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border);">
@@ -501,12 +528,111 @@
       }
     }
 
+    let hasUnsavedChanges = false;
+    let isSavingParams = false;
+
+    function playChime(type = 'success') {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        const now = ctx.currentTime;
+
+        if (type === 'success') {
+          // Institutional high-tech double chime (C6 -> G6)
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(1046.50, now);
+          osc.frequency.exponentialRampToValueAtTime(1567.98, now + 0.08);
+          gain.gain.setValueAtTime(0.08, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+          osc.start(now);
+          osc.stop(now + 0.22);
+        } else if (type === 'preset') {
+          // Sweetspot acoustic confirmation tri-tone (E5 -> A5 -> E6)
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(659.25, now);
+          osc.frequency.setValueAtTime(880.00, now + 0.06);
+          osc.frequency.setValueAtTime(1318.51, now + 0.12);
+          gain.gain.setValueAtTime(0.09, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+          osc.start(now);
+          osc.stop(now + 0.28);
+        } else if (type === 'error') {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.setValueAtTime(180, now + 0.10);
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+          osc.start(now);
+          osc.stop(now + 0.25);
+        }
+      } catch (e) {
+        // Silently skip if audio is restricted or unsupported
+      }
+    }
+
+    function markUnsaved() {
+      hasUnsavedChanges = true;
+      const btn = document.getElementById('btnSaveParams');
+      if (btn && !isSavingParams) {
+        btn.classList.add('unsaved');
+        btn.innerHTML = '<span class="unsaved-dot"></span> 💾 Apply &amp; Save*';
+      }
+      const statusEl = document.getElementById('paramStatusText');
+      if (statusEl && !isSavingParams) {
+        statusEl.textContent = '● Unsaved changes';
+        statusEl.style.color = 'var(--amber)';
+      }
+    }
+
+    function clearUnsaved() {
+      hasUnsavedChanges = false;
+      const btn = document.getElementById('btnSaveParams');
+      if (btn && !isSavingParams) {
+        btn.classList.remove('unsaved');
+        btn.innerHTML = '💾 Apply &amp; Save';
+      }
+    }
+
+    function loadSweetspots() {
+      const spec = ASSET_SPECS[currentAsset] || ASSET_SPECS.BTC;
+      document.getElementById('inputDiscountPrice').value = '0.48';
+      document.getElementById('inputMomentumPrice').value = '0.62';
+      document.getElementById('inputMinConfidence').value = '70';
+      document.getElementById('inputMaxContracts').value = '1';
+      document.getElementById('inputMinEdge').value = '6.0';
+      document.getElementById('inputMinEv').value = '0.02';
+      document.getElementById('inputMinSpotDiff').value = spec.minDiff.toFixed(spec.decimals);
+      document.getElementById('inputVpinThreshold').value = '0.60';
+      document.getElementById('inputTakeProfitPrice').value = '0.95';
+      document.getElementById('inputTakeProfitRoi').value = '20.0';
+
+      const diffHint = document.getElementById('minSpotDiffHint');
+      if (diffHint) diffHint.textContent = `★ Sweetspot: $${spec.minDiff} ${currentAsset}`;
+
+      markUnsaved();
+      playChime('preset');
+      appendLog(`🎯 [SWEETSPOTS LOADED] $0.48 Maker ($0 Fee) | $0.62 Mom Cap | 70% AI | $0.02 Net EV | $0.95 TP (Cash-in) | 1ct Invariant. Click 'Apply & Save' to commit.`);
+    }
+
     async function loadParameters() {
       try {
         const res = await fetch('/api/bot/parameters');
         if (!res.ok) return;
         const p = await res.json();
         if (p.discount_limit_price !== undefined) document.getElementById('inputDiscountPrice').value = p.discount_limit_price.toFixed(2);
+        if (p.momentum_max_price !== undefined) document.getElementById('inputMomentumPrice').value = p.momentum_max_price.toFixed(2);
+        if (p.min_confidence !== undefined) {
+          const conf = p.min_confidence <= 1.0 ? Math.round(p.min_confidence * 100) : Math.round(p.min_confidence);
+          document.getElementById('inputMinConfidence').value = conf;
+        }
         if (p.max_contracts !== undefined) document.getElementById('inputMaxContracts').value = Math.min(p.max_contracts, 1);
         if (p.min_edge_pct !== undefined) document.getElementById('inputMinEdge').value = p.min_edge_pct.toFixed(1);
         if (p.min_ev_dollars !== undefined) document.getElementById('inputMinEv').value = p.min_ev_dollars.toFixed(2);
@@ -517,6 +643,13 @@
         if (p.vpin_toxic_threshold !== undefined) document.getElementById('inputVpinThreshold').value = p.vpin_toxic_threshold.toFixed(2);
         if (p.take_profit_price_threshold !== undefined) document.getElementById('inputTakeProfitPrice').value = p.take_profit_price_threshold.toFixed(2);
         if (p.min_take_profit_roi !== undefined) document.getElementById('inputTakeProfitRoi').value = p.min_take_profit_roi.toFixed(1);
+        
+        clearUnsaved();
+        const statusEl = document.getElementById('paramStatusText');
+        if (statusEl) {
+          statusEl.textContent = 'Parameters in sync';
+          statusEl.style.color = 'var(--muted)';
+        }
         paramsLoaded = true;
       } catch (err) {
         console.error('Failed to load parameters:', err);
@@ -524,38 +657,99 @@
     }
 
     async function saveParameters() {
+      if (isSavingParams) return;
+      isSavingParams = true;
+
+      const btn = document.getElementById('btnSaveParams');
+      const statusEl = document.getElementById('paramStatusText');
+
+      let confVal = parseFloat(document.getElementById('inputMinConfidence').value);
+      if (isNaN(confVal)) confVal = 70;
+      if (confVal > 1.0) confVal = confVal / 100.0;
+      confVal = Math.min(Math.max(confVal, 0.50), 0.99);
+
       const payload = {
-        discount_limit_price: parseFloat(document.getElementById('inputDiscountPrice').value),
+        discount_limit_price: parseFloat(document.getElementById('inputDiscountPrice').value) || 0.48,
+        momentum_max_price: parseFloat(document.getElementById('inputMomentumPrice').value) || 0.62,
+        min_confidence: confVal,
         max_contracts: 1, // Strictly 1 contract per asset invariant
-        min_edge_pct: parseFloat(document.getElementById('inputMinEdge').value),
-        min_ev_dollars: parseFloat(document.getElementById('inputMinEv').value),
-        min_spot_diff: parseFloat(document.getElementById('inputMinSpotDiff').value),
-        vpin_toxic_threshold: parseFloat(document.getElementById('inputVpinThreshold').value),
-        take_profit_price_threshold: parseFloat(document.getElementById('inputTakeProfitPrice').value),
-        min_take_profit_roi: parseFloat(document.getElementById('inputTakeProfitRoi').value)
+        min_edge_pct: parseFloat(document.getElementById('inputMinEdge').value) || 6.0,
+        min_ev_dollars: parseFloat(document.getElementById('inputMinEv').value) || 0.02,
+        min_spot_diff: parseFloat(document.getElementById('inputMinSpotDiff').value) || 21.0,
+        vpin_toxic_threshold: parseFloat(document.getElementById('inputVpinThreshold').value) || 0.60,
+        take_profit_price_threshold: parseFloat(document.getElementById('inputTakeProfitPrice').value) || 0.95,
+        min_take_profit_roi: parseFloat(document.getElementById('inputTakeProfitRoi').value) || 20.0
       };
 
       try {
-        const statusEl = document.getElementById('paramStatusText');
-        statusEl.textContent = 'Saving...';
-        statusEl.style.color = 'var(--amber)';
+        if (btn) {
+          btn.disabled = true;
+          btn.innerHTML = '💾 Applying...';
+          btn.style.opacity = '0.8';
+        }
+        if (statusEl) {
+          statusEl.textContent = 'Saving...';
+          statusEl.style.color = 'var(--amber)';
+        }
+
         const res = await fetch('/api/bot/parameters', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
+
         if (res.ok) {
-          statusEl.textContent = 'Saved at ' + new Date().toLocaleTimeString();
-          statusEl.style.color = 'var(--green)';
-          appendLog(`⚙️ [PARAMETERS SAVED] Ceiling: $${payload.discount_limit_price} | Max: ${payload.max_contracts}ct | MinEdge: ${payload.min_edge_pct}% | MinEV: $${payload.min_ev_dollars} | MinDist: $${payload.min_spot_diff}`);
+          clearUnsaved();
+          if (btn) {
+            btn.classList.remove('unsaved');
+            btn.innerHTML = '✅ Saved!';
+          }
+          if (statusEl) {
+            statusEl.textContent = 'Saved at ' + new Date().toLocaleTimeString();
+            statusEl.style.color = 'var(--green)';
+          }
+          playChime('success');
+          appendLog(`⚙️ [PARAMETERS SAVED] Maker: $${payload.discount_limit_price} | MomCap: $${payload.momentum_max_price} | AI: ${(payload.min_confidence * 100).toFixed(0)}% | 1ct Invariant | MinEdge: ${payload.min_edge_pct}% | MinEV: $${payload.min_ev_dollars} | Dist: $${payload.min_spot_diff} | TP: $${payload.take_profit_price_threshold}`);
+          setTimeout(() => {
+            if (btn) {
+              btn.disabled = false;
+              btn.innerHTML = '💾 Apply &amp; Save';
+              btn.style.opacity = '1';
+            }
+          }, 1500);
         } else {
-          const err = await res.json();
-          statusEl.textContent = 'Save failed';
-          statusEl.style.color = 'var(--red)';
+          const err = await res.json().catch(() => ({}));
+          if (btn) {
+            btn.innerHTML = '❌ Save Failed';
+          }
+          if (statusEl) {
+            statusEl.textContent = 'Save failed';
+            statusEl.style.color = 'var(--red)';
+          }
+          playChime('error');
           appendLog('❌ Failed saving parameters: ' + JSON.stringify(err));
+          setTimeout(() => {
+            if (btn) {
+              btn.disabled = false;
+              btn.innerHTML = '💾 Apply &amp; Save*';
+              btn.style.opacity = '1';
+            }
+          }, 2000);
         }
       } catch (err) {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '💾 Apply &amp; Save*';
+          btn.style.opacity = '1';
+        }
+        if (statusEl) {
+          statusEl.textContent = 'Network error';
+          statusEl.style.color = 'var(--red)';
+        }
+        playChime('error');
         appendLog('❌ Error saving parameters: ' + err);
+      } finally {
+        isSavingParams = false;
       }
     }
 

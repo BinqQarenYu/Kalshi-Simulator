@@ -1007,7 +1007,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                       type="number"
                       step="0.01"
                       min="0.10"
-                      max="0.85"
+                      max="0.65"
                       value={botParams.discount_limit_price ?? 0.48}
                       onChange={(e) => setBotParams({ ...botParams, discount_limit_price: parseFloat(e.target.value) })}
                       className="w-full bg-transparent text-white font-mono outline-none text-xs"
@@ -1223,7 +1223,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                       type="number"
                       step="0.01"
                       min="0.10"
-                      max="0.85"
+                      max="0.65"
                       value={botParams.discount_limit_price ?? 0.48}
                       onChange={(e) => setBotParams({ ...botParams, discount_limit_price: parseFloat(e.target.value) })}
                       className="w-full bg-transparent text-white font-mono outline-none text-xs"

@@ -1381,7 +1381,7 @@ async def panic_halt() -> Dict[str, Any]:
 
 
 class ParametersUpdateRequest(BaseModel):
-    discount_limit_price: Optional[float] = Field(default=None, ge=0.10, le=0.85, description="Maker discount limit price ceiling")
+    discount_limit_price: Optional[float] = Field(default=None, ge=0.10, le=0.65, description="Maker discount limit price ceiling")
     max_contracts: Optional[int] = Field(default=None, ge=1, le=1, description="Max contracts per cycle trade (strictly 1)")
     min_edge_pct: Optional[float] = Field(default=None, ge=1.0, le=50.0, description="Minimum edge percentage")
     min_ev_dollars: Optional[float] = Field(default=None, ge=0.01, le=0.50, description="Minimum net EV dollars per contract")
