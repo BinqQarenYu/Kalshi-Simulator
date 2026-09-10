@@ -164,6 +164,30 @@ def test_pocket_cockpit_api(monkeypatch, tmp_path: Path):
         assert engine.is_armed is False
 
 
+def test_standalone_bot_cors(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("TESTING", "true")
+    engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
+    with patch("kalshi_sim.standalone_bot.app_engine", engine):
+        client = TestClient(app)
+        # Test request from allowed origin
+        origin = "http://localhost:3000"
+        resp = client.get("/api/state", headers={"Origin": origin})
+        assert resp.status_code == 200
+        assert resp.headers.get("access-control-allow-origin") == origin
+        assert resp.headers.get("access-control-allow-credentials") == "true"
+
+        # Test preflight OPTIONS request
+        options_resp = client.options(
+            "/api/state",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert options_resp.status_code == 200
+        assert options_resp.headers.get("access-control-allow-origin") == origin
+
+
 def test_standalone_bot_sync_pnl_reports(tmp_path: Path):
     engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
     now_utc = datetime.now(timezone.utc)
