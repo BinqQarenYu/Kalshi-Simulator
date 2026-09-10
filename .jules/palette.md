@@ -1,5 +1,9 @@
 # Palette's Journal - Micro-UX & Accessibility Learnings
 
+## 2026-09-18 - Regulatory Compliance Modal Tab Navigation & Action Controls Accessibility
+**Learning:** Multi-section modal navigation tabs (such as Active Guardrails, Legal Handbook, and CFTC Audit Trail in ComplianceModal) require explicit `role="tablist"` container markup, `role="tab"`, `id`, `aria-selected`, `aria-controls`, and `focus-visible:ring-2` styling. Linking tabs to content panels marked with `role="tabpanel"` and `aria-labelledby` ensures screen reader users can discover and navigate regulatory compliance views cleanly.
+**Action:** Always structure modal section tabs with `role="tablist"`, `role="tab"`, `id`, `aria-selected`, `aria-controls`, `focus-visible:ring-2`, and link them directly to `role="tabpanel"` containers with matching `aria-labelledby` IDs.
+
 ## 2026-09-14 - Summary Metric Filter Cards & Modal Close Controls Accessibility
 **Learning:** Interactive summary cards that double as quick filters (such as "Today's Report" and "Total Live Report" cards in report modals) implemented as `<div>` containers are non-focusable and invisible to screen reader tab orders unless converted to semantic `<button type="button">` controls with explicit `aria-label` and `focus-visible:ring-2` styling.
 **Action:** Always wrap interactive summary/metric filter cards in semantic `<button type="button">` elements, provide descriptive `aria-label` text, add `focus-visible:ring-2` outlines, and apply `text-left` to preserve card alignment.

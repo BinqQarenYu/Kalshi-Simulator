@@ -142,21 +142,26 @@ export const ComplianceModal: React.FC<ComplianceModalProps> = ({
 
           <div className="flex items-center gap-2">
             <button
+              type="button"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="p-2 text-[#8b949e] hover:text-white bg-[#21262d] hover:bg-[#30363d] rounded-lg transition-colors"
+              aria-label="Refresh compliance telemetry"
               title="Refresh Compliance Telemetry"
+              className="p-2 text-[#8b949e] hover:text-white bg-[#21262d] hover:bg-[#30363d] rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
             >
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin text-purple-400' : ''}`} />
             </button>
             <button
+              type="button"
               onClick={handleExportJSON}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#8b949e] hover:text-white bg-[#21262d] hover:bg-[#30363d] rounded-lg transition-colors border border-[#30363d]"
+              aria-label="Export compliance audit as JSON"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#8b949e] hover:text-white bg-[#21262d] hover:bg-[#30363d] rounded-lg transition-colors border border-[#30363d] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
             >
               <Download className="h-3.5 w-3.5" />
               <span>Export JSON</span>
             </button>
             <button
+              type="button"
               onClick={onClose}
               aria-label="Close compliance modal"
               className="p-2 text-[#8b949e] hover:text-white rounded-lg hover:bg-[#21262d] transition-colors text-lg font-bold leading-none ml-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500"
@@ -229,10 +234,15 @@ export const ComplianceModal: React.FC<ComplianceModalProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-2 px-6 pt-3 border-b border-[#21262d] bg-[#0d1117]">
+        <div role="tablist" aria-label="Compliance sections" className="flex items-center gap-2 px-6 pt-3 border-b border-[#21262d] bg-[#0d1117]">
           <button
+            type="button"
+            role="tab"
+            id="tab-compliance-checks"
+            aria-selected={activeTab === 'checks'}
+            aria-controls="panel-compliance-checks"
             onClick={() => setActiveTab('checks')}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 ${
               activeTab === 'checks'
                 ? 'border-purple-500 text-purple-400 bg-purple-500/10'
                 : 'border-transparent text-[#8b949e] hover:text-white'
@@ -243,8 +253,13 @@ export const ComplianceModal: React.FC<ComplianceModalProps> = ({
           </button>
 
           <button
+            type="button"
+            role="tab"
+            id="tab-compliance-handbook"
+            aria-selected={activeTab === 'handbook'}
+            aria-controls="panel-compliance-handbook"
             onClick={() => setActiveTab('handbook')}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 ${
               activeTab === 'handbook'
                 ? 'border-purple-500 text-purple-400 bg-purple-500/10'
                 : 'border-transparent text-[#8b949e] hover:text-white'
@@ -255,8 +270,13 @@ export const ComplianceModal: React.FC<ComplianceModalProps> = ({
           </button>
 
           <button
+            type="button"
+            role="tab"
+            id="tab-compliance-audit"
+            aria-selected={activeTab === 'audit_trail'}
+            aria-controls="panel-compliance-audit"
             onClick={() => setActiveTab('audit_trail')}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all ${
+            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold border-b-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 ${
               activeTab === 'audit_trail'
                 ? 'border-purple-500 text-purple-400 bg-purple-500/10'
                 : 'border-transparent text-[#8b949e] hover:text-white'
@@ -271,7 +291,7 @@ export const ComplianceModal: React.FC<ComplianceModalProps> = ({
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           {/* TAB 1: ACTIVE CHECKS */}
           {activeTab === 'checks' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div id="panel-compliance-checks" role="tabpanel" aria-labelledby="tab-compliance-checks" className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {checks.map((c, i) => (
                 <div
                   key={i}
@@ -306,7 +326,7 @@ export const ComplianceModal: React.FC<ComplianceModalProps> = ({
 
           {/* TAB 2: DOS & DON'TS HANDBOOK */}
           {activeTab === 'handbook' && (
-            <div className="space-y-6">
+            <div id="panel-compliance-handbook" role="tabpanel" aria-labelledby="tab-compliance-handbook" className="space-y-6">
               {/* THE DOS */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
@@ -383,7 +403,7 @@ export const ComplianceModal: React.FC<ComplianceModalProps> = ({
 
           {/* TAB 3: AUDIT TRAIL */}
           {activeTab === 'audit_trail' && (
-            <div className="space-y-4">
+            <div id="panel-compliance-audit" role="tabpanel" aria-labelledby="tab-compliance-audit" className="space-y-4">
               <div className="p-4 rounded-xl bg-[#161b22] border border-[#30363d]">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-[#8b949e]">
