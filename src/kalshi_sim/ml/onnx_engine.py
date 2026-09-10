@@ -11,6 +11,7 @@ import logging
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -55,6 +56,10 @@ class KalshiONNXEngine:
         self.last_signal: str = "WAIT"
         self.last_confidence: float = 0.0
         self.last_probs: List[float] = [0.0, 0.0, 1.0]
+
+        # Hot-reload filesystem stat check rate-limiting state
+        self._last_mtime_check: float = 0.0
+        self._check_interval: float = 1.0  # Throttle stat() to max once per second
 
         self._load_model()
 
@@ -115,15 +120,18 @@ class KalshiONNXEngine:
         latest_trades: Optional[List[TradeEvent]] = None,
     ) -> Dict[str, Any]:
         """Execute feature extraction and sub-millisecond ONNX inference for an L2 tick."""
-        # 1. Hot-reload check
-        if self.model_path.exists():
-            try:
-                curr_mtime = self.model_path.stat().st_mtime
-                if curr_mtime > self.last_mtime:
-                    logger.info("[KalshiONNX] Hot-reload triggered: reloading %s", self.model_path)
-                    self._load_model()
-            except Exception:
-                pass
+        # 1. Hot-reload check (throttled to max once per second to avoid blocking filesystem stat calls on tick hot path)
+        now = time.monotonic()
+        if now - self._last_mtime_check > self._check_interval:
+            self._last_mtime_check = now
+            if self.model_path.exists():
+                try:
+                    curr_mtime = self.model_path.stat().st_mtime
+                    if curr_mtime > self.last_mtime:
+                        logger.info("[KalshiONNX] Hot-reload triggered: reloading %s", self.model_path)
+                        self._load_model()
+                except Exception:
+                    pass
 
         # 2. Extract 28-dimensional raw feature vector
         raw_vector = self.extractor.extract_features_from_book(book, latest_trades)
