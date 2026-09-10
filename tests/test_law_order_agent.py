@@ -170,3 +170,11 @@ def test_credential_leak_audit(law_agent):
     })
     assert unsafe_item.status == "FAIL"
     assert "CRITICAL SECURITY LEAK" in unsafe_item.message
+
+    # Unsafe payload with api_secret key
+    unsafe_secret_item = law_agent.audit_credential_security({
+        "ticker": "KXBTC15M",
+        "api_secret": "super_secret_key"
+    })
+    assert unsafe_secret_item.status == "FAIL"
+    assert "CRITICAL SECURITY LEAK" in unsafe_secret_item.message
