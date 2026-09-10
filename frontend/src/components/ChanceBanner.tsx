@@ -41,12 +41,18 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
         {/* Quick Action Pill Buttons */}
         <div className="flex items-center gap-2">
           <button
+            type="button"
+            aria-label={`Quick trade UP contract at ${market.yes_cents_str}`}
+            title={`Quick trade UP contract at ${market.yes_cents_str}`}
             onClick={() => onQuickTrade('yes')}
             className="px-4 py-1.5 rounded-full text-xs font-extrabold bg-[#00d084]/15 hover:bg-[#00d084]/25 text-[#00d084] border border-[#00d084]/40 transition-all shadow-sm active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084]"
           >
             Up {market.yes_cents_str}
           </button>
           <button
+            type="button"
+            aria-label={`Quick trade DOWN contract at ${market.no_cents_str}`}
+            title={`Quick trade DOWN contract at ${market.no_cents_str}`}
             onClick={() => onQuickTrade('no')}
             className="px-4 py-1.5 rounded-full text-xs font-extrabold bg-[#ff4d4d]/15 hover:bg-[#ff4d4d]/25 text-[#ff4d4d] border border-[#ff4d4d]/40 transition-all shadow-sm active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff4d4d]"
           >
