@@ -35,3 +35,7 @@
 ## 2026-09-12 - Portfolio Account Switcher Tabs & ARIA Tabpanel Linking
 **Learning:** Tab switches that toggle portfolio views (such as Paper Account vs Live Exchange Account) require proper `role="tablist"` container wrapping, `role="tab"`, `aria-selected`, `aria-controls`, and `focus-visible:ring-2` keyboard focus rings. Linking tab buttons directly to their respective content panels using `id`, `role="tabpanel"`, and `aria-labelledby` ensures screen reader users can seamlessly discover and navigate account views.
 **Action:** Always structure account view toggles with `role="tablist"`, `role="tab"`, `aria-selected`, `aria-controls`, `focus-visible:ring-2`, and wrap panel bodies with `role="tabpanel"` and `aria-labelledby`.
+
+## 2026-09-16 - Quick Action Trade Pill Buttons Accessibility
+**Learning:** Compact quick-action pill buttons in banner toolbars (e.g., "Up 4.6¢" / "Down 95.4¢") often omit `type="button"`, explicit `aria-label`, and `title` tooltip attributes, causing screen readers to announce abbreviated text without market contract context during quick trading interactions.
+**Action:** Always supply explicit `type="button"`, descriptive `aria-label` (e.g. `aria-label="Quick trade UP contract at 4.6¢"`), and matching `title` tooltips on quick action pill buttons.
