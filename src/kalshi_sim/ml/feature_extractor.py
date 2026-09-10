@@ -32,7 +32,8 @@ class KalshiOrderflowFeatureExtractor:
         )
 
         # State tracking for rolling metrics
-        self.rolling_trades: List[Dict[str, Any]] = []
+        # Performance optimization: Use deque(maxlen=100) to eliminate O(N) pop(0) array shifts
+        self.rolling_trades: deque[Dict[str, Any]] = deque(maxlen=100)
         self.max_trade_history = 100
 
         # Volume baseline tracking (rolling median)
@@ -40,6 +41,8 @@ class KalshiOrderflowFeatureExtractor:
 
         # Cumulative Volume Delta (5-minute rolling window)
         self.cvd_window: deque[Tuple[float, float]] = deque()
+        # Performance optimization: Track running CVD total in O(1) time to eliminate per-tick sum() loops
+        self._running_cvd = 0.0
         self.CVD_WINDOW_SECONDS = 300.0
 
         # VPIN Probabilistic Bulk Classification (PBC) state
@@ -76,21 +79,26 @@ class KalshiOrderflowFeatureExtractor:
             "ts": trade_event.timestamp.timestamp(),
         }
         self.rolling_trades.append(trade_dict)
-        if len(self.rolling_trades) > self.max_trade_history:
-            self.rolling_trades.pop(0)
 
         now = trade_event.timestamp.timestamp()
-        self.cvd_window.append((now, qty * trade_dir))
+        signed_qty = qty * trade_dir
+        self.cvd_window.append((now, signed_qty))
+        self._running_cvd += signed_qty
 
-        # Evict stale entries beyond 5-minute window
+        # Evict stale entries beyond 5-minute window and update running CVD in O(1)
         cutoff = now - self.CVD_WINDOW_SECONDS
         while self.cvd_window and self.cvd_window[0][0] < cutoff:
-            self.cvd_window.popleft()
+            _, evicted_signed = self.cvd_window.popleft()
+            self._running_cvd -= evicted_signed
 
         # Dynamic Whale print detection
-        recent_sizes = [float(t["q"]) for t in self.rolling_trades]
-        if len(recent_sizes) >= 10:
-            dyn_threshold = 5.0 * float(np.median(recent_sizes))
+        # Performance optimization: Fast list sorting for median calculation avoids NumPy allocation overhead
+        if len(self.rolling_trades) >= 10:
+            recent_sizes = [t["q"] for t in self.rolling_trades]
+            recent_sizes.sort()
+            n_q = len(recent_sizes)
+            med_q = recent_sizes[n_q // 2] if n_q % 2 == 1 else (recent_sizes[n_q // 2 - 1] + recent_sizes[n_q // 2]) * 0.5
+            dyn_threshold = 5.0 * med_q
         else:
             dyn_threshold = self.whale_threshold
 
@@ -107,7 +115,11 @@ class KalshiOrderflowFeatureExtractor:
             self.vpin_bucket_price_changes.append(delta_p)
 
             if len(self.vpin_bucket_price_changes) >= 5:
-                sigma_v = float(np.std(self.vpin_bucket_price_changes))
+                # Performance optimization: Fast pure-Python standard deviation on small deque
+                pcs = list(self.vpin_bucket_price_changes)
+                mean_pc = sum(pcs) / len(pcs)
+                variance = sum((x - mean_pc) ** 2 for x in pcs) / len(pcs)
+                sigma_v = math.sqrt(variance)
             else:
                 sigma_v = max(price * 0.00005, 1e-4)
 
@@ -123,7 +135,8 @@ class KalshiOrderflowFeatureExtractor:
             self.vpin_imbalances.append(imbalance)
 
             if self.vpin_imbalances:
-                self.vpin_score = float(np.mean(self.vpin_imbalances)) / self.vpin_bucket_size
+                # Performance optimization: Fast sum() / len() instead of np.mean()
+                self.vpin_score = (sum(self.vpin_imbalances) / len(self.vpin_imbalances)) / self.vpin_bucket_size
 
             self.vpin_bucket_vol = 0.0
             self.vpin_bucket_start_price = price
@@ -247,7 +260,8 @@ class KalshiOrderflowFeatureExtractor:
         self.ask_absorption *= self.ABSORPTION_DECAY
         self.whale_tx_count *= self.WHALE_DECAY
 
-        cvd = sum(signed_qty for _, signed_qty in self.cvd_window)
+        # Performance optimization: Use O(1) running CVD value instead of linear sum() loop
+        cvd = self._running_cvd
         cvd_norm = cvd * inv_baseline
         bid_absorption_norm = self.bid_absorption * inv_baseline
         ask_absorption_norm = self.ask_absorption * inv_baseline
@@ -255,7 +269,9 @@ class KalshiOrderflowFeatureExtractor:
         # Entropy of recent trade executions
         entropy = 0.0
         if self.rolling_trades:
-            recent_sizes = [float(t["q"]) for t in self.rolling_trades[-20:]]
+            # Performance optimization: Slice last 20 elements directly without re-casting floats
+            recent_trades = list(self.rolling_trades)[-20:]
+            recent_sizes = [t["q"] for t in recent_trades]
             total_vol = sum(recent_sizes) + 1e-9
             probs = [s / total_vol for s in recent_sizes if s > 0]
             if probs:
