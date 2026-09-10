@@ -1,5 +1,9 @@
 # Palette's Journal - Micro-UX & Accessibility Learnings
 
+## 2026-09-14 - Summary Metric Filter Cards & Modal Close Controls Accessibility
+**Learning:** Interactive summary cards that double as quick filters (such as "Today's Report" and "Total Live Report" cards in report modals) implemented as `<div>` containers are non-focusable and invisible to screen reader tab orders unless converted to semantic `<button type="button">` controls with explicit `aria-label` and `focus-visible:ring-2` styling.
+**Action:** Always wrap interactive summary/metric filter cards in semantic `<button type="button">` elements, provide descriptive `aria-label` text, add `focus-visible:ring-2` outlines, and apply `text-left` to preserve card alignment.
+
 ## 2026-09-03 - Safety Confirmation Switch Controls and Modal Close Buttons
 **Learning:** Safety toggles in high-stakes modal dialogs (like live trade order dry-run mode) require explicit `role="switch"`, `aria-checked`, and `aria-labelledby` linking to their visual title so screen reader users can verify critical state before confirming financial transactions.
 **Action:** In modal confirmation dialogs, link switch buttons to heading text with `id`/`aria-labelledby`, ensure `aria-checked` reflects boolean state, add `focus-visible:ring-2` focus rings, and provide `aria-label` to modal close buttons.
@@ -7,6 +11,7 @@
 ## 2026-08-30 - Custom Switch Toggles & Associated Screen Reader Labels
 **Learning:** Custom visual toggle switches implemented as `<button>` elements inside form panels are often missing standard screen reader roles and label associations, rendering them invisible or ambiguous to assistive technologies.
 **Action:** Always link custom switch buttons to a `<label>` element via `htmlFor`/`id`, apply `role="switch"`, `aria-checked`, explicit `aria-label`, and add `focus-visible:ring-2` keyboard focus styles.
+
 ## 2025-05-18 - Accessible Custom Toggle Switches and Step Controls
 **Learning:** Custom styled pill buttons used as switches lack native accessibility state unless explicitly provided with `role="switch"`, `aria-checked`, and `aria-labelledby`/`aria-label`. Additionally, compact step buttons (`-1¢`, `+1¢`) need explicit `aria-label` attributes and focus-visible rings for keyboard-only navigation.
 **Action:** When building custom toggle controls or step buttons in trading panels, always include `role="switch"`, `aria-checked`, explicit `aria-label` text, and `focus-visible:ring-*` styles.

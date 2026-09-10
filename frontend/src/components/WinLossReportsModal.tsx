@@ -228,7 +228,12 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-[#21262d] transition-colors">
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close win loss report modal"
+              className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-[#21262d] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
               <X className="h-5 w-5" />
             </button>
           </div>
@@ -260,11 +265,13 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
             <span className="text-[10px] text-gray-500 font-mono">Avg: {avgPnL >= 0 ? '+' : ''}${avgPnL.toFixed(2)}/trade</span>
           </div>
 
-          <div 
+          <button
+            type="button"
             onClick={() => setDateScope(dateScope === 'today' ? 'all' : 'today')}
-            className={`border rounded-xl p-3 flex flex-col justify-between gap-1 cursor-pointer transition-all ${dateScope === 'today' ? 'bg-amber-500/10 border-amber-500/50 shadow-md shadow-amber-500/10 ring-1 ring-amber-500/40' : 'bg-[#0e121a] border-[#21262d] hover:border-amber-500/30'}`}
+            aria-label="Filter reports by today"
+            className={`border rounded-xl p-3 flex flex-col justify-between gap-1 cursor-pointer text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${dateScope === 'today' ? 'bg-amber-500/10 border-amber-500/50 shadow-md shadow-amber-500/10 ring-1 ring-amber-500/40' : 'bg-[#0e121a] border-[#21262d] hover:border-amber-500/30'}`}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between w-full">
               <span className="text-[10px] font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-1"><Calendar className="h-3 w-3" /> Today's Report</span>
               <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-mono">{dateScope === 'today' ? 'ACTIVE' : 'FILTER'}</span>
             </div>
@@ -273,13 +280,15 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
               <span className="text-xs text-gray-400 font-mono">({todayWinRate.toFixed(0)}% W)</span>
             </div>
             <span className="text-[10px] text-gray-400 font-mono">{todayCount} trades today ({todayWins}W / {todayLosses}L)</span>
-          </div>
+          </button>
 
-          <div 
+          <button
+            type="button"
             onClick={() => setModeFilter(modeFilter === 'live' ? 'all' : 'live')}
-            className={`border rounded-xl p-3 flex flex-col justify-between gap-1 cursor-pointer transition-all ${modeFilter === 'live' ? 'bg-rose-500/10 border-rose-500/50 shadow-md shadow-rose-500/10 ring-1 ring-rose-500/40' : 'bg-[#0e121a] border-[#21262d] hover:border-rose-500/30'}`}
+            aria-label="Filter reports by live real-money trades"
+            className={`border rounded-xl p-3 flex flex-col justify-between gap-1 cursor-pointer text-left transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 ${modeFilter === 'live' ? 'bg-rose-500/10 border-rose-500/50 shadow-md shadow-rose-500/10 ring-1 ring-rose-500/40' : 'bg-[#0e121a] border-[#21262d] hover:border-rose-500/30'}`}
           >
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between w-full">
               <span className="text-[10px] font-semibold text-rose-400 uppercase tracking-wider flex items-center gap-1"><Flame className="h-3 w-3" /> Total Live Report</span>
               <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 font-mono">{totalLiveCount} REPS</span>
             </div>
@@ -288,7 +297,7 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
               <span className="text-xs text-gray-400 font-mono">({liveWinRate.toFixed(1)}% W)</span>
             </div>
             <span className="text-[10px] text-gray-400 font-mono">100% Real Kalshi Settlements</span>
-          </div>
+          </button>
 
           <div className="bg-[#0e121a] border border-[#21262d] rounded-xl p-3 flex flex-col justify-between gap-1">
             <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Profit Factor</span>

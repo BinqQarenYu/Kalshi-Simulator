@@ -403,7 +403,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
 
       {/* LIVE BALANCE DEPLETED / INSUFFICIENT FUNDS ALERT BANNER */}
       {isLive && isLiveFrozen && (
-        <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-2.5 text-xs animate-in fade-in">
+        <div id="live-balance-depleted-msg" className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-2.5 text-xs animate-in fade-in">
           <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
           <div className="flex-1">
             <div className="font-bold text-white flex items-center justify-between">
@@ -441,6 +441,12 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       <button
         type="button"
         disabled={isSubmitting || (isLive && isLiveFrozen)}
+        aria-describedby={isLive && isLiveFrozen ? 'live-balance-depleted-msg' : undefined}
+        title={
+          isLive && isLiveFrozen
+            ? `Order disabled: Available live balance ($${availableLiveCash.toFixed(2)}) is less than required order cost ($${totalCost.toFixed(2)}). Deposit funds on Kalshi to unfreeze.`
+            : undefined
+        }
         onClick={handleExecute}
         className={`w-full py-3.5 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
           isLive && isLiveFrozen
