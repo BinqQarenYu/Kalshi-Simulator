@@ -358,6 +358,15 @@ def test_cors_middleware_disallows_unauthorized_origin(client: TestClient) -> No
     assert response.headers.get("access-control-allow-origin") != "http://evil-attacker.com"
 
 
+def test_security_headers(client: TestClient) -> None:
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.headers.get("x-content-type-options") == "nosniff"
+    assert response.headers.get("x-frame-options") == "DENY"
+    assert response.headers.get("x-xss-protection") == "1; mode=block"
+    assert response.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+
+
 def test_domination_config_endpoints(client: TestClient) -> None:
     with client:
         # GET config
