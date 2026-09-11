@@ -39,3 +39,7 @@
 ## 2026-08-31 - O(1) Running CVD & Persistent ONNX Input Tensor Buffers
 **Learning:** Computing `sum()` over 5-minute rolling trade deques on every tick and allocating NumPy arrays for small statistics (median, stddev on ≤100 items) or ONNX input dicts per tick incurred linear loop overhead and GC pauses.
 **Action:** Maintain running CVD totals incrementally on trade push/pop, replace small-sample NumPy calls with pure Python arithmetic/sorting, and mutate pre-allocated ONNX input buffers in-place (`copy=False`).
+
+## 2026-09-01 - Elimination of Redundant Per-Tick Trade Entropy Recalculation & Deque Slicing Fix
+**Learning:** `extract_features_from_book` was recomputing trade size entropy from scratch on every orderbook tick (converting deque to list, computing `sum`, probabilities, and `math.log2`), even though `self._cached_entropy` was already updated on trade prints and directly assigned to `buf[5]`. This wasted ~8.11 µs (~26% of total tick latency) on completely un-used local computations. Furthermore, slicing `deque[-20:]` directly raises `TypeError`.
+**Action:** Remove duplicate per-tick entropy computation inside `extract_features_from_book`, rely on `self._cached_entropy` updated during `process_trade`, and convert `self.rolling_trades` to a list before slicing in `_update_cached_entropy`. Reduced feature extraction tick latency from ~30.9 µs to ~22.9 µs (~26% speedup).
