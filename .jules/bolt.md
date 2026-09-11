@@ -39,3 +39,7 @@
 ## 2026-08-31 - O(1) Running CVD & Persistent ONNX Input Tensor Buffers
 **Learning:** Computing `sum()` over 5-minute rolling trade deques on every tick and allocating NumPy arrays for small statistics (median, stddev on ≤100 items) or ONNX input dicts per tick incurred linear loop overhead and GC pauses.
 **Action:** Maintain running CVD totals incrementally on trade push/pop, replace small-sample NumPy calls with pure Python arithmetic/sorting, and mutate pre-allocated ONNX input buffers in-place (`copy=False`).
+
+## 2026-09-01 - Native List Slicing vs Modulo Loops in Zero-Copy Ring Buffers
+**Learning:** Querying rolling elements from fixed-capacity circular ring buffers using per-element modulo loops `(head - count + i + cap) % cap` in Python incurs significant interpreter and arithmetic overhead (~12.5 µs for 100 elements). Native list slicing (`buf[start:end]` and contiguous concatenation) delegates memory copying to C-native array operations, reducing retrieval latency to ~5.1 µs (~2.4x speedup).
+**Action:** Replace range-based index loops over circular deques/buffers with C-native list slicing for contiguous segments.
