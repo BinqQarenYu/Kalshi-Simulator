@@ -44,6 +44,7 @@ class KalshiOrderflowFeatureExtractor:
         # Performance optimization: Track running CVD total in O(1) time to eliminate per-tick sum() loops
         self._running_cvd = 0.0
         self.CVD_WINDOW_SECONDS = 300.0
+        self._cvd_sum = 0.0
 
         # VPIN Probabilistic Bulk Classification (PBC) state
         self.vpin_bucket_vol = 0.0
@@ -65,6 +66,24 @@ class KalshiOrderflowFeatureExtractor:
         self.ask_absorption = 0.0
         self.ABSORPTION_DECAY = 0.995
 
+        # Cached entropy & pre-allocated feature buffer
+        self._cached_entropy = 0.0
+        self._feature_buffer = np.zeros(28, dtype=np.float32)
+
+    def _update_cached_entropy(self) -> None:
+        """Recalculate trade size entropy whenever trade history updates."""
+        if not self.rolling_trades:
+            self._cached_entropy = 0.0
+            return
+
+        recent_sizes = [float(t["q"]) for t in self.rolling_trades[-20:]]
+        total_vol = sum(recent_sizes) + 1e-9
+        probs = [s / total_vol for s in recent_sizes if s > 0]
+        if probs:
+            self._cached_entropy = -sum(p * math.log2(p) for p in probs)
+        else:
+            self._cached_entropy = 0.0
+
     def process_trade(self, trade_event: TradeEvent) -> None:
         """Update trade-dependent state (CVD, VPIN, Whale prints, Absorption)."""
         qty = float(trade_event.count)
@@ -79,6 +98,8 @@ class KalshiOrderflowFeatureExtractor:
             "ts": trade_event.timestamp.timestamp(),
         }
         self.rolling_trades.append(trade_dict)
+
+        self._update_cached_entropy()
 
         now = trade_event.timestamp.timestamp()
         signed_qty = qty * trade_dir
@@ -243,17 +264,20 @@ class KalshiOrderflowFeatureExtractor:
         b0, a0 = bid_sizes[0], ask_sizes[0]
         ofi_l1 = (b0 - a0) / (b0 + a0 + 1e-9)
 
-        vol_b5 = sum(bid_sizes[:5])
-        vol_a5 = sum(ask_sizes[:5])
+        vol_b5 = bid_sizes[0] + bid_sizes[1] + bid_sizes[2] + bid_sizes[3] + bid_sizes[4]
+        vol_a5 = ask_sizes[0] + ask_sizes[1] + ask_sizes[2] + ask_sizes[3] + ask_sizes[4]
         ofi_l5 = (vol_b5 - vol_a5) / (vol_b5 + vol_a5 + 1e-9)
 
         # Reuse pre-calculated sums for full-depth volume
         ofi_l15 = (sum_bids - sum_asks) / (total_visible_volume)
 
-        # 4. Spoofing & Layering Metrics
-        spoof_mag_bid = sum(bid_sizes_norm[5:]) * 0.15
-        spoof_mag_ask = sum(ask_sizes_norm[5:]) * 0.15
-        layering_index = (sum(bid_sizes[5:]) + sum(ask_sizes[5:])) / (vol_b5 + vol_a5 + 1e-9)
+        # 4. Spoofing & Layering Metrics (Derived from full depth sums to avoid extra slicing & list allocations)
+        vol_b_tail = sum_bids - vol_b5
+        vol_a_tail = sum_asks - vol_a5
+
+        spoof_mag_bid = (vol_b_tail * inv_baseline) * 0.15
+        spoof_mag_ask = (vol_a_tail * inv_baseline) * 0.15
+        layering_index = (vol_b_tail + vol_a_tail) / (vol_b5 + vol_a5 + 1e-9)
 
         # 5. Tape / Trade Dynamics
         self.bid_absorption *= self.ABSORPTION_DECAY
@@ -280,32 +304,28 @@ class KalshiOrderflowFeatureExtractor:
         self.prev_best_bid = best_bid
         self.prev_best_ask = best_ask
 
-        # 6. Spatial Imbalance Vector (15 layers with pre-calculated exponential decay tuple)
+        # 6. Spatial Imbalance Vector & Buffer Assembly
+        # Populate pre-allocated numpy array buffer directly to avoid Python list allocations.
         decays = self._decay_weights
-        spatial_imbalances = [
-            decays[i] * (bid_sizes_norm[i] - ask_sizes_norm[i])
-            for i in range(target_depth)
-        ]
+        buf = self._feature_buffer
+        buf[0] = spread_bps
+        buf[1] = ofi_l1
+        buf[2] = ofi_l5
+        buf[3] = ofi_l15
+        buf[4] = cvd_norm
+        buf[5] = self._cached_entropy
+        buf[6] = self.vpin_score
+        buf[7] = spoof_mag_bid
+        buf[8] = spoof_mag_ask
+        buf[9] = bid_absorption_norm
+        buf[10] = ask_absorption_norm
+        buf[11] = self.whale_tx_count
+        buf[12] = layering_index
 
-        # Assemble 28-feature vector
-        feature_vector = [
-            spread_bps,
-            ofi_l1,
-            ofi_l5,
-            ofi_l15,
-            cvd_norm,
-            entropy,
-            self.vpin_score,
-            spoof_mag_bid,
-            spoof_mag_ask,
-            bid_absorption_norm,
-            ask_absorption_norm,
-            float(self.whale_tx_count),
-            layering_index,
-        ]
-        feature_vector.extend(spatial_imbalances)
+        for i in range(target_depth):
+            buf[13 + i] = decays[i] * (bid_sizes[i] - ask_sizes[i]) * inv_baseline
 
-        return np.array(feature_vector, dtype=np.float32)
+        return buf.copy()
 
     def calculate_vpin(self) -> float:
         """Return the current VPIN toxicity score."""
