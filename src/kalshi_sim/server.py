@@ -5578,7 +5578,7 @@ def _build_full_state_payload() -> dict[str, Any]:
     title = f"{asset_cfg.name} {state.active_timeframe.value}"
     series = asset_cfg.series_ticker_15m
 
-    return {
+    payload = {
         "timestamp": now_utc.isoformat(),
         "market": {
             "active_asset": state.active_asset.value,
@@ -5649,6 +5649,15 @@ def _build_full_state_payload() -> dict[str, Any]:
         "btc_orderflow": state.btc_orderflow_feed.get_orderflow_summary() if hasattr(state, "btc_orderflow_feed") and state.btc_orderflow_feed else None,
         "continuous_training": state.continuous_trainer.get_status() if hasattr(state, "continuous_trainer") and state.continuous_trainer else None,
     }
+
+    # SECURITY: Audit state payload for private keys or sensitive credential leaks prior to WebSocket broadcast
+    if hasattr(state, "law_order_agent") and state.law_order_agent:
+        audit_res = state.law_order_agent.audit_credential_security(payload)
+        if audit_res.status == "FAIL":
+            logger.critical("[SECURITY ALERT] Blocked state broadcast payload due to credential leak!")
+            raise ValueError(f"State payload security audit failed: {audit_res.message}")
+
+    return payload
 
 
 
