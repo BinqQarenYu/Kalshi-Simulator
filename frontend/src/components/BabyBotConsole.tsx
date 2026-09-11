@@ -113,6 +113,20 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     }
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+      e.preventDefault();
+      handleHoldStart();
+    }
+  };
+
+  const handleKeyUp = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      handleHoldEnd();
+    }
+  };
+
   useEffect(() => {
     return () => {
       if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
@@ -372,13 +386,21 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       <div className="p-4 bg-[#0c0f12]">
         <button
           type="button"
+          aria-label={
+            isHalted
+              ? 'Bot emergency halted. All resting orders cancelled.'
+              : 'Flatten all positions and halt bot. Hold mouse button or press and hold Space or Enter for 1.5 seconds'
+          }
           onMouseDown={handleHoldStart}
           onMouseUp={handleHoldEnd}
           onMouseLeave={handleHoldEnd}
           onTouchStart={handleHoldStart}
           onTouchEnd={handleHoldEnd}
+          onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
+          onBlur={handleHoldEnd}
           disabled={isHalted}
-          className={`w-full relative overflow-hidden py-3.5 px-4 rounded-lg font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg select-none ${
+          className={`w-full relative overflow-hidden py-3.5 px-4 rounded-lg font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f43f5e] ${
             isHalted
               ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
               : 'border-2 border-[#d31a38] text-[#f43f5e] hover:bg-[#d31a38]/10 active:scale-[0.99]'
