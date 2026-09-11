@@ -36,6 +36,6 @@
 **Learning:** Executing `sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]` on every feature extraction tick introduced redundant sorting overhead (~13.5 µs) even when order book states were unchanged between reads across ticks.
 **Action:** Leveraged existing `_BookDict._version` mutation tracking in `L2BookState.get_depth_tuples(n)` to cache sorted depth tuples. Reduced `get_depth_tuples` cache hit time to ~0.3 µs (~40x faster) and overall feature extraction tick latency from ~38.6 µs to ~23.7 µs (~38% speedup).
 
-## 2026-08-31 - Running CVD Tracking & Pre-allocated Buffer in Feature Extraction
-**Learning:** Re-summing the 5-minute CVD window deque and re-calculating trade entropy on every feature extraction tick introduced unnecessary $O(N)$ overhead and object allocation even when no trades occurred between ticks.
-**Action:** Maintained an $O(1)$ running `_cvd_sum` accumulator in `process_trade`, cached trade size entropy `_cached_entropy`, pre-allocated a 28-element float32 buffer `self._feature_buffer`, and derived tail volume directly (`sum_bids - vol_b5`), reducing feature extraction latency from ~38.3 µs to ~20.8 µs per tick (~1.84x speedup).
+## 2026-08-31 - O(1) Running CVD & Persistent ONNX Input Tensor Buffers
+**Learning:** Computing `sum()` over 5-minute rolling trade deques on every tick and allocating NumPy arrays for small statistics (median, stddev on ≤100 items) or ONNX input dicts per tick incurred linear loop overhead and GC pauses.
+**Action:** Maintain running CVD totals incrementally on trade push/pop, replace small-sample NumPy calls with pure Python arithmetic/sorting, and mutate pre-allocated ONNX input buffers in-place (`copy=False`).
