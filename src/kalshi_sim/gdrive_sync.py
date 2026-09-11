@@ -32,6 +32,7 @@ RCLONE_CANDIDATES = [
 GDRIVE_REMOTE_NAME = "gdrive_quolas"
 GDRIVE_MODELS_PATH = f"{GDRIVE_REMOTE_NAME}:QuoLas_Models"
 GDRIVE_DATA_PATH = f"{GDRIVE_REMOTE_NAME}:QuoLas_Data/kalshi_sim"
+LOCAL_GDRIVE_MODELS_PATH = Path(r"C:\Users\likha\My Drive (benjohncarino@gmail.com)\QuoLas_Models")
 
 
 def find_rclone_binary() -> Optional[str]:
@@ -60,14 +61,14 @@ def run_rclone_cmd(args: list[str]) -> bool:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            timeout=10,
+            timeout=60,
             check=True,
         )
         if proc.stdout.strip():
             logger.info("rclone output:\n%s", proc.stdout.strip())
         return True
     except subprocess.TimeoutExpired:
-        logger.warning("rclone command timed out after 10s: %s", " ".join(cmd))
+        logger.warning("rclone command timed out after 60s: %s", " ".join(cmd))
         return False
     except subprocess.CalledProcessError as exc:
         logger.error("rclone failed (code %d): %s", exc.returncode, exc.stderr.strip())
@@ -78,7 +79,7 @@ def run_rclone_cmd(args: list[str]) -> bool:
 
 
 def pull_models_from_gdrive(local_models_dir: Path = Path("models")) -> bool:
-    """Pull refined ONNX models and feature stats from Google Drive."""
+    """Pull refined ONNX models, feature stats, and HMM pickles from Google Drive."""
     local_models_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Pulling ONNX models from %s -> %s ...", GDRIVE_MODELS_PATH, local_models_dir.resolve())
     return run_rclone_cmd([
@@ -88,16 +89,30 @@ def pull_models_from_gdrive(local_models_dir: Path = Path("models")) -> bool:
         "--include", "*.onnx",
         "--include", "*.onnx.data",
         "--include", "feature_stats.json",
+        "--include", "*.pkl",
         "-v",
     ])
 
 
 def push_models_to_gdrive(local_models_dir: Path = Path("models")) -> bool:
-    """Push local ONNX models and feature stats to Google Drive."""
+    """Push local ONNX models, feature stats, and HMM pickles to Google Drive."""
     if not local_models_dir.exists():
         logger.warning("Local models directory '%s' does not exist.", local_models_dir)
         return False
-    logger.info("Pushing ONNX models from %s -> %s ...", local_models_dir.resolve(), GDRIVE_MODELS_PATH)
+
+    # 1. Direct copy to local Google Drive for Desktop directory if present
+    if LOCAL_GDRIVE_MODELS_PATH.exists():
+        try:
+            for pattern in ["*.onnx", "*.onnx.data", "feature_stats.json", "*.pkl"]:
+                for file_path in local_models_dir.glob(pattern):
+                    dest = LOCAL_GDRIVE_MODELS_PATH / file_path.name
+                    shutil.copy2(file_path, dest)
+            logger.info("Directly synced models to local Google Drive folder: %s", LOCAL_GDRIVE_MODELS_PATH)
+        except Exception as l_exc:
+            logger.debug("Local Google Drive directory sync skipped/error: %s", l_exc)
+
+    # 2. Cloud rclone sync to remote
+    logger.info("Pushing models from %s -> %s ...", local_models_dir.resolve(), GDRIVE_MODELS_PATH)
     return run_rclone_cmd([
         "copy",
         str(local_models_dir.resolve()),
@@ -105,6 +120,7 @@ def push_models_to_gdrive(local_models_dir: Path = Path("models")) -> bool:
         "--include", "*.onnx",
         "--include", "*.onnx.data",
         "--include", "feature_stats.json",
+        "--include", "*.pkl",
         "-v",
     ])
 

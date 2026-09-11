@@ -44,17 +44,34 @@ class DualONNXGateway:
 
     def __init__(
         self,
-        quolas_model_path: Union[str, Path] = Path("models/nano_microscope_overhauled.onnx"),
-        kalshi_model_path: Union[str, Path] = Path("models/kalshi_onnx.onnx"),
+        quolas_model_path: Optional[Union[str, Path]] = None,
+        kalshi_model_path: Optional[Union[str, Path]] = None,
         quolas_stats_path: Optional[Union[str, Path]] = None,
         kalshi_stats_path: Optional[Union[str, Path]] = None,
         fallback_to_quolas: bool = True,
+        matrix_builder: Optional[Any] = None,
     ) -> None:
-        self.quolas_model_path = Path(quolas_model_path)
-        self.kalshi_model_path = Path(kalshi_model_path)
+        p_quolas_default = Path("models/quolas.onnx")
+        if quolas_model_path:
+            self.quolas_model_path = Path(quolas_model_path)
+        else:
+            self.quolas_model_path = p_quolas_default if p_quolas_default.exists() else Path("models/nano_microscope_overhauled.onnx")
+
+        if kalshi_model_path:
+            self.kalshi_model_path = Path(kalshi_model_path)
+        else:
+            p_kalshi_legacy = Path("models/kalshi_onnx.onnx")
+            if p_quolas_default.exists():
+                self.kalshi_model_path = p_quolas_default
+            elif p_kalshi_legacy.exists():
+                self.kalshi_model_path = p_kalshi_legacy
+            else:
+                self.kalshi_model_path = self.quolas_model_path
+
         self.quolas_stats_path = Path(quolas_stats_path) if quolas_stats_path else (self.quolas_model_path.parent / "feature_stats.json")
         self.kalshi_stats_path = Path(kalshi_stats_path) if kalshi_stats_path else (self.kalshi_model_path.parent / "feature_stats.json")
         self.fallback_to_quolas = fallback_to_quolas
+        self.matrix_builder = matrix_builder
 
         # 1. Initialize QuoLas Spot Engine
         self.quolas_engine = KalshiONNXEngine(
@@ -64,23 +81,22 @@ class DualONNXGateway:
 
         # 2. Initialize Kalshi Engine with graceful fallback
         self.is_kalshi_fallback = False
-        if self.kalshi_model_path.exists():
+        if self.kalshi_model_path.exists() and self.kalshi_model_path != self.quolas_model_path:
             self.kalshi_engine = KalshiONNXEngine(
                 model_path=self.kalshi_model_path,
                 stats_path=self.kalshi_stats_path,
             )
             logger.info("Loaded dedicated Kalshi ONNX model from %s", self.kalshi_model_path)
         elif self.fallback_to_quolas and self.quolas_model_path.exists():
-            logger.warning(
-                "Dedicated Kalshi ONNX model %s not found. Falling back to QuoLas Spot model %s.",
-                self.kalshi_model_path,
+            logger.info(
+                "Using unified QuoLas model %s for Spot & Kalshi dual engine.",
                 self.quolas_model_path,
             )
             self.kalshi_engine = KalshiONNXEngine(
                 model_path=self.quolas_model_path,
                 stats_path=self.quolas_stats_path,
             )
-            self.is_kalshi_fallback = True
+            self.is_kalshi_fallback = not p_quolas_default.exists()
         else:
             logger.warning(
                 "Kalshi ONNX model %s not found and QuoLas fallback unavailable. Initializing stub Kalshi engine.",
@@ -93,7 +109,21 @@ class DualONNXGateway:
             self.is_kalshi_fallback = True
 
     def _check_kalshi_model_promotion(self) -> None:
-        """Dynamically hot-swap Kalshi engine if dedicated model is created/promoted while running in fallback."""
+        """Dynamically hot-swap engines if quolas.onnx or dedicated kalshi_onnx is promoted."""
+        quolas_target = Path("models/quolas.onnx")
+        if quolas_target.exists():
+            if self.quolas_model_path != quolas_target or self.is_kalshi_fallback:
+                logger.info(
+                    "🚀 [DUAL-ONNX GATEWAY] Newly trained unified QuoLas model detected at %s! Hot-reloading active engines.",
+                    quolas_target,
+                )
+                self.quolas_model_path = quolas_target
+                self.kalshi_model_path = quolas_target
+                self.quolas_engine = KalshiONNXEngine(model_path=quolas_target, stats_path=self.quolas_stats_path)
+                self.kalshi_engine = KalshiONNXEngine(model_path=quolas_target, stats_path=self.kalshi_stats_path)
+                self.is_kalshi_fallback = False
+                return
+
         if self.is_kalshi_fallback and self.kalshi_model_path.exists():
             logger.info(
                 "🚀 [DUAL-ONNX GATEWAY] Newly trained dedicated Kalshi model detected at %s! Upgrading from fallback.",
@@ -111,6 +141,7 @@ class DualONNXGateway:
         kalshi_book: Optional[L2BookState],
         latest_spot_trades: Optional[List[TradeEvent]] = None,
         latest_kalshi_trades: Optional[List[TradeEvent]] = None,
+        spot_tensor: Optional[Any] = None,
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Execute concurrent or sequential inference on both spot and Kalshi order books.
 
@@ -121,7 +152,13 @@ class DualONNXGateway:
         self._check_kalshi_model_promotion()
 
         # QuoLas Spot inference
-        if spot_book is not None:
+        if spot_tensor is not None:
+            try:
+                quolas_res = self.quolas_engine.process_feature_vector(spot_tensor)
+            except Exception as exc:
+                logger.error("[DUAL-ONNX] Spot tensor inference exception: %s", exc)
+                quolas_res = _make_neutral_result(reason=f"Spot tensor inference error: {exc}")
+        elif spot_book is not None and hasattr(spot_book, "get_depth"):
             try:
                 quolas_res = self.quolas_engine.process_orderbook_tick(
                     book=spot_book,
@@ -130,11 +167,21 @@ class DualONNXGateway:
             except Exception as exc:
                 logger.error("[DUAL-ONNX] Spot inference exception: %s", exc)
                 quolas_res = _make_neutral_result(reason=f"Spot inference error: {exc}")
+        elif self.matrix_builder is not None:
+            try:
+                tensor = self.matrix_builder.get_current_tensor()
+                if tensor is not None and len(tensor) == 28 and any(tensor != 0):
+                    quolas_res = self.quolas_engine.process_feature_vector(tensor)
+                else:
+                    quolas_res = _make_neutral_result(reason="MatrixBuilder tensor empty or uninitialized")
+            except Exception as exc:
+                logger.error("[DUAL-ONNX] MatrixBuilder inference exception: %s", exc)
+                quolas_res = _make_neutral_result(reason=f"MatrixBuilder error: {exc}")
         else:
             quolas_res = _make_neutral_result(reason="Missing spot order book")
 
         # Kalshi inference
-        if kalshi_book is not None:
+        if kalshi_book is not None and hasattr(kalshi_book, "get_depth"):
             try:
                 kalshi_res = self.kalshi_engine.process_orderbook_tick(
                     book=kalshi_book,
@@ -144,7 +191,7 @@ class DualONNXGateway:
                 logger.error("[DUAL-ONNX] Kalshi inference exception: %s", exc)
                 kalshi_res = _make_neutral_result(reason=f"Kalshi inference error: {exc}")
         else:
-            kalshi_res = _make_neutral_result(reason="Missing kalshi order book")
+            kalshi_res = _make_neutral_result(reason="Missing or invalid kalshi order book")
 
         return quolas_res, kalshi_res
 

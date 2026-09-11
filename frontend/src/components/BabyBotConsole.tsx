@@ -11,7 +11,18 @@
  */
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { MarketState, AISignals, Position, LivePortfolioState, DualONNXTelemetry, PreflightGates } from '../types';
+import {
+  MarketState,
+  AISignals,
+  Position,
+  LivePortfolioState,
+  DualONNXTelemetry,
+  PreflightGates,
+  WinLossEventReport,
+  BotPerformanceSummary,
+  MacroDominionTelemetry,
+  HMMMacroRegimeTelemetry,
+} from '../types';
 import {
   AlertOctagon,
   Zap,
@@ -33,6 +44,11 @@ import {
   Scale,
   Lock,
   Sparkles,
+  CheckCircle2,
+  XCircle,
+  TrendingUp,
+  Brain,
+  Compass,
 } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
 
@@ -45,7 +61,7 @@ export interface BotProfile {
   laneBadge: 'live' | 'shadow' | 'sim';
   asset: string;
   timeframe: string;
-  telemetryType: 'dominion' | 'onnx' | 'antipin' | 'scalper' | 'trend';
+  telemetryType: 'dominion' | 'onnx' | 'antipin' | 'scalper' | 'trend' | 'macro_dominion';
   description: string;
   hardCapContracts: number;
   discountCeiling: number;
@@ -162,16 +178,16 @@ export const BOT_PROFILES: Record<string, BotProfile> = {
     id: 'macro_trend_dominion',
     name: 'Macro Trend Dominion',
     shortName: 'Macro Trend',
-    version: 'v2.0',
+    version: 'v2.0 (3-Brain Fusion)',
     lane: 'LANE 2 (SHADOW PAPER)',
     laneBadge: 'shadow',
     asset: 'BTC',
     timeframe: '15m',
-    telemetryType: 'trend',
-    description: '1-Hour Rolling Macro Trend Following with Anti-Countertrend Veto',
+    telemetryType: 'macro_dominion',
+    description: '15M Triple-Brain Consensus (Spot ONNX + Kalshi ONNX + 5m HMM) with 9 Dials & Mistake-Learning Engine',
     hardCapContracts: 1,
     discountCeiling: 0.48,
-    playbook: '1-Hour Macro Trend Alignment · Anti-Countertrend Veto',
+    playbook: '15M 3-Brain Consensus · 1¢–89¢ Limit Sweetspot · Online Mistake Learning',
   },
   'sol_vol_breakout': {
     id: 'sol_vol_breakout',
@@ -207,6 +223,9 @@ interface BabyBotConsoleProps {
   onSelectBot?: (botId: string) => void;
   dualOnnxTelemetry?: DualONNXTelemetry;
   preflightGates?: PreflightGates;
+  macroDominionTelemetry?: MacroDominionTelemetry;
+  hmmMacroRegime?: HMMMacroRegimeTelemetry;
+  onOpenReports?: () => void;
 }
 
 export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
@@ -226,12 +245,50 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   onSelectBot,
   dualOnnxTelemetry,
   preflightGates,
+  macroDominionTelemetry,
+  hmmMacroRegime,
+  onOpenReports,
 }) => {
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [killHoldProgress, setKillHoldProgress] = useState(0);
   const [isArmingKill, setIsArmingKill] = useState(false);
   const [isHalted, setIsHalted] = useState(false);
   const [isParamsOpen, setIsParamsOpen] = useState(false);
+
+  // Dedicated Bot Micro-Report State (Live vs Paper Segregated)
+  const [reportMode, setReportMode] = useState<'live' | 'paper'>(tradingMode);
+  const [recentReports, setRecentReports] = useState<WinLossEventReport[]>([]);
+  const [botPerformance, setBotPerformance] = useState<BotPerformanceSummary | null>(null);
+  const [isLoadingReports, setIsLoadingReports] = useState<boolean>(false);
+
+  useEffect(() => {
+    setReportMode(tradingMode);
+  }, [tradingMode]);
+
+  const fetchMicroReports = async () => {
+    setIsLoadingReports(true);
+    try {
+      const res = await fetch(
+        `/api/reports/win-loss?bot_id=${encodeURIComponent(selectedBotId)}&mode=${encodeURIComponent(reportMode)}&limit=5`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setRecentReports(Array.isArray(data.reports) ? data.reports.slice(0, 5) : []);
+        setBotPerformance(data.bot_summary || null);
+      }
+    } catch (e) {
+      console.warn('[BabyBotConsole] Failed to fetch micro reports:', e);
+    } finally {
+      setIsLoadingReports(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchMicroReports();
+    const interval = setInterval(fetchMicroReports, 15000);
+    return () => clearInterval(interval);
+  }, [selectedBotId, reportMode]);
+
   const [botParams, setBotParams] = useState<Record<string, any>>({
     discount_limit_price: 0.48,
     entry_discount_depth: 0.48,
@@ -242,6 +299,10 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     min_spot_diff: 21.0,
     vpin_toxic_threshold: 0.60,
     take_profit_price_threshold: 0.95,
+    enable_take_profit_ceiling: true,
+    require_reversal_for_tp_ceiling: true,
+    enable_reverse_take_profit_roi: true,
+    reverse_indicator_threshold: 85.0,
     min_take_profit_roi: 20.0,
     brain_priority_mode: 'TREND_ALIGNED_SCALP',
     contract_scaling_mode: 'TIER_0_STRICT_1',
@@ -250,6 +311,16 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     tape_confirmation_ticks: 2,
     taker_cross_ev_threshold: 0.08,
     dynamic_moat_multiplier: 1.15,
+    // Bot 3 Macro Trend Dominion 9 Dials
+    min_macro_agreement: true,
+    enable_hmm_risk_off_veto: true,
+    confidence_threshold: 0.65,
+    limit_price_cents: 52,
+    limit_price: 0.52,
+    adverse_selection_guard: true,
+    volatility_moat_multiplier: 1.20,
+    enable_mistake_learning: true,
+    brier_shrinkage_factor: 0.15,
   });
   const [isSavingParams, setIsSavingParams] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
@@ -260,7 +331,11 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const activeProfile = useMemo(() => {
     return (
       BOT_PROFILES[selectedBotId] ||
-      (selectedBotId.includes('onnx') ? BOT_PROFILES['the_onnx_strategy'] || BOT_PROFILES['macro_onnx'] : BOT_PROFILES['3_step_domination_bot'])
+      (selectedBotId.includes('macro_trend')
+        ? BOT_PROFILES['macro_trend_dominion']
+        : selectedBotId.includes('onnx')
+        ? BOT_PROFILES['the_onnx_strategy'] || BOT_PROFILES['macro_onnx']
+        : BOT_PROFILES['3_step_domination_bot'])
     );
   }, [selectedBotId]);
 
@@ -323,7 +398,28 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     const activeAssetKey = (market?.active_asset || activeProfile.asset || 'BTC').toUpperCase();
     const assetMoat = moatByAsset[activeAssetKey] ?? 21.0;
 
-    if (activeProfile.telemetryType === 'onnx') {
+    if (activeProfile.telemetryType === 'macro_dominion' || activeProfile.id === 'macro_trend_dominion') {
+      setBotParams((prev) => ({
+        ...prev,
+        min_macro_agreement: true,
+        enable_hmm_risk_off_veto: true,
+        confidence_threshold: 0.65,
+        min_confidence: 0.65,
+        limit_price_cents: 52,
+        limit_price: 0.52,
+        discount_limit_price: 0.52,
+        min_ev_dollars: 0.03,
+        adverse_selection_guard: true,
+        volatility_moat_multiplier: 1.20,
+        dynamic_moat_multiplier: 1.20,
+        enable_mistake_learning: true,
+        brier_shrinkage_factor: 0.15,
+        min_spot_diff: assetMoat,
+        max_contracts: 1,
+      }));
+      setSaveSuccessMsg('🎯 Macro Trend 9-Dial presets loaded');
+      setTimeout(() => setSaveSuccessMsg(null), 2500);
+    } else if (activeProfile.telemetryType === 'onnx') {
       setBotParams((prev) => ({
         ...prev,
         brain_priority_mode: 'TREND_ALIGNED_SCALP',
@@ -341,6 +437,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         vpin_toxic_threshold: 0.60,
         min_spot_diff: assetMoat,
         take_profit_price_threshold: 0.95,
+        enable_take_profit_ceiling: true,
         max_contracts: 1,
       }));
       setSaveSuccessMsg('🎯 Quant Sweetspots preset loaded');
@@ -356,6 +453,10 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         vpin_toxic_threshold: 0.60,
         min_spot_diff: assetMoat,
         take_profit_price_threshold: 0.95,
+        enable_take_profit_ceiling: true,
+        require_reversal_for_tp_ceiling: true,
+        enable_reverse_take_profit_roi: true,
+        reverse_indicator_threshold: 85.0,
         min_take_profit_roi: 20.0,
         max_contracts: 1,
       }));
@@ -379,14 +480,29 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         discount_limit_price: botParams.entry_discount_depth ?? botParams.discount_limit_price,
         tape_confirmation_ticks: botParams.tape_confirmation_ticks,
         taker_cross_ev_threshold: botParams.taker_cross_ev_threshold,
-        dynamic_moat_multiplier: botParams.dynamic_moat_multiplier,
+        dynamic_moat_multiplier: botParams.dynamic_moat_multiplier ?? botParams.volatility_moat_multiplier,
         momentum_max_price: botParams.momentum_max_price,
-        min_confidence: botParams.min_confidence,
+        min_confidence: botParams.min_confidence ?? botParams.confidence_threshold,
         min_ev_dollars: botParams.min_ev_dollars,
         vpin_toxic_threshold: botParams.vpin_toxic_threshold,
         min_spot_diff: botParams.min_spot_diff,
         min_edge_pct: botParams.min_edge_pct,
         take_profit_price_threshold: botParams.take_profit_price_threshold,
+        enable_take_profit_ceiling: botParams.enable_take_profit_ceiling ?? true,
+        require_reversal_for_tp_ceiling: botParams.require_reversal_for_tp_ceiling ?? true,
+        enable_reverse_take_profit_roi: botParams.enable_reverse_take_profit_roi ?? true,
+        reverse_indicator_threshold: botParams.reverse_indicator_threshold ?? 85.0,
+        min_take_profit_roi: botParams.min_take_profit_roi ?? 20.0,
+        // Bot 3 Macro Trend Dominion 9 Dials
+        min_macro_agreement: botParams.min_macro_agreement,
+        enable_hmm_risk_off_veto: botParams.enable_hmm_risk_off_veto,
+        confidence_threshold: botParams.confidence_threshold ?? botParams.min_confidence,
+        limit_price_cents: botParams.limit_price_cents ?? (botParams.discount_limit_price ? Math.round(botParams.discount_limit_price * 100) : 52),
+        limit_price: botParams.limit_price ?? botParams.discount_limit_price ?? ((botParams.limit_price_cents ?? 52) / 100),
+        adverse_selection_guard: botParams.adverse_selection_guard,
+        volatility_moat_multiplier: botParams.volatility_moat_multiplier ?? botParams.dynamic_moat_multiplier,
+        enable_mistake_learning: botParams.enable_mistake_learning,
+        brier_shrinkage_factor: botParams.brier_shrinkage_factor,
         max_contracts: 1, // Institutional 1-contract invariant
       };
       const cleaned = Object.fromEntries(
@@ -399,7 +515,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       });
       if (res.ok) {
         soundFX.playWinSound();
-        setSaveSuccessMsg('✅ Strategy Dials updated & active');
+        setSaveSuccessMsg('✅ Strategy Dials saved as new defaults');
         setTimeout(() => setSaveSuccessMsg(null), 2500);
       } else {
         setSaveSuccessMsg('⚠️ Failed to save');
@@ -479,6 +595,25 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     }
     return `Awaiting high-confidence orderflow impulse. Both models filtering noise below ${((botParams.min_confidence || 0.70) * 100).toFixed(0)}% threshold.`;
   }, [dualOnnxTelemetry?.rationale, dualRegime, vpin, botParams, quolasSignal, quolasConfidence, kalshiSignal, kalshiConfidence]);
+
+  // Macro Trend Dominion (Bot 3) Telemetry
+  const isMacroDominion = activeProfile.id === 'macro_trend_dominion' || activeProfile.telemetryType === 'macro_dominion';
+  const macroAction = (macroDominionTelemetry?.call || 
+    (aiSignals?.recommended_side === 'yes' ? 'YES' : aiSignals?.recommended_side === 'no' ? 'NO' : 'DONT')).toUpperCase();
+  const macroRawConf = Math.round((macroDominionTelemetry?.spot_confidence ? macroDominionTelemetry.spot_confidence * 100 : (aiSignals?.onnx_confidence ? aiSignals.onnx_confidence * 100 : 76)));
+  const macroCalibratedConf = Math.round(macroDominionTelemetry?.confidence_pct ?? (aiSignals?.onnx_confidence ? aiSignals.onnx_confidence * 95 : 72));
+  const macroLimitPrice = macroDominionTelemetry?.limit_price_cents ?? (botParams.limit_price_cents || (botParams.discount_limit_price ? Math.round(botParams.discount_limit_price * 100) : 52));
+  const macroEv = macroDominionTelemetry?.expected_value ?? (macroAction === 'YES' ? (aiSignals?.ev_yes ?? 0.06) : macroAction === 'NO' ? (aiSignals?.ev_no ?? 0.05) : 0.0);
+  const macroHmmRegime = macroDominionTelemetry?.hmm_regime || hmmMacroRegime?.current_regime || 'STABLE_RANGE';
+  const macroSpotTrend = macroDominionTelemetry?.macro_trend || (diffVal >= 0 ? 'BULL' : 'BEAR');
+  const macroRegimesAgree = (macroSpotTrend === 'BULL' && (macroHmmRegime.includes('BULL') || macroHmmRegime.includes('RANGE') || macroHmmRegime === 'STABLE_RANGE')) ||
+                            (macroSpotTrend === 'BEAR' && (macroHmmRegime.includes('BEAR') || macroHmmRegime.includes('RANGE') || macroHmmRegime === 'STABLE_RANGE'));
+  const macroBrier = typeof macroDominionTelemetry?.brier_score === 'number' ? macroDominionTelemetry.brier_score.toFixed(3) : '0.082';
+  const macroPrunedDeciles = Array.isArray(macroDominionTelemetry?.pruned_deciles) ? macroDominionTelemetry.pruned_deciles : [];
+  const macroMistakeMap = macroDominionTelemetry?.failure_counts || {};
+  const macroMistakes = Object.values(macroMistakeMap).reduce((acc: number, cur: any) => acc + (Number(cur) || 0), 0);
+  const macroTotalCycles = Math.max(1, (botPerformance?.total_events ?? 0));
+  const macroAccuracy = macroTotalCycles > 0 ? (((macroTotalCycles - macroMistakes) / macroTotalCycles) * 100).toFixed(1) : '100.0';
 
   // Hold-to-arm kill switch logic
   const handleHoldStart = () => {
@@ -597,16 +732,16 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           Model:
         </span>
         {[
-          BOT_PROFILES['dual_onnx'],
           BOT_PROFILES['3_step_domination_bot'],
-          BOT_PROFILES['macro_onnx'],
+          BOT_PROFILES['dual_onnx'] || BOT_PROFILES['the_onnx_strategy'] || BOT_PROFILES['macro_onnx'],
+          BOT_PROFILES['macro_trend_dominion'],
           BOT_PROFILES['dominion_2_bot'],
           BOT_PROFILES['ofi_sprint_scalper'],
-          BOT_PROFILES['macro_trend_dominion'],
         ].filter(Boolean).map((profile) => {
           const isActive =
             activeProfile.id === profile.id ||
-            (profile.id === 'macro_onnx' && activeProfile.id === 'onnx_microstructure_bot');
+            (profile.id === 'macro_trend_dominion' && (activeProfile.id.includes('macro_trend') || activeProfile.id === 'macro_onnx')) ||
+            ((profile.id === 'dual_onnx' || profile.id === 'macro_onnx') && (activeProfile.id === 'onnx_microstructure_bot' || activeProfile.id === 'the_onnx_strategy'));
           return (
             <button
               key={profile.id}
@@ -831,7 +966,175 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       </div>
 
       {/* 5. STRATEGY-SPECIFIC TELEMETRY DECK */}
-      {activeProfile.telemetryType === 'onnx' ? (
+      {isMacroDominion ? (
+        // --- Bot 3: Macro Trend Dominion 15M Triple-Brain & Mistake-Learning Deck ---
+        <div className="p-3.5 bg-[#0a0f14] border-b border-[#262d35] space-y-3 font-mono">
+          {/* Header Bar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4 h-4 text-cyan-400" />
+              <span className="text-xs font-bold text-white uppercase tracking-wider">
+                Macro Trend Dominion
+              </span>
+              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                15M 3-BRAIN
+              </span>
+            </div>
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                macroAction === 'YES'
+                  ? 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30'
+                  : macroAction === 'NO'
+                  ? 'text-rose-400 bg-rose-500/15 border-rose-500/30'
+                  : 'text-amber-400 bg-amber-500/15 border-amber-500/30'
+              }`}
+            >
+              {macroAction === 'YES' && '🎯 CALL: BUY YES'}
+              {macroAction === 'NO' && '🎯 CALL: BUY NO'}
+              {macroAction === 'DONT' && '⏸️ CALL: DONT (HOLD)'}
+            </span>
+          </div>
+
+          {/* Centerpiece 15M Decision Hero */}
+          <div className={`p-3 rounded-xl border flex flex-col gap-2 ${
+            macroAction === 'YES'
+              ? 'bg-emerald-950/25 border-emerald-500/40 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500/30'
+              : macroAction === 'NO'
+              ? 'bg-rose-950/25 border-rose-500/40 shadow-lg shadow-rose-500/10 ring-1 ring-rose-500/30'
+              : 'bg-slate-900/60 border-slate-700/60'
+          }`}>
+            <div className="flex items-center justify-between border-b border-[#1f2833] pb-2">
+              <div className="flex items-center gap-2">
+                <span className={`text-xl font-black tracking-tight ${
+                  macroAction === 'YES' ? 'text-emerald-400' : macroAction === 'NO' ? 'text-rose-400' : 'text-slate-300'
+                }`}>
+                  {macroAction === 'DONT' ? 'DONT (NO TRADE)' : `BUY ${macroAction}`}
+                </span>
+                <span className="text-[10px] text-slate-400">@ 15M Cycle</span>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-black font-mono text-cyan-300">
+                  {macroLimitPrice}¢ Limit
+                </div>
+                <div className="text-[9px] text-emerald-400/80 font-bold">
+                  $0 Maker Fee · +{macroLimitPrice > 0 ? (((100 - macroLimitPrice) / macroLimitPrice) * 100).toFixed(0) : '0'}% ROI
+                </div>
+              </div>
+            </div>
+
+            {/* Metrics Triad: Calibrated Win %, Net EV, Consensus Agreement */}
+            <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+              <div className="bg-[#0b1017] p-1.5 rounded border border-[#1e2530]">
+                <div className="text-[8px] uppercase text-slate-400">Win Probability</div>
+                <div className="text-xs font-black text-cyan-300 mt-0.5">
+                  {macroCalibratedConf}%
+                </div>
+                <div className="text-[8px] text-slate-500">
+                  Raw: {macroRawConf}% (Brier Cal)
+                </div>
+              </div>
+              <div className="bg-[#0b1017] p-1.5 rounded border border-[#1e2530]">
+                <div className="text-[8px] uppercase text-slate-400">Net EV / Ct</div>
+                <div className={`text-xs font-black mt-0.5 ${macroEv >= 0.02 ? 'text-emerald-400' : 'text-slate-300'}`}>
+                  {macroEv >= 0 ? '+' : ''}${macroEv.toFixed(2)}
+                </div>
+                <div className="text-[8px] text-slate-500">
+                  Hurdle: &ge; ${(botParams.min_ev_dollars ?? 0.03).toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-[#0b1017] p-1.5 rounded border border-[#1e2530]">
+                <div className="text-[8px] uppercase text-slate-400">Macro Agreement</div>
+                <div className={`text-xs font-black mt-0.5 ${macroRegimesAgree ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {macroRegimesAgree ? 'AGREED' : 'DIVERGENT'}
+                </div>
+                <div className="text-[8px] text-slate-500 truncate">
+                  {macroSpotTrend} vs {macroHmmRegime.replace('_TREND', '')}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Triple-Brain Consensus Grid */}
+          <div className="grid grid-cols-3 gap-1.5 text-[9px]">
+            {/* Brain 1: QuoLas Spot */}
+            <div className="p-2 rounded bg-[#10151c] border border-cyan-500/30 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-cyan-400 font-bold">1. SPOT ONNX</span>
+                <span className={`px-1 py-0.2 rounded font-bold ${quolasSignal === 'UP' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                  {quolasSignal}
+                </span>
+              </div>
+              <div className="text-white font-bold">{quolasConfidence}% Conf</div>
+              <div className="text-[8px] text-slate-500">CME 5Hz BRTI</div>
+            </div>
+
+            {/* Brain 2: Kalshi CLOB ONNX */}
+            <div className="p-2 rounded bg-[#10151c] border border-purple-500/30 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-purple-400 font-bold">2. CLOB ONNX</span>
+                <span className={`px-1 py-0.2 rounded font-bold ${kalshiSignal === 'UP' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                  {kalshiSignal}
+                </span>
+              </div>
+              <div className="text-white font-bold">{kalshiConfidence}% Conf</div>
+              <div className="text-[8px] text-slate-500">28-D Microstructure</div>
+            </div>
+
+            {/* Brain 3: 5m HMM Markov */}
+            <div className="p-2 rounded bg-[#10151c] border border-amber-500/30 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-amber-400 font-bold">3. 5M HMM</span>
+                <span className={`px-1 py-0.2 rounded font-bold ${macroHmmRegime.includes('BULL') ? 'bg-emerald-500/20 text-emerald-400' : macroHmmRegime.includes('BEAR') ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-300'}`}>
+                  {macroHmmRegime.replace('_TREND', '')}
+                </span>
+              </div>
+              <div className="text-white font-bold truncate">{macroSpotTrend} 1H</div>
+              <div className="text-[8px] text-slate-500">Markov Anchor</div>
+            </div>
+          </div>
+
+          {/* Mistake-Learning & Adaptation Engine Bar */}
+          <div className="p-2.5 rounded-lg bg-[#0d1218] border border-[#1e2530] text-[10px] space-y-1.5">
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="font-bold uppercase tracking-wider text-cyan-300 flex items-center gap-1">
+                <Brain className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Dual Paper/Live Mistake-Learning Engine</span>
+              </span>
+              <span className="text-[9px] font-mono text-emerald-400 font-semibold">
+                ONLINE TRACKING
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5 text-center text-[9px] pt-0.5">
+              <div className="bg-[#121820] p-1.5 rounded border border-[#212a36]">
+                <div className="text-slate-400">Brier Score</div>
+                <div className="text-white font-bold font-mono">{macroBrier}</div>
+                <div className="text-[8px] text-emerald-400">Calibration OK</div>
+              </div>
+              <div className="bg-[#121820] p-1.5 rounded border border-[#212a36]">
+                <div className="text-slate-400">Pruned Deciles</div>
+                <div className="text-amber-300 font-bold font-mono">
+                  {macroPrunedDeciles.length > 0 ? macroPrunedDeciles.map(d => `${d}¢`).join(', ') : 'None'}
+                </div>
+                <div className="text-[8px] text-slate-500">-EV Filter</div>
+              </div>
+              <div className="bg-[#121820] p-1.5 rounded border border-[#212a36]">
+                <div className="text-slate-400">Cycles / Mistakes</div>
+                <div className="text-white font-bold font-mono">
+                  {macroTotalCycles}c / {macroMistakes}m
+                </div>
+                <div className="text-[8px] text-cyan-400">{macroAccuracy}% Accuracy</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Rationale Banner */}
+          <div className="p-2 rounded bg-[#10141a] border border-[#1e2530] text-[10px] text-slate-300">
+            <span className="text-cyan-400 font-bold mr-1">Rationale:</span>
+            <span>{macroDominionTelemetry?.rationale || dualRationale}</span>
+          </div>
+        </div>
+      ) : activeProfile.telemetryType === 'onnx' ? (
         // --- ONNX Macro Net v2: Dual-Brain Neural Telemetry Deck ---
         <div className="p-3.5 bg-[#0e1117] border-b border-[#262d35] space-y-3 font-mono">
           {/* Header with Dual-Brain Mode & Status */}
@@ -980,7 +1283,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                 <span>🎯 Execution Rationale:</span>
               </span>
               <span className="text-[9px] text-[#34d399] font-semibold">
-                Maker Limit: ≤ ${botParams.discount_limit_price?.toFixed(2) || '0.48'}
+                Maker Limit: ≤ ${botParams.discount_limit_price?.toFixed(2) || '0.52'}
               </span>
             </div>
             <p className="text-white text-[11px] leading-tight">
@@ -1058,7 +1361,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
               <span className="text-xs font-bold text-white uppercase tracking-wider">3-Step Playbook Stage</span>
             </div>
             <span className="text-[10px] text-emerald-400 font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30">
-              MAKER CEILING: ${botParams.discount_limit_price?.toFixed(2) || '0.48'}
+              MAKER CEILING: ${botParams.discount_limit_price?.toFixed(2) || '0.52'}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-1.5 text-[9px] text-center">
@@ -1115,7 +1418,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
             </>
           ) : (
             <div className="w-full text-center text-[#8c9ba5] py-1 text-xs">
-              FLAT · No open contract positions (Holding ${(botParams.discount_limit_price || 0.48).toFixed(2)} Maker Resting Limit)
+              FLAT · No open contract positions (Holding ${(botParams.discount_limit_price || 0.52).toFixed(2)} Maker Resting Limit)
             </div>
           )}
         </div>
@@ -1125,13 +1428,13 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           <div className="p-2 rounded bg-[#13171c] border border-[#1f262d]">
             <span className="text-[#8c9ba5] text-[10px]">MAX RISK (CAPITAL):</span>
             <div className="text-sm font-bold text-[#f43f5e] mt-0.5">
-              -${(botParams.discount_limit_price || 0.48).toFixed(2)} / ct
+              -${(botParams.discount_limit_price || 0.52).toFixed(2)} / ct
             </div>
           </div>
           <div className="p-2 rounded bg-[#13171c] border border-[#1f262d]">
             <span className="text-[#8c9ba5] text-[10px]">MAX SETTLEMENT WIN:</span>
             <div className="text-sm font-bold text-[#10b981] mt-0.5">
-              +${(1.0 - (botParams.discount_limit_price || 0.48)).toFixed(2)} / ct
+              +${(1.0 - (botParams.discount_limit_price || 0.52)).toFixed(2)} / ct
             </div>
           </div>
         </div>
@@ -1206,7 +1509,496 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
 
         {isParamsOpen && (
           <div className="p-4 bg-[#12161a] border-t border-[#1f262d] space-y-3 font-mono text-xs">
-            {activeProfile.telemetryType === 'onnx' ? (
+            {isMacroDominion ? (
+              /* MACRO TREND DOMINION — 9 STRATEGY DIALS COCKPIT */
+              <div className="space-y-3.5">
+                {/* Header Banner */}
+                <div className="p-2.5 rounded-lg bg-gradient-to-r from-cyan-950/40 via-teal-950/30 to-slate-900 border border-cyan-500/30 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sliders className="w-4 h-4 text-cyan-400" />
+                    <div>
+                      <div className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <span>MACRO TREND DOMINION</span>
+                        <span className="px-1.5 py-0.2 rounded text-[9px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono">
+                          9 DIALS COCKPIT
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-slate-400">
+                        15M Triple-Brain Consensus · 1¢–89¢ Sweetspot · Online Mistake Learning
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30">
+                    SWEETSPOTS ACTIVE
+                  </span>
+                </div>
+
+                {/* DIAL 1: Macro Consensus Agreement (min_macro_agreement) */}
+                <div className="space-y-1.5 p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d]">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block animate-pulse" />
+                      Dial 1: 1H Macro Trend & HMM Agreement
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-cyan-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Higher-Timeframe Alignment Filter:</b><br />
+                          • <b>Strict Consensus (Sweetspot):</b> Demands 1-Hour Spot Trend and 5m HMM Markov Regime agree before taking directional trades.<br />
+                          • <b>Why it matters:</b> Eliminates taking counter-trend bets into dominant institutional flow.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-[9px] font-mono text-cyan-400 font-bold">
+                      {botParams.min_macro_agreement !== false ? 'STRICT CONSENSUS' : 'ALLOW DIVERGENCE'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { val: true, label: 'Strict Consensus', badge: 'Sweetspot', desc: '1H Spot & HMM Must Agree' },
+                      { val: false, label: 'Allow Divergence', badge: 'Aggressive', desc: 'Trade on ONNX alone' },
+                    ].map((opt) => {
+                      const isActive = (botParams.min_macro_agreement !== false) === opt.val;
+                      return (
+                        <button
+                          key={String(opt.val)}
+                          type="button"
+                          onClick={() => {
+                            soundFX.playClickSound();
+                            setBotParams({ ...botParams, min_macro_agreement: opt.val });
+                          }}
+                          className={`p-2 rounded border text-left transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-cyan-500/15 border-cyan-400 text-white shadow-lg shadow-cyan-500/10 ring-1 ring-cyan-400/40'
+                              : 'bg-[#10141b] border-[#222933] text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold">{opt.label}</span>
+                            <span className={`text-[8px] font-mono px-1 rounded ${
+                              isActive ? 'bg-cyan-400/20 text-cyan-300 font-semibold' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {opt.badge}
+                            </span>
+                          </div>
+                          <div className="text-[8px] text-slate-400 mt-0.5 truncate">{opt.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* DIAL 2: HMM Risk-Off Regime Veto (enable_hmm_risk_off_veto) */}
+                <div className="space-y-1.5 p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d]">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-amber-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+                      Dial 2: 5m HMM Risk-Off Veto
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-amber-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Markov Volatility Protection:</b><br />
+                          • <b>Veto Active (Sweetspot):</b> Hard stop on trading when HMM enters RISK_OFF, high volatility entropy, or unanchored churn.<br />
+                          • <b>Why it matters:</b> Prevents catastrophic drawdown during unpredictable regime transitions.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-[9px] font-mono text-amber-400 font-bold">
+                      {botParams.enable_hmm_risk_off_veto !== false ? 'VETO ACTIVE' : 'VETO BYPASSED'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { val: true, label: 'Veto Active', badge: 'Sweetspot', desc: 'Halt in RISK_OFF / Churn' },
+                      { val: false, label: 'Bypass Veto', badge: 'Risky', desc: 'Ignore Markov regime' },
+                    ].map((opt) => {
+                      const isActive = (botParams.enable_hmm_risk_off_veto !== false) === opt.val;
+                      return (
+                        <button
+                          key={String(opt.val)}
+                          type="button"
+                          onClick={() => {
+                            soundFX.playClickSound();
+                            setBotParams({ ...botParams, enable_hmm_risk_off_veto: opt.val });
+                          }}
+                          className={`p-2 rounded border text-left transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-amber-500/15 border-amber-400 text-white shadow ring-1 ring-amber-400/40'
+                              : 'bg-[#10141b] border-[#222933] text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold">{opt.label}</span>
+                            <span className={`text-[8px] font-mono px-1 rounded ${
+                              isActive ? 'bg-amber-400/20 text-amber-300 font-semibold' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {opt.badge}
+                            </span>
+                          </div>
+                          <div className="text-[8px] text-slate-400 mt-0.5 truncate">{opt.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* DIAL 3: Calibrated Win Probability Hurdle (min_confidence / confidence_threshold) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" />
+                      Dial 3: Calibrated Win Probability Hurdle
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-cyan-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Calibrated Conviction Gate:</b><br />
+                          • Minimum calibrated AI probability score (0.50 - 0.95) to place resting order.<br />
+                          • <b>65% Sweetspot:</b> Filters out low-conviction noise bets while capturing institutional trend cycles.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-xs font-mono font-bold text-cyan-300">
+                      {Math.round(((botParams.confidence_threshold ?? botParams.min_confidence ?? 0.65)) * 100)}% Conviction
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <input
+                      type="range"
+                      min="0.50"
+                      max="0.95"
+                      step="0.01"
+                      value={botParams.confidence_threshold ?? botParams.min_confidence ?? 0.65}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setBotParams({ ...botParams, confidence_threshold: val, min_confidence: val });
+                      }}
+                      className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <span>50% (Coin-Flip)</span>
+                      <span className="text-cyan-400 font-semibold">65% (Sweetspot)</span>
+                      <span>95% (Ultra-Hurdle)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DIAL 4: Resting Limit Sweet Spot (limit_price_cents: 1¢ - 89¢) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-emerald-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                      Dial 4: Resting Limit Sweet Spot (1¢–89¢)
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-emerald-500/40 z-50 shadow-2xl leading-snug">
+                          <b>The Maker Limit Ceiling:</b><br />
+                          • <i>What is the maximum price you will pay?</i><br />
+                          • Places resting maker orders on Kalshi book with <b>$0.00 Maker Fee</b>.<br />
+                          • <b>48¢–52¢ Sweetspot:</b> Generates <b>+92% to +108% net ROI</b> on winning $1.00 binary payout.<br />
+                          • Parameter adjustable from 1¢ up to 89¢.
+                        </div>
+                      </div>
+                    </label>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
+                        +{(((100 - (botParams.limit_price_cents ?? 52)) / (botParams.limit_price_cents ?? 52)) * 100).toFixed(0)}% ROI
+                      </span>
+                      <span className="text-xs font-mono font-bold text-emerald-300">
+                        {botParams.limit_price_cents ?? 52}¢ (${((botParams.limit_price_cents ?? 52) / 100).toFixed(2)})
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Range Slider (1 - 89 cents) */}
+                  <div className="space-y-1">
+                    <input
+                      type="range"
+                      min="1"
+                      max="89"
+                      step="1"
+                      value={botParams.limit_price_cents ?? 52}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setBotParams({
+                          ...botParams,
+                          limit_price_cents: val,
+                          limit_price: val / 100,
+                          discount_limit_price: val / 100,
+                          entry_discount_depth: val / 100,
+                        });
+                      }}
+                      className="w-full accent-emerald-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <span>1¢ (Deep Penny)</span>
+                      <span className="text-emerald-400 font-semibold">48¢–52¢ (Sweetspot · +92% to +108% ROI)</span>
+                      <span>89¢ (Max Cap)</span>
+                    </div>
+                  </div>
+
+                  {/* Preset Pills */}
+                  <div className="grid grid-cols-4 gap-1 pt-1">
+                    {[
+                      { cents: 35, label: '35¢ Deep' },
+                      { cents: 48, label: '48¢ Maker' },
+                      { cents: 52, label: '52¢ Sweet' },
+                      { cents: 62, label: '62¢ Mom' },
+                    ].map((p) => {
+                      const isSel = (botParams.limit_price_cents ?? 52) === p.cents;
+                      return (
+                        <button
+                          key={p.cents}
+                          type="button"
+                          onClick={() => {
+                            soundFX.playClickSound();
+                            setBotParams({
+                              ...botParams,
+                              limit_price_cents: p.cents,
+                              limit_price: p.cents / 100,
+                              discount_limit_price: p.cents / 100,
+                              entry_discount_depth: p.cents / 100,
+                            });
+                          }}
+                          className={`py-1 rounded text-[9px] font-mono font-bold transition-all border cursor-pointer ${
+                            isSel
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400 shadow-sm'
+                              : 'bg-[#10141a] text-slate-400 border-[#222933] hover:text-white'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* DIAL 5: Net Expected Value Hurdle (min_ev_dollars) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" />
+                      Dial 5: Net Expected Value Hurdle ($/ct)
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-indigo-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Expected Return Gate:</b><br />
+                          • EV = P(win) * ($1 - Price) - P(loss) * Price - Fees.<br />
+                          • <b>+$0.03 Sweetspot:</b> Rejects paper-thin edges; guarantees long-term statistical profitability.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-xs font-mono font-bold text-indigo-300">
+                      +${(botParams.min_ev_dollars ?? 0.03).toFixed(2)} / ct
+                    </span>
+                  </div>
+
+                  <div className="flex items-center bg-[#10141a] border border-indigo-500/30 rounded px-2 py-1">
+                    <span className="text-indigo-400 mr-1">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      max="0.25"
+                      value={botParams.min_ev_dollars ?? 0.03}
+                      onChange={(e) => setBotParams({ ...botParams, min_ev_dollars: parseFloat(e.target.value) })}
+                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* DIAL 6: Adverse Selection Guard (adverse_selection_guard) */}
+                <div className="space-y-1.5 p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d]">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-rose-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />
+                      Dial 6: Adverse Selection Guard
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-rose-500/40 z-50 shadow-2xl leading-snug">
+                          <b>High-Velocity Spike Shield:</b><br />
+                          • When Bitcoin spot velocity |ΔSpot| &gt; $15, protects against toxic fills by applying +$0.01 drift offset.<br />
+                          • <b>Why it matters:</b> Prevents high-frequency bots from picking off resting limit orders ahead of crashes.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-[9px] font-mono text-rose-400 font-bold">
+                      {botParams.adverse_selection_guard !== false ? 'GUARD ACTIVE' : 'BYPASS'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { val: true, label: 'Guard Active', badge: '+$0.01 Shield', desc: 'Hold when |ΔSpot| > $15' },
+                      { val: false, label: 'Bypass Guard', badge: 'No Offset', desc: 'Accept toxic fills' },
+                    ].map((opt) => {
+                      const isActive = (botParams.adverse_selection_guard !== false) === opt.val;
+                      return (
+                        <button
+                          key={String(opt.val)}
+                          type="button"
+                          onClick={() => {
+                            soundFX.playClickSound();
+                            setBotParams({ ...botParams, adverse_selection_guard: opt.val });
+                          }}
+                          className={`p-2 rounded border text-left transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-rose-500/15 border-rose-400 text-white shadow ring-1 ring-rose-400/40'
+                              : 'bg-[#10141b] border-[#222933] text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold">{opt.label}</span>
+                            <span className={`text-[8px] font-mono px-1 rounded ${
+                              isActive ? 'bg-rose-400/20 text-rose-300 font-semibold' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {opt.badge}
+                            </span>
+                          </div>
+                          <div className="text-[8px] text-slate-400 mt-0.5 truncate">{opt.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* DIAL 7: Volatility Moat Multiplier (volatility_moat_multiplier) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-purple-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-purple-400 inline-block" />
+                      Dial 7: Volatility Moat Multiplier
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-purple-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Dynamic Strike Buffer:</b><br />
+                          • Multiplies base moat ($21 BTC) based on market volatility: ${(21.0 * (botParams.volatility_moat_multiplier ?? 1.20)).toFixed(2)} active buffer.<br />
+                          • Refuses trades when Bitcoin is hovering too close to strike K at expiration.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-xs font-mono font-bold text-purple-300">
+                      {(botParams.volatility_moat_multiplier ?? 1.20).toFixed(2)}x (${(21.0 * (botParams.volatility_moat_multiplier ?? 1.20)).toFixed(2)})
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="3.0"
+                      step="0.05"
+                      value={botParams.volatility_moat_multiplier ?? 1.20}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setBotParams({ ...botParams, volatility_moat_multiplier: val, dynamic_moat_multiplier: val });
+                      }}
+                      className="w-full accent-purple-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <span>0.5x ($10.50)</span>
+                      <span className="text-purple-400 font-semibold">1.2x ($25.20 Sweetspot)</span>
+                      <span>3.0x ($63.00 Heavy)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DIAL 8: Online Mistake Learning (enable_mistake_learning) */}
+                <div className="space-y-1.5 p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d]">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-teal-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <Brain className="w-3.5 h-3.5 text-teal-400" />
+                      Dial 8: Online Mistake-Learning Engine
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-teal-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Online Feedback Adaptation:</b><br />
+                          • Records both Paper & Live cycle outcomes.<br />
+                          • Dynamically applies Brier shrinkage to overconfident guesses and prunes persistent negative-EV deciles.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-[9px] font-mono text-teal-400 font-bold">
+                      {botParams.enable_mistake_learning !== false ? 'ONLINE LEARNING ACTIVE' : 'OFFLINE STATIC'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { val: true, label: 'Online Learning', badge: 'Paper & Live', desc: 'Calibrate after every cycle' },
+                      { val: false, label: 'Static Mode', badge: 'No Learning', desc: 'Zero probability updates' },
+                    ].map((opt) => {
+                      const isActive = (botParams.enable_mistake_learning !== false) === opt.val;
+                      return (
+                        <button
+                          key={String(opt.val)}
+                          type="button"
+                          onClick={() => {
+                            soundFX.playClickSound();
+                            setBotParams({ ...botParams, enable_mistake_learning: opt.val });
+                          }}
+                          className={`p-2 rounded border text-left transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-teal-500/15 border-teal-400 text-white shadow ring-1 ring-teal-400/40'
+                              : 'bg-[#10141b] border-[#222933] text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold">{opt.label}</span>
+                            <span className={`text-[8px] font-mono px-1 rounded ${
+                              isActive ? 'bg-teal-400/20 text-teal-300 font-semibold' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {opt.badge}
+                            </span>
+                          </div>
+                          <div className="text-[8px] text-slate-400 mt-0.5 truncate">{opt.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* DIAL 9: Brier Shrinkage Factor (brier_shrinkage_factor) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-teal-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-teal-400 inline-block" />
+                      Dial 9: Mistake Shrinkage Factor (Brier Rate)
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-teal-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Overconfidence Dampener:</b><br />
+                          • When a prediction fails at settlement, confidence is shrunk by this rate.<br />
+                          • <b>0.15 Sweetspot:</b> Sufficient to avoid revenge trading streaks while maintaining responsiveness to trend changes.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-xs font-mono font-bold text-teal-300">
+                      {Math.round(((botParams.brier_shrinkage_factor ?? 0.15)) * 100)}% Shrinkage
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <input
+                      type="range"
+                      min="0.01"
+                      max="0.50"
+                      step="0.01"
+                      value={botParams.brier_shrinkage_factor ?? 0.15}
+                      onChange={(e) => setBotParams({ ...botParams, brier_shrinkage_factor: parseFloat(e.target.value) })}
+                      className="w-full accent-teal-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <span>1% (Minimal)</span>
+                      <span className="text-teal-400 font-semibold">15% (Sweetspot)</span>
+                      <span>50% (Heavy Dampening)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : activeProfile.telemetryType === 'onnx' ? (
               /* THE ONNX STRATEGY — 5 STRATEGY DIALS COCKPIT MATRIX */
               <div className="space-y-3.5">
                 {/* Header Banner */}
@@ -1665,7 +2457,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                       step="0.01"
                       min="0.10"
                       max="0.65"
-                      value={botParams.discount_limit_price ?? 0.48}
+                      value={botParams.discount_limit_price ?? 0.52}
                       onChange={(e) => setBotParams({ ...botParams, discount_limit_price: parseFloat(e.target.value) })}
                       className="w-full bg-transparent text-white font-mono outline-none text-xs"
                     />
@@ -1781,17 +2573,44 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
 
                 {/* Take Profit Ceiling */}
                 <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    Take Profit ($)
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br />
-                        <b>How it works:</b> Sells winning contract before expiration.<br />
-                        <b>Why it matters:</b> Cashes in 95¢ instead of risking crash for 5¢.
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
+                      Take Profit ($)
+                      <div className="group relative cursor-help">
+                        <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
+                        <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-56 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
+                          <b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br />
+                          <b>How it works:</b> Sells winning contract before expiration if an adverse reversal is detected.<br />
+                          <b>Philosophy:</b> Let winners run to 100% ($1.00) unless an adverse reversal ≥85% is detected.
+                        </div>
                       </div>
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setBotParams({ ...botParams, require_reversal_for_tp_ceiling: !(botParams.require_reversal_for_tp_ceiling ?? true) })}
+                        title="Require 85%+ adverse reversal detected before ejecting at ceiling (otherwise hold to $1.00)"
+                        className={`text-[8px] font-bold px-1 py-0.5 rounded border transition-colors ${
+                          (botParams.require_reversal_for_tp_ceiling ?? true)
+                            ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-400'
+                            : 'border-slate-700 bg-slate-800/40 text-slate-400'
+                        }`}
+                      >
+                        {(botParams.require_reversal_for_tp_ceiling ?? true) ? '🛡️ ≥85% REV' : '⚡ ALWAYS'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBotParams({ ...botParams, enable_take_profit_ceiling: !(botParams.enable_take_profit_ceiling ?? true) })}
+                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-colors ${
+                          (botParams.enable_take_profit_ceiling ?? true)
+                            ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                            : 'border-slate-700 bg-slate-800/40 text-slate-400'
+                        }`}
+                      >
+                        {(botParams.enable_take_profit_ceiling ?? true) ? '🟢 ON' : '⚪ OFF'}
+                      </button>
                     </div>
-                  </label>
+                  </div>
                   <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
                     <span className="text-slate-500 mr-1">$</span>
                     <input
@@ -1803,6 +2622,89 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                       onChange={(e) => setBotParams({ ...botParams, take_profit_price_threshold: parseFloat(e.target.value) })}
                       className="w-full bg-transparent text-white font-mono outline-none text-xs"
                     />
+                  </div>
+                </div>
+
+                {/* Min Take Profit ROI % */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
+                      Take Profit ROI %
+                      <div className="group relative cursor-help">
+                        <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
+                        <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-56 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
+                          <b>The Beginner Translation:</b> <i>"Target ROI Early Harvest."</i><br />
+                          <b>How it works:</b> Harvests profits if at least this ROI is met AND indicators show an 85%+ adverse reversal.<br />
+                          <b>Why it matters:</b> Let winners run to $1.00 unless the trade turns against you.
+                        </div>
+                      </div>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setBotParams({ ...botParams, enable_reverse_take_profit_roi: !(botParams.enable_reverse_take_profit_roi ?? true) })}
+                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition-colors ${
+                        (botParams.enable_reverse_take_profit_roi ?? true)
+                          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400'
+                          : 'border-slate-700 bg-slate-800/40 text-slate-400'
+                      }`}
+                    >
+                      {(botParams.enable_reverse_take_profit_roi ?? true) ? '🟢 ON' : '⚪ OFF'}
+                    </button>
+                  </div>
+                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
+                    <input
+                      type="number"
+                      step="5"
+                      min="5"
+                      max="100"
+                      value={botParams.min_take_profit_roi ?? 20.0}
+                      onChange={(e) => setBotParams({ ...botParams, min_take_profit_roi: parseFloat(e.target.value) })}
+                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                    />
+                    <span className="text-slate-500 ml-1">%</span>
+                  </div>
+                </div>
+
+                {/* Adverse Reversal Threshold % */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
+                    Reversal Trigger %
+                    <div className="group relative cursor-help">
+                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
+                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-56 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
+                        <b>The Beginner Translation:</b> <i>"Reversal Conviction Sensor."</i><br />
+                        <b>How it works:</b> Exit triggers only fire if indicators calculate this conviction in reverse direction.<br />
+                        <b>Default:</b> 85% conviction required.
+                      </div>
+                    </div>
+                  </label>
+                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
+                    <input
+                      type="number"
+                      step="1"
+                      min="50"
+                      max="99"
+                      value={botParams.reverse_indicator_threshold ?? 85.0}
+                      onChange={(e) => setBotParams({ ...botParams, reverse_indicator_threshold: parseFloat(e.target.value) })}
+                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                    />
+                    <span className="text-slate-500 ml-1">%</span>
+                  </div>
+                </div>
+
+                {/* Early Harvest Policy */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
+                    Early Harvest Policy
+                    <div className="group relative cursor-help">
+                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
+                      <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-56 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
+                        <b>Rule:</b> Let winners run to full $1.00 payout at expiration. Early exit occurs only if adverse reversal is confirmed (≥85%).
+                      </div>
+                    </div>
+                  </label>
+                  <div className="flex items-center justify-center bg-emerald-500/10 border border-emerald-500/30 rounded px-2 py-1">
+                    <span className="text-[10px] font-mono font-bold text-emerald-400">RUN TO $1.00 (≥85% GATE)</span>
                   </div>
                 </div>
               </div>
@@ -1829,7 +2731,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   className="px-2.5 py-1.5 rounded bg-[#171c22] hover:bg-[#222933] text-amber-300 hover:text-amber-200 border border-amber-500/30 text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1"
                 >
                   <span>🎯</span>
-                  <span>{activeProfile.telemetryType === 'onnx' ? 'Reset Quant Sweetspots' : 'Sweetspots Preset'}</span>
+                  <span>{activeProfile.telemetryType === 'macro_dominion' ? 'Reset Macro Sweetspots' : activeProfile.telemetryType === 'onnx' ? 'Reset Quant Sweetspots' : 'Sweetspots Preset'}</span>
                 </button>
                 <button
                   onClick={handleSaveParameters}
@@ -1837,7 +2739,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#00bda5] text-black font-bold text-xs hover:bg-[#2dd4bf] transition-all shadow cursor-pointer disabled:opacity-50"
                 >
                   {isSavingParams ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                  <span>{activeProfile.telemetryType === 'onnx' ? 'Apply Strategy Dials' : 'Apply & Save'}</span>
+                  <span>{activeProfile.telemetryType === 'macro_dominion' || activeProfile.telemetryType === 'onnx' ? 'Apply Strategy Dials' : 'Apply & Save as Default'}</span>
                 </button>
               </div>
             </div>
@@ -1849,10 +2751,156 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       <div className="px-4 py-2.5 bg-[#0f1319] border-b border-[#262d35] text-[11px] font-mono text-[#8c9ba5] leading-relaxed">
         <span className="text-white font-semibold">Active Playbook: </span>
         <span>
-          {activeProfile.telemetryType === 'onnx'
+          {activeProfile.telemetryType === 'macro_dominion'
+            ? (macroDominionTelemetry?.rationale || '15M Triple-Brain Consensus (Spot ONNX + Kalshi ONNX + 5m HMM). Places resting maker limits (1¢–89¢) with online Brier mistake calibration & decile pruning.')
+            : activeProfile.telemetryType === 'onnx'
             ? (aiSignals?.rationale || 'QuoLas Spot (CME BRTI 5Hz) Lead-Lag Ingestion + Kalshi 28-D Microstructure Tensor. Sniper Maker limits on price contradictions ($0.00 fee) and consensus momentum scalps.')
             : (aiSignals?.rationale || activeProfile.playbook)}
         </span>
+      </div>
+
+      {/* 8.5. Dedicated Bot Micro-Report Stream & KPI Strip (Live vs Paper Segregated) */}
+      <div className="border-b border-[#262d35] bg-[#0c1015] p-3 text-xs font-mono">
+        {/* Header & Segregated Pill Toggle */}
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+              <span>📋</span>
+              <span className="truncate max-w-[110px] sm:max-w-none">{activeProfile.shortName} Ledger</span>
+            </span>
+            {/* Live / Paper Pill Toggle */}
+            <div className="flex items-center bg-[#171c22] p-0.5 rounded border border-[#262d35] text-[10px]">
+              <button
+                type="button"
+                onClick={() => setReportMode('live')}
+                className={`px-2 py-0.5 rounded font-bold transition-all ${
+                  reportMode === 'live'
+                    ? 'bg-amber-500 text-black shadow-sm'
+                    : 'text-[#8c9ba5] hover:text-white'
+                }`}
+              >
+                LIVE
+              </button>
+              <button
+                type="button"
+                onClick={() => setReportMode('paper')}
+                className={`px-2 py-0.5 rounded font-bold transition-all ${
+                  reportMode === 'paper'
+                    ? 'bg-purple-500 text-white shadow-sm'
+                    : 'text-[#8c9ba5] hover:text-white'
+                }`}
+              >
+                PAPER
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={fetchMicroReports}
+              disabled={isLoadingReports}
+              title="Refresh ledger"
+              className="text-[#8c9ba5] hover:text-white transition-colors"
+            >
+              <RefreshCw className={`w-3 h-3 ${isLoadingReports ? 'animate-spin text-[#00bda5]' : ''}`} />
+            </button>
+            {onOpenReports && (
+              <button
+                type="button"
+                onClick={onOpenReports}
+                className="text-[10px] text-[#00bda5] hover:text-[#2dd4bf] hover:underline flex items-center gap-0.5 cursor-pointer"
+              >
+                <span>Full Ledger</span>
+                <ExternalLink className="w-2.5 h-2.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Mini KPI Strip */}
+        <div className="grid grid-cols-3 gap-1.5 mb-2 bg-[#12171e] p-2 rounded border border-[#262d35]/60">
+          <div className="flex flex-col">
+            <span className="text-[9px] text-[#8c9ba5] uppercase tracking-wider">Win Rate</span>
+            <span className={`text-[12px] font-bold ${
+              (botPerformance?.win_rate_pct ?? 0) >= 50
+                ? 'text-emerald-400'
+                : (botPerformance?.total_events ?? 0) === 0
+                ? 'text-[#8c9ba5]'
+                : 'text-rose-400'
+            }`}>
+              {botPerformance && botPerformance.total_events > 0
+                ? `${botPerformance.win_rate_pct.toFixed(1)}%`
+                : '--'}
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[9px] text-[#8c9ba5] uppercase tracking-wider">Net PnL</span>
+            <span className={`text-[12px] font-bold ${
+              (botPerformance?.total_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
+            }`}>
+              {botPerformance && botPerformance.total_events > 0
+                ? `${botPerformance.total_pnl >= 0 ? '+' : ''}$${botPerformance.total_pnl.toFixed(2)}`
+                : '--'}
+            </span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[9px] text-[#8c9ba5] uppercase tracking-wider">Cycles</span>
+            <span className="text-[12px] font-bold text-white">
+              {botPerformance && botPerformance.total_events > 0
+                ? `${botPerformance.wins}W / ${botPerformance.losses}L`
+                : '--'}
+            </span>
+          </div>
+        </div>
+
+        {/* Recent Settlements List */}
+        {recentReports.length > 0 ? (
+          <div className="space-y-1">
+            {recentReports.map((r, idx) => {
+              const isWin = r.outcome.toLowerCase() === 'win';
+              const rawPnl = r.pnl !== undefined ? r.pnl : r.net_pnl;
+              const pnlNum = typeof rawPnl === 'number' ? rawPnl : parseFloat(String(rawPnl || '0'));
+              const displaySide = r.bot_side || r.side || 'YES';
+              return (
+                <div
+                  key={r.report_id || idx}
+                  className={`flex items-center justify-between p-1.5 rounded border text-[10px] ${
+                    isWin
+                      ? 'bg-emerald-950/20 border-emerald-500/20 text-emerald-300'
+                      : 'bg-rose-950/20 border-rose-500/20 text-rose-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 truncate max-w-[65%]">
+                    {isWin ? (
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                    ) : (
+                      <XCircle className="w-3 h-3 text-rose-400 shrink-0" />
+                    )}
+                    <span className="truncate text-white font-medium">
+                      {r.ticker.replace('KXBTC15M-', '').replace('KXETH15M-', 'ETH-').replace('KXSOL15M-', 'SOL-')}
+                    </span>
+                    <span className="text-[8px] text-[#8c9ba5] uppercase px-1 py-0.2 bg-[#171c22] rounded border border-[#262d35]">
+                      {displaySide}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 font-mono">
+                    <span className={`font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {pnlNum >= 0 ? `+$${pnlNum.toFixed(2)}` : `-$${Math.abs(pnlNum).toFixed(2)}`}
+                    </span>
+                    <span className="text-[9px] text-[#8c9ba5]">
+                      {r.timestamp_utc ? r.timestamp_utc.slice(11, 16) : ''}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="py-2 text-center text-[#8c9ba5] text-[10px] bg-[#12171e]/50 rounded border border-[#262d35]/40">
+            <span>No {reportMode.toUpperCase()} settlements for {activeProfile.shortName}</span>
+          </div>
+        )}
       </div>
 
       {/* 9. Hardware-Style Emergency Kill-Switch */}

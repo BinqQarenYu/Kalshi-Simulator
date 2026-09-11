@@ -19,6 +19,7 @@ class DualONNXRegime(str, Enum):
     CONTRADICTION_ARBITRAGE = "CONTRADICTION_ARBITRAGE"
     CHOP_WAIT = "CHOP_WAIT"
     TOXIC_VETO = "TOXIC_VETO"
+    TEMPORAL_DESYNC = "TEMPORAL_DESYNC"
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class DualONNXDecision:
     recommended_limit_price: Decimal
     expected_value: Decimal
     recommended_contracts: int = 1
+    cancel_resting_orders: bool = False
     rationale: str = ""
 
     @property
@@ -55,6 +57,7 @@ class DualONNXDecision:
             "recommended_limit_price": str(self.recommended_limit_price),
             "expected_value": str(self.expected_value),
             "recommended_contracts": self.recommended_contracts,
+            "cancel_resting_orders": self.cancel_resting_orders,
             "is_trade": self.is_trade,
             "rationale": self.rationale,
         }

@@ -196,6 +196,17 @@ export function App() {
           }}
           dualOnnxTelemetry={data.dual_onnx_telemetry}
           preflightGates={data.preflight_gates}
+          macroDominionTelemetry={data.macro_trend_dominion_telemetry}
+          hmmMacroRegime={data.hmm_macro_regime}
+          onOpenReports={() => {
+            if (window.opener) {
+              try {
+                window.opener.focus();
+              } catch {}
+            } else {
+              window.open('/', '_blank');
+            }
+          }}
         />
       </div>
     );
@@ -236,6 +247,8 @@ export function App() {
       onResetCircuitBreaker={resetCircuitBreaker}
       dualOnnxTelemetry={data.dual_onnx_telemetry}
       preflightGates={data.preflight_gates}
+      macroDominionTelemetry={data.macro_trend_dominion_telemetry}
+      hmmMacroRegime={data.hmm_macro_regime}
     />
   );
 }

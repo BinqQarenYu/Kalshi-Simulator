@@ -9,6 +9,7 @@ description: CFTC statutory compliance, wash-trading prevention, anti-spoofing, 
 ## 1. Zero Tolerance for Wash Trading
 - Never submit an order that matches or crosses with an existing open/resting order from the same account.
 - Immediate pre-trade check: reject and log any opposing resting order at same/crossing price.
+- **Multi-Bot Self-Crossing Shield**: When multiple autonomous bots run concurrently, all trade submissions must be arbitrated synchronously by `LiveCoordinator`. If Bot A holds an active YES on a market, Bot B is strictly prohibited from submitting NO on the same ticker, eliminating CFTC Section 4c(a)(1) wash-trading liability.
 
 ## 2. Zero Tolerance for Spoofing & Layering
 - Never submit phantom orders or rapid cancellation floods intended to manipulate order book depth.

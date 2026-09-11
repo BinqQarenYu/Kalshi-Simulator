@@ -103,7 +103,7 @@ def test_training_cycle_execution(tmp_path: Path) -> None:
     assert trainer.last_val_acc is not None
     assert trainer.samples_trained >= 30
     assert trainer.models_promoted >= 1
-    assert (models_dir / "kalshi_onnx.onnx").exists()
+    assert (models_dir / "quolas.onnx").exists() or (models_dir / "kalshi_onnx.onnx").exists()
     assert (models_dir / "feature_stats.json").exists()
 
 

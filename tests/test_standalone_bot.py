@@ -331,7 +331,7 @@ def test_standalone_bot_parameters_and_endpoints(tmp_path):
     engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
     # Check default parameters
     p = engine.get_parameters()
-    assert p["discount_limit_price"] == 0.48
+    assert p["discount_limit_price"] == 0.52
     assert p["max_contracts"] == 1
     assert p["min_edge_pct"] == 6.0
     assert p["min_ev_dollars"] == 0.02
@@ -610,5 +610,183 @@ def test_standalone_bot_window_management_api():
         assert data["status"] == "LAUNCHED"
         assert data["success"] is True
         mock_launch.assert_called_once()
+
+
+def test_take_profit_ceiling_execution_in_standalone_engine(tmp_path: Path):
+    """Verify StandaloneBotEngine holds winners to $1.00 when no reversal,
+
+    and executes take-profit ceiling when an adverse reversal >= 85% is detected.
+    """
+    from datetime import timedelta
+    from kalshi_sim.schemas import L2BookState
+
+    engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+    engine.active_ticker = "KXBTC15M-T100000"
+    engine.target_strike = Decimal("100000")
+    engine.current_btc_spot = Decimal("100050")  # +$50 in the money (no reversal)
+    engine.active_market_close_dt = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+    # Establish an open position bought at 52¢
+    engine.active_position = {
+        "ticker": "KXBTC15M-T100000",
+        "side": "yes",
+        "size": 1,
+        "entry_price": Decimal("0.52"),
+        "entry_time": 0.0,
+    }
+
+    # Populate order book where YES bid has reached $0.96 (above $0.95 ceiling)
+    book = L2BookState(market_ticker="KXBTC15M-T100000")
+    book.yes_book = {Decimal("0.96"): Decimal("100"), Decimal("0.95"): Decimal("50")}
+    book.no_book = {Decimal("0.03"): Decimal("50")}
+    engine.orderbook._books["KXBTC15M-T100000"] = book
+
+    # 1. When winning with NO reversal detected -> Continues holding to $1.00 expiry
+    asyncio.run(engine.evaluate_and_execute())
+    assert engine.active_position is not None, "Bot should hold winners when no adverse reversal"
+
+    # 2. When spot crashes $200 below strike -> Adverse reversal >= 85% detected
+    engine.current_btc_spot = Decimal("99800")
+    engine.last_eval_time = 0.0  # Reset throttle timer
+    asyncio.run(engine.evaluate_and_execute())
+
+    # Position should now be cleared (exited at 96¢ ceiling to bank profit before collapse)
+    assert engine.active_position is None
+    assert engine.today_wins == 1
+    # Realized PnL = 0.96 - 0.52 - 0.01 fee = 0.43
+    assert engine.today_pnl == Decimal("0.43")
+    assert engine.settled_cycles == 1
+
+
+def test_take_profit_ceiling_api_parameter_update(tmp_path: Path):
+    """Verify enable_take_profit_ceiling and reversal gate parameter API updates."""
+    from kalshi_sim.standalone_bot import app_engine
+    import kalshi_sim.standalone_bot as sb
+
+    test_engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+    sb.app_engine = test_engine
+
+    client = TestClient(sb.app)
+    params_resp = client.get("/api/bot/parameters")
+    assert params_resp.status_code == 200
+    p = params_resp.json()
+    assert p["enable_take_profit_ceiling"] is True
+    assert p["take_profit_price_threshold"] == 0.95
+    assert p["require_reversal_for_tp_ceiling"] is True
+    assert p["enable_reverse_take_profit_roi"] is True
+    assert p["reverse_indicator_threshold"] == 85.0
+    assert p["min_take_profit_roi"] == 20.0
+
+    # Update via POST
+    update_resp = client.post(
+        "/api/bot/parameters",
+        json={
+            "enable_take_profit_ceiling": False,
+            "take_profit_price_threshold": 0.92,
+            "require_reversal_for_tp_ceiling": False,
+            "enable_reverse_take_profit_roi": False,
+            "reverse_indicator_threshold": 90.0,
+            "min_take_profit_roi": 25.0,
+        },
+    )
+    assert update_resp.status_code == 200
+    data = update_resp.json()
+    assert data["parameters"]["enable_take_profit_ceiling"] is False
+    assert data["parameters"]["take_profit_price_threshold"] == 0.92
+    assert data["parameters"]["require_reversal_for_tp_ceiling"] is False
+    assert data["parameters"]["enable_reverse_take_profit_roi"] is False
+    assert data["parameters"]["reverse_indicator_threshold"] == 90.0
+    assert data["parameters"]["min_take_profit_roi"] == 25.0
+    assert test_engine.bot.enable_take_profit_ceiling is False
+    assert test_engine.bot.require_reversal_for_tp_ceiling is False
+    assert test_engine.bot.enable_reverse_take_profit_roi is False
+    assert test_engine.bot.reverse_indicator_threshold == 0.90
+    assert test_engine.bot.min_take_profit_roi == 0.25
+
+
+def test_bot_parameters_persistence_across_restarts(tmp_path: Path):
+    """Verify strategy parameters survive daemon reboots and become permanent defaults."""
+    import json
+    from kalshi_sim.schemas import CryptoAsset
+
+    # 1. Initial engine has factory defaults
+    engine1 = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
+    assert engine1.bot.discount_limit_price == Decimal("0.52")
+    assert engine1.bot.max_entry_price == Decimal("0.62")
+    assert engine1.bot.min_confidence == 0.70
+    assert engine1.bot.min_spot_diff == 35.0
+
+    # 2. Update parameters (e.g. from UI 'Apply & Save as Default')
+    engine1.update_parameters(
+        discount_limit_price=0.49,
+        momentum_max_price=0.58,
+        min_confidence=0.75,
+        min_spot_diff=25.0,
+        enable_take_profit_ceiling=True,
+        take_profit_price_threshold=0.96,
+    )
+    assert engine1.bot.discount_limit_price == Decimal("0.49")
+    assert engine1.bot.max_entry_price == Decimal("0.58")
+    assert engine1.bot.min_confidence == 0.75
+    assert engine1.bot.min_spot_diff == 25.0
+
+    # Verify JSON file written to disk
+    params_file = tmp_path / "bot_parameters_domination.json"
+    assert params_file.exists()
+    with open(params_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    assert data["discount_limit_price"] == 0.49
+    assert data["momentum_max_price"] == 0.58
+    assert data["min_confidence"] == 75.0  # get_parameters returns percentage
+    assert data["take_profit_price_threshold"] == 0.96
+    assert data["assets"]["BTC"]["min_spot_diff"] == 25.0
+    assert data["max_contracts"] == 1  # Invariant armor
+
+    # 3. Simulate daemon reboot / restart: instantiate brand new engine in same data_dir
+    engine2 = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
+    assert engine2.bot.discount_limit_price == Decimal("0.49")
+    assert engine2.bot.max_entry_price == Decimal("0.58")
+    assert engine2.bot.min_confidence == 0.75
+    assert engine2.bot.min_spot_diff == 25.0
+    assert engine2.bot.take_profit_price_threshold == Decimal("0.96")
+    assert engine2.guardrails.max_micro_bankroll_contracts == 1
+
+    # 4. Multi-asset moat isolation: switch to ETH, customize ETH moat, check BTC retention
+    engine2.set_asset(CryptoAsset.ETH)
+    assert engine2.bot.asset == CryptoAsset.ETH
+    # Default ETH moat is 2.50
+    assert engine2.bot.min_spot_diff == 2.50
+    # Custom update ETH moat to 2.20
+    engine2.update_parameters(min_spot_diff=2.20)
+    assert engine2.bot.min_spot_diff == 2.20
+
+    # Switch back to BTC
+    engine2.set_asset(CryptoAsset.BTC)
+    assert engine2.bot.asset == CryptoAsset.BTC
+    assert engine2.bot.min_spot_diff == 25.0
+
+    # 5. Simulate 2nd reboot: create engine3 and verify both BTC and ETH retain custom defaults
+    engine3 = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
+    assert engine3.bot.min_spot_diff == 25.0
+    engine3.set_asset(CryptoAsset.ETH)
+    assert engine3.bot.min_spot_diff == 2.20
+
+
+def test_corrupt_parameters_file_fallback(tmp_path: Path):
+    """Verify engine gracefully falls back to factory defaults if saved JSON is corrupted."""
+    params_file = tmp_path / "bot_parameters_domination.json"
+    # Write garbage JSON
+    params_file.write_text("{corrupt json syntax!@#$", encoding="utf-8")
+
+    # Engine initialization should not crash
+    engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
+    # Reverts safely to factory defaults
+    assert engine.bot.discount_limit_price == Decimal("0.52")
+    assert engine.bot.max_entry_price == Decimal("0.62")
+    assert engine.bot.min_confidence == 0.70
+    assert engine.bot.min_spot_diff == 35.0
+    assert engine.guardrails.max_micro_bankroll_contracts == 1
+
+
 
 

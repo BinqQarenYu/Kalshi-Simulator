@@ -288,8 +288,8 @@
       <div class="panel-title">
         <span>⚙️ Strategy Parameters & Guardrails</span>
         <div style="display: flex; align-items: center; gap: 8px;">
-          <button id="btnSweetspots" onclick="loadSweetspots()" class="btn-sweetspot-sm" title="Load Quant Sweetspots ($0.48 Maker / $0.62 Mom / $0.95 TP / 1 Ct)">🎯 Sweetspots</button>
-          <button id="btnSaveParams" onclick="saveParameters()" class="btn-save-sm">💾 Apply & Save</button>
+          <button id="btnSweetspots" onclick="loadSweetspots()" class="btn-sweetspot-sm" title="Load Quant Benchmark Sweetspots ($0.52 Maker / $0.62 Mom / $0.95 TP / 1 Ct)">🎯 Sweetspots</button>
+          <button id="btnSaveParams" onclick="saveParameters()" class="btn-save-sm">💾 Apply & Save as Default</button>
         </div>
       </div>
       <div class="params-grid">
@@ -297,9 +297,9 @@
           <label class="param-label">Discount Limit Price (Maker Ceiling) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"What is the absolute maximum price you are willing to pay?"</i><br><b>How it works:</b> Places a 'lowball offer' below market value.<br><b>Why it matters:</b> Guarantees $0 Kalshi maker fees and captures discount entries.</div></div></label>
           <div class="input-wrap">
             <span class="prefix">$</span>
-            <input id="inputDiscountPrice" type="number" step="0.01" min="0.10" max="0.65" value="0.48" oninput="markUnsaved()" />
+            <input id="inputDiscountPrice" type="number" step="0.01" min="0.10" max="0.65" value="0.52" oninput="markUnsaved()" />
           </div>
-          <span class="sweetspot-badge">★ Sweetspot: $0.48 ($0 Maker fee)</span>
+          <span class="sweetspot-badge">★ Sweetspot: $0.48–$0.52 ($0 Maker fee)</span>
         </div>
 
         <div class="param-item">
@@ -365,26 +365,52 @@
         </div>
 
         <div class="param-item">
-          <label class="param-label">Take Profit Price Ceiling <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br><b>How it works:</b> Automatically sells the contract early if you are winning big.<br><b>Why it matters:</b> Cashes out guaranteed profit instead of risking everything for the final 5 pennies.</div></div></label>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+            <label class="param-label" style="margin-bottom: 0;">Take Profit Price Ceiling <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br><b>How it works:</b> Automatically sells the contract early if you are winning big.<br><b>Philosophy:</b> Let winners run to 100% payout ($1.00) unless an adverse reversal ≥85% is detected.</div></div></label>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <button id="btnToggleTpCeilingReversal" type="button" onclick="toggleTpCeilingReversal()" title="Require 85%+ reversal detection to exit at ceiling" style="font-size: 0.62rem; font-weight: 700; padding: 2px 5px; border-radius: 4px; border: 1px solid #0284c7; background: rgba(14,165,233,0.15); color: #38bdf8; cursor: pointer; transition: all 0.15s ease;">🛡️ ≥85% REV</button>
+              <button id="btnToggleTpCeiling" type="button" onclick="toggleTpCeiling()" style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #10b981; background: rgba(16,185,129,0.15); color: #34d399; cursor: pointer; transition: all 0.15s ease;">🟢 ENABLED</button>
+            </div>
+          </div>
           <div class="input-wrap">
             <span class="prefix">$</span>
             <input id="inputTakeProfitPrice" type="number" step="0.01" min="0.50" max="0.99" value="0.95" oninput="markUnsaved()" />
           </div>
-          <span class="sweetspot-badge">★ Sweetspot: $0.95 (Cash in 95¢)</span>
+          <span id="tpCeilingHint" class="sweetspot-badge">★ Sweetspot: $0.95 (Eject on ≥85% Reversal; else hold to $1.00)</span>
         </div>
 
         <div class="param-item">
-          <label class="param-label">Min Take Profit ROI % <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"How much profit is good enough to leave early?"</i><br><b>How it works:</b> Ensures you walk away with at least a 20% return on your investment.<br><b>Why it matters:</b> Stops the bot from panic-selling for a 1% profit.</div></div></label>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+            <label class="param-label" style="margin-bottom: 0;">Min Take Profit ROI % <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"Target ROI Early Harvest."</i><br><b>How it works:</b> Harvests profits if at least this ROI is met AND indicators show an 85%+ adverse reversal.<br><b>Why it matters:</b> Let winners run to 100% payout unless the trade turns against you.</div></div></label>
+            <button id="btnToggleTpRoi" type="button" onclick="toggleTpRoi()" style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #10b981; background: rgba(16,185,129,0.15); color: #34d399; cursor: pointer; transition: all 0.15s ease;">🟢 ENABLED</button>
+          </div>
           <div class="input-wrap">
             <input id="inputTakeProfitRoi" type="number" step="5" min="5" max="100" value="20.0" oninput="markUnsaved()" />
             <span class="suffix">%</span>
           </div>
-          <span class="sweetspot-badge">★ Sweetspot: 20%</span>
+          <span id="tpRoiHint" class="sweetspot-badge">★ Sweetspot: 20% (On ≥85% Reversal)</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Adverse Reversal Trigger % <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"Reversal Conviction Sensor."</i><br><b>How it works:</b> Exit triggers only fire if indicators calculate this conviction in reverse direction.<br><b>Default:</b> 85% conviction required.</div></div></label>
+          <div class="input-wrap">
+            <input id="inputReverseThreshold" type="number" step="1" min="50" max="99" value="85" oninput="markUnsaved()" />
+            <span class="suffix">%</span>
+          </div>
+          <span class="sweetspot-badge">★ Sweetspot: 85% conviction</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Early Harvest Policy <div class="info-icon">i<div class="tooltip"><b>The Philosophy:</b> <i>"Let winners run to 100% payout ($1.00)."</i><br><b>How it works:</b> Never give up profit early unless the market turns against you by 85% or more.</div></div></label>
+          <div class="input-wrap" style="background: rgba(16,185,129,0.06); border-color: rgba(16,185,129,0.3);">
+            <span id="tpPolicyBadge" style="font-size: 0.78rem; font-weight: 700; color: #34d399; font-family: monospace;">RUN TO 100% ($1.00)</span>
+          </div>
+          <span id="tpPolicySub" class="sweetspot-badge" style="color: #60a5fa;">🛡️ Reversal Guard: ≥85% Gate Active</span>
         </div>
       </div>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border);">
         <button onclick="sweepOrders()" class="btn-sweep-sm">🧹 Sweep Expired Event Orders</button>
-        <span id="paramStatusText" style="font-size: 0.75rem; color: var(--muted); font-family: monospace;">Parameters in sync</span>
+        <span id="paramStatusText" style="font-size: 0.75rem; color: var(--muted); font-family: monospace;">Saved defaults in sync</span>
       </div>
     </div>
 
@@ -601,9 +627,120 @@
       }
     }
 
+    let tpCeilingEnabled = true;
+    let tpCeilingReversalRequired = true;
+    let tpRoiEnabled = true;
+
+    function updateTpCeilingBtn() {
+      const btn = document.getElementById('btnToggleTpCeiling');
+      const hint = document.getElementById('tpCeilingHint');
+      if (btn) {
+        if (tpCeilingEnabled) {
+          btn.innerHTML = '🟢 ENABLED';
+          btn.style.borderColor = '#10b981';
+          btn.style.background = 'rgba(16, 185, 129, 0.15)';
+          btn.style.color = '#34d399';
+          if (hint) {
+            hint.textContent = tpCeilingReversalRequired
+              ? '★ Sweetspot: $0.95 (Eject on ≥85% Reversal; else hold to $1.00)'
+              : '★ Sweetspot: $0.95 (Active Early Eject)';
+          }
+        } else {
+          btn.innerHTML = '⚪ DISABLED';
+          btn.style.borderColor = 'var(--border)';
+          btn.style.background = 'rgba(255, 255, 255, 0.05)';
+          btn.style.color = 'var(--muted)';
+          if (hint) hint.textContent = '⚠️ Disabled (Holds position to expiry)';
+        }
+      }
+    }
+
+    function updateTpCeilingReversalBtn() {
+      const btn = document.getElementById('btnToggleTpCeilingReversal');
+      const hint = document.getElementById('tpCeilingHint');
+      if (btn) {
+        if (tpCeilingReversalRequired) {
+          btn.innerHTML = '🛡️ ≥85% REV';
+          btn.style.borderColor = '#0284c7';
+          btn.style.background = 'rgba(14, 165, 233, 0.15)';
+          btn.style.color = '#38bdf8';
+        } else {
+          btn.innerHTML = '⚡ ALWAYS';
+          btn.style.borderColor = 'var(--border)';
+          btn.style.background = 'rgba(255, 255, 255, 0.05)';
+          btn.style.color = 'var(--muted)';
+        }
+        if (hint && tpCeilingEnabled) {
+          hint.textContent = tpCeilingReversalRequired
+            ? '★ Sweetspot: $0.95 (Eject on ≥85% Reversal; else hold to $1.00)'
+            : '★ Sweetspot: $0.95 (Active Early Eject)';
+        }
+      }
+      updatePolicyBadge();
+    }
+
+    function updateTpRoiBtn() {
+      const btn = document.getElementById('btnToggleTpRoi');
+      const hint = document.getElementById('tpRoiHint');
+      if (btn) {
+        if (tpRoiEnabled) {
+          btn.innerHTML = '🟢 ENABLED';
+          btn.style.borderColor = '#10b981';
+          btn.style.background = 'rgba(16, 185, 129, 0.15)';
+          btn.style.color = '#34d399';
+          if (hint) hint.textContent = '★ Sweetspot: 20% (On ≥85% Reversal)';
+        } else {
+          btn.innerHTML = '⚪ DISABLED';
+          btn.style.borderColor = 'var(--border)';
+          btn.style.background = 'rgba(255, 255, 255, 0.05)';
+          btn.style.color = 'var(--muted)';
+          if (hint) hint.textContent = '⚠️ Disabled (Holds position to expiry)';
+        }
+      }
+      updatePolicyBadge();
+    }
+
+    function updatePolicyBadge() {
+      const b = document.getElementById('tpPolicyBadge');
+      const sub = document.getElementById('tpPolicySub');
+      const revThresh = document.getElementById('inputReverseThreshold') ? document.getElementById('inputReverseThreshold').value : '85';
+      if (b && sub) {
+        if (tpCeilingReversalRequired) {
+          b.textContent = `RUN TO $1.00 (≥${revThresh}% REV GATE)`;
+          b.style.color = '#34d399';
+          sub.textContent = `🛡️ Reversal Gate: ≥${revThresh}% Threshold Active`;
+        } else {
+          b.textContent = 'EARLY EJECT UNCONDITIONAL';
+          b.style.color = '#fbbf24';
+          sub.textContent = '⚠️ Always exits when ceiling price is reached';
+        }
+      }
+    }
+
+    function toggleTpCeiling() {
+      tpCeilingEnabled = !tpCeilingEnabled;
+      updateTpCeilingBtn();
+      markUnsaved();
+      playChime('click');
+    }
+
+    function toggleTpCeilingReversal() {
+      tpCeilingReversalRequired = !tpCeilingReversalRequired;
+      updateTpCeilingReversalBtn();
+      markUnsaved();
+      playChime('click');
+    }
+
+    function toggleTpRoi() {
+      tpRoiEnabled = !tpRoiEnabled;
+      updateTpRoiBtn();
+      markUnsaved();
+      playChime('click');
+    }
+
     function loadSweetspots() {
       const spec = ASSET_SPECS[currentAsset] || ASSET_SPECS.BTC;
-      document.getElementById('inputDiscountPrice').value = '0.48';
+      document.getElementById('inputDiscountPrice').value = '0.52';
       document.getElementById('inputMomentumPrice').value = '0.62';
       document.getElementById('inputMinConfidence').value = '70';
       document.getElementById('inputMaxContracts').value = '1';
@@ -613,13 +750,21 @@
       document.getElementById('inputVpinThreshold').value = '0.60';
       document.getElementById('inputTakeProfitPrice').value = '0.95';
       document.getElementById('inputTakeProfitRoi').value = '20.0';
+      document.getElementById('inputReverseThreshold').value = '85';
+      tpCeilingEnabled = true;
+      tpCeilingReversalRequired = true;
+      tpRoiEnabled = true;
+      updateTpCeilingBtn();
+      updateTpCeilingReversalBtn();
+      updateTpRoiBtn();
+      updatePolicyBadge();
 
       const diffHint = document.getElementById('minSpotDiffHint');
       if (diffHint) diffHint.textContent = `★ Sweetspot: $${spec.minDiff} ${currentAsset}`;
 
       markUnsaved();
       playChime('preset');
-      appendLog(`🎯 [SWEETSPOTS LOADED] $0.48 Maker ($0 Fee) | $0.62 Mom Cap | 70% AI | $0.02 Net EV | $0.95 TP (Cash-in) | 1ct Invariant. Click 'Apply & Save' to commit.`);
+      appendLog(`🎯 [QUANT BENCHMARK LOADED] $0.52 Maker ($0 Fee) | $0.62 Mom Cap | 70% AI | $0.02 Net EV | $0.95 TP Ceiling (≥85% Reversal Gate) | 1ct Invariant. Click 'Apply & Save as Default' to set as your permanent defaults.`);
     }
 
     async function loadParameters() {
@@ -642,12 +787,28 @@
         }
         if (p.vpin_toxic_threshold !== undefined) document.getElementById('inputVpinThreshold').value = p.vpin_toxic_threshold.toFixed(2);
         if (p.take_profit_price_threshold !== undefined) document.getElementById('inputTakeProfitPrice').value = p.take_profit_price_threshold.toFixed(2);
+        if (p.enable_take_profit_ceiling !== undefined) {
+          tpCeilingEnabled = Boolean(p.enable_take_profit_ceiling);
+          updateTpCeilingBtn();
+        }
+        if (p.require_reversal_for_tp_ceiling !== undefined) {
+          tpCeilingReversalRequired = Boolean(p.require_reversal_for_tp_ceiling);
+          updateTpCeilingReversalBtn();
+        }
+        if (p.enable_reverse_take_profit_roi !== undefined) {
+          tpRoiEnabled = Boolean(p.enable_reverse_take_profit_roi);
+          updateTpRoiBtn();
+        }
+        if (p.reverse_indicator_threshold !== undefined) {
+          document.getElementById('inputReverseThreshold').value = Math.round(p.reverse_indicator_threshold);
+        }
         if (p.min_take_profit_roi !== undefined) document.getElementById('inputTakeProfitRoi').value = p.min_take_profit_roi.toFixed(1);
+        updatePolicyBadge();
         
         clearUnsaved();
         const statusEl = document.getElementById('paramStatusText');
         if (statusEl) {
-          statusEl.textContent = 'Parameters in sync';
+          statusEl.textContent = 'Saved defaults in sync';
           statusEl.style.color = 'var(--muted)';
         }
         paramsLoaded = true;
@@ -669,7 +830,7 @@
       confVal = Math.min(Math.max(confVal, 0.50), 0.99);
 
       const payload = {
-        discount_limit_price: parseFloat(document.getElementById('inputDiscountPrice').value) || 0.48,
+        discount_limit_price: parseFloat(document.getElementById('inputDiscountPrice').value) || 0.52,
         momentum_max_price: parseFloat(document.getElementById('inputMomentumPrice').value) || 0.62,
         min_confidence: confVal,
         max_contracts: 1, // Strictly 1 contract per asset invariant
@@ -678,6 +839,10 @@
         min_spot_diff: parseFloat(document.getElementById('inputMinSpotDiff').value) || 21.0,
         vpin_toxic_threshold: parseFloat(document.getElementById('inputVpinThreshold').value) || 0.60,
         take_profit_price_threshold: parseFloat(document.getElementById('inputTakeProfitPrice').value) || 0.95,
+        enable_take_profit_ceiling: tpCeilingEnabled,
+        require_reversal_for_tp_ceiling: tpCeilingReversalRequired,
+        enable_reverse_take_profit_roi: tpRoiEnabled,
+        reverse_indicator_threshold: parseFloat(document.getElementById('inputReverseThreshold').value) || 85.0,
         min_take_profit_roi: parseFloat(document.getElementById('inputTakeProfitRoi').value) || 20.0
       };
 
@@ -702,18 +867,18 @@
           clearUnsaved();
           if (btn) {
             btn.classList.remove('unsaved');
-            btn.innerHTML = '✅ Saved!';
+            btn.innerHTML = '✅ Saved as Default!';
           }
           if (statusEl) {
-            statusEl.textContent = 'Saved at ' + new Date().toLocaleTimeString();
+            statusEl.textContent = 'Saved as default at ' + new Date().toLocaleTimeString();
             statusEl.style.color = 'var(--green)';
           }
           playChime('success');
-          appendLog(`⚙️ [PARAMETERS SAVED] Maker: $${payload.discount_limit_price} | MomCap: $${payload.momentum_max_price} | AI: ${(payload.min_confidence * 100).toFixed(0)}% | 1ct Invariant | MinEdge: ${payload.min_edge_pct}% | MinEV: $${payload.min_ev_dollars} | Dist: $${payload.min_spot_diff} | TP: $${payload.take_profit_price_threshold}`);
+          appendLog(`⚙️ [PARAMETERS SAVED AS DEFAULT] Maker: $${payload.discount_limit_price} | MomCap: $${payload.momentum_max_price} | AI: ${(payload.min_confidence * 100).toFixed(0)}% | 1ct Invariant | MinEdge: ${payload.min_edge_pct}% | MinEV: $${payload.min_ev_dollars} | Dist: $${payload.min_spot_diff} | TP Ceiling: $${payload.take_profit_price_threshold} (${payload.enable_take_profit_ceiling ? 'ENABLED' : 'DISABLED'}) | Persisted to disk as boot default.`);
           setTimeout(() => {
             if (btn) {
               btn.disabled = false;
-              btn.innerHTML = '💾 Apply &amp; Save';
+              btn.innerHTML = '💾 Apply &amp; Save as Default';
               btn.style.opacity = '1';
             }
           }, 1500);
@@ -731,7 +896,7 @@
           setTimeout(() => {
             if (btn) {
               btn.disabled = false;
-              btn.innerHTML = '💾 Apply &amp; Save*';
+              btn.innerHTML = '💾 Apply &amp; Save as Default*';
               btn.style.opacity = '1';
             }
           }, 2000);
@@ -739,7 +904,7 @@
       } catch (err) {
         if (btn) {
           btn.disabled = false;
-          btn.innerHTML = '💾 Apply &amp; Save*';
+          btn.innerHTML = '💾 Apply &amp; Save as Default*';
           btn.style.opacity = '1';
         }
         if (statusEl) {

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AISignals } from '../types';
+import { AISignals, MacroDominionTelemetry } from '../types';
 import {
   Cpu,
   Zap,
@@ -32,6 +32,7 @@ interface AIMicrostructureCardProps {
   onOpenReports?: () => void;
   dominationDiscountPrice?: number;
   onUpdateDiscountPrice?: (price: number) => Promise<any>;
+  macroDominionTelemetry?: MacroDominionTelemetry;
 }
 
 export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.memo(({
@@ -42,6 +43,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   onOpenReports,
   dominationDiscountPrice,
   onUpdateDiscountPrice,
+  macroDominionTelemetry,
 }) => {
   const assetMeta = getAssetMeta(activeAsset);
   const [isTesting, setIsTesting] = useState<boolean>(false);
@@ -466,6 +468,48 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 ? 'SKIPPING'
                 : 'EDGE READY'}
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Macro Trend Dominion: 15M 3-Brain Consensus & Learning Badge */}
+      {isMacroTrend && (
+        <div className="flex flex-col gap-2 p-3 bg-cyan-950/20 border border-cyan-500/40 rounded-xl font-mono text-xs shadow-inner">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-cyan-400" />
+              <span className="font-bold text-white uppercase text-[11px]">15M 3-Brain Consensus</span>
+            </div>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+              (macroDominionTelemetry?.call || signals.recommended_side?.toUpperCase()) === 'YES'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                : (macroDominionTelemetry?.call || signals.recommended_side?.toUpperCase()) === 'NO'
+                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+            }`}>
+              CALL: {macroDominionTelemetry?.call || (signals.recommended_side === 'yes' ? 'YES' : signals.recommended_side === 'no' ? 'NO' : 'DONT')}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1.5 text-center text-[10px]">
+            <div className="p-1.5 bg-[#0e131a] rounded border border-[#212a36]">
+              <div className="text-gray-400 text-[9px]">Calibrated Win</div>
+              <div className="font-bold text-cyan-300">
+                {macroDominionTelemetry?.confidence_pct ? `${macroDominionTelemetry.confidence_pct.toFixed(0)}%` : `${((signals.onnx_confidence ?? 0.72) * 100).toFixed(0)}%`}
+              </div>
+            </div>
+            <div className="p-1.5 bg-[#0e131a] rounded border border-[#212a36]">
+              <div className="text-gray-400 text-[9px]">Sweetspot Limit</div>
+              <div className="font-bold text-white">
+                {macroDominionTelemetry?.limit_price_cents ?? 52}¢ ($0 Fee)
+              </div>
+            </div>
+            <div className="p-1.5 bg-[#0e131a] rounded border border-[#212a36]">
+              <div className="text-gray-400 text-[9px]">Online Learning</div>
+              <div className="font-bold text-emerald-400">
+                {macroDominionTelemetry?.brier_score !== undefined ? `Brier ${macroDominionTelemetry.brier_score.toFixed(3)}` : 'Active'}
+              </div>
+            </div>
           </div>
         </div>
       )}

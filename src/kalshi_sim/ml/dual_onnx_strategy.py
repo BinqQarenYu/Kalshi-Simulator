@@ -40,6 +40,18 @@ def _classify_signal(sig: str) -> str:
     return "WAIT"
 
 
+def calculate_kalshi_taker_fee(price: Union[Decimal, float], contracts: int = 1) -> Decimal:
+    """Calculate authentic Kalshi CFTC taker fee with $0.01 floor and $0.02 cap per contract.
+    Formula: ceil(0.07 * C * P * (1 - P))
+    """
+    p = float(price)
+    c = float(contracts)
+    raw = 0.07 * c * p * (1.0 - p)
+    cents = math.ceil(round(raw * 100.0, 6))
+    fee_per_ct = max(1, min(2, cents))
+    return (Decimal(str(fee_per_ct * contracts)) / Decimal("100")).quantize(Decimal("0.01"))
+
+
 class DualONNXArbitrageBot:
     """The ONNX Strategy: Institutional High-Frequency Dual-Brain Arbitrage Engine."""
 
@@ -49,7 +61,7 @@ class DualONNXArbitrageBot:
     def __init__(
         self,
         gateway: Optional[DualONNXGateway] = None,
-        discount_ceiling: Decimal = Decimal("0.48"),
+        discount_ceiling: Decimal = Decimal("0.52"),
         entry_discount_depth: Optional[Union[Decimal, float, str]] = None,
         momentum_max_price: Decimal = Decimal("0.62"),
         min_ev_dollars: Decimal = Decimal("0.02"),
@@ -65,8 +77,23 @@ class DualONNXArbitrageBot:
         fee_per_contract: Decimal = Decimal("0.01"),
         typical_1m_volatility: float = 14.0,
         asset: Union[CryptoAsset, str] = CryptoAsset.BTC,
+        hmm_brain: Optional[Any] = None,
+        max_temporal_skew_ms: float = 1000.0,
+        gamma_cliff_seconds: float = 90.0,
+        auto_cancel_on_veto: bool = True,
+        dynamic_volatility_mode: str = "REALIZED_ATR",
+        candle_builder: Optional[Any] = None,
     ) -> None:
         self.gateway = gateway or DualONNXGateway()
+        self.hmm_brain = hmm_brain
+        self.candle_builder = candle_builder
+        self.max_temporal_skew_ms = float(max_temporal_skew_ms)
+        self.gamma_cliff_seconds = float(gamma_cliff_seconds)
+        self.auto_cancel_on_veto = bool(auto_cancel_on_veto)
+        self.dynamic_volatility_mode = str(dynamic_volatility_mode).upper()
+        self.last_temporal_skew_ms: float = 0.0
+        self.is_temporally_synced: bool = True
+        self.slower_brain: str = "IN_SYNC"
         effective_discount = entry_discount_depth if entry_discount_depth is not None else discount_ceiling
         self.entry_discount_depth = Decimal(str(effective_discount))
         self.discount_ceiling = self.entry_discount_depth
@@ -86,6 +113,41 @@ class DualONNXArbitrageBot:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
         self.current_atr: float = self.typical_1m_volatility
         self.tape_streak: int = 0
+
+    def calculate_taker_fee(self, price: Union[Decimal, float], contracts: int = 1) -> Decimal:
+        """Calculate taker fee using authentic CFTC schedule."""
+        return calculate_kalshi_taker_fee(price, contracts)
+
+    def _resolve_current_volatility(self) -> float:
+        """Resolve rolling 1-minute equivalent realized volatility from CandleBuilder or fallback."""
+        if self.dynamic_volatility_mode != "REALIZED_ATR" or self.candle_builder is None:
+            return self.typical_1m_volatility
+
+        try:
+            symbol = f"{self.asset.value}USDT" if not self.asset.value.endswith("USDT") else self.asset.value
+            candles = self.candle_builder.get_candles(symbol, count=15, include_current=True)
+            if not candles or len(candles) < 2:
+                return self.typical_1m_volatility
+
+            trs = []
+            for i in range(1, len(candles)):
+                h = float(candles[i]["high"])
+                l = float(candles[i]["low"])
+                prev_c = float(candles[i - 1]["close"])
+                tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+                trs.append(tr)
+
+            if not trs:
+                return self.typical_1m_volatility
+
+            mean_tr = sum(trs) / len(trs)
+            interval_ms = float(getattr(self.candle_builder, "interval_ms", 60000))
+            time_scale = math.sqrt(max(1.0, interval_ms / 60000.0))
+            vol_1m = max(1.0, mean_tr / time_scale)
+            return float(vol_1m)
+        except Exception as exc:
+            logger.debug("[DUAL-ONNX] Realized volatility calculation fallback: %s", exc)
+            return self.typical_1m_volatility
 
     def get_parameters(self) -> Dict[str, Any]:
         """Return current live strategy parameters."""
@@ -109,7 +171,16 @@ class DualONNXArbitrageBot:
             "vpin_toxic_threshold": round(self.vpin_toxic_threshold, 3),
             "fee_per_contract": float(self.fee_per_contract),
             "typical_1m_volatility": self.typical_1m_volatility,
+            "current_atr": round(self.current_atr, 2),
+            "gamma_cliff_seconds": self.gamma_cliff_seconds,
+            "auto_cancel_on_veto": self.auto_cancel_on_veto,
+            "dynamic_volatility_mode": self.dynamic_volatility_mode,
             "max_contracts": 1,
+            "hmm_regime": self.hmm_brain.current_regime.name if (self.hmm_brain and hasattr(self.hmm_brain, "current_regime")) else "NONE",
+            "max_temporal_skew_ms": self.max_temporal_skew_ms,
+            "cross_brain_skew_ms": round(self.last_temporal_skew_ms, 2),
+            "is_temporally_synced": self.is_temporally_synced,
+            "slower_brain": self.slower_brain,
         }
 
     def update_parameters(
@@ -131,9 +202,26 @@ class DualONNXArbitrageBot:
         fee_per_contract: Optional[Union[float, Decimal, str]] = None,
         typical_1m_volatility: Optional[float] = None,
         asset: Optional[Union[CryptoAsset, str]] = None,
+        max_temporal_skew_ms: Optional[Union[float, int]] = None,
+        gamma_cliff_seconds: Optional[Union[float, int]] = None,
+        auto_cancel_on_veto: Optional[bool] = None,
+        dynamic_volatility_mode: Optional[str] = None,
+        candle_builder: Optional[Any] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Dynamically update strategy parameters on the fly."""
+        if gamma_cliff_seconds is not None:
+            self.gamma_cliff_seconds = max(10.0, min(300.0, float(gamma_cliff_seconds)))
+        if auto_cancel_on_veto is not None:
+            self.auto_cancel_on_veto = bool(auto_cancel_on_veto)
+        if dynamic_volatility_mode is not None:
+            dvm = str(dynamic_volatility_mode).upper()
+            if dvm in ("REALIZED_ATR", "FIXED_14", "FIXED_STATIC"):
+                self.dynamic_volatility_mode = dvm
+        if candle_builder is not None:
+            self.candle_builder = candle_builder
+        if max_temporal_skew_ms is not None:
+            self.max_temporal_skew_ms = max(100.0, min(10000.0, float(max_temporal_skew_ms)))
         disc = entry_discount_depth if entry_discount_depth is not None else (discount_ceiling if discount_ceiling is not None else discount_limit_price)
         if disc is not None:
             self.entry_discount_depth = max(Decimal("0.10"), min(Decimal("0.85"), Decimal(str(disc))))
@@ -170,6 +258,8 @@ class DualONNXArbitrageBot:
             self.typical_1m_volatility = max(1.0, float(typical_1m_volatility))
         if asset is not None:
             self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
+        if "hmm_brain" in kwargs:
+            self.hmm_brain = kwargs["hmm_brain"]
 
         logger.info("[THE ONNX STRATEGY] Parameters updated: %s", self.get_parameters())
         return self.get_parameters()
@@ -218,8 +308,63 @@ class DualONNXArbitrageBot:
                 recommended_limit_price=Decimal("0.00"),
                 expected_value=Decimal("0.00"),
                 recommended_contracts=0,
+                cancel_resting_orders=self.auto_cancel_on_veto,
                 rationale="Market cycle has already expired.",
             )
+
+        # 1c. Gamma Cliff Guard (Anti-Pin Risk Late Cycle)
+        if time_to_expiry_s < self.gamma_cliff_seconds:
+            return DualONNXDecision(
+                action="HOLD",
+                regime=DualONNXRegime.CHOP_WAIT,
+                side=None,
+                quolas_signal="WAIT",
+                quolas_confidence=0.0,
+                kalshi_signal="WAIT",
+                kalshi_confidence=0.0,
+                recommended_limit_price=Decimal("0.00"),
+                expected_value=Decimal("0.00"),
+                recommended_contracts=0,
+                cancel_resting_orders=self.auto_cancel_on_veto,
+                rationale=f"Gamma cliff veto: Cycle expiry imminent ({time_to_expiry_s:.0f}s < {self.gamma_cliff_seconds:.0f}s). All entries halted & resting orders purged (Late-cycle pin-risk shield).",
+            )
+
+        # 1b. Cross-Brain Temporal Synchronization & Lead-Lag Shield
+        t_spot_dt = getattr(spot_l2, "last_update", None)
+        t_kalshi_dt = getattr(kalshi_l2, "last_update", None)
+        if t_spot_dt is not None and t_kalshi_dt is not None and spot_l2 is not kalshi_l2:
+            try:
+                ts_spot = t_spot_dt.timestamp() if hasattr(t_spot_dt, "timestamp") else float(t_spot_dt)
+                ts_kalshi = t_kalshi_dt.timestamp() if hasattr(t_kalshi_dt, "timestamp") else float(t_kalshi_dt)
+                skew_ms = abs(ts_spot - ts_kalshi) * 1000.0
+                self.last_temporal_skew_ms = skew_ms
+
+                if skew_ms > self.max_temporal_skew_ms:
+                    self.is_temporally_synced = False
+                    self.slower_brain = "KALSHI" if ts_spot > ts_kalshi else "SPOT"
+                    return DualONNXDecision(
+                        action="HOLD",
+                        regime=DualONNXRegime.TEMPORAL_DESYNC,
+                        side=None,
+                        quolas_signal="WAIT",
+                        quolas_confidence=0.0,
+                        kalshi_signal="WAIT",
+                        kalshi_confidence=0.0,
+                        recommended_limit_price=Decimal("0.00"),
+                        expected_value=Decimal("0.00"),
+                        recommended_contracts=0,
+                        cancel_resting_orders=self.auto_cancel_on_veto,
+                        rationale=f"Temporal desync veto: Cross-brain skew ({skew_ms:.1f}ms > {self.max_temporal_skew_ms:.0f}ms). Slower feed ({self.slower_brain}) must catch up before trade authorization (Anti-ghosting shield).",
+                    )
+                else:
+                    self.is_temporally_synced = True
+                    self.slower_brain = "IN_SYNC"
+            except Exception as t_exc:
+                logger.debug("[DUAL-ONNX] Temporal skew calculation fallback: %s", t_exc)
+        else:
+            self.last_temporal_skew_ms = 0.0
+            self.is_temporally_synced = True
+            self.slower_brain = "IN_SYNC"
 
         # 2. Dual ONNX Inference
         if quolas_inference is None or kalshi_inference is None:
@@ -262,8 +407,28 @@ class DualONNXArbitrageBot:
                 recommended_limit_price=Decimal("0.00"),
                 expected_value=Decimal("0.00"),
                 recommended_contracts=0,
+                cancel_resting_orders=self.auto_cancel_on_veto,
                 rationale=f"Toxic flow veto: {toxic_source} VPIN toxicity ({score:.3f} > {self.vpin_toxic_threshold:.3f}).",
             )
+
+        # 3b. HMM Macro Regime Veto Check
+        if self.hmm_brain is not None:
+            curr_regime = getattr(self.hmm_brain, "current_regime", None)
+            if curr_regime is not None and getattr(curr_regime, "name", "") == "RISK_OFF":
+                return DualONNXDecision(
+                    action="HOLD",
+                    regime=DualONNXRegime.TOXIC_VETO,
+                    side=None,
+                    quolas_signal=q_sig,
+                    quolas_confidence=q_conf,
+                    kalshi_signal=k_sig,
+                    kalshi_confidence=k_conf,
+                    recommended_limit_price=Decimal("0.00"),
+                    expected_value=Decimal("0.00"),
+                    recommended_contracts=0,
+                    cancel_resting_orders=self.auto_cancel_on_veto,
+                    rationale="HMM macro regime veto: RISK_OFF (Extreme volatility/stress cascade shield).",
+                )
 
         # 4. Spot Conviction Filter
         # Spot Brain is the source of truth for price discovery. If Spot is WAIT or below confidence threshold, CHOP_WAIT
@@ -283,7 +448,7 @@ class DualONNXArbitrageBot:
             )
 
         # 4b. Volatility Window Guard (Dial 3)
-        curr_vol = self.typical_1m_volatility
+        curr_vol = self._resolve_current_volatility()
         self.current_atr = curr_vol
         self.tape_streak = len(latest_kalshi_trades) if latest_kalshi_trades is not None else 0
         if curr_vol < float(self.volatility_floor):
@@ -374,7 +539,7 @@ class DualONNXArbitrageBot:
 
         # 6. Estimate Probability of Win (Analytical Spot Diffusion + ONNX Confidence)
         t_minutes = max(0.1, time_to_expiry_s / 60.0)
-        sigma_t = max(1.0, self.typical_1m_volatility * math.sqrt(t_minutes) * (self.dynamic_moat_multiplier / 1.36))
+        sigma_t = max(1.0, curr_vol * math.sqrt(t_minutes) * (self.dynamic_moat_multiplier / 1.36))
         z_score = spot_diff / sigma_t
         p_spot_digital = _standard_normal_cdf(z_score)
 
@@ -394,16 +559,17 @@ class DualONNXArbitrageBot:
                 and best_yes_ask is not None
                 and best_yes_ask <= self.momentum_max_price
             )
+            taker_fee = self.calculate_taker_fee(best_yes_ask, contracts=1) if best_yes_ask is not None else self.fee_per_contract
             taker_ev = (
-                Decimal(str(p_win)) * Decimal("1.00") - best_yes_ask - self.fee_per_contract
+                Decimal(str(p_win)) * Decimal("1.00") - best_yes_ask - taker_fee
                 if best_yes_ask is not None
                 else Decimal("-1.00")
             )
 
             if can_cross and taker_ev >= self.taker_cross_ev_threshold:
                 limit_price = best_yes_ask
-                fee = self.fee_per_contract
-                exec_type = f"Taker Sweep (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f})"
+                fee = taker_fee
+                exec_type = f"Taker Sweep (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f}, Fee ${fee:.2f})"
             elif best_yes_bid is not None:
                 limit_price = min(self.momentum_max_price, best_yes_bid + Decimal("0.01"))
                 fee = Decimal("0.00")
@@ -460,16 +626,17 @@ class DualONNXArbitrageBot:
                 and best_no_ask is not None
                 and best_no_ask <= self.momentum_max_price
             )
+            taker_fee = self.calculate_taker_fee(best_no_ask, contracts=1) if best_no_ask is not None else self.fee_per_contract
             taker_ev = (
-                Decimal(str(p_win)) * Decimal("1.00") - best_no_ask - self.fee_per_contract
+                Decimal(str(p_win)) * Decimal("1.00") - best_no_ask - taker_fee
                 if best_no_ask is not None
                 else Decimal("-1.00")
             )
 
             if can_cross and taker_ev >= self.taker_cross_ev_threshold:
                 limit_price = best_no_ask
-                fee = self.fee_per_contract
-                exec_type = f"Taker Sweep (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f})"
+                fee = taker_fee
+                exec_type = f"Taker Sweep (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f}, Fee ${fee:.2f})"
             elif best_no_bid is not None:
                 limit_price = min(self.momentum_max_price, best_no_bid + Decimal("0.01"))
                 fee = Decimal("0.00")
@@ -513,6 +680,22 @@ class DualONNXArbitrageBot:
 
         # Case C: Spot UP, Kalshi DOWN -> CONTRADICTION_ARBITRAGE (BUY_YES at discount)
         if q_sig == "UP" and k_sig in ("DOWN", "WAIT"):
+            # Fallback guard: If Kalshi brain is in uncalibrated fallback, require high QuoLas conviction
+            if getattr(self.gateway, "is_kalshi_fallback", False) and k_sig in ("DOWN", "WAIT") and q_conf < 0.70:
+                return DualONNXDecision(
+                    action="HOLD",
+                    regime=DualONNXRegime.CHOP_WAIT,
+                    side=None,
+                    quolas_signal=q_sig,
+                    quolas_confidence=q_conf,
+                    kalshi_signal=k_sig,
+                    kalshi_confidence=k_conf,
+                    recommended_limit_price=Decimal("0.00"),
+                    expected_value=Decimal("0.00"),
+                    recommended_contracts=0,
+                    rationale=f"Fallback guard: Kalshi brain in uncalibrated fallback requires QuoLas confidence >= 0.70 ({q_conf:.2f} < 0.70).",
+                )
+
             regime = DualONNXRegime.CONTRADICTION_ARBITRAGE
             action = "BUY_YES"
             side = "yes"
@@ -526,16 +709,17 @@ class DualONNXArbitrageBot:
                 and best_yes_ask is not None
                 and best_yes_ask <= self.entry_discount_depth
             )
+            taker_fee = self.calculate_taker_fee(best_yes_ask, contracts=1) if best_yes_ask is not None else self.fee_per_contract
             taker_ev = (
-                Decimal(str(p_win)) * Decimal("1.00") - best_yes_ask - self.fee_per_contract
+                Decimal(str(p_win)) * Decimal("1.00") - best_yes_ask - taker_fee
                 if best_yes_ask is not None
                 else Decimal("-1.00")
             )
 
             if can_cross and taker_ev >= self.taker_cross_ev_threshold:
                 limit_price = best_yes_ask
-                fee = self.fee_per_contract
-                exec_type = f"Taker Discount Snipe (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f})"
+                fee = taker_fee
+                exec_type = f"Taker Discount Snipe (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f}, Fee ${fee:.2f})"
             elif best_yes_bid is not None:
                 limit_price = min(self.entry_discount_depth, best_yes_bid + Decimal("0.01"))
                 fee = Decimal("0.00")
@@ -579,6 +763,22 @@ class DualONNXArbitrageBot:
 
         # Case D: Spot DOWN, Kalshi UP -> CONTRADICTION_ARBITRAGE (BUY_NO at discount)
         if q_sig == "DOWN" and k_sig in ("UP", "WAIT"):
+            # Fallback guard: If Kalshi brain is in uncalibrated fallback, require high QuoLas conviction
+            if getattr(self.gateway, "is_kalshi_fallback", False) and k_sig in ("UP", "WAIT") and q_conf < 0.70:
+                return DualONNXDecision(
+                    action="HOLD",
+                    regime=DualONNXRegime.CHOP_WAIT,
+                    side=None,
+                    quolas_signal=q_sig,
+                    quolas_confidence=q_conf,
+                    kalshi_signal=k_sig,
+                    kalshi_confidence=k_conf,
+                    recommended_limit_price=Decimal("0.00"),
+                    expected_value=Decimal("0.00"),
+                    recommended_contracts=0,
+                    rationale=f"Fallback guard: Kalshi brain in uncalibrated fallback requires QuoLas confidence >= 0.70 ({q_conf:.2f} < 0.70).",
+                )
+
             regime = DualONNXRegime.CONTRADICTION_ARBITRAGE
             action = "BUY_NO"
             side = "no"
@@ -592,16 +792,17 @@ class DualONNXArbitrageBot:
                 and best_no_ask is not None
                 and best_no_ask <= self.entry_discount_depth
             )
+            taker_fee = self.calculate_taker_fee(best_no_ask, contracts=1) if best_no_ask is not None else self.fee_per_contract
             taker_ev = (
-                Decimal(str(p_win)) * Decimal("1.00") - best_no_ask - self.fee_per_contract
+                Decimal(str(p_win)) * Decimal("1.00") - best_no_ask - taker_fee
                 if best_no_ask is not None
                 else Decimal("-1.00")
             )
 
             if can_cross and taker_ev >= self.taker_cross_ev_threshold:
                 limit_price = best_no_ask
-                fee = self.fee_per_contract
-                exec_type = f"Taker Discount Snipe (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f})"
+                fee = taker_fee
+                exec_type = f"Taker Discount Snipe (EV +${taker_ev:.2f} >= ${self.taker_cross_ev_threshold:.2f}, Fee ${fee:.2f})"
             elif best_no_bid is not None:
                 limit_price = min(self.entry_discount_depth, best_no_bid + Decimal("0.01"))
                 fee = Decimal("0.00")

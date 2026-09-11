@@ -21,6 +21,60 @@ from kalshi_sim.db.connection import DatabaseManager, get_db
 logger = logging.getLogger(__name__)
 
 
+def _expand_bot_aliases(bot_type: Optional[str]) -> Optional[List[str]]:
+    """Expand bot_type into all historical and current database aliases."""
+    if not bot_type or bot_type.lower() in ("all", "combined"):
+        return None
+    bt = bot_type.lower().strip()
+    if bt in (
+        "macro_trend_dominion",
+        "macro_onnx",
+        "macro_trend",
+        "macro_trend_dominion_bot",
+        "macro_onnx_bot",
+        "macro_trend_onnx_fusion",
+        "onnx_macro_v2",
+    ):
+        return [
+            "macro_trend_dominion",
+            "macro_onnx",
+            "macro_trend",
+            "macro_trend_dominion_bot",
+            "macro_onnx_bot",
+            "macro_trend_onnx_fusion",
+            "onnx_macro_v2",
+        ]
+    if bt in (
+        "dual_onnx",
+        "the_onnx_strategy",
+        "onnx_microstructure_bot",
+        "onnx_microstructure",
+        "dual_onnx_bot",
+        "dual_onnx_arbitrage",
+    ):
+        return [
+            "dual_onnx",
+            "the_onnx_strategy",
+            "onnx_microstructure_bot",
+            "onnx_microstructure",
+            "dual_onnx_bot",
+            "dual_onnx_arbitrage",
+        ]
+    if bt in (
+        "3_step_domination_bot",
+        "dominion_2_bot",
+        "three_step_domination_bot",
+        "3_step_dominion",
+    ):
+        return [
+            "3_step_domination_bot",
+            "dominion_2_bot",
+            "three_step_domination_bot",
+            "3_step_dominion",
+        ]
+    return [bot_type]
+
+
 class HistoricalQueryService:
     """Provides analytical and time-series query operations over SQLite historical data."""
 
@@ -50,9 +104,11 @@ class HistoricalQueryService:
         if timeframe and timeframe.lower() != "all":
             query += " AND (timeframe = ? OR ticker LIKE ?)"
             params.extend([timeframe.lower(), f"%{timeframe.upper()}%"])
-        if bot_type and bot_type.lower() != "all":
-            query += " AND bot_type = ?"
-            params.append(bot_type)
+        bot_aliases = _expand_bot_aliases(bot_type)
+        if bot_aliases:
+            placeholders = ",".join("?" for _ in bot_aliases)
+            query += f" AND bot_type IN ({placeholders})"
+            params.extend(bot_aliases)
         if execution_mode and execution_mode.lower() != "all":
             query += " AND execution_mode = ?"
             params.append(execution_mode)
@@ -88,9 +144,11 @@ class HistoricalQueryService:
         if timeframe and timeframe.lower() != "all":
             query += " AND ticker LIKE ?"
             params.append(f"%{timeframe.upper()}%")
-        if bot_type and bot_type.lower() != "all":
-            query += " AND bot_type = ?"
-            params.append(bot_type)
+        bot_aliases = _expand_bot_aliases(bot_type)
+        if bot_aliases:
+            placeholders = ",".join("?" for _ in bot_aliases)
+            query += f" AND bot_type IN ({placeholders})"
+            params.extend(bot_aliases)
         if execution_mode and execution_mode.lower() != "all":
             query += " AND execution_mode = ?"
             params.append(execution_mode)
@@ -121,9 +179,11 @@ class HistoricalQueryService:
         if end_epoch_ms is not None:
             query += " AND timestamp_epoch_ms <= ?"
             params.append(end_epoch_ms)
-        if bot_type and bot_type.lower() not in ("all", "combined"):
-            query += " AND (bot_type = ? OR bot_type = 'all')"
-            params.append(bot_type)
+        bot_aliases = _expand_bot_aliases(bot_type)
+        if bot_aliases:
+            placeholders = ",".join("?" for _ in bot_aliases)
+            query += f" AND (bot_type IN ({placeholders}) OR bot_type = 'all')"
+            params.extend(bot_aliases)
         if execution_mode and execution_mode.lower() != "all":
             query += " AND execution_mode = ?"
             params.append(execution_mode)
@@ -152,9 +212,11 @@ class HistoricalQueryService:
         if ticker:
             query += " AND ticker = ?"
             params.append(ticker)
-        if bot_type and bot_type.lower() != "all":
-            query += " AND bot_type = ?"
-            params.append(bot_type)
+        bot_aliases = _expand_bot_aliases(bot_type)
+        if bot_aliases:
+            placeholders = ",".join("?" for _ in bot_aliases)
+            query += f" AND bot_type IN ({placeholders})"
+            params.extend(bot_aliases)
 
         query += " ORDER BY timestamp_epoch_ms DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
@@ -179,13 +241,15 @@ class HistoricalQueryService:
         eq_where = " WHERE 1=1"
         eq_params: List[Any] = []
 
-        if bot_type and bot_type.lower() not in ("all", "combined"):
-            st_where += " AND bot_type = ?"
-            st_params.append(bot_type)
-            tr_where += " AND bot_type = ?"
-            tr_params.append(bot_type)
-            eq_where += " AND (bot_type = ? OR bot_type = 'all')"
-            eq_params.append(bot_type)
+        bot_aliases = _expand_bot_aliases(bot_type)
+        if bot_aliases:
+            placeholders = ",".join("?" for _ in bot_aliases)
+            st_where += f" AND bot_type IN ({placeholders})"
+            st_params.extend(bot_aliases)
+            tr_where += f" AND bot_type IN ({placeholders})"
+            tr_params.extend(bot_aliases)
+            eq_where += f" AND (bot_type IN ({placeholders}) OR bot_type = 'all')"
+            eq_params.extend(bot_aliases)
 
         if execution_mode and execution_mode.lower() != "all":
             st_where += " AND execution_mode = ?"
@@ -387,12 +451,11 @@ class HistoricalQueryService:
         execution_mode: Optional[str] = None,
     ) -> Dict[str, int]:
         """Selectively delete history records from SQLite database."""
-        where_clause = " WHERE 1=1"
-        params: List[Any] = []
-
-        if bot_type and bot_type.lower() not in ("all", "combined"):
-            where_clause += " AND bot_type = ?"
-            params.append(bot_type)
+        bot_aliases = _expand_bot_aliases(bot_type)
+        if bot_aliases:
+            placeholders = ",".join("?" for _ in bot_aliases)
+            where_clause += f" AND bot_type IN ({placeholders})"
+            params.extend(bot_aliases)
 
         if execution_mode and execution_mode.lower() != "all":
             where_clause += " AND execution_mode = ?"

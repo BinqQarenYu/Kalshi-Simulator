@@ -58,7 +58,8 @@ from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
-from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
+from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
+from kalshi_sim.ml.quolas_core.hmm_brain import HMMBrain
 from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine
 from kalshi_sim.notifications import TelemetryAlertDispatcher
 from kalshi_sim.ohlcv_aggregator import OHLCVAggregator
@@ -143,11 +144,13 @@ def resolve_bot_instance(bot_id: str) -> Any:
     elif bot_id in ("dominion_2_bot", "dominion2", "dominion_v2"):
         return Dominion2Bot()
     elif bot_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend", "macro_trend_dominion", "macro_trend_dominion_bot"):
-        return MacroTrendDominionBot()
-    elif bot_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+        if hasattr(state, "sim_agent") and state.sim_agent and hasattr(state.sim_agent, "_macro_trend_bot"):
+            return state.sim_agent._macro_trend_bot
+        return MacroTrendDominionBot(strategy_id="macro_trend_dominion", strategy_name="Macro Trend Dominion", hmm_brain=getattr(state, "hmm_brain", None))
+    elif bot_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "onnx_macro_v2"):
         if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
             return state.dual_onnx_bot
-        state.dual_onnx_bot = DualONNXArbitrageBot()
+        state.dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=getattr(state, "hmm_brain", None))
         return state.dual_onnx_bot
     return None
 
@@ -218,7 +221,7 @@ class ServerState:
         self.ai_worker_task: asyncio.Task | None = None
         self.ai_auto_trade: bool = True
         self.active_strategy_bot: str = "3_step_domination_bot"
-        self.domination_discount_price: Decimal = Decimal("0.48")
+        self.domination_discount_price: Decimal = Decimal("0.52")
         self.mode: Literal["mock", "live"] = "live"
         self.market_expiry_seconds: int = 900
         self.is_dirty: bool = True
@@ -240,11 +243,15 @@ class ServerState:
         # Real-time Institutional Bitcoin Orderflow Feed (Binance / Coinbase L2)
         self.btc_orderflow_feed = BtcOrderflowFeed()
 
+        # QuoLas HMM Markov Macro Regime Detector
+        self.hmm_brain = HMMBrain()
+
         # Decoupled AI & Microstructure Worker
         self.ai_worker = AIWorker(
             orderbook_manager=self.orderbook,
             sim_agent=self.sim_agent,
             refresh_interval_s=0.25,
+            hmm_brain=self.hmm_brain,
         )
 
         # Agent_integrity_check Guardian
@@ -289,6 +296,7 @@ class ServerState:
         self.continuous_trainer = ContinuousModelTrainer(
             data_dir=self.data_dir,
             models_dir=Path("models"),
+            onnx_model_name="quolas.onnx",
             training_interval_seconds=180.0,
             batch_size=32,
             learning_rate=2e-4,
@@ -298,7 +306,7 @@ class ServerState:
         )
 
         # The ONNX Strategy Execution Instance (Dual-Brain Contradiction & Momentum Arbitrage)
-        self.dual_onnx_bot = DualONNXArbitrageBot()
+        self.dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
 
         # 15-Minute Event Win/Loss Reports Ledger (Disk-Persisted, No Auto-Reset)
         self.win_loss_reports: list[dict[str, Any]] = self.load_persisted_reports()
@@ -556,9 +564,10 @@ async def live_kalshi_public_sync_loop() -> None:
                             book.yes_book = new_yes_book
                             book.no_book = new_no_book
 
-                            # Trigger bot evaluation against real live orderbook (suppressed if standalone bot holds trading lock during live mode)
+                            # Trigger bot evaluation against real live orderbook (suppressed only if sim_agent is in real live execution mode and standalone bot holds lock)
                             if state.sim_agent and state.ai_auto_trade:
-                                if state.mode == "live":
+                                is_live_exec = getattr(state.sim_agent, "execution_mode", "simulated") == "live"
+                                if is_live_exec:
                                     holder = get_active_lock_holder()
                                     if not (holder and holder[1] != os.getpid()):
                                         asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
@@ -604,7 +613,7 @@ async def standalone_sync_loop() -> None:
                                 state.current_btc_price = Decimal(str(data["spot_price"]))
                             if data.get("twap_60s") is not None:
                                 state.twap_60s_price = Decimal(str(data["twap_60s"]))
-                            if "armed" in data:
+                            if "armed" in data and state.active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination"):
                                 state.ai_auto_trade = bool(data["armed"])
 
                             bal = float(data.get("balance", 0.0))
@@ -955,6 +964,8 @@ def record_win_loss_event_report(
             target_p = getattr(state.sim_agent, "_portfolio_dominion2", target_p)
         elif bot_type_resolved in ("onnx_ml_bot", "onnx_microstructure_bot", "onnx"):
             target_p = getattr(state.sim_agent, "_portfolio_onnx", target_p)
+        elif bot_type_resolved in ("dual_onnx", "onnx_macro_v2", "the_onnx_strategy", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+            target_p = getattr(state.sim_agent, "_portfolio_dual_onnx", target_p)
 
         if target_p and contracts > 0 and side_clean in ("yes", "no"):
             target_p._balance += pnl
@@ -1011,7 +1022,10 @@ def record_win_loss_event_report(
         "ev_edge": round(ev_edge, 3),
         "balance_after": float(balance_after),
         "bot_type": bot_type_resolved,
+        "bot_id": bot_type_resolved,
+        "strategy_id": bot_type_resolved,
         "execution_mode": exec_mode_resolved,
+        "lane": "LANE 1 (LIVE)" if exec_mode_resolved == "live" else "LANE 2 (SHADOW)",
         "timestamp_utc": timestamp_utc or now_utc.isoformat(),
     }
 
@@ -1633,7 +1647,8 @@ async def live_ticker_and_timer_loop() -> None:
                 if state.mode == "mock":
                     update_dynamic_clob_ladder(state.current_btc_price, state.target_strike, state.active_ticker, remaining_secs)
                 if state.ai_auto_trade and state.sim_agent:
-                    if state.mode == "live":
+                    is_live_exec = getattr(state.sim_agent, "execution_mode", "simulated") == "live"
+                    if is_live_exec:
                         holder = get_active_lock_holder()
                         if not (holder and holder[1] != os.getpid()):
                             state.sim_agent.set_ticker_timeframe(state.active_ticker, state.active_timeframe)
@@ -1684,13 +1699,14 @@ async def live_ticker_and_timer_loop() -> None:
                     # Settle open positions on current contract and record Win/Loss Event
                     if state.mode == "live":
                         asyncio.create_task(sync_live_settlements())
-                    elif state.sim_agent:
+                    if state.sim_agent:
                         active_macro_tag = "macro_onnx" if state.active_strategy_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion") else "macro_trend_dominion"
                         portfolios_to_check = [
                             (getattr(state.sim_agent, "_portfolio_domination", None), "3_step_domination_bot"),
                             (getattr(state.sim_agent, "_portfolio_macro_trend", None), active_macro_tag),
                             (getattr(state.sim_agent, "_portfolio_dominion2", None), "dominion_2_bot"),
                             (getattr(state.sim_agent, "_portfolio_onnx", None), "onnx_microstructure_bot"),
+                            (getattr(state.sim_agent, "_portfolio_dual_onnx", None), "onnx_macro_v2"),
                             (getattr(state.sim_agent, "_portfolio", None), "manual_sim"),
                         ]
                         for p_inst, b_type in portfolios_to_check:
@@ -1832,6 +1848,33 @@ async def live_balance_sync_loop() -> None:
         await client.close()
 
 
+async def hmm_macro_regime_loop() -> None:
+    """Continuously evaluates 5m Binance candles with HMMBrain to update macro market regimes."""
+    logger.info("🧠 [HMM BRAIN] Macro regime evaluation loop started (Interval: 30s).")
+    last_train_day = -1
+    while True:
+        try:
+            await asyncio.sleep(30.0)
+            if not hasattr(state, "btc_orderflow_feed") or not state.btc_orderflow_feed:
+                continue
+
+            candles = state.btc_orderflow_feed.get_candles(symbol="BTCUSDT", interval_seconds=300, count=288)
+            if candles and hasattr(state, "hmm_brain") and state.hmm_brain:
+                # 1. Update regime prediction
+                regime, probs = state.hmm_brain.predict_regime({"BTCUSDT": candles})
+
+                # 2. Retrain once every 24h if sufficient bars accumulated (min 288 bars = 24h)
+                now_utc = datetime.now(timezone.utc)
+                if len(candles) >= state.hmm_brain.MIN_TRAINING_SAMPLES and now_utc.day != last_train_day:
+                    if state.hmm_brain.train({"BTCUSDT": candles}):
+                        last_train_day = now_utc.day
+                        logger.info("🧠 [HMM BRAIN] Retrained and persisted HMM regime model on %d 5m bars.", len(candles))
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.debug("[HMM BRAIN] Regime loop tick error: %s", exc)
+
+
 async def start_background_simulation() -> None:
     """Initialize simulation agent, tick writer, and feed."""
     state.data_dir.mkdir(parents=True, exist_ok=True)
@@ -1866,8 +1909,14 @@ async def start_background_simulation() -> None:
         order_client=order_client,
         btc_orderflow_feed=state.btc_orderflow_feed,
         bot_auditor=state.bot_auditor,
+        hmm_brain=state.hmm_brain,
     )
-    state.sim_agent.execution_mode = state.mode
+    state.sim_agent.active_strategy_bot = state.active_strategy_bot
+    holder = get_active_lock_holder()
+    if (holder and holder[1] != os.getpid()) or state.active_strategy_bot in ("dual_onnx", "the_onnx_strategy", "onnx_macro_v2", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+        state.sim_agent.execution_mode = "simulated"
+    else:
+        state.sim_agent.execution_mode = state.mode
     state.tick_writer = TickWriter(data_dir=state.data_dir, timeframe="paper_live")
     await state.tick_writer.open()
 
@@ -1957,6 +2006,7 @@ async def start_background_simulation() -> None:
     state.integrity_task = asyncio.create_task(integrity_audit_loop(), name="integrity_audit")
     state.live_balance_task = asyncio.create_task(live_balance_sync_loop(), name="live_balance_sync")
     state.standalone_sync_task = asyncio.create_task(standalone_sync_loop(), name="standalone_sync")
+    state.hmm_regime_task = asyncio.create_task(hmm_macro_regime_loop(), name="hmm_macro_regime")
     if state.mode == "live":
         asyncio.create_task(sync_live_settlements(), name="initial_settlement_sync")
     logger.info("Simulation background tasks started in '%s' mode with Real-time BTC Orderflow Feed, Decoupled AI Worker, Agent_integrity_check & Live Balance Sync active.", state.mode)
@@ -1977,6 +2027,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await state.gdrive_sync.stop()
     if state.ai_worker:
         state.ai_worker.stop()
+    if hasattr(state, "hmm_regime_task") and state.hmm_regime_task:
+        state.hmm_regime_task.cancel()
     if state.standalone_sync_task:
         state.standalone_sync_task.cancel()
     if state.broadcast_task:
@@ -2055,7 +2107,7 @@ class SettingsRequest(BaseModel):
     domination_discount_price: float | None = Field(default=None, ge=0.10, le=0.65)
 
 class DominationConfigRequest(BaseModel):
-    discount_limit_price: float = Field(default=0.48, ge=0.10, le=0.65, description="Maker discount limit price ceiling")
+    discount_limit_price: float = Field(default=0.52, ge=0.10, le=0.65, description="Maker discount limit price ceiling")
 
 class StrategySelectRequest(BaseModel):
     strategy_id: str
@@ -3184,7 +3236,14 @@ async def close_position_endpoint(req: ClosePositionRequest) -> dict[str, Any]:
 @app.post("/api/settings")
 async def update_settings(req: SettingsRequest) -> dict[str, Any]:
     if req.ai_auto_trade is not None:
-        if req.ai_auto_trade and state.mode == "live":
+        is_live_request = (
+            state.mode == "live"
+            and (
+                getattr(state.sim_agent, "execution_mode", "simulated") == "live"
+                or state.active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination")
+            )
+        )
+        if req.ai_auto_trade and is_live_request:
             holder = get_active_lock_holder()
             if holder and holder[1] != os.getpid():
                 raise HTTPException(
@@ -3194,14 +3253,16 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
         state.ai_auto_trade = req.ai_auto_trade
     if req.active_strategy_bot is not None:
         cand_bot = req.active_strategy_bot
-        if cand_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+        if cand_bot in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "the_onnx_strategy", "onnx_macro_v2"):
+            cand_bot = "dual_onnx"
+        elif cand_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
             cand_bot = "macro_onnx"
         elif cand_bot in ("macro_trend", "macro_trend_dominion_bot"):
             cand_bot = "macro_trend_dominion"
         elif cand_bot in ("dominion2", "dominion_v2"):
             cand_bot = "dominion_2_bot"
 
-        if cand_bot in ("macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
+        if cand_bot in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
             # Enforce Pre-Deployment Audit Certification Gate
             if not state.bot_auditor.is_certified(cand_bot):
                 bot_inst = resolve_bot_instance(cand_bot)
@@ -3237,7 +3298,11 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
                 logger.info("[MODE SWITCH] Switching to Interactive Mock Feed...")
                 await start_mock_feed()
         if state.sim_agent:
-            state.sim_agent.execution_mode = req.mode
+            holder = get_active_lock_holder()
+            if (holder and holder[1] != os.getpid()) or state.active_strategy_bot in ("dual_onnx", "the_onnx_strategy", "onnx_macro_v2", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+                state.sim_agent.execution_mode = "simulated"
+            else:
+                state.sim_agent.execution_mode = req.mode
     if req.active_timeframe:
         try:
             tf = Timeframe(req.active_timeframe.lower())
@@ -3594,6 +3659,10 @@ class ParametersUpdateRequest(BaseModel):
     min_spot_diff: Optional[float] = Field(default=None, ge=0.0, le=200.0, description="Minimum distance from strike to avoid coin flips")
     vpin_toxic_threshold: Optional[float] = Field(default=None, ge=0.10, le=0.95, description="VPIN toxicity threshold")
     take_profit_price_threshold: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Take profit ceiling")
+    enable_take_profit_ceiling: Optional[bool] = Field(default=None, description="Take profit ceiling enabled toggle")
+    require_reversal_for_tp_ceiling: Optional[bool] = Field(default=None, description="Require 85%+ reversal detection to exit at ceiling")
+    enable_reverse_take_profit_roi: Optional[bool] = Field(default=None, description="Only take profit on min_take_profit_roi if indicators >= 85% reverse")
+    reverse_indicator_threshold: Optional[float] = Field(default=None, ge=50.0, le=99.0, description="Conviction threshold in opposite direction required for take-profit harvest (e.g. 85.0%)")
     min_take_profit_roi: Optional[float] = Field(default=None, ge=5.0, le=100.0, description="Minimum take profit ROI percentage")
     min_confidence: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Minimum ONNX neural net confidence")
     momentum_max_price: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Maximum allowable entry price for momentum trades")
@@ -3605,6 +3674,18 @@ class ParametersUpdateRequest(BaseModel):
     tape_confirmation_ticks: Optional[int] = Field(default=None, ge=1, le=10, description="Number of consecutive orderflow tape ticks required for entry confirmation")
     taker_cross_ev_threshold: Optional[float] = Field(default=None, ge=0.01, le=0.30, description="Minimum EV required to pay taker spread/fee")
     dynamic_moat_multiplier: Optional[float] = Field(default=None, ge=0.5, le=3.0, description="Dynamic moat volatility multiplier")
+    max_temporal_skew_ms: Optional[float] = Field(default=None, ge=100.0, le=10000.0, description="Max cross-brain temporal skew in milliseconds")
+    gamma_cliff_seconds: Optional[float] = Field(default=None, ge=10.0, le=300.0, description="Gamma cliff late-cycle cutoff in seconds")
+    auto_cancel_on_veto: Optional[bool] = Field(default=None, description="Automatically cancel resting orders on veto/cutoff")
+    dynamic_volatility_mode: Optional[str] = Field(default=None, description="Volatility mode: REALIZED_ATR or FIXED_14")
+    # Bot 3: Macro Trend Dominion 9 Strategy Dials
+    limit_price_cents: Optional[int] = Field(default=None, ge=1, le=89, description="Bot 3 resting order limit price sweet spot (1-89 cents)")
+    min_confidence_pct: Optional[float] = Field(default=None, ge=50.0, le=90.0, description="Bot 3 minimum required model confidence percentage (50-90%)")
+    volatility_moat_dollars: Optional[float] = Field(default=None, ge=5.0, le=100.0, description="Bot 3 proximity barrier threshold in dollars ($5-$100)")
+    hmm_risk_off_veto: Optional[bool] = Field(default=None, description="Bot 3 HMM RISK_OFF macro regime veto toggle")
+    macro_trend_window: Optional[str] = Field(default=None, description="Bot 3 macro trend lookback window ('15m+30m', '15m', '1h')")
+    take_profit_harvest_cents: Optional[int] = Field(default=None, ge=80, le=98, description="Bot 3 dynamic profit harvest limit (80-98 cents)")
+    adaptive_learning_rate: Optional[float] = Field(default=None, ge=0.0, le=0.50, description="Bot 3 error learning adaptation rate (0.0-0.50)")
 
 
 @app.get("/api/bot/parameters")
@@ -3641,9 +3722,37 @@ async def get_bot_parameters() -> dict[str, Any]:
             "tape_confirmation_ticks",
             "taker_cross_ev_threshold",
             "dynamic_moat_multiplier",
+            "max_temporal_skew_ms",
+            "cross_brain_skew_ms",
+            "is_temporally_synced",
+            "slower_brain",
+            "gamma_cliff_seconds",
+            "auto_cancel_on_veto",
+            "dynamic_volatility_mode",
+            "current_atr",
         ):
             if k not in res:
                 res[k] = onnx_params.get(k)
+
+    # Merge macro_trend_dominion strategy dials so client consoles always receive current dials
+    macro_inst = resolve_bot_instance("macro_trend_dominion")
+    if macro_inst and hasattr(macro_inst, "get_parameters"):
+        macro_params = macro_inst.get_parameters()
+        for k in (
+            "limit_price_cents",
+            "min_confidence_pct",
+            "volatility_moat_dollars",
+            "hmm_risk_off_veto",
+            "macro_trend_window",
+            "take_profit_harvest_cents",
+            "adaptive_learning_rate",
+            "rolling_brier_score",
+            "brier_shrinkage_factor",
+            "active_price_cap",
+            "decile_pruning_table",
+        ):
+            if k not in res and k in macro_params:
+                res[k] = macro_params.get(k)
     return res
 
 
@@ -3668,6 +3777,17 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
     if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
         state.dual_onnx_bot.update_parameters(**payload)
 
+    # Always keep macro_trend_dominion bot updated with strategy dials
+    macro_inst = resolve_bot_instance("macro_trend_dominion")
+    if macro_inst and hasattr(macro_inst, "update_parameters"):
+        macro_keys = {
+            "limit_price_cents", "min_confidence_pct", "min_ev_dollars",
+            "volatility_moat_dollars", "hmm_risk_off_veto", "macro_trend_window",
+            "take_profit_harvest_cents", "adaptive_learning_rate",
+        }
+        if any(k in payload for k in macro_keys):
+            macro_inst.update_parameters(**payload)
+
     if not res:
         inst = resolve_bot_instance(state.active_strategy_bot)
         if inst and hasattr(inst, "update_parameters"):
@@ -3687,6 +3807,14 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
             "tape_confirmation_ticks",
             "taker_cross_ev_threshold",
             "dynamic_moat_multiplier",
+            "max_temporal_skew_ms",
+            "cross_brain_skew_ms",
+            "is_temporally_synced",
+            "slower_brain",
+            "gamma_cliff_seconds",
+            "auto_cancel_on_veto",
+            "dynamic_volatility_mode",
+            "current_atr",
         ):
             if k in payload or k not in res:
                 res[k] = onnx_params.get(k)
@@ -3820,7 +3948,7 @@ async def get_bot_strategies() -> dict[str, Any]:
 async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
     """Switch active strategy bot."""
     strat_id = req.strategy_id
-    if strat_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+    if strat_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "onnx_macro_v2"):
         strat_id = "dual_onnx"
     elif strat_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
         strat_id = "macro_onnx"
@@ -3851,6 +3979,8 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
         state.ai_worker.set_active_strategy(strat_id)
     if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):
         state.sim_agent.set_active_strategy(strat_id)
+        if strat_id in ("dual_onnx", "the_onnx_strategy", "onnx_macro_v2", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+            state.sim_agent.execution_mode = "simulated"
 
     logger.info("Active strategy bot switched to: %s", strat_id)
     return {
@@ -4187,6 +4317,14 @@ async def resume_ml_trainer_endpoint() -> dict[str, Any]:
         state.continuous_trainer.resume()
         return {"status": "RESUMED", "message": "Continuous trainer resumed"}
     return {"status": "UNAVAILABLE"}
+
+
+@app.get("/api/ml/hmm/status")
+async def get_hmm_status_endpoint() -> dict[str, Any]:
+    """Retrieve real-time HMM Markov macro regime telemetry."""
+    if hasattr(state, "hmm_brain") and state.hmm_brain:
+        return state.hmm_brain.get_status()
+    return {"status": "UNAVAILABLE", "is_fitted": False}
 
 
 # ---------------------------------------------------------------------------
@@ -4572,9 +4710,48 @@ async def get_live_reports_endpoint(limit: int = 500) -> dict[str, Any]:
     }
 
 
+def _matches_bot_id(r: dict[str, Any], target_bot: str) -> bool:
+    """Check if a report record belongs to a specific bot, handling historical aliases."""
+    target = target_bot.lower().strip()
+    r_bot = str(r.get("bot_id") or r.get("strategy_id") or r.get("bot_type") or "").lower().strip()
+    r_strat = str(r.get("strategy_name") or r.get("ai_rationale") or "").lower()
+
+    if target in ("onnx_macro_v2", "the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "onnx_macro"):
+        return (
+            r_bot in ("onnx_macro_v2", "the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "onnx_macro")
+            or "dual onnx" in r_strat
+            or "the onnx strategy" in r_strat
+            or "contradiction" in r_strat
+            or "dual-brain" in r_strat
+        )
+    elif target in ("3_step_domination_bot", "domination_bot", "domination", "3_step_dom"):
+        return (
+            r_bot in ("3_step_domination_bot", "domination_bot", "domination")
+            or ("domination" in r_strat and "macro" not in r_strat and "dominion 2" not in r_strat and "contradiction" not in r_strat)
+        )
+    elif target in ("dominion_2_bot", "dominion2", "dominion_v2", "dominion_2"):
+        return (
+            r_bot in ("dominion_2_bot", "dominion2", "dominion_v2")
+            or "dominion 2" in r_strat
+            or "anti-pin" in r_strat
+        )
+    elif target in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot", "macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+        return (
+            r_bot in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot", "macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion")
+            or ("macro trend" in r_strat and "contradiction" not in r_strat)
+        )
+    elif target in ("ofi_sprint_scalper", "ofi_scalper"):
+        return (
+            r_bot in ("ofi_sprint_scalper", "ofi_scalper")
+            or "ofi sprint" in r_strat
+        )
+    return r_bot == target
+
+
 @app.get("/api/reports/win-loss")
 async def get_win_loss_reports_endpoint(
     limit: int = 50,
+    bot_id: str | None = None,
     bot_type: str | None = None,
     mode: str | None = None,
     execution_mode: str | None = None,
@@ -4582,7 +4759,7 @@ async def get_win_loss_reports_endpoint(
     asset: str | None = None,
     date: str | None = None,
 ) -> dict[str, Any]:
-    """Retrieve event Win/Loss reports (5M / 15M) with overall, Domination Bot, ONNX ML Bot, Today's, and Live breakdowns."""
+    """Retrieve event Win/Loss reports (5M / 15M) with overall, per-bot, Today's, and Live breakdowns."""
     if state.mode == "live":
         await sync_live_settlements()
 
@@ -4605,10 +4782,11 @@ async def get_win_loss_reports_endpoint(
             pass
 
     all_reports = state.win_loss_reports
-    macro_reports = [r for r in all_reports if r.get("bot_type") in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot")]
-    dom_reports = [r for r in all_reports if r.get("bot_type") in ("3_step_domination_bot", "domination_bot", "domination")]
-    dom2_reports = [r for r in all_reports if r.get("bot_type") in ("dominion_2_bot", "dominion2", "dominion_v2")]
+    macro_reports = [r for r in all_reports if _matches_bot_id(r, "macro_trend_dominion")]
+    dom_reports = [r for r in all_reports if _matches_bot_id(r, "3_step_domination_bot")]
+    dom2_reports = [r for r in all_reports if _matches_bot_id(r, "dominion_2_bot")]
     onnx_reports = [r for r in all_reports if r.get("bot_type") in ("onnx_ml_bot", "onnx_microstructure_bot", "onnx")]
+    dual_onnx_reports = [r for r in all_reports if _matches_bot_id(r, "onnx_macro_v2")]
     live_reports = [
         r for r in all_reports
         if (r.get("execution_mode") == "live" or r.get("bot_type") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-"))
@@ -4639,8 +4817,9 @@ async def get_win_loss_reports_endpoint(
         elif exec_m.lower() in ("simulated", "mock", "paper"):
             filtered_reports = [r for r in filtered_reports if r in sim_reports]
 
-    if bot_type and bot_type.lower() not in ("all", "combined"):
-        filtered_reports = [r for r in filtered_reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
+    effective_bot = bot_id or bot_type
+    if effective_bot and effective_bot.lower() not in ("all", "combined"):
+        filtered_reports = [r for r in filtered_reports if _matches_bot_id(r, effective_bot)]
 
     if timeframe and timeframe.lower() not in ("all", "combined"):
         tf_clean = timeframe.lower()
@@ -4653,18 +4832,42 @@ async def get_win_loss_reports_endpoint(
             if r.get("asset", "").upper() == asset_clean or (f"KX{asset_clean}" in r.get("ticker", "").upper())
         ]
 
+    BOT_NAMES = {
+        "3_step_domination_bot": "3-Step Dominion v3.2",
+        "onnx_macro_v2": "The ONNX Strategy (Dual-Brain)",
+        "the_onnx_strategy": "The ONNX Strategy (Dual-Brain)",
+        "dual_onnx": "The ONNX Strategy (Dual-Brain)",
+        "dominion_2_bot": "Dominion 2 (Anti-Pin Scalper)",
+        "macro_trend_dominion": "Macro Trend Dominion",
+        "ofi_sprint_scalper": "OFI Sprint Scalper",
+    }
+    bot_summary = None
+    if effective_bot and effective_bot.lower() not in ("all", "combined"):
+        b_metrics = _calculate_15m_metrics(filtered_reports)
+        last_t = filtered_reports[0].get("timestamp_utc") if filtered_reports else None
+        bot_summary = {
+            "bot_id": effective_bot,
+            "bot_name": BOT_NAMES.get(effective_bot, effective_bot.replace("_", " ").title()),
+            "execution_mode": exec_m or "all",
+            **b_metrics,
+            "last_trade_time": last_t,
+        }
+
     return {
         "summary": _calculate_15m_metrics(filtered_reports),
+        "bot_summary": bot_summary,
         "all_summary": _calculate_15m_metrics(all_reports),
         "macro_trend_summary": _calculate_15m_metrics(macro_reports),
         "domination_summary": _calculate_15m_metrics(dom_reports),
         "dominion2_summary": _calculate_15m_metrics(dom2_reports),
-        "onnx_summary": _calculate_15m_metrics(onnx_reports),
+        "onnx_summary": _calculate_15m_metrics(dual_onnx_reports if dual_onnx_reports else onnx_reports),
+        "dual_onnx_summary": _calculate_15m_metrics(dual_onnx_reports),
         "live_summary": _calculate_15m_metrics(live_reports),
         "sim_summary": _calculate_15m_metrics(sim_reports),
         "today_summary": _calculate_15m_metrics(today_reports),
         "total_today_reports": len(today_reports),
-        "filter_bot_type": bot_type or "all",
+        "filter_bot_id": bot_id or "all",
+        "filter_bot_type": effective_bot or "all",
         "filter_mode": exec_m or "all",
         "filter_timeframe": timeframe or "all",
         "filter_asset": asset or "all",
@@ -5562,8 +5765,8 @@ def _build_full_state_payload() -> dict[str, Any]:
             }
             for p in lp.get("positions", [])
         ]
-    elif state.sim_agent and state.sim_agent._portfolio:
-        p = state.sim_agent._portfolio
+    elif state.sim_agent and state.sim_agent.portfolio:
+        p = state.sim_agent.portfolio
         snap = p.get_pnl_snapshot()
         portfolio_data["balance"] = float(p.balance)
         portfolio_data["equity"] = float(snap.total_equity)
@@ -5620,8 +5823,9 @@ def _build_full_state_payload() -> dict[str, Any]:
 
     # Calculate BTC spot delta from strike
     btc_spot = float(state.current_btc_price)
-    diff = btc_spot - float(strike_dec)
-    diff_pct = (diff / float(strike_dec)) * 100.0
+    s_flt = float(strike_dec)
+    diff = btc_spot - s_flt
+    diff_pct = (diff / s_flt) * 100.0 if s_flt > 0.0 else 0.0
 
     # Single Source of Truth: Merge Standalone ground truth if active
     now_mono = time.monotonic()
@@ -5642,33 +5846,39 @@ def _build_full_state_payload() -> dict[str, Any]:
         if sd.get("orderbook_ladder"):
             ladder = sd["orderbook_ladder"]
 
-        ai_data = {
-            "has_positive_edge": float(sd.get("edge_pct", 0.0)) > 0,
-            "recommended_side": "yes" if "BUY YES" in sd.get("rationale", "") else ("no" if "BUY NO" in sd.get("rationale", "") else "wait"),
-            "ai_prob": float(sd.get("best_yes_ask") or 0.5),
-            "p_up": float(sd.get("p_up", 0.50)),
-            "p_down": float(sd.get("p_down", 0.50)),
-            "p_wait": float(sd.get("p_wait", 0.00)),
-            "market_price": 0.48,
-            "expected_value": float(sd.get("ev", 0.0)),
-            "net_expected_value": float(sd.get("ev", 0.0)),
-            "statistical_edge": float(sd.get("edge_pct", 0.0)),
-            "recommended_contracts": 1 if "wait" not in sd.get("rationale", "").lower() else 0,
-            "active_playbook": sd.get("playbook", "3-Step Domination Bot"),
-            "rationale": sd.get("rationale", ""),
-            "vpin": float(sd.get("vpin", 0.15)),
-            "vpin_is_safe": bool(sd.get("vpin_is_safe", True)),
-        }
+        if state.active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination"):
+            ai_data = {
+                "has_positive_edge": float(sd.get("edge_pct", 0.0)) > 0,
+                "recommended_side": "yes" if "BUY YES" in sd.get("rationale", "") else ("no" if "BUY NO" in sd.get("rationale", "") else "wait"),
+                "ai_prob": float(sd.get("best_yes_ask") or 0.5),
+                "p_up": float(sd.get("p_up", 0.50)),
+                "p_down": float(sd.get("p_down", 0.50)),
+                "p_wait": float(sd.get("p_wait", 0.00)),
+                "market_price": 0.48,
+                "expected_value": float(sd.get("ev", 0.0)),
+                "net_expected_value": float(sd.get("ev", 0.0)),
+                "statistical_edge": float(sd.get("edge_pct", 0.0)),
+                "recommended_contracts": 1 if "wait" not in sd.get("rationale", "").lower() else 0,
+                "active_playbook": sd.get("playbook", "3-Step Domination Bot"),
+                "rationale": sd.get("rationale", ""),
+                "vpin": float(sd.get("vpin", 0.15)),
+                "vpin_is_safe": bool(sd.get("vpin_is_safe", True)),
+            }
 
-        portfolio_data["balance"] = float(sd.get("balance", 0.0))
-        portfolio_data["equity"] = float(sd.get("balance", 0.0))
-        portfolio_data["realized_pnl"] = float(sd.get("today_pnl", 0.0))
-        portfolio_data["total_trades"] = int(sd.get("settled_cycles", 0))
-        portfolio_data["wins"] = int(sd.get("today_wins", 0))
-        portfolio_data["losses"] = int(sd.get("today_losses", 0))
-        portfolio_data["win_rate"] = float(sd.get("today_win_rate", 0.0))
+            portfolio_data["balance"] = float(sd.get("balance", 0.0))
+            portfolio_data["equity"] = float(sd.get("balance", 0.0))
+            portfolio_data["realized_pnl"] = float(sd.get("today_pnl", 0.0))
+            portfolio_data["total_trades"] = int(sd.get("settled_cycles", 0))
+            portfolio_data["wins"] = int(sd.get("today_wins", 0))
+            portfolio_data["losses"] = int(sd.get("today_losses", 0))
+            portfolio_data["win_rate"] = float(sd.get("today_win_rate", 0.0))
+
         if sd.get("recent_reports"):
-            state.win_loss_reports = sd["recent_reports"]
+            known_ids = {r.get("report_id") for r in state.win_loss_reports if r.get("report_id")}
+            for sr in sd["recent_reports"]:
+                if sr.get("report_id") and sr["report_id"] not in known_ids:
+                    state.win_loss_reports.append(sr)
+                    known_ids.add(sr["report_id"])
 
     cfg = TIMEFRAME_CONFIGS.get(state.active_timeframe, {})
     asset_cfg = get_asset_config(state.active_asset)
@@ -5770,12 +5980,46 @@ def _build_full_state_payload() -> dict[str, Any]:
         "contract_scaling_mode": getattr(dual_bot, "contract_scaling_mode", "TIER_0_STRICT_1"),
         "volatility_floor": float(getattr(dual_bot, "volatility_floor", 10.0)),
         "volatility_ceiling": float(getattr(dual_bot, "volatility_ceiling", 45.0)),
-        "entry_discount_depth": float(getattr(dual_bot, "entry_discount_depth", 0.48)),
+        "entry_discount_depth": float(getattr(dual_bot, "entry_discount_depth", 0.52)),
         "tape_confirmation_ticks": getattr(dual_bot, "tape_confirmation_ticks", 2),
         "taker_cross_ev_threshold": float(getattr(dual_bot, "taker_cross_ev_threshold", 0.08)),
         "dynamic_moat_multiplier": float(getattr(dual_bot, "dynamic_moat_multiplier", 1.15)),
         "current_atr": float(getattr(dual_bot, "current_atr", 14.0)),
         "tape_streak": getattr(dual_bot, "tape_streak", 0),
+    }
+
+    macro_bot = getattr(state.sim_agent, "_macro_trend_bot", None) if state.sim_agent else None
+    if not macro_bot:
+        macro_bot = resolve_bot_instance("macro_trend_dominion")
+
+    macro_params = macro_bot.get_parameters() if macro_bot and hasattr(macro_bot, "get_parameters") else {}
+    learning_diag = macro_bot.learning_engine.get_diagnostics() if macro_bot and hasattr(macro_bot, "learning_engine") else {}
+
+    macro_telemetry = {
+        "active": state.active_strategy_bot in ("macro_trend_dominion", "macro_onnx", "macro_trend", "macro_trend_dominion_bot"),
+        "strategy_id": "macro_trend_dominion",
+        "strategy_name": "Macro Trend Dominion",
+        "call": ai_data.get("call", "YES" if ai_data.get("recommended_side") == "yes" else ("NO" if ai_data.get("recommended_side") == "no" else "DONT")),
+        "side": ai_data.get("recommended_side", "wait"),
+        "confidence_pct": round(float(ai_data.get("confidence_pct", ai_data.get("ai_prob", 0.50) * 100.0)), 1),
+        "limit_price_cents": int(macro_params.get("limit_price_cents", 52)),
+        "limit_price": float(macro_params.get("limit_price_cents", 52)) / 100.0,
+        "expected_value": float(ai_data.get("expected_value", 0.0)),
+        "net_edge_pct": float(ai_data.get("net_edge_pct", ai_data.get("statistical_edge", 0.0) * 100.0)),
+        "recommended_contracts": int(ai_data.get("recommended_contracts", 1)),
+        "macro_trend": "BULL" if diff > 0 else "BEAR",
+        "hmm_regime": str(getattr(getattr(state, "hmm_brain", None), "current_regime", "UNKNOWN")),
+        "spot_signal": ai_data.get("quolas_signal", ai_data.get("onnx_signal", "WAIT")),
+        "spot_confidence": float(ai_data.get("quolas_confidence", ai_data.get("onnx_confidence", 0.50))),
+        "kalshi_signal": ai_data.get("kalshi_signal", "WAIT"),
+        "kalshi_confidence": float(ai_data.get("kalshi_confidence", 0.50)),
+        "rationale": ai_data.get("rationale", ""),
+        "brier_score": learning_diag.get("rolling_brier_score", 0.25),
+        "brier_shrinkage_factor": learning_diag.get("brier_shrinkage_factor", 1.0),
+        "active_price_cap": learning_diag.get("active_price_cap", 0.52),
+        "pruned_deciles": learning_diag.get("pruned_deciles", []),
+        "failure_counts": learning_diag.get("failure_counts", {}),
+        "parameters": macro_params,
     }
 
     return {
@@ -5848,7 +6092,9 @@ def _build_full_state_payload() -> dict[str, Any]:
         "token_credit_status": state.token_credit_agent.get_status(),
         "btc_orderflow": state.btc_orderflow_feed.get_orderflow_summary() if hasattr(state, "btc_orderflow_feed") and state.btc_orderflow_feed else None,
         "continuous_training": state.continuous_trainer.get_status() if hasattr(state, "continuous_trainer") and state.continuous_trainer else None,
+        "hmm_macro_regime": state.hmm_brain.get_status() if hasattr(state, "hmm_brain") and state.hmm_brain else None,
         "dual_onnx_telemetry": dual_telemetry,
+        "macro_trend_dominion_telemetry": macro_telemetry,
         "preflight_gates": preflight_gates,
     }
 

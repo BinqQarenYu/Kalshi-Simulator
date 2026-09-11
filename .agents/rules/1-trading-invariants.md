@@ -33,3 +33,8 @@ description: Core quantitative trading invariants, capital preservation rules, a
 - **Zero Direct Live Deployment**: No bot may ever be deployed directly to Live Trading (`Lane 1`).
 - **4-Stage Promotion Lifecycle**: Every strategy must graduate sequentially: `COOK` (isolated module) $\to$ `BACKTEST` (historical cycles & unit tests) $\to$ `SHADOW` (Lane 2 incubator on live ticks, zero capital risk) $\to$ `PROMOTE` (Live Lane 1).
 - **Mandatory 4-Pillar Pre-Flight Audit**: A bot MUST achieve 100% PASS on all 4 pillars of `BotDeploymentAuditor` (Invariant Compliance, Micro-Bankroll Sizing, Guardrail Wiring, and Decimal Math) before it can be authorized for live order routing.
+
+## 8. Multi-Bot Anti-Cannibalism & Directional Coherence
+- **Zero Opposing Position Cannibalism**: Multiple bots operating on the same account/ticker must **NEVER** take opposing positions (e.g. Bot 1 BUY YES while Bot 3 BUY NO) on the same 15M contract cycle.
+- **Negative-Arbitrage Trap**: Holding opposing binary positions at or near 52¢ creates a guaranteed negative-payout loss ($1.00 payout on $1.04 cost = -$0.04 guaranteed loss) and destroys risk/reward asymmetry.
+- **Enforcement**: All trade intents must resolve synchronously through `LiveCoordinator` (`live_coordinator.py`). Any order proposal whose side opposes an existing active or resting position on that ticker is strictly vetoed with `CFTC ANTI-WASH TRADING VETO`.

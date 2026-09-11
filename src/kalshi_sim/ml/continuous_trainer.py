@@ -105,6 +105,19 @@ def export_and_verify_onnx(
     dummy_toxic = torch.randn(1, 13, dtype=torch.float32, device=device)
 
     try:
+        # Protect against Windows cp1252 charmap encoding crashes from PyTorch internal emoji prints
+        if sys.platform == "win32":
+            if hasattr(sys.stdout, "reconfigure"):
+                try:
+                    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+            if hasattr(sys.stderr, "reconfigure"):
+                try:
+                    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+
         torch.onnx.export(
             exportable,
             (dummy_spatial, dummy_toxic),
@@ -117,6 +130,7 @@ def export_and_verify_onnx(
                 "action_logits": {0: "batch"},
             },
             opset_version=18,
+            dynamo=False,
         )
 
         # Verification pass with ONNX Runtime
@@ -166,7 +180,7 @@ class ContinuousModelTrainer:
         self,
         data_dir: Path = Path("data"),
         models_dir: Path = Path("models"),
-        onnx_model_name: str = "kalshi_onnx.onnx",
+        onnx_model_name: str = "quolas.onnx",
         training_interval_seconds: float = 180.0,
         batch_size: int = 32,
         learning_rate: float = 2e-4,
@@ -510,6 +524,13 @@ class ContinuousModelTrainer:
                     self.models_promoted,
                     self.onnx_model_path.name,
                 )
+
+                # Push updated models and feature stats to Google Drive
+                try:
+                    from kalshi_sim.gdrive_sync import push_models_to_gdrive
+                    push_models_to_gdrive(self.models_dir)
+                except Exception as gd_exc:
+                    logger.debug("[CONTINUOUS TRAINER] GDrive push on promotion skipped/failed: %s", gd_exc)
             else:
                 self.status = "EVALUATED"
         else:

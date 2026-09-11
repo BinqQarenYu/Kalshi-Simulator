@@ -60,6 +60,7 @@ import { OrderEntryPanel } from './OrderEntryPanel';
 import { LiveGuardrailsCard } from './LiveGuardrailsCard';
 import { AIMicrostructureCard } from './AIMicrostructureCard';
 import { BabyBotConsole } from './BabyBotConsole';
+import { BotReportsDeck } from './BotReportsDeck';
 import { HistoricalAnalyticsTab } from './HistoricalAnalyticsTab';
 import { 
   WinLossReportsModal,
@@ -70,7 +71,7 @@ import {
   isTodayReport,
 } from './WinLossReportsModal';
 import { soundFX } from '../utils/audioFX';
-import { ContinuousTrainingTelemetry } from '../types';
+import { ContinuousTrainingTelemetry, MacroDominionTelemetry, HMMMacroRegimeTelemetry } from '../types';
 
 type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'settings';
 type SettingsSubNav =
@@ -120,6 +121,8 @@ interface ParentHubProps {
   onResetCircuitBreaker?: () => Promise<any>;
   dualOnnxTelemetry?: DualONNXTelemetry;
   preflightGates?: PreflightGates;
+  macroDominionTelemetry?: MacroDominionTelemetry;
+  hmmMacroRegime?: HMMMacroRegimeTelemetry;
 }
 
 export const ParentHub: React.FC<ParentHubProps> = ({
@@ -155,13 +158,15 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   onResetCircuitBreaker,
   dualOnnxTelemetry,
   preflightGates,
+  macroDominionTelemetry,
+  hmmMacroRegime,
 }) => {
   const [primaryNav, setPrimaryNav] = useState<PrimaryNav>('analytics');
   const [settingsSubNav, setSettingsSubNav] = useState<SettingsSubNav>('defaults');
   const [botsSubNav, setBotsSubNav] = useState<BotsSubNav>('matrix');
   const [journalSubNav, setJournalSubNav] = useState<JournalSubNav>('trades');
   const [analyticsSubNav, setAnalyticsSubNav] = useState<AnalyticsSubNav>('workbench');
-  const [workbenchTab, setWorkbenchTab] = useState<'orderbook' | 'tape' | 'positions'>('orderbook');
+  const [workbenchTab, setWorkbenchTab] = useState<'orderbook' | 'tape' | 'positions' | 'reports'>('orderbook');
   const [isPromoteModalOpen, setIsPromoteModalOpen] = useState(false);
   const [isWinLossModalOpen, setIsWinLossModalOpen] = useState(false);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
@@ -429,9 +434,11 @@ export const ParentHub: React.FC<ParentHubProps> = ({
     const botStatsMap: Record<TraderCategory, { count: number; wins: number; pnl: number }> = {
       all: { count: journalExecutions.length, wins: journalExecutions.filter(x => x.outcome === 'WIN').length, pnl: journalExecutions.reduce((acc, x) => acc + (x.pnlNum || 0), 0) },
       '3_step_dom': { count: 0, wins: 0, pnl: 0 },
+      onnx_macro: { count: 0, wins: 0, pnl: 0 },
       macro_onnx: { count: 0, wins: 0, pnl: 0 },
       dominion_2: { count: 0, wins: 0, pnl: 0 },
       macro_trend: { count: 0, wins: 0, pnl: 0 },
+      ofi_sprint: { count: 0, wins: 0, pnl: 0 },
       onnx_ml: { count: 0, wins: 0, pnl: 0 },
       live: { count: liveTotal, wins: liveWins, pnl: livePnl },
     };
@@ -1537,7 +1544,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           {primaryNav === 'analytics' && analyticsSubNav === 'vpin' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {aiSignals ? (
-                <AIMicrostructureCard signals={aiSignals} />
+                <AIMicrostructureCard signals={aiSignals} macroDominionTelemetry={macroDominionTelemetry} />
               ) : (
                 <div className="p-6 bg-[#12161a] border border-[#262d35] rounded-xl flex items-center justify-center text-xs font-mono text-[#8c9ba5]">
                   Awaiting AI Microstructure Signals...
@@ -1594,6 +1601,14 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                   >
                     <span>💼 Active Positions & Fills</span>
                   </button>
+                  <button
+                    onClick={() => setWorkbenchTab('reports')}
+                    className={`pb-1 border-b-2 transition-all flex items-center gap-1.5 ${
+                      workbenchTab === 'reports' ? 'border-[#00bda5] text-[#2dd4bf] font-bold' : 'border-transparent text-[#8c9ba5] hover:text-white'
+                    }`}
+                  >
+                    <span>📋 Bot Reports</span>
+                  </button>
                 </div>
 
                 {workbenchTab === 'orderbook' && (
@@ -1613,6 +1628,15 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                     onClosePosition={onClosePosition || (async () => {})}
                     onCancelOrder={onCancelOrder}
                     onResetCircuitBreaker={onResetCircuitBreaker}
+                  />
+                )}
+
+                {workbenchTab === 'reports' && (
+                  <BotReportsDeck
+                    botId={selectedBotId}
+                    activeAsset={market.active_asset}
+                    tradingMode={tradingMode}
+                    onOpenFullReports={() => setIsWinLossModalOpen(true)}
                   />
                 )}
               </div>
@@ -1669,6 +1693,9 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               onSelectBot={handleSelectBot}
               dualOnnxTelemetry={dualOnnxTelemetry}
               preflightGates={preflightGates}
+              macroDominionTelemetry={macroDominionTelemetry}
+              hmmMacroRegime={hmmMacroRegime}
+              onOpenReports={() => setWorkbenchTab('reports')}
             />
           </div>
         ) : (

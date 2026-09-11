@@ -373,13 +373,13 @@ def test_hard_one_contract_cap(spot_l2_book: L2BookState, kalshi_l2_book: L2Book
 def test_get_and_update_parameters() -> None:
     """Verify runtime parameter querying and dynamic parameter updates."""
     bot = DualONNXArbitrageBot(
-        discount_ceiling=Decimal("0.48"),
+        discount_ceiling=Decimal("0.52"),
         momentum_max_price=Decimal("0.62"),
         min_ev_dollars=Decimal("0.02"),
     )
 
     params = bot.get_parameters()
-    assert params["discount_ceiling"] == 0.48
+    assert params["discount_ceiling"] == 0.52
     assert params["momentum_max_price"] == 0.62
     assert params["min_ev_dollars"] == 0.02
     assert params["asset"] == "BTC"
@@ -438,7 +438,7 @@ def test_the_onnx_strategy_identity_and_dials_introspection() -> None:
     assert params["contract_scaling_mode"] == "TIER_0_STRICT_1"
     assert params["volatility_floor"] == 10.0
     assert params["volatility_ceiling"] == 45.0
-    assert params["entry_discount_depth"] == 0.48
+    assert params["entry_discount_depth"] == 0.52
     assert params["tape_confirmation_ticks"] == 2
     assert params["max_contracts"] == 1
 
@@ -598,4 +598,112 @@ def test_dial_5_tape_confirmation_guard(spot_l2_book: L2BookState, kalshi_l2_boo
         latest_kalshi_trades=[{"price": 0.48}, {"price": 0.48}],
     )
     assert dec_two.action == "BUY_YES"
+
+
+def test_gamma_cliff_guard(spot_l2_book: L2BookState, kalshi_l2_book: L2BookState) -> None:
+    """Verify Gamma Cliff Guard halts entries and flags resting orders for purge at T < 90s."""
+    bot = DualONNXArbitrageBot(gamma_cliff_seconds=90.0, auto_cancel_on_veto=True)
+
+    # T = 80s (< 90s cliff) -> Vetoed
+    dec = bot.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=80.0,
+        quolas_inference={"signal": "UP", "confidence": 0.90, "vpin_score": 0.10, "vpin_veto": False},
+        kalshi_inference={"signal": "UP", "confidence": 0.90, "vpin_score": 0.10, "vpin_veto": False},
+    )
+    assert dec.action == "HOLD"
+    assert dec.cancel_resting_orders is True
+    assert "Gamma cliff veto" in dec.rationale
+
+
+def test_kalshi_taker_fee_schedule() -> None:
+    """Verify authentic CFTC taker fee schedule with $0.01 floor and $0.02 cap per contract."""
+    from kalshi_sim.ml.dual_onnx_strategy import calculate_kalshi_taker_fee
+
+    # At $0.50: 0.07 * 1 * 0.50 * 0.50 = 0.0175 -> ceil is $0.02
+    assert calculate_kalshi_taker_fee(Decimal("0.50"), contracts=1) == Decimal("0.02")
+
+    # At $0.48: 0.07 * 1 * 0.48 * 0.52 = 0.017472 -> ceil is $0.02
+    assert calculate_kalshi_taker_fee(Decimal("0.48"), contracts=1) == Decimal("0.02")
+
+    # At $0.10: 0.07 * 1 * 0.10 * 0.90 = 0.0063 -> ceil is $0.01
+    assert calculate_kalshi_taker_fee(Decimal("0.10"), contracts=1) == Decimal("0.01")
+
+    # At $0.90: 0.07 * 1 * 0.90 * 0.10 = 0.0063 -> ceil is $0.01
+    assert calculate_kalshi_taker_fee(Decimal("0.90"), contracts=1) == Decimal("0.01")
+
+    # At $0.01: 0.07 * 1 * 0.01 * 0.99 = 0.000693 -> floor is $0.01
+    assert calculate_kalshi_taker_fee(Decimal("0.01"), contracts=1) == Decimal("0.01")
+
+
+def test_dynamic_volatility_from_candle_builder(spot_l2_book: L2BookState, kalshi_l2_book: L2BookState) -> None:
+    """Verify dynamic volatility calculation from CandleBuilder rolling candles."""
+    from kalshi_sim.ml.quolas_core.candle_builder import CandleBuilder
+
+    builder = CandleBuilder(interval_seconds=60, max_candles=50)
+    # Feed candles with high volatility (e.g. $60 spread)
+    for i in range(10):
+        t_ms = 1700000000000 + i * 60000
+        builder.process_tick("BTCUSDT", price=65000.0, quantity=1.0, timestamp_ms=t_ms)
+        builder.process_tick("BTCUSDT", price=65060.0, quantity=1.0, timestamp_ms=t_ms + 10000)
+        builder.process_tick("BTCUSDT", price=65010.0, quantity=1.0, timestamp_ms=t_ms + 30000)
+
+    bot = DualONNXArbitrageBot(
+        dynamic_volatility_mode="REALIZED_ATR",
+        candle_builder=builder,
+    )
+    vol = bot._resolve_current_volatility()
+    assert vol >= 50.0  # Captures the $60 high-volatility moves instead of static 14.0!
+
+
+def test_veto_cancels_resting_orders(spot_l2_book: L2BookState, kalshi_l2_book: L2BookState) -> None:
+    """Verify that VPIN and temporal skew vetoes set cancel_resting_orders=True."""
+    bot = DualONNXArbitrageBot(auto_cancel_on_veto=True)
+
+    # Toxic VPIN veto
+    dec_toxic = bot.evaluate(
+        spot_l2=spot_l2_book,
+        kalshi_l2=kalshi_l2_book,
+        time_to_expiry_s=300.0,
+        quolas_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.95, "vpin_veto": True},
+        kalshi_inference={"signal": "UP", "confidence": 0.85, "vpin_score": 0.20, "vpin_veto": False},
+    )
+    assert dec_toxic.action == "HOLD"
+    assert dec_toxic.cancel_resting_orders is True
+
+
+def test_all_12_parameters_introspection_and_update() -> None:
+    """Verify all 12 institutional dials are represented in get_parameters() and modifiable."""
+    bot = DualONNXArbitrageBot()
+    params = bot.get_parameters()
+
+    # Verify presence of all 12 key dials
+    assert "brain_priority_mode" in params
+    assert "entry_discount_depth" in params
+    assert "momentum_max_price" in params
+    assert "taker_cross_ev_threshold" in params
+    assert "min_confidence" in params
+    assert "min_ev_dollars" in params
+    assert "max_temporal_skew_ms" in params
+    assert "gamma_cliff_seconds" in params
+    assert "auto_cancel_on_veto" in params
+    assert "dynamic_volatility_mode" in params
+    assert "volatility_floor" in params
+    assert "volatility_ceiling" in params
+
+    # Update dials
+    updated = bot.update_parameters(
+        gamma_cliff_seconds=120.0,
+        auto_cancel_on_veto=False,
+        dynamic_volatility_mode="FIXED_14",
+        brain_priority_mode="CONTRADICTION_SNIPER",
+        taker_cross_ev_threshold=0.06,
+    )
+    assert updated["gamma_cliff_seconds"] == 120.0
+    assert updated["auto_cancel_on_veto"] is False
+    assert updated["dynamic_volatility_mode"] == "FIXED_14"
+    assert updated["brain_priority_mode"] == "CONTRADICTION_SNIPER"
+    assert updated["taker_cross_ev_threshold"] == 0.06
+
 
