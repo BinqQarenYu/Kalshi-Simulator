@@ -2367,12 +2367,11 @@ async def export_ticks(timeframe: str = "mock") -> FileResponse:
 
     data_dir = state.data_dir
     files = sorted(data_dir.glob(f"ticks_{timeframe}_*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
-    if not files:
-        # Fallback to any ticks file
-        files = sorted(data_dir.glob("ticks_*.jsonl"), key=lambda f: f.stat().st_mtime, reverse=True)
 
+    # SECURITY: Never fall back to arbitrary tick files from other timeframes/sessions
+    # to prevent cross-session/cross-timeframe sensitive data exposure.
     if not files:
-        raise HTTPException(status_code=404, detail="No recorded tick files found.")
+        raise HTTPException(status_code=404, detail="No recorded tick files found for specified timeframe.")
 
     target_file = files[0]
     # SECURITY: Ensure target file is strictly inside data_dir to prevent path traversal
