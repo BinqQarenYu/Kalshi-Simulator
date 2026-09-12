@@ -230,7 +230,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       <div>
         <div className="flex items-center justify-between text-xs font-semibold text-[#8b949e] mb-1">
           <label htmlFor="shares-input">Shares</label>
-          <div className="flex items-center gap-1.5 text-[11px]">
+          <div id="shares-balance-info" className="flex items-center gap-1.5 text-[11px]">
             {isLive ? (
               <span className="text-emerald-400 font-mono" title="Live Kalshi Actual Account Cash">
                 Live Available: <strong className={`${availableLiveCash <= 0.05 ? 'text-amber-400' : 'text-emerald-300'}`}>${availableLiveCash.toFixed(2)}</strong>
@@ -245,6 +245,8 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
         <div className="flex items-center gap-2">
           <input
             id="shares-input"
+            aria-label="Shares quantity"
+            aria-describedby="shares-balance-info"
             type="number"
             min={1}
             max={isLive ? 1 : 5000}
