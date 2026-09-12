@@ -76,6 +76,7 @@ class RemoteControlManager:
         self.auth_file = self.data_dir / "remote_control_auth.json"
         self.enabled: bool = True
         self.active_token: str = ""
+        self.authorized_tokens: list[str] = []
         self._load_or_generate_token()
 
     def _load_or_generate_token(self) -> None:
@@ -86,6 +87,11 @@ class RemoteControlManager:
                 if isinstance(data, dict) and data.get("token"):
                     self.active_token = str(data["token"])
                     self.enabled = bool(data.get("enabled", True))
+                    raw_tokens = data.get("authorized_tokens", [])
+                    if isinstance(raw_tokens, list):
+                        self.authorized_tokens = [str(t) for t in raw_tokens if t]
+                    if self.active_token and self.active_token not in self.authorized_tokens:
+                        self.authorized_tokens.append(self.active_token)
                     logger.info("🔑 [REMOTE CONTROL] Restored persisted pairing token for device.")
                     return
             except Exception as e:
@@ -96,6 +102,8 @@ class RemoteControlManager:
     def regenerate_token(self) -> str:
         """Generate a fresh 128-bit cryptographic pairing token and save to disk."""
         self.active_token = f"rc_{secrets.token_urlsafe(16)}"
+        if self.active_token not in self.authorized_tokens:
+            self.authorized_tokens.append(self.active_token)
         self.enabled = True
         self._save()
         logger.info("🔑 [REMOTE CONTROL] Generated fresh pairing token.")
@@ -104,6 +112,7 @@ class RemoteControlManager:
     def revoke_token(self) -> None:
         """Revoke active token and disable remote control."""
         self.active_token = ""
+        self.authorized_tokens = []
         self.enabled = False
         self._save()
         logger.warning("🛑 [REMOTE CONTROL] Remote control revoked and disabled.")
@@ -122,9 +131,11 @@ class RemoteControlManager:
     def _save(self) -> None:
         """Persist remote control state."""
         try:
+            tokens_to_save = list(set([self.active_token] + self.authorized_tokens)) if self.active_token else []
             payload = {
                 "enabled": self.enabled,
                 "token": self.active_token,
+                "authorized_tokens": tokens_to_save,
                 "device_name": get_device_name(),
             }
             self.auth_file.parent.mkdir(parents=True, exist_ok=True)
@@ -133,12 +144,18 @@ class RemoteControlManager:
             logger.error("Failed to save remote control state: %s", e)
 
     def is_authorized(self, token: Optional[str]) -> bool:
-        """Verify candidate token against active token using constant-time comparison."""
-        if not self.enabled or not self.active_token:
+        """Verify candidate token against active token and authorized tokens using constant-time comparison."""
+        if not self.enabled:
             return False
         if not token:
             return False
-        return secrets.compare_digest(token.strip(), self.active_token)
+        clean = token.replace("?auth=", "").replace("auth=", "").strip()
+        if self.active_token and secrets.compare_digest(clean, self.active_token):
+            return True
+        for tok in getattr(self, "authorized_tokens", []):
+            if tok and secrets.compare_digest(clean, tok.strip()):
+                return True
+        return False
 
     def get_info(self, port: Optional[int] = None) -> Dict[str, Any]:
         """Return pairing metadata, connection links, and device discovery info."""
