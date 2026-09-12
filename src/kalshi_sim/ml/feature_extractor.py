@@ -76,7 +76,10 @@ class KalshiOrderflowFeatureExtractor:
             self._cached_entropy = 0.0
             return
 
-        recent_sizes = [float(t["q"]) for t in self.rolling_trades[-20:]]
+        # Use list slicing on deque converted to list or itertools is unnecessary;
+        # deque doesn't support direct slicing, so convert to list first
+        trades_list = list(self.rolling_trades)
+        recent_sizes = [float(t["q"]) for t in trades_list[-20:]]
         total_vol = sum(recent_sizes) + 1e-9
         probs = [s / total_vol for s in recent_sizes if s > 0]
         if probs:
@@ -178,9 +181,33 @@ class KalshiOrderflowFeatureExtractor:
             for t in latest_trades:
                 self.process_trade(t)
 
-        # Performance optimization: Fast-path raw tuple extraction using get_depth_tuples
-        # to avoid instantiating ~30 Pydantic OrderBookLevel wrapper objects per tick call.
-        if hasattr(book, "get_depth_tuples"):
+        # Performance optimization: Fast-path raw float tuple extraction using get_depth_float_tuples
+        # to avoid instantiating ~30 Pydantic OrderBookLevel wrapper objects and redundant Decimal->float conversions.
+        if hasattr(book, "get_depth_float_tuples"):
+            top_yes, top_no = book.get_depth_float_tuples(self.target_depth)
+            if not top_yes or not top_no:
+                return np.zeros(28, dtype=np.float32)
+
+            best_bid = top_yes[0][0]
+            is_spot = getattr(book, "is_spot", False) or best_bid > 10.0
+
+            if is_spot:
+                best_ask = top_no[0][0] if top_no else (best_bid + 0.01)
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                mid = (best_bid + best_ask) / 2.0
+                spread_bps = max(0.0001, ((best_ask - best_bid) / mid) * 100.0)
+            else:
+                best_ask = (1.0 - top_no[0][0]) if top_no else (best_bid + 0.01)
+                if best_bid <= 0:
+                    best_bid = 0.01
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                spread_bps = max(0.001, min(0.25, best_ask - best_bid))
+
+            bid_sizes = [qty for _, qty in top_yes]
+            ask_sizes = [qty for _, qty in top_no]
+        elif hasattr(book, "get_depth_tuples"):
             top_yes, top_no = book.get_depth_tuples(self.target_depth)
             if not top_yes or not top_no:
                 return np.zeros(28, dtype=np.float32)

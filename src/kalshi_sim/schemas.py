@@ -451,6 +451,8 @@ class L2BookState:
         "_cached_spot_ask_version",
         "_cached_depth_key",
         "_cached_depth_tuples",
+        "_cached_float_depth_key",
+        "_cached_float_depth_tuples",
     )
 
     def __init__(self, market_ticker: str, is_spot: bool = False) -> None:
@@ -469,6 +471,8 @@ class L2BookState:
         self._cached_spot_ask_version: int = -1
         self._cached_depth_key: tuple | None = None
         self._cached_depth_tuples: tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]] | None = None
+        self._cached_float_depth_key: tuple | None = None
+        self._cached_float_depth_tuples: tuple[list[tuple[float, float]], list[tuple[float, float]]] | None = None
 
     @property
     def yes_book(self) -> dict[Decimal, Decimal]:
@@ -576,6 +580,26 @@ class L2BookState:
         self._cached_depth_key = key
         self._cached_depth_tuples = (top_yes, top_no)
         return self._cached_depth_tuples
+
+    def get_depth_float_tuples(
+        self, n: int = 15
+    ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+        """Return top *n* bid and ask (price_float, quantity_float) tuples, sorted best-first.
+
+        Performance optimization: Uses version-backed _BookDict tracking to memoize float-converted depth
+        levels in O(1) time. Avoids converting Decimal prices and quantities to Python floats on every tick read.
+        """
+        key = (self._yes_book._version, self._no_book._version, n, self.is_spot)
+        if self._cached_float_depth_key == key and self._cached_float_depth_tuples is not None:
+            return self._cached_float_depth_tuples
+
+        top_yes, top_no = self.get_depth_tuples(n)
+        top_yes_float = [(float(p), float(q)) for p, q in top_yes]
+        top_no_float = [(float(p), float(q)) for p, q in top_no]
+
+        self._cached_float_depth_key = key
+        self._cached_float_depth_tuples = (top_yes_float, top_no_float)
+        return self._cached_float_depth_tuples
 
     def get_depth(self, n: int = 15) -> tuple[list[OrderBookLevel], list[OrderBookLevel]]:
         """Return top *n* bid and ask levels as OrderBookLevel models, sorted best-first."""
