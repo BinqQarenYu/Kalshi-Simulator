@@ -5,7 +5,7 @@
   ],
   "asset_mode": "single",
   "is_armed": true,
-  "updated_at": "2026-09-12T19:13:27.523085+00:00",
+  "updated_at": "2026-09-12T19:21:20.683005+00:00",
   "max_contracts": 1,
   "assets": {
     "BTC": {
@@ -43,7 +43,10 @@
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0
+      "twap_fading_window_seconds": 60.0,
+      "twap_immutability_sniper_cents": 0.75,
+      "max_queue_depth_ahead": 250,
+      "max_clob_spread_cents": 0.05
     },
     "ETH": {
       "discount_limit_price": 0.48,
@@ -71,7 +74,10 @@
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0
+      "twap_fading_window_seconds": 60.0,
+      "twap_immutability_sniper_cents": 0.75,
+      "max_queue_depth_ahead": 200,
+      "max_clob_spread_cents": 0.04
     },
     "SOL": {
       "discount_limit_price": 0.48,
@@ -99,7 +105,10 @@
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0
+      "twap_fading_window_seconds": 60.0,
+      "twap_immutability_sniper_cents": 0.72,
+      "max_queue_depth_ahead": 150,
+      "max_clob_spread_cents": 0.06
     },
     "DOGE": {
       "discount_limit_price": 0.48,
@@ -127,7 +136,10 @@
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0
+      "twap_fading_window_seconds": 60.0,
+      "twap_immutability_sniper_cents": 0.7,
+      "max_queue_depth_ahead": 300,
+      "max_clob_spread_cents": 0.03
     },
     "GOLD": {
       "discount_limit_price": 0.48,
@@ -155,7 +167,10 @@
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0
+      "twap_fading_window_seconds": 60.0,
+      "twap_immutability_sniper_cents": 0.75,
+      "max_queue_depth_ahead": 150,
+      "max_clob_spread_cents": 0.05
     },
     "HYPER": {
       "discount_limit_price": 0.48,
@@ -183,7 +198,10 @@
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0
+      "twap_fading_window_seconds": 60.0,
+      "twap_immutability_sniper_cents": 0.72,
+      "max_queue_depth_ahead": 200,
+      "max_clob_spread_cents": 0.05
     }
   },
   "discount_limit_price": 0.51,
@@ -219,5 +237,8 @@
   "velocity_z_score_threshold": 2.5,
   "moneyness_moat_multiplier": 2.0,
   "twap_fading_quarantine_seconds": 15.0,
-  "twap_fading_window_seconds": 60.0
+  "twap_fading_window_seconds": 60.0,
+  "twap_immutability_sniper_cents": 0.75,
+  "max_queue_depth_ahead": 250,
+  "max_clob_spread_cents": 0.05
 }
