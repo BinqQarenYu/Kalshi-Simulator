@@ -840,7 +840,7 @@ class StandaloneBotEngine:
 
             today_reports = [
                 r for r in all_reports
-                if (r.get("execution_mode") == "live" or r.get("bot_type") == "live")
+                if (r.get("execution_mode") == "live" or r.get("bot_type") == "live" or not self.is_live)
                 and (today_prefix in r.get("ticker", "") or today_iso in str(r.get("timestamp_utc", "")))
             ]
             self.settled_cycles = len(today_reports)
@@ -2335,6 +2335,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """SECURITY: Add HTTP response headers to harden against clickjacking, MIME sniffing, and XSS."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 @app.middleware("http")

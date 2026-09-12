@@ -61,7 +61,7 @@ def test_live_order_dry_run_safety_mode():
 def test_live_order_execution_mocked_success():
     """Test live order execution when enabled and mocked exchange succeeds."""
     with TestClient(app) as client:
-        with patch.dict("os.environ", {"KALSHI_API_KEY_ID": "test_id", "KALSHI_LIVE_TRADING_ENABLED": "true"}):
+        with patch.dict("os.environ", {"KALSHI_API_KEY_ID": "test_id", "KALSHI_PRIVATE_KEY_PATH": "test_key.pem", "KALSHI_LIVE_TRADING_ENABLED": "true"}):
             with patch("kalshi_sim.server.get_active_lock_holder", return_value=None):
                 with patch("kalshi_sim.server.KalshiLiveOrderClient") as mock_cls:
                     mock_client = AsyncMock()
@@ -96,7 +96,7 @@ def test_live_order_execution_mocked_success():
 def test_live_order_cancellation_endpoint():
     """Test cancelling live order on exchange."""
     with TestClient(app) as client:
-        with patch.dict("os.environ", {"KALSHI_API_KEY_ID": "test_id"}):
+        with patch.dict("os.environ", {"KALSHI_API_KEY_ID": "test_id", "KALSHI_PRIVATE_KEY_PATH": "test_key.pem"}):
             with patch("kalshi_sim.server.KalshiLiveOrderClient") as mock_cls:
                 mock_client = AsyncMock()
                 mock_client.cancel_order.return_value = True
@@ -112,7 +112,7 @@ def test_live_order_cancellation_endpoint():
 def test_live_open_orders_endpoint():
     """Test fetching open orders from live exchange."""
     with TestClient(app) as client:
-        with patch.dict("os.environ", {"KALSHI_API_KEY_ID": "test_id"}):
+        with patch.dict("os.environ", {"KALSHI_API_KEY_ID": "test_id", "KALSHI_PRIVATE_KEY_PATH": "test_key.pem"}):
             with patch("kalshi_sim.server.KalshiLiveOrderClient") as mock_cls:
                 mock_client = AsyncMock()
                 mock_client.get_open_orders.return_value = [

@@ -1,5 +1,13 @@
 # Palette's Journal - Micro-UX & Accessibility Learnings
 
+## 2026-09-21 - Hold-To-Arm Emergency Action Controls Keyboard Accessibility
+**Learning:** Hardware-style hold-to-activate controls (such as the 1.5-second hold-to-arm emergency kill switch in BabyBotConsole) that only handle mouse or touch events (`onMouseDown`/`onTouchStart`) are completely unusable for keyboard-only users and screen reader navigation. Supplying `onKeyDown` and `onKeyUp` listeners for `Space` and `Enter` keys (with `e.preventDefault()` and `!e.repeat` guards), adding `onBlur` safety cleanup, explicit descriptive `aria-label` instructions, and `focus-visible:ring-2` focus outlines ensures emergency safety controls remain fully accessible to all users.
+**Action:** When implementing hold-to-activate or long-press controls, always wire `onKeyDown` and `onKeyUp` listeners for `Space` and `Enter`, add `onBlur` state reset, provide explicit `aria-label` instructions on how to trigger the hold action via keyboard, and include `focus-visible:ring-2` styling.
+
+## 2026-09-18 - Regulatory Compliance Modal Tab Navigation & Action Controls Accessibility
+**Learning:** Multi-section modal navigation tabs (such as Active Guardrails, Legal Handbook, and CFTC Audit Trail in ComplianceModal) require explicit `role="tablist"` container markup, `role="tab"`, `id`, `aria-selected`, `aria-controls`, and `focus-visible:ring-2` styling. Linking tabs to content panels marked with `role="tabpanel"` and `aria-labelledby` ensures screen reader users can discover and navigate regulatory compliance views cleanly.
+**Action:** Always structure modal section tabs with `role="tablist"`, `role="tab"`, `id`, `aria-selected`, `aria-controls`, `focus-visible:ring-2`, and link them directly to `role="tabpanel"` containers with matching `aria-labelledby` IDs.
+
 ## 2026-09-14 - Summary Metric Filter Cards & Modal Close Controls Accessibility
 **Learning:** Interactive summary cards that double as quick filters (such as "Today's Report" and "Total Live Report" cards in report modals) implemented as `<div>` containers are non-focusable and invisible to screen reader tab orders unless converted to semantic `<button type="button">` controls with explicit `aria-label` and `focus-visible:ring-2` styling.
 **Action:** Always wrap interactive summary/metric filter cards in semantic `<button type="button">` elements, provide descriptive `aria-label` text, add `focus-visible:ring-2` outlines, and apply `text-left` to preserve card alignment.

@@ -18,11 +18,7 @@ from typing import Any, Dict, List
 import numpy as np
 import pytest
 
-from kalshi_sim.ml.continuous_trainer import (
-    ContinuousModelTrainer,
-    QuoLasMicroscopeNet,
-    export_and_verify_onnx,
-)
+from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
 from kalshi_sim.ml.dual_onnx_gateway import DualONNXGateway
 from kalshi_sim.ml.dual_onnx_schemas import DualONNXRegime
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
@@ -241,6 +237,9 @@ def test_cross_brain_temporal_skew_veto():
 
 def test_continuous_trainer_quolas_export(tmp_path: Path):
     """Test export_and_verify_onnx produces a verified ONNX model with UTF-8 safety."""
+    pytest.importorskip("torch")
+    from kalshi_sim.ml.continuous_trainer import export_and_verify_onnx
+    from kalshi_sim.ml.model import QuoLasMicroscopeNet
     net = QuoLasMicroscopeNet(input_dim=28, hidden_dim=64, num_classes=3)
     target_onnx = tmp_path / "test_quolas.onnx"
 

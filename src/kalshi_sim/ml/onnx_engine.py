@@ -61,6 +61,15 @@ class KalshiONNXEngine:
         self._last_mtime_check: float = 0.0
         self._check_interval: float = 1.0  # Throttle stat() to max once per second
 
+        # Performance optimization: Pre-allocate persistent contiguous input buffers to avoid
+        # per-tick array instantiations and garbage collection pauses during high-frequency ticks.
+        self._toxic_buffer = np.zeros((1, 13), dtype=np.float32)
+        self._spatial_buffer = np.zeros((1, 15), dtype=np.float32)
+        self._onnx_inputs = {
+            "spatial_input": self._spatial_buffer,
+            "toxic_input": self._toxic_buffer,
+        }
+
         self._load_model()
 
     def _load_model(self) -> None:
@@ -144,26 +153,20 @@ class KalshiONNXEngine:
         else:
             normed = raw_vector
 
-        # 4. Slice into dual input streams
-        toxic_vec = normed[:13].reshape(1, 13).astype(np.float32)
-        spatial_vec = normed[13:28].reshape(1, 15).astype(np.float32)
+        # 4. Mutate pre-allocated input buffers in-place without memory re-allocations
+        self._toxic_buffer[0, :] = normed[:13]
+        self._spatial_buffer[0, :] = normed[13:28]
 
-        # 5. Sanitize NaNs/Infs
-        if not np.isfinite(toxic_vec).all():
-            toxic_vec = np.nan_to_num(toxic_vec, nan=0.0, posinf=0.0, neginf=0.0)
-        if not np.isfinite(spatial_vec).all():
-            spatial_vec = np.nan_to_num(spatial_vec, nan=0.0, posinf=0.0, neginf=0.0)
+        # 5. Sanitize NaNs/Infs in-place
+        if not np.isfinite(self._toxic_buffer).all():
+            np.nan_to_num(self._toxic_buffer, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+        if not np.isfinite(self._spatial_buffer).all():
+            np.nan_to_num(self._spatial_buffer, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # 6. Execute ONNX graph
+        # 6. Execute ONNX graph with persistent inputs dictionary
         if self.session is not None:
             try:
-                outputs = self.session.run(
-                    None,
-                    {
-                        "spatial_input": spatial_vec,
-                        "toxic_input": toxic_vec,
-                    },
-                )
+                outputs = self.session.run(None, self._onnx_inputs)
                 probs = outputs[0][0]
             except Exception as exc:
                 logger.error("[KalshiONNX] Inference execution error: %s", exc)

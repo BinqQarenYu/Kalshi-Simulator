@@ -1472,12 +1472,15 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                 </div>
 
                 {/* 3. Today's Report Card (Interactive) */}
-                <div
+                <button
+                  type="button"
                   onClick={() => {
                     soundFX.playClickSound();
                     setJournalDateScope('today');
                   }}
-                  className={`border rounded-xl p-4 flex flex-col justify-between transition cursor-pointer ${
+                  aria-label="Filter journal by Today's Trades"
+                  aria-pressed={journalSubNav === 'trades' ? journalDateScope !== 'all' : journalDateScope === 'today'}
+                  className={`border rounded-xl p-4 flex flex-col justify-between transition cursor-pointer text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${
                     (journalSubNav === 'trades' ? journalDateScope !== 'all' : journalDateScope === 'today')
                       ? 'bg-emerald-950/20 border-emerald-500/50 shadow-md shadow-emerald-950/30'
                       : 'bg-[#12161a] border-[#262d35] hover:border-emerald-500/30'
@@ -1510,15 +1513,18 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                     <span>{journalStats.today.total} trades today (ET)</span>
                     <span className="text-emerald-300 underline text-[10px]">Filter Today &rsaquo;</span>
                   </div>
-                </div>
+                </button>
 
                 {/* 4. Total Live Report Card (Interactive) */}
-                <div
+                <button
+                  type="button"
                   onClick={() => {
                     soundFX.playClickSound();
                     setJournalBotFilter(journalBotFilter === 'live' ? 'all' : 'live');
                   }}
-                  className={`border rounded-xl p-4 flex flex-col justify-between transition cursor-pointer ${
+                  aria-label="Filter journal by Total Live Execution Report"
+                  aria-pressed={journalBotFilter === 'live'}
+                  className={`border rounded-xl p-4 flex flex-col justify-between transition cursor-pointer text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 ${
                     journalBotFilter === 'live'
                       ? 'bg-rose-950/20 border-rose-500/50 shadow-md shadow-rose-950/30'
                       : 'bg-[#12161a] border-[#262d35] hover:border-rose-500/30'
@@ -1551,7 +1557,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                     <span>{journalStats.live.total} real Kalshi fills</span>
                     <span className="text-rose-300">$0.00 Maker fee</span>
                   </div>
-                </div>
+                </button>
               </div>
 
               {/* "Who Traded" Strategy Performance Breakdown Bar */}

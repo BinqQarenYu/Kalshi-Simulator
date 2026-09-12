@@ -9,12 +9,10 @@ from kalshi_sim.server import app, _build_full_state_payload
 
 @pytest.fixture
 def client() -> TestClient:
-    from kalshi_sim.server import state
-    if getattr(state, "guardrails_agent", None):
-        p = getattr(state.sim_agent, "_portfolio", None) or getattr(state, "portfolio", None)
-        cur_bal = getattr(p, "equity", state.starting_capital) if p else state.starting_capital
-        state.guardrails_agent.reset_circuit_breaker(cur_bal)
-    return TestClient(app)
+    c = TestClient(app)
+    c.post("/api/circuit-breaker/reset")
+    c.post("/api/reset", json={"capital": 10000.0})
+    return c
 
 
 def test_health_endpoint(client: TestClient) -> None:
@@ -101,6 +99,8 @@ def test_reset_portfolio_endpoint(client: TestClient) -> None:
 
 
 def test_place_and_close_order_endpoint(client: TestClient) -> None:
+    client.post("/api/circuit-breaker/reset")
+    client.post("/api/reset", json={"capital": 10000.0})
     with client:
         # Place order
         order_res = client.post("/api/orders", json={"side": "yes", "size": 10, "order_type": "market"})
@@ -127,6 +127,8 @@ def test_close_nonexistent_position(client: TestClient) -> None:
 
 
 def test_resting_limit_order_lifecycle(client: TestClient) -> None:
+    client.post("/api/circuit-breaker/reset")
+    client.post("/api/reset", json={"capital": 10000.0})
     with client:
         # Place resting limit order
         resp = client.post(
@@ -363,6 +365,15 @@ def test_cors_middleware_disallows_unauthorized_origin(client: TestClient) -> No
         },
     )
     assert response.headers.get("access-control-allow-origin") != "http://evil-attacker.com"
+
+
+def test_security_headers(client: TestClient) -> None:
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.headers.get("x-content-type-options") == "nosniff"
+    assert response.headers.get("x-frame-options") == "DENY"
+    assert response.headers.get("x-xss-protection") == "1; mode=block"
+    assert response.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
 
 
 def test_domination_config_endpoints(client: TestClient) -> None:

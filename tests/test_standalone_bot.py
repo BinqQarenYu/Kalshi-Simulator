@@ -214,6 +214,19 @@ def test_standalone_bot_cors(monkeypatch, tmp_path: Path):
         assert options_resp.headers.get("access-control-allow-origin") == origin
 
 
+def test_standalone_bot_security_headers(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("TESTING", "true")
+    engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
+    with patch("kalshi_sim.standalone_bot.app_engine", engine):
+        client = TestClient(app)
+        resp = client.get("/api/state")
+        assert resp.status_code == 200
+        assert resp.headers.get("x-content-type-options") == "nosniff"
+        assert resp.headers.get("x-frame-options") == "DENY"
+        assert resp.headers.get("x-xss-protection") == "1; mode=block"
+        assert resp.headers.get("referrer-policy") == "strict-origin-when-cross-origin"
+
+
 def test_standalone_bot_sync_pnl_reports(tmp_path: Path):
     engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
     now_utc = datetime.now(timezone.utc)

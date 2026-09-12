@@ -39,6 +39,7 @@ import uvicorn
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
+from kalshi_sim.incubator_agent import get_incubator_agent, IncubatorAgent
 from kalshi_sim.process_lock import get_active_lock_holder
 from kalshi_sim.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, async_validate_credentials, create_aiohttp_connector, load_private_key
 from kalshi_sim.data_memory_manager import MarketDataMemoryManager, MemoryProfile
@@ -276,6 +277,9 @@ class ServerState:
             integrity_agent=self.integrity_agent,
             law_order_agent=self.law_order_agent,
         )
+
+        # Autonomous Lane 2 Incubator Supervisor Agent
+        self.incubator_agent = get_incubator_agent()
 
         # Telemetry & Instant Alert Webhook Dispatcher (Phase 3.3)
         self.telemetry_alerts = TelemetryAlertDispatcher()
@@ -2111,6 +2115,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    """SECURITY: Add HTTP response headers to harden against clickjacking, MIME sniffing, and XSS."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -4237,14 +4252,14 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
 
 @app.post("/api/reset")
 async def reset_portfolio(req: ResetRequest) -> dict[str, Any]:
+    state.starting_capital = Decimal(str(req.capital))
     portfolios = []
     if state.sim_agent:
-        if hasattr(state.sim_agent, "_portfolio_domination"):
-            portfolios.append(state.sim_agent._portfolio_domination)
-        if hasattr(state.sim_agent, "_portfolio_onnx"):
-            portfolios.append(state.sim_agent._portfolio_onnx)
-        if not portfolios and hasattr(state.sim_agent, "_portfolio"):
-            portfolios.append(state.sim_agent._portfolio)
+        for attr in ["_portfolio_domination", "_portfolio_onnx", "_portfolio_macro_trend", "_portfolio_dominion2", "_portfolio"]:
+            if hasattr(state.sim_agent, attr):
+                p = getattr(state.sim_agent, attr)
+                if p not in portfolios:
+                    portfolios.append(p)
     if getattr(state, "portfolio", None) and state.portfolio not in portfolios:
         portfolios.append(state.portfolio)
 
@@ -4264,6 +4279,7 @@ async def reset_portfolio(req: ResetRequest) -> dict[str, Any]:
     if getattr(state, "guardrails_agent", None):
         state.guardrails_agent.reset_circuit_breaker(Decimal(str(req.capital)))
 
+    state.is_dirty = True
     return {"success": True, "capital": req.capital}
 
 
@@ -5899,6 +5915,101 @@ async def resume_training_endpoint() -> dict[str, Any]:
     return {"success": False, "message": "Trainer not initialized."}
 
 
+# ---------------------------------------------------------------------------
+# Lane 2 Incubator Agent Supervisor Endpoints
+# ---------------------------------------------------------------------------
+
+class IncubatorTradeRequest(BaseModel):
+    trade_id: str
+    bot_id: str
+    bot_name: Optional[str] = None
+    ticker: str
+    side: Literal["yes", "no"]
+    count: int = Field(default=1, ge=1, le=10)
+    entry_price: float = Field(..., ge=0.01, le=0.99)
+    target_strike: float
+    entry_spot: float
+    vpin_at_entry: float = 0.0
+    cycle_id: Optional[str] = None
+
+
+class IncubatorSettleRequest(BaseModel):
+    ticker: str
+    final_twap: float
+    target_strike: float
+    cycle_id: Optional[str] = None
+
+
+class IncubatorAuditRequest(BaseModel):
+    bot_id: str
+
+
+@app.get("/api/incubator/scorecards")
+async def get_incubator_scorecards_endpoint() -> list[dict[str, Any]]:
+    """Retrieve multi-cycle quantitative performance scorecards for all Lane 2 shadow bots."""
+    return state.incubator_agent.get_all_scorecards()
+
+
+@app.get("/api/incubator/scorecard/{bot_id}")
+async def get_single_incubator_scorecard_endpoint(bot_id: str) -> dict[str, Any]:
+    """Retrieve scorecard for a specific shadow bot candidate."""
+    return state.incubator_agent.get_bot_scorecard(bot_id).to_dict()
+
+
+@app.get("/api/incubator/post-mortems")
+async def get_incubator_post_mortems_endpoint(limit: int = 20) -> list[dict[str, Any]]:
+    """Retrieve recent cycle post-mortems."""
+    return state.incubator_agent.get_recent_post_mortems(limit=limit)
+
+
+@app.get("/api/incubator/mobile-summary")
+async def get_incubator_mobile_summary_endpoint() -> dict[str, str]:
+    """Retrieve mobile-screen formatted text digest for remote monitoring."""
+    return {"summary": state.incubator_agent.generate_mobile_digest()}
+
+
+@app.post("/api/incubator/record-trade")
+async def record_incubator_shadow_trade_endpoint(req: IncubatorTradeRequest) -> dict[str, Any]:
+    """Record a shadow trade execution from a Lane 2 bot."""
+    rec = state.incubator_agent.record_shadow_order(
+        trade_id=req.trade_id,
+        bot_id=req.bot_id,
+        bot_name=req.bot_name or req.bot_id,
+        ticker=req.ticker,
+        side=req.side,
+        count=req.count,
+        entry_price=Decimal(str(req.entry_price)),
+        target_strike=Decimal(str(req.target_strike)),
+        entry_spot=Decimal(str(req.entry_spot)),
+        vpin_at_entry=req.vpin_at_entry,
+        cycle_id=req.cycle_id,
+    )
+    state.is_dirty = True
+    return {"success": True, "trade": rec.to_dict()}
+
+
+@app.post("/api/incubator/settle-cycle")
+async def settle_incubator_cycle_endpoint(req: IncubatorSettleRequest) -> dict[str, Any]:
+    """Trigger warm-path post-mortem evaluation for a settled contract cycle."""
+    pm = state.incubator_agent.on_cycle_settled(
+        ticker=req.ticker,
+        final_twap=Decimal(str(req.final_twap)),
+        target_strike=Decimal(str(req.target_strike)),
+        cycle_id=req.cycle_id,
+    )
+    state.is_dirty = True
+    return {"success": True, "post_mortem": pm.to_dict()}
+
+
+@app.post("/api/incubator/audit-promotion")
+async def audit_incubator_bot_promotion_endpoint(req: IncubatorAuditRequest) -> dict[str, Any]:
+    """Run 4-Pillar pre-flight certification and quantitative performance audit for promotion to Live Lane 1."""
+    bot_inst = resolve_bot_instance(req.bot_id)
+    report = state.incubator_agent.audit_for_promotion(bot_id=req.bot_id, bot_instance=bot_inst)
+    state.is_dirty = True
+    return report
+
+
 
 # ---------------------------------------------------------------------------
 # WebSocket Broadcast Logic
@@ -6346,7 +6457,7 @@ def _build_full_state_payload() -> dict[str, Any]:
             "today_pnl": float(sd_m.get("today_pnl", 0.0)),
         })
 
-    return {
+    payload = {
         "timestamp": now_utc.isoformat(),
         "market": {
             "active_asset": state.active_asset.value,
@@ -6425,6 +6536,15 @@ def _build_full_state_payload() -> dict[str, Any]:
         "macro_trend_dominion_telemetry": macro_telemetry,
         "preflight_gates": preflight_gates,
     }
+
+    # SECURITY: Audit state payload for private keys or sensitive credential leaks prior to WebSocket broadcast
+    if hasattr(state, "law_order_agent") and state.law_order_agent:
+        audit_res = state.law_order_agent.audit_credential_security(payload)
+        if audit_res.status == "FAIL":
+            logger.critical("[SECURITY ALERT] Blocked state broadcast payload due to credential leak!")
+            raise ValueError(f"State payload security audit failed: {audit_res.message}")
+
+    return payload
 
 
 

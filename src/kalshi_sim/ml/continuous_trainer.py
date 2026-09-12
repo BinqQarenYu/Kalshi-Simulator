@@ -29,7 +29,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-import torch
+
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except (ImportError, OSError):
+    torch = None
+    TORCH_AVAILABLE = False
 
 try:
     import psutil
@@ -91,6 +97,9 @@ def export_and_verify_onnx(
     """Export model to temporary ONNX file, verify output shape and validity, then atomically replace target."""
     if not ORT_AVAILABLE:
         logger.warning("onnxruntime not installed; skipping ONNX export.")
+        return False
+    if not TORCH_AVAILABLE:
+        logger.warning("torch not available; skipping ONNX export.")
         return False
 
     target_onnx_path = Path(target_onnx_path)
@@ -306,6 +315,11 @@ class ContinuousModelTrainer:
 
     def _worker_loop(self) -> None:
         """Main background loop executing bounded training cycles."""
+        if not TORCH_AVAILABLE:
+            self.status = "DISABLED_NO_TORCH"
+            logger.info("[CONTINUOUS TRAINER] PyTorch not installed/available; continuous background training disabled.")
+            return
+
         # 1. Apply OS low priority
         apply_low_priority_to_thread_or_process()
 

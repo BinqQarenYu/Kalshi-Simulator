@@ -665,3 +665,32 @@ export interface PresetListResponse {
   active_preset: BotPreset;
 }
 
+export interface IncubatorScorecard {
+  bot_id: string;
+  bot_name: string;
+  total_trades: number;
+  wins: number;
+  losses: number;
+  win_rate_pct: string;
+  total_pnl: string;
+  profit_factor: string;
+  max_drawdown_pct: string;
+  adverse_selection_count: number;
+  toxic_vpin_trades_count: number;
+  promotion_status: 'COOKING' | 'AUDITING' | 'READY_FOR_PROMOTION' | 'PROMOTED' | 'BLOCKED';
+  readiness_score_pct: number;
+  last_audit?: any;
+}
+
+export interface IncubatorPostMortem {
+  cycle_id: string;
+  ticker: string;
+  settlement_twap: string;
+  target_strike: string;
+  outcome: string;
+  trades: any[];
+  total_pnl: string;
+  diagnosis: string;
+  timestamp: string;
+}
+

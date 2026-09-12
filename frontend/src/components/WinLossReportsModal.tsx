@@ -133,7 +133,19 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
     } else {
       setModeFilter('all');
     }
-  }, [isOpen, isLiveMode]);
+  }, [isOpen, isLiveMode, reports]);
+
+  const traderStats = useMemo(() => {
+    const categories: TraderCategory[] = ['3_step_dom', 'onnx_macro', 'dominion_2', 'macro_trend', 'ofi_sprint', 'macro_onnx', 'onnx_ml', 'live'];
+    return categories.map((cat) => {
+      const subset = reports.filter((r) => getTraderCategory(r) === cat);
+      const w = subset.filter((r) => r.outcome === 'win').length;
+      const l = subset.filter((r) => r.outcome === 'loss').length;
+      const pnl = subset.reduce((acc, r) => acc + (r.pnl || 0), 0);
+      const wr = subset.length > 0 ? (w / subset.length) * 100 : 0;
+      return { cat, badge: getTraderBadge(cat), total: subset.length, wins: w, losses: l, winRate: wr, pnl };
+    });
+  }, [reports]);
 
   if (!isOpen) return null;
 
@@ -150,19 +162,6 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
   const todayLosses = todayReports.filter((r) => r.outcome === 'loss').length;
   const todayWinRate = todayCount > 0 ? (todayWins / todayCount) * 100 : 0;
   const todayPnL = todayReports.reduce((acc, r) => acc + (r.pnl || 0), 0);
-
-  const traderStats = useMemo(() => {
-    const categories: TraderCategory[] = ['3_step_dom', 'onnx_macro', 'dominion_2', 'macro_trend', 'ofi_sprint', 'macro_onnx', 'onnx_ml', 'live'];
-    return categories.map((cat) => {
-      const subset = reports.filter((r) => getTraderCategory(r) === cat);
-      const w = subset.filter((r) => r.outcome === 'win').length;
-      const l = subset.filter((r) => r.outcome === 'loss').length;
-      const pnl = subset.reduce((acc, r) => acc + (r.pnl || 0), 0);
-      const wr = subset.length > 0 ? (w / subset.length) * 100 : 0;
-      return { cat, badge: getTraderBadge(cat), total: subset.length, wins: w, losses: l, winRate: wr, pnl };
-    });
-  }, [reports]);
-
   const baseReports = reports.filter((r) => {
     if (dateScope === 'today' && !isTodayReport(r)) return false;
     if (modeFilter === 'live' && !isLiveReport(r)) return false;

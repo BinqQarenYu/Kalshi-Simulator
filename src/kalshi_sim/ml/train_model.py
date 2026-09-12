@@ -13,39 +13,56 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    from torch.utils.data import DataLoader, Dataset
+    TORCH_AVAILABLE = True
+    _BaseDataset = Dataset
+    _BaseModule = nn.Module
+except (ImportError, OSError):
+    torch = None
+    nn = None
+    F = None
+    DataLoader = None
+    Dataset = object
+    TORCH_AVAILABLE = False
+    _BaseDataset = object
+    _BaseModule = object
 
 from kalshi_sim.ml.model import QuoLasMicroscopeNet
 
 logger = logging.getLogger(__name__)
 
 
-class OrderflowDataset(Dataset):
+class OrderflowDataset(_BaseDataset):
     """PyTorch Dataset wrapping extracted orderflow features and labels."""
 
     def __init__(self, X: np.ndarray, y: np.ndarray) -> None:
+        if not TORCH_AVAILABLE:
+            self.X = X
+            self.y = y
+            return
         self.X = torch.from_numpy(X.astype(np.float32))
         self.y = torch.from_numpy(y.astype(np.int64))
 
     def __len__(self) -> int:
         return len(self.y)
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[Any, Any]:
         return self.X[idx], self.y[idx]
 
 
-class FocalLoss(nn.Module):
+class FocalLoss(_BaseModule):
     """Focal Loss with class weights and focusing parameter gamma."""
 
-    def __init__(self, alpha: Optional[torch.Tensor] = None, gamma: float = 2.0) -> None:
+    def __init__(self, alpha: Optional[Any] = None, gamma: float = 2.0) -> None:
         super().__init__()
         self.alpha = alpha
         self.gamma = gamma
 
-    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def forward(self, logits: Any, targets: Any) -> Any:
         ce_loss = F.cross_entropy(logits, targets, reduction="none")
         pt = torch.exp(-ce_loss)
         focal_loss = ((1.0 - pt) ** self.gamma) * ce_loss
@@ -77,6 +94,13 @@ class ModelTrainer:
         weight_decay: float = 1e-4,
         device: Optional[str] = None,
     ) -> None:
+        if not TORCH_AVAILABLE:
+            self.device = None
+            self.model = None
+            self.lr = learning_rate
+            self.weight_decay = weight_decay
+            self.optimizer = None
+            return
         self.device = torch.device(device if device else ("cuda" if torch.cuda.is_available() else "cpu"))
         self.model = model or QuoLasMicroscopeNet()
         self.model.to(self.device)

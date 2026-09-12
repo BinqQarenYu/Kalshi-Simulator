@@ -6,12 +6,21 @@ Outputs 3-class probabilistic classification: [P(UP), P(DOWN), P(WAIT)].
 
 from __future__ import annotations
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    TORCH_AVAILABLE = True
+    _BaseModule = nn.Module
+except (ImportError, OSError):
+    torch = None
+    nn = None
+    F = None
+    TORCH_AVAILABLE = False
+    _BaseModule = object
 
 
-class ResidualBlock(nn.Module):
+class ResidualBlock(_BaseModule):
     """Residual MLP Block with LayerNorm, SiLU non-linearities, and Dropout."""
 
     def __init__(self, dim: int = 64, hidden_dim: int = 128, dropout: float = 0.1) -> None:
@@ -32,7 +41,7 @@ class ResidualBlock(nn.Module):
         return residual + out
 
 
-class QuoLasMicroscopeNet(nn.Module):
+class QuoLasMicroscopeNet(_BaseModule):
     """QuoLas Nano Microscope Neural Classifier.
 
     Input: (B, 28) normalized orderflow microstructure tensor.
@@ -51,6 +60,9 @@ class QuoLasMicroscopeNet(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.num_classes = num_classes
+
+        if not TORCH_AVAILABLE:
+            return
 
         # Input projection layer
         self.input_layer = nn.Sequential(
@@ -92,7 +104,7 @@ class QuoLasMicroscopeNet(nn.Module):
         return F.softmax(logits, dim=-1)
 
 
-class ExportableQuoLasNet(nn.Module):
+class ExportableQuoLasNet(_BaseModule):
     """Dual-input wrapper for QuoLasMicroscopeNet to export seamless ONNX graphs.
 
     Inputs:
