@@ -1,0 +1,198 @@
+{
+  "registry_name": "Kalshi Institutional Bot Iteration Registry",
+  "curator": "Quoquo (Desk Librarian & Archivist)",
+  "last_updated": "2026-09-12T08:29:00Z",
+  "bots": {
+    "bot_1_three_step_domination": {
+      "bot_id": "3_step_domination_bot",
+      "display_name": "3-Step Domination Bot",
+      "lane": "Lane 1 (Live Real Capital)",
+      "target_asset": "Multi-Asset Basket (BTC, ETH, SOL, DOGE, GOLD, HYPER)",
+      "current_active_iteration": "v5.0-anti-breakout-triad",
+      "iterations": [
+        {
+          "version": "v1.0-static-normal-cdf",
+          "name": "Static Parametric CDF Breakout",
+          "status": "SUPERSEDED",
+          "period": "Initial Architecture",
+          "core_mechanics": {
+            "formula": "z = (S_t - K) / (sigma * sqrt(tau)), P(YES) = Phi(z)",
+            "playbooks": [
+              "P1: Early Momentum",
+              "P2: Mid-Cycle Drift",
+              "P3: Late Gamma Snub"
+            ],
+            "execution": "Market Taker Aggression ($0.01-$0.02 Fee)"
+          },
+          "strengths": [
+            "Sub-millisecond mathematical calculation without neural inference latency",
+            "Continuous theoretical probability modeling over time-to-expiry",
+            "Clean Kelly-fractional allocation"
+          ],
+          "failure_modes": [
+            "Mistook opening 60-second Brownian noise (+-$35) for real breakouts at T > 13.5m",
+            "Generated 90.4% of all strategy losses (66 out of 73 P1 losses) in opening 50s",
+            "Zero orderflow, VPIN, or absorption awareness"
+          ],
+          "empirical_metrics": {
+            "win_rate_pct": 58.5,
+            "loss_concentration_in_opening_50s_pct": 90.4,
+            "net_pnl_dollars": 5.68,
+            "total_p1_trades": 159
+          }
+        },
+        {
+          "version": "v2.0-multi-asset-dynamic-moats",
+          "name": "Multi-Asset Basket & Volatility Moats",
+          "status": "SUPERSEDED",
+          "period": "Multi-Asset Expansion",
+          "core_mechanics": {
+            "supported_assets": [
+              "BTC",
+              "ETH",
+              "SOL",
+              "DOGE",
+              "GOLD",
+              "HYPER"
+            ],
+            "formula": "moat = clamp(1.15 * min_diff, z_asset * vol * sqrt(tau), 2.15 * min_diff)",
+            "execution": "Asset-calibrated minimum diffs and volatility scaling"
+          },
+          "strengths": [
+            "Eliminated hardcoded dollar moats across heterogeneous assets",
+            "Adapts dynamically to quiet markets vs high volatility regimes",
+            "Enabled multi-asset rotation while maintaining single active position"
+          ],
+          "failure_modes": [
+            "Still vulnerable to early-cycle entry if volatility spike widened the strike spread",
+            "Gold contracts experienced news blackout slippage during US economic data releases"
+          ],
+          "empirical_metrics": {
+            "win_rate_pct": 63.0,
+            "net_pnl_dollars": 40.68
+          }
+        },
+        {
+          "version": "v3.0-profit-harvesting-suite",
+          "name": "Full Capital Defense & Profit Harvesting",
+          "status": "SUPERSEDED",
+          "period": "Capital Protection Overhaul",
+          "core_mechanics": {
+            "take_profit_ceiling": "92c - 95c mandatory early exit",
+            "trailing_ratchet": "8c - 10c buffer below high-water mark bid",
+            "breakeven_armor": "Locks exit price at entry if peak bid >= 85c",
+            "dynamic_reversal_decay": "Decays required exit conviction 85% -> 50% as tau -> 0",
+            "spot_velocity_front_run": "Exits immediately if |Delta S_3s| > $15.00"
+          },
+          "strengths": [
+            "Harvested profits at 88c-92c before late-cycle binary collapse",
+            "Salvaged profitable runs that previously suffered sudden reversal at settlement",
+            "Dynamic reversal curve protected capital in final 120 seconds"
+          ],
+          "failure_modes": [
+            "Taker exit fee drag (-$0.01/contract) when multiple early exits trigger",
+            "Did not prevent bad entries; only managed bad entries after the fact"
+          ],
+          "empirical_metrics": {
+            "salvaged_trades_rate_pct": 28.5,
+            "max_drawdown_dollars": 8.26
+          }
+        },
+        {
+          "version": "v4.0-discount-sniper-maker-armor",
+          "name": "Discount Sniper & Micro-Bankroll Sizing Armor",
+          "status": "SUPERSEDED",
+          "period": "Pre-Overnight Sizing Audit",
+          "core_mechanics": {
+            "entry_type": "Resting Maker Limit Orders at 48c - 52c sweetspot",
+            "fee_structure": "$0.00 Maker Fee (Zero CFTC exchange taker fee drag)",
+            "sizing_cap": "Strictly 1 Contract for Bankrolls < $75 ($0.51 max risk)",
+            "cycle_lock": "1-Trade-Per-Cycle In-Flight Intent Synchronous Lock",
+            "anti_wash_trading": "LiveCoordinator synchronous opposing side block"
+          },
+          "strengths": [
+            "Permanently eliminated inverted risk/reward traps (buying at > 65c)",
+            "Zero fee drag on entry saves $0.01 - $0.02 per contract round-trip",
+            "Preserved account capital flawlessly: account never dipped below $16.47",
+            "CFTC compliant: 100% immune to wash trading violations"
+          ],
+          "failure_modes": [
+            "Resting maker limit orders sometimes left unfilled if spot moves away rapidly",
+            "Still permitted early entry at T = 13.5m if maker limit was touched"
+          ],
+          "empirical_metrics": {
+            "capital_preservation_efficiency_pct": 100.0,
+            "account_balance_dollars": 17.4948,
+            "maker_fill_rate_pct": 82.4
+          }
+        },
+        {
+          "version": "v5.0-anti-breakout-triad",
+          "name": "The Anti-False Breakout Triad (Current Live)",
+          "status": "ACTIVE_LIVE",
+          "period": "Current Deployment (2026-09-12)",
+          "core_mechanics": {
+            "layer_1_quarantine": "90s Opening Cycle Blackout (T_rem <= 810s for 15M; T_rem <= 270s for 5M)",
+            "layer_2_onnx_veto": "Brain 1 QuoLas Nano Microscope 28-dimensional microstructure tensor",
+            "onnx_features": [
+              "OFI L1/5/15",
+              "CVD 5m",
+              "VPIN PBC",
+              "Bid/Ask Absorption",
+              "Spatial Imbalance (alpha=0.425)"
+            ],
+            "veto_rules": [
+              "VPIN score > 0.70 -> VETO",
+              "BUY YES proposed but ONNX != LONG -> VETO",
+              "BUY NO proposed but ONNX != SHORT -> VETO"
+            ],
+            "layer_3_macro_alignment": "1H Bitcoin Trend & 5m HMM Markov Consensus"
+          },
+          "strengths": [
+            "Eliminates 90.4% of all historical false breakout losses (66 out of 73 saved)",
+            "Raises strategy win rate from 64.4% to 74.7% (+10.3 percentage points)",
+            "Catches 80.0% of historical losses in tick-level orderbook replay",
+            "Reduces transaction churn by 64% while maintaining 87% of net dollar PnL",
+            "Lowest portfolio max drawdown ($5.76 - $7.52)"
+          ],
+          "failure_modes": [
+            "May occasionally veto rare opening runaway momentum spikes (trade-off accepted for 74.7% consistency)"
+          ],
+          "empirical_metrics": {
+            "projected_win_rate_pct": 74.7,
+            "losses_eliminated_count": 66,
+            "max_drawdown_dollars": 7.52,
+            "onnx_microstructure_loss_rejection_rate_pct": 80.0
+          }
+        }
+      ]
+    },
+    "bot_2_kalshi_brain": {
+      "bot_id": "kalshi_brain_bot",
+      "display_name": "Kalshi Microstructure Brain",
+      "lane": "Lane 3 (Simulation / Research)",
+      "target_asset": "BTC",
+      "status": "INCUBATING",
+      "core_mechanics": {
+        "focus": "CLOB depth imbalance, retail flow toxicity, and market maker spread capture"
+      }
+    },
+    "bot_3_standalone_macro_hmm": {
+      "bot_id": "standalone_macro_hmm",
+      "display_name": "Standalone Macro HMM Regime Bot",
+      "lane": "Lane 2 (Shadow / Paper on Port 8003)",
+      "target_asset": "BTC",
+      "status": "ACTIVE_SHADOW",
+      "current_active_iteration": "v1.0-gaussian-hmm-consensus",
+      "core_mechanics": {
+        "model": "4-State Gaussian Hidden Markov Model (Bull Trend, Bear Trend, Chop, High Volatility)",
+        "window": "5-minute rolling bars over 24-hour lookback",
+        "action": "Only permits breakout entries when Markov State == Trend; strictly mandates WAIT in Chop"
+      },
+      "strengths": [
+        "100% capital preservation overnight ($250.00 paper equity preserved with 0 bad trades)",
+        "Accurately detected overnight ranging regime and held fire"
+      ]
+    }
+  }
+}

@@ -173,3 +173,88 @@ def test_server_blocks_uncertified_bot_switch():
     resp_invalid = client.post("/api/bot/strategy/select", json={"strategy_id": "non_existent_bot"})
     assert resp_invalid.status_code == 400
 
+
+def test_seal_of_excellence_baseline_authorization(auditor):
+    b1 = ThreeStepDominationBot()
+    rep = auditor.audit_bot("3_step_domination_bot", b1, mode="live")
+    assert rep.is_certified is True
+    assert rep.seal is not None
+    assert rep.seal.seal_status == "SEALED_EXCELLENT"
+    assert rep.seal.live_trading_authorized is True
+    assert rep.seal.council_signoff == "COUNCIL-SANCTIONED-BASELINE-V3.2"
+    assert auditor.has_seal_of_excellence("3_step_domination_bot") is True
+
+
+def test_candidate_bots_held_in_incubation(auditor):
+    b2 = Dominion2Bot()
+    rep2 = auditor.audit_bot("dominion_2_bot", b2, mode="simulated")
+    assert rep2.is_certified is True
+    assert rep2.seal.seal_status == "IN_INCUBATION"
+    assert rep2.seal.live_trading_authorized is False
+    assert auditor.has_seal_of_excellence("dominion_2_bot") is False
+
+    b3 = MacroTrendDominionBot()
+    rep3 = auditor.audit_bot("macro_trend_dominion", b3, mode="simulated")
+    assert rep3.is_certified is True
+    assert rep3.seal.seal_status == "IN_INCUBATION"
+    assert rep3.seal.live_trading_authorized is False
+    assert auditor.has_seal_of_excellence("macro_trend_dominion") is False
+
+
+def test_live_mode_blocks_uncalibrated_bot(auditor):
+    b2 = Dominion2Bot()
+    # In live mode, candidate bot without 30 cycles fails Pillar 5
+    rep = auditor.audit_bot("dominion_2_bot", b2, mode="live")
+    assert rep.is_certified is False
+    assert rep.status == "BLOCKED"
+    assert rep.seal.seal_status == "IN_INCUBATION"
+    assert rep.seal.live_trading_authorized is False
+    assert any("Insufficient statistical sample" in r for r in rep.to_dict()["failure_reasons"])
+
+
+def test_live_coordinator_seal_veto():
+    from kalshi_sim.live_coordinator import LiveCoordinator
+    coord = LiveCoordinator()
+
+    # Candidate bot without seal is strictly vetoed in live mode
+    permitted, reason = coord.check_trade_permission(
+        ticker="KXBTC15M-TEST",
+        proposed_side="yes",
+        bot_id="macro_trend_dominion",
+        requested_contracts=1,
+        is_live=True,
+    )
+    assert permitted is False
+    assert "SEAL OF EXCELLENCE VETO" in reason
+
+    # Permitted in simulation / shadow incubation mode
+    permitted_paper, _ = coord.check_trade_permission(
+        ticker="KXBTC15M-TEST",
+        proposed_side="yes",
+        bot_id="macro_trend_dominion",
+        requested_contracts=1,
+        is_live=False,
+    )
+    assert permitted_paper is True
+
+    # 3-Step Dominion is authorized for live
+    permitted_b1, _ = coord.check_trade_permission(
+        ticker="KXBTC15M-TEST",
+        proposed_side="yes",
+        bot_id="3_step_domination_bot",
+        requested_contracts=1,
+        is_live=True,
+    )
+    assert permitted_b1 is True
+
+
+def test_server_bot_seal_status_endpoint():
+    client = TestClient(app)
+    resp = client.get("/api/bot/seal/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "active_strategy_bot" in data
+    assert "seals" in data
+    assert "3_step_domination_bot" in data["seals"]
+    assert data["seals"]["3_step_domination_bot"]["live_trading_authorized"] is True
+

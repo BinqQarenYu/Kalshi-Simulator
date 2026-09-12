@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from kalshi_sim.portfolio import Portfolio
-from kalshi_sim.schemas import MarketInfo, Position, SettlementResult, TickerUpdate
+from kalshi_sim.schemas import MarketInfo, OrderSide, Position, SettlementResult, TickerUpdate
 
 logger = logging.getLogger(__name__)
 
@@ -160,3 +160,63 @@ def run_settlement_cycle(
 
     logger.info("Settled %d positions in cycle", len(results))
     return results
+
+
+def evaluate_twap_settlement(
+    target_strike: Decimal,
+    twap_60s: Decimal,
+    strike_type: str = "greater",
+) -> bool:
+    """Evaluate whether YES won based on official 60s TWAP settlement parity.
+
+    Args:
+        target_strike: Contract strike price.
+        twap_60s: CME CF Benchmarks 60-second trailing TWAP index price.
+        strike_type: 'greater' (default) or 'less'.
+
+    Returns:
+        True if YES outcome won, False if NO won.
+    """
+    if strike_type == "less":
+        return twap_60s <= target_strike
+    return twap_60s >= target_strike
+
+
+def calculate_twap_pnl(
+    side: OrderSide | str,
+    entry_price: Decimal,
+    contracts: int,
+    target_strike: Decimal,
+    twap_60s: Decimal,
+    fee: Decimal = Decimal("0.00"),
+    strike_type: str = "greater",
+) -> tuple[str, Decimal, Decimal]:
+    """Calculate exact settlement outcome, gross PnL, and net PnL using 60s TWAP parity.
+
+    All math is evaluated in strict Decimal arithmetic (zero IEEE 754 float drift).
+
+    Args:
+        side: Position side ('YES' or 'NO').
+        entry_price: Average entry fill price ($0.01 - $0.99).
+        contracts: Number of contracts (positive int).
+        target_strike: Contract strike to beat.
+        twap_60s: Trailing 60s settlement TWAP.
+        fee: Total transaction fee paid on entry.
+        strike_type: 'greater' or 'less'.
+
+    Returns:
+        Tuple of (outcome ("WIN" | "LOSS"), gross_pnl, net_pnl).
+    """
+    yes_won = evaluate_twap_settlement(target_strike, twap_60s, strike_type)
+    side_str = side.value.upper() if isinstance(side, OrderSide) else str(side).upper()
+    is_win = (side_str == "YES" and yes_won) or (side_str == "NO" and not yes_won)
+
+    c_dec = Decimal(str(contracts))
+    if is_win:
+        gross_pnl = (Decimal("1.00") - entry_price) * c_dec
+        net_pnl = gross_pnl - fee
+        return "WIN", gross_pnl, net_pnl
+    else:
+        gross_pnl = -entry_price * c_dec
+        net_pnl = gross_pnl
+        return "LOSS", gross_pnl, net_pnl

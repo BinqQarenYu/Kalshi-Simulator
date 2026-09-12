@@ -42,6 +42,18 @@ ASSET_TIMEFRAME_SERIES: dict[CryptoAsset, dict[Timeframe, list[str]]] = {
         Timeframe.ONE_HOUR: ["KXDOGED", "KXDOGE"],
         Timeframe.DAILY: ["KXDOGE"],
     },
+    CryptoAsset.GOLD: {
+        Timeframe.FIVE_MIN: ["KXGOLD5M", "KXGOLD15M"],
+        Timeframe.FIFTEEN_MIN: ["KXGOLD15M"],
+        Timeframe.ONE_HOUR: ["KXGOLDH", "KXGOLD"],
+        Timeframe.DAILY: ["KXGOLD"],
+    },
+    CryptoAsset.HYPER: {
+        Timeframe.FIVE_MIN: ["KXHYPE5M", "KXHYPE15M"],
+        Timeframe.FIFTEEN_MIN: ["KXHYPE15M"],
+        Timeframe.ONE_HOUR: ["KXHYPEH", "KXHYPE"],
+        Timeframe.DAILY: ["KXHYPE"],
+    },
 }
 
 # Backwards-compatible module-level constant for BTC

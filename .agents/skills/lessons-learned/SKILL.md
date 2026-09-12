@@ -1,4 +1,4 @@
-﻿---
+---
 name: lessons-learned
 description: Institutional trading lessons learned, incident post-mortems, anti-regression patterns, and hard-coded invariants for Kalshi quantitative trading.
 ---
@@ -22,6 +22,8 @@ This document is the authoritative institutional repository of all quantitative 
 - [Lesson 7: Deterministic Polling vs Fragile Sleeps in Async Testing](#lesson-7-deterministic-polling-vs-fragile-sleeps-in-async-testing)
 - [Lesson 8: Strict IEEE-754 Floating-Point Disallowance](#lesson-8-strict-ieee-754-floating-point-disallowance)
 - [Lesson 9: Multi-Asset Context Switching Isolation](#lesson-9-multi-asset-context-switching-isolation)
+- [Lesson 10: Multi-Asset Order Sweep & Take-Profit Fill Isolation (The 12-Order Auto-Cancel Loop)](#lesson-10-multi-asset-order-sweep--take-profit-fill-isolation-the-12-order-auto-cancel-loop)
+- [Lesson 11: Zero Static Mock Data & Anti-Hallucination Dashboard Invariant (Single Source of Truth)](#lesson-11-zero-static-mock-data--anti-hallucination-dashboard-invariant-single-source-of-truth)
 
 ---
 
@@ -139,3 +141,42 @@ $$\begin{aligned}
   1. Capture `target_ticker = self.active_ticker` as a local variable within the evaluation frame.
   2. Release any pending in-flight locks for the previous asset.
   3. Sweep and cancel resting orders from the previous asset to prevent cross-asset order accumulation.
+
+---
+
+### Lesson 10: Multi-Asset Order Sweep & Take-Profit Fill Isolation (The 12-Order Auto-Cancel Loop)
+
+#### The Incident (2026-09-11)
+* **Symptom**: During live trading on `KXBTC15M-26SEP110615-15`, the user observed the engine submit and cancel **12 limit sell orders in 66 seconds**, spamming the Kalshi exchange order activity tab and SQLite trade log.
+* **Forensic Root Cause**:
+  1. The bot was long 1 BTC contract. While the trade was maturing, the engine focus switched to evaluate Gold (`KXGOLD...`).
+  2. At $T=119\text{s}$, the BTC position triggered Late-Cycle Harvest (Take Profit) and dispatched a limit sell order @ $0.9040.
+  3. Meanwhile, the background `_resting_order_watchdog_loop` ran a continuous finished event sweep checking:
+     `if oid and self.active_ticker and t != self.active_ticker: cancel_order(oid)`
+  4. Because `self.active_ticker` was currently `KXGOLD...`, the watchdog saw the resting sell on `KXBTC...`, mistakenly deemed it an obsolete finished event, and auto-cancelled it within 2 seconds.
+  5. Because the sell order was cancelled before filling, Kalshi still held the 1 BTC position. On the next tick, Take-Profit fired again, placed another sell, and the sweep cancelled it again—repeating **12 times**.
+  6. Furthermore, Take-Profit was enqueuing `take_profit_exit` records to SQLite immediately upon order dispatch rather than awaiting verified fill confirmation.
+* **Hardened Architecture & Invariants**:
+  1. **Multi-Asset Protected Ticker Shield**: Any background sweep or watchdog routine must dynamically aggregate a `protected_tickers` set:
+     - All tickers in `self.active_positions` (never sweep orders on open positions being actively managed or exited).
+     - All tickers in `self.active_resting_orders` (never sweep unexpired limit orders).
+     - All unexpired market cycles across all assets in `self.asset_markets` ($T_{\text{rem}} > 45\text{s}$).
+     - `self.active_ticker` if $T_{\text{rem}} > 45\text{s}$.
+     Resting orders are ONLY cancelled if their ticker is strictly outside `protected_tickers` and the contract is truly finished.
+  2. **Take-Profit De-duplication**: Before dispatching a take-profit order, the engine checks `any(o.get('ticker') == pos_ticker and o.get('action') == 'sell' for o in self.active_resting_orders.values())` to prevent duplicate exits while one is resting.
+  3. **Fill-Gated DB & PnL Accounting**: Take-profit limit orders placed on the book are registered in `self.active_resting_orders`. PnL updates and SQLite `take_profit_exit` entries are ONLY committed once the exchange confirms the fill (`open_orders` sweep or WebSocket fill event).
+
+---
+
+### Lesson 11: Zero Static Mock Data & Anti-Hallucination Dashboard Invariant (Single Source of Truth)
+
+#### The Incident (2026-09-12)
+* **Symptom**: The user observed a sharp contradiction on the institutional dashboard: Mother Dash Factory Matrix displayed Bot 3 (Macro Trend Dominion) with a **67.8% win rate across 310 events**, while the council report and live running daemon on Port 8003 (`standalone_macro.py`) reported 5 losses, 1 win (16.7% win rate, -$0.67 PnL). The user understandably perceived this as an AI hallucination.
+* **Forensic Root Cause**:
+  1. During frontend prototyping of `ParentHub.tsx`, hardcoded static placeholder numbers (`events: 310, winRate: '67.8%', profitFactor: '1.52'`) were written into `benchmarkingModels` with an empty `useMemo` dependency array (`[]`).
+  2. Mother server (`server.py` on Port 8000) only polled Port 8001 (`standalone_bot.py`), while Port 8002 (`standalone_onnx.py`) and Port 8003 (`standalone_macro.py`) ran isolated daemons without upstream telemetry aggregation.
+  3. Consequently, static mock numbers masqueraded as live metrics on the user's primary decision dashboard.
+* **Hardened Architecture & Invariants**:
+  1. **Strict Zero Mock Data in Production UI**: No static placeholder percentages, simulated event counts, or mock trade records are ever permitted in trading dashboards.
+  2. **Multi-Port Telemetry Aggregator**: Mother server (`server.py` on Port 8000) continuously synchronizes with all active bot daemons (Port 8001 Live, Port 8002 Dual ONNX Shadow, Port 8003 Macro Dominion Shadow) via `standalone_sync_loop` and broadcasts live empirical statistics (`settled_cycles`, `today_wins`, `today_losses`, `today_win_rate`, `today_pnl`) down the WebSocket.
+  3. **Honest Empty State (`—` / `AWAITING TELEMETRY`)**: If a bot daemon is starting up or has zero settled cycles, the UI must render `—` (dash) or `AWAITING TELEMETRY`, never a fabricated percentage.

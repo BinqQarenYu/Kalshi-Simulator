@@ -283,6 +283,9 @@ class KalshiLiveOrderClient:
         endpoint = "/trade-api/v2/portfolio/events/orders"
         url = f"{self.base_url}/portfolio/events/orders"
 
+        if price_dollars is not None and not isinstance(price_dollars, Decimal):
+            price_dollars = Decimal(str(price_dollars))
+
         order_uuid = client_order_id or str(uuid.uuid4())
         
         # In Kalshi's V2 single-book architecture:

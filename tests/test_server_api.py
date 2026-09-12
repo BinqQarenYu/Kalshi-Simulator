@@ -9,6 +9,11 @@ from kalshi_sim.server import app, _build_full_state_payload
 
 @pytest.fixture
 def client() -> TestClient:
+    from kalshi_sim.server import state
+    if getattr(state, "guardrails_agent", None):
+        p = getattr(state.sim_agent, "_portfolio", None) or getattr(state, "portfolio", None)
+        cur_bal = getattr(p, "equity", state.starting_capital) if p else state.starting_capital
+        state.guardrails_agent.reset_circuit_breaker(cur_bal)
     return TestClient(app)
 
 
@@ -91,6 +96,8 @@ def test_reset_portfolio_endpoint(client: TestClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["capital"] == 15000.0
+    from kalshi_sim.server import state
+    client.post("/api/reset", json={"capital": float(state.starting_capital)})
 
 
 def test_place_and_close_order_endpoint(client: TestClient) -> None:
@@ -393,9 +400,9 @@ def test_supported_assets_endpoint(client: TestClient) -> None:
     data = resp.json()
     assert "active_asset" in data
     assert "assets" in data
-    assert len(data["assets"]) == 4
+    assert len(data["assets"]) == 6
     asset_ids = [a["id"] for a in data["assets"]]
-    assert set(asset_ids) == {"BTC", "ETH", "SOL", "DOGE"}
+    assert set(asset_ids) == {"BTC", "ETH", "SOL", "DOGE", "GOLD", "HYPER"}
 
     # Verify BTC asset config values
     btc_item = next(a for a in data["assets"] if a["id"] == "BTC")
@@ -441,23 +448,25 @@ def test_select_active_asset_endpoint(client: TestClient) -> None:
 
 
 def test_bot_arm_disarm_panic_endpoints(client: TestClient) -> None:
-    # 1. Arm
-    resp_arm = client.post("/api/bot/arm")
-    assert resp_arm.status_code == 200
-    assert resp_arm.json()["status"] == "ARMED"
-    assert resp_arm.json()["armed"] is True
+    from unittest.mock import patch
+    with patch("kalshi_sim.server.get_active_lock_holder", return_value=None):
+        # 1. Arm
+        resp_arm = client.post("/api/bot/arm")
+        assert resp_arm.status_code == 200
+        assert resp_arm.json()["status"] == "ARMED"
+        assert resp_arm.json()["armed"] is True
 
-    # 2. Disarm
-    resp_disarm = client.post("/api/bot/disarm")
-    assert resp_disarm.status_code == 200
-    assert resp_disarm.json()["status"] == "DISARMED"
-    assert resp_disarm.json()["armed"] is False
+        # 2. Disarm
+        resp_disarm = client.post("/api/bot/disarm")
+        assert resp_disarm.status_code == 200
+        assert resp_disarm.json()["status"] == "DISARMED"
+        assert resp_disarm.json()["armed"] is False
 
-    # 3. Panic
-    resp_panic = client.post("/api/bot/panic")
-    assert resp_panic.status_code == 200
-    assert resp_panic.json()["status"] == "PANIC_EXECUTED"
-    assert resp_panic.json()["armed"] is False
+        # 3. Panic
+        resp_panic = client.post("/api/bot/panic")
+        assert resp_panic.status_code == 200
+        assert resp_panic.json()["status"] == "PANIC_EXECUTED"
+        assert resp_panic.json()["armed"] is False
 
 
 def test_mother_standalone_single_source_of_truth_sync(client: TestClient) -> None:

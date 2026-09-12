@@ -58,6 +58,7 @@ from kalshi_sim.ml.macro_trend_dominion.schemas import MacroDominionDecision
 from kalshi_sim.ml.quolas_core.candle_builder import CandleBuilder
 from kalshi_sim.ml.quolas_core.hmm_brain import HMMBrain
 from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
+from kalshi_sim.order_simulator import OrderSimulator
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.process_lock import TradingEngineLock, is_pid_running, get_active_lock_holder
 from kalshi_sim.schemas import (
@@ -187,14 +188,15 @@ class StandaloneMacroEngine:
         )
         self.guardrails.authorize_live_bot("macro_trend_dominion")
         self.auditor = BotDeploymentAuditor()
+        self.coordinator = LiveCoordinator()
         self.orderbook = OrderBookManager(enforce_consecutive_seq=False)
 
-        # 3. Pre-Flight 4-Pillar Certification Audit
+        # 3. Pre-Flight 5-Pillar Certification Audit & Seal of Excellence Gate
         mode_str = "live" if is_live else "simulated"
         audit_rep = self.auditor.audit_bot("macro_trend_dominion", self.bot, mode=mode_str)
-        if is_live and not audit_rep.is_certified:
+        if is_live and (not audit_rep.is_certified or not self.auditor.has_seal_of_excellence("macro_trend_dominion")):
             logger.warning(
-                "⚠️ [AUDIT WARNING] Bot 3 not fully certified for LIVE trading yet. Downgrading to Lane 2 SHADOW mode."
+                "🛡️ [SEAL OF EXCELLENCE GATE] Bot 3 does not hold the Seal of Excellence for LIVE trading yet (Status: IN_INCUBATION). Downgrading to Lane 2 SHADOW mode."
             )
             self.is_live = False
             self.execution_mode = "SHADOW"
@@ -381,8 +383,8 @@ class StandaloneMacroEngine:
                 self.cf_sync = CFBenchmarksSync(
                     api_key_id=self.api_key_id,
                     private_key_path=self.private_key_path,
-                    ws_url=self.ws_url,
-                    rest_base=self.rest_base,
+                    ws_url=PROD_WS_URL,
+                    rest_base=PROD_REST_BASE,
                     on_asset_price_update=_on_cf_asset_update,
                 )
                 await self.cf_sync.start()
@@ -588,9 +590,48 @@ class StandaloneMacroEngine:
                                 is_live=self.is_live,
                             )
                             if is_allowed:
-                                self._execute_trade(dec, cycle_key)
+                                is_permitted, coord_reason = self.coordinator.check_trade_permission(
+                                    ticker=cycle_key,
+                                    proposed_side=dec.call,
+                                    bot_id="macro_trend_dominion",
+                                    requested_contracts=approved_size,
+                                    is_live=self.is_live,
+                                )
+                                if not is_permitted:
+                                    logger.warning("🛡️ [COORDINATOR / SEAL VETO] %s on %s: %s", dec.call.upper(), cycle_key, coord_reason)
+                                else:
+                                    self._execute_trade(dec, cycle_key)
                             else:
                                 logger.info("🛡️ [GUARDRAIL VETO] %s | %s", cycle_key, g_reason)
+
+                # Process and match resting orders against inside quotes and expiration window
+                for oid, order in list(self.active_resting_orders.items()):
+                    if order.get("status") == "RESTING":
+                        lim_price = Decimal(str(order["limit_price_cents"])) / Decimal("100")
+                        side = order["side"]
+                        is_filled = False
+                        fill_p = lim_price
+                        if side == "YES" and self.best_yes_ask is not None and lim_price >= self.best_yes_ask:
+                            is_filled = True
+                            fill_p = min(lim_price, self.best_yes_ask)
+                        elif side == "NO" and self.best_no_ask is not None and lim_price >= self.best_no_ask:
+                            is_filled = True
+                            fill_p = min(lim_price, self.best_no_ask)
+
+                        if is_filled:
+                            order["status"] = "FILLED"
+                            order["fill_price"] = fill_p
+                            order["fee"] = OrderSimulator.calculate_kalshi_taker_fee(fill_p, order["contracts"])
+                            logger.info(
+                                "🎯 [RESTING MATCHED & FILLED] %s | %s @ $%s (fee: $%s)",
+                                order["cycle"], side, fill_p, order["fee"]
+                            )
+                        elif t_rem <= 90.0:
+                            order["status"] = "EXPIRED"
+                            logger.info(
+                                "⏰ [RESTING ORDER EXPIRED UNFILLED] %s | %s @ %dc unfilled (T_rem <= 90s)",
+                                order["cycle"], side, order["limit_price_cents"]
+                            )
 
                 await asyncio.sleep(1.0)
             except asyncio.CancelledError:
@@ -665,9 +706,18 @@ class StandaloneMacroEngine:
                         )
 
                     for oid, order in list(self.active_resting_orders.items()):
+                        if order.get("status") != "FILLED":
+                            logger.info(
+                                "ℹ️ [SETTLEMENT SKIPPED] Order %s on %s was %s (unfilled). $0.00 PnL recorded.",
+                                oid, order.get("cycle"), order.get("status")
+                            )
+                            continue
+
                         is_win = (order["side"] == actual_outcome)
-                        price = Decimal(str(order["limit_price_cents"])) / Decimal("100")
-                        pnl = (Decimal("1.00") - price) if is_win else -price
+                        price = order.get("fill_price") or (Decimal(str(order["limit_price_cents"])) / Decimal("100"))
+                        fee = order.get("fee", Decimal("0.00"))
+                        gross_pnl = (Decimal("1.00") - price) if is_win else -price
+                        pnl = gross_pnl - fee if is_win else gross_pnl
 
                         self.settled_cycles += 1
                         if is_win:

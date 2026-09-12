@@ -20,6 +20,7 @@ def test_first_mover_permission(temp_coordinator: LiveCoordinator):
         proposed_side="yes",
         bot_id="dominion",
         requested_contracts=1,
+        is_live=False,
     )
     assert is_ok is True
     assert "FIRST_MOVER" in reason
@@ -42,6 +43,7 @@ def test_anti_wash_trading_opposing_veto(temp_coordinator: LiveCoordinator):
         proposed_side="no",
         bot_id="the_onnx_strategy",
         requested_contracts=1,
+        is_live=False,
     )
     assert is_ok is False
     assert "ANTI-WASH TRADING VETO" in reason
@@ -65,6 +67,7 @@ def test_same_direction_cooperative_allowance(temp_coordinator: LiveCoordinator)
         proposed_side="yes",
         bot_id="the_onnx_strategy",
         requested_contracts=1,
+        is_live=False,
     )
     assert is_ok is True
     assert "COOPERATIVE" in reason
@@ -84,6 +87,7 @@ def test_same_direction_cooperative_allowance(temp_coordinator: LiveCoordinator)
         proposed_side="yes",
         bot_id="third_bot",
         requested_contracts=1,
+        is_live=False,
     )
     assert is_ok_3 is False
     assert "COMBINED EXPOSURE CAP VETO" in reason_3
@@ -107,6 +111,7 @@ def test_cycle_expiry_reset(temp_coordinator: LiveCoordinator):
         proposed_side="no",
         bot_id="the_onnx_strategy",
         requested_contracts=1,
+        is_live=False,
     )
     assert is_ok is True
     assert "EXPIRED" in reason

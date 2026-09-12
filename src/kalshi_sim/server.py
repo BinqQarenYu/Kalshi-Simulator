@@ -237,6 +237,10 @@ class ServerState:
         self.cf_sync: Optional[CFBenchmarksSync] = None
         self._standalone_data: Optional[dict[str, Any]] = None
         self._last_standalone_sync: float = 0.0
+        self._standalone_onnx_data: Optional[dict[str, Any]] = None
+        self._last_standalone_onnx_sync: float = 0.0
+        self._standalone_macro_data: Optional[dict[str, Any]] = None
+        self._last_standalone_macro_sync: float = 0.0
         self.standalone_sync_task: Optional[asyncio.Task] = None
 
 
@@ -655,6 +659,28 @@ async def standalone_sync_loop() -> None:
                                 })
 
                             state.is_dirty = True
+
+                # 2. Sync Bot 2 (Port 8002 - Dual-Brain ONNX Shadow)
+                try:
+                    async with session.get("http://127.0.0.1:8002/api/state", timeout=aiohttp.ClientTimeout(total=0.8)) as resp2:
+                        if resp2.status == 200:
+                            data2 = await resp2.json()
+                            state._standalone_onnx_data = data2
+                            state._last_standalone_onnx_sync = time.monotonic()
+                            state.is_dirty = True
+                except Exception as exc:
+                    logger.debug("[STANDALONE ONNX BOT 2 SYNC] Polling standby: %s", exc)
+
+                # 3. Sync Bot 3 (Port 8003 - Macro Trend Dominion Shadow)
+                try:
+                    async with session.get("http://127.0.0.1:8003/api/state", timeout=aiohttp.ClientTimeout(total=0.8)) as resp3:
+                        if resp3.status == 200:
+                            data3 = await resp3.json()
+                            state._standalone_macro_data = data3
+                            state._last_standalone_macro_sync = time.monotonic()
+                            state.is_dirty = True
+                except Exception as exc:
+                    logger.debug("[STANDALONE MACRO BOT 3 SYNC] Polling standby: %s", exc)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -1911,6 +1937,8 @@ async def start_background_simulation() -> None:
         bot_auditor=state.bot_auditor,
         hmm_brain=state.hmm_brain,
     )
+    if getattr(state, "guardrails_agent", None):
+        state.guardrails_agent.reset_circuit_breaker(state.starting_capital)
     state.sim_agent.active_strategy_bot = state.active_strategy_bot
     holder = get_active_lock_holder()
     if (holder and holder[1] != os.getpid()) or state.active_strategy_bot in ("dual_onnx", "the_onnx_strategy", "onnx_macro_v2", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
@@ -2622,6 +2650,15 @@ async def place_kalshi_live_order(req: LiveOrderRequest) -> LiveOrderResponse:
             detail=f"Live orders blocked: 24/7 Standalone Bot ({holder[0]}, PID: {holder[1]}) is currently running."
         )
 
+    # Ensure Active Strategy Holds the Seal of Excellence for Live Trading
+    active_bot = state.active_strategy_bot
+    if not state.bot_auditor.has_seal_of_excellence(active_bot):
+        logger.error("[SEAL OF EXCELLENCE VETO] Live order blocked: Strategy '%s' lacks active live seal authorization.", active_bot)
+        raise HTTPException(
+            status_code=422,
+            detail=f"SEAL OF EXCELLENCE VETO: Strategy '{active_bot}' lacks active live order routing authorization. 5-pillar passing certificate required."
+        )
+
     # Acquire rate limiter token before exchange communication
     acquired = await kalshi_rate_limiter.acquire(1.0, timeout=5.0)
     if not acquired:
@@ -2850,6 +2887,16 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
     # LIVE TRADING EXECUTION INTERCEPT (Real Kalshi Account Routing & Balance Freeze)
     # =========================================================================
     if req.execution_mode == "live":
+        # Strict Seal of Excellence Pre-Flight Live Authorization Gate
+        target_bot = req.bot_type or state.active_strategy_bot
+        if not state.bot_auditor.has_seal_of_excellence(target_bot):
+            logger.error("[SEAL OF EXCELLENCE VETO] Live order rejected for '%s': Strategy lacks active live seal.", target_bot)
+            return {
+                "success": False,
+                "status": "seal_of_excellence_veto",
+                "reason": f"SEAL OF EXCELLENCE VETO: Strategy '{target_bot}' has not been granted the Seal of Excellence for live order routing.",
+            }
+
         # Strict 5M Live Trading Prohibition Invariant
         is_5m_target = (("5M" in ticker.upper() and "15M" not in ticker.upper()) or "5MIN" in ticker.upper()) or state.active_timeframe == Timeframe.FIVE_MIN
         if is_5m_target:
@@ -3608,7 +3655,16 @@ async def sweep_orders_endpoint(force: bool = False) -> dict[str, Any]:
         t_rem = float(state.sim_agent.time_to_expiry_s)
 
     is_active_expired = t_rem <= 45.0
-    effective_keep = None if (force or is_active_expired) else active_ticker
+    protected_tickers: set[str] = set()
+    if not force:
+        if active_ticker and not is_active_expired:
+            protected_tickers.add(active_ticker)
+        # Protect tickers with active portfolio positions
+        if state.live_portfolio and "positions" in state.live_portfolio:
+            for p in state.live_portfolio["positions"]:
+                pos_t = p.get("ticker")
+                if pos_t:
+                    protected_tickers.add(pos_t)
 
     # If exchange order client is available, sweep live exchange open orders
     if client and hasattr(client, "get_open_orders"):
@@ -3617,7 +3673,7 @@ async def sweep_orders_endpoint(force: bool = False) -> dict[str, Any]:
             for o in open_orders:
                 t = o.get("ticker")
                 oid = o.get("order_id")
-                if oid and (not effective_keep or t != effective_keep):
+                if oid and (not protected_tickers or t not in protected_tickers):
                     try:
                         success = await client.cancel_order(oid, ticker=t)
                         if success:
@@ -3634,7 +3690,7 @@ async def sweep_orders_endpoint(force: bool = False) -> dict[str, Any]:
         if resting:
             for oid, o_info in list(resting.items()):
                 t = o_info.get("ticker") if isinstance(o_info, dict) else None
-                if not effective_keep or (t and t != effective_keep):
+                if not protected_tickers or (t and t not in protected_tickers):
                     resting.pop(oid, None)
                     if not client:
                         cancelled += 1
@@ -3677,6 +3733,12 @@ class ParametersUpdateRequest(BaseModel):
     gamma_cliff_seconds: Optional[float] = Field(default=None, ge=10.0, le=300.0, description="Gamma cliff late-cycle cutoff in seconds")
     auto_cancel_on_veto: Optional[bool] = Field(default=None, description="Automatically cancel resting orders on veto/cutoff")
     dynamic_volatility_mode: Optional[str] = Field(default=None, description="Volatility mode: REALIZED_ATR or FIXED_14")
+    entry_window_open_minutes: Optional[float] = Field(default=None, ge=1.0, le=14.9, description="Earliest time remaining to enter cycle in minutes")
+    entry_window_close_minutes: Optional[float] = Field(default=None, ge=0.5, le=14.0, description="Latest time remaining to enter and sweep cutoff in minutes")
+    enable_trailing_ratchet: Optional[bool] = Field(default=None, description="Enable high-water mark trailing profit ratchet and breakeven armor")
+    trailing_ratchet_buffer: Optional[float] = Field(default=None, ge=0.02, le=0.25, description="Trailing stop buffer in dollars below peak bid")
+    spot_delta_front_run_threshold: Optional[float] = Field(default=None, ge=0.00001, le=100.0, description="Base rolling spot velocity threshold for 4-regime dynamic fading and pre-emptive front-run exit against orderbook gap")
+    enable_dynamic_reversal_curve: Optional[bool] = Field(default=None, description="Dynamically decay reversal threshold from 85% to 55% as time to expiry nears")
     # Bot 3: Macro Trend Dominion 9 Strategy Dials
     limit_price_cents: Optional[int] = Field(default=None, ge=1, le=89, description="Bot 3 resting order limit price sweet spot (1-89 cents)")
     min_confidence_pct: Optional[float] = Field(default=None, ge=50.0, le=90.0, description="Bot 3 minimum required model confidence percentage (50-90%)")
@@ -3820,6 +3882,190 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
                 if "parameters" in res and isinstance(res["parameters"], dict):
                     res["parameters"][k] = onnx_params.get(k)
     return res
+
+
+# ============================================================================
+# Preset Vault & Configuration Lifecycle Endpoints
+# ============================================================================
+
+from kalshi_sim.preset_manager import get_preset_manager
+
+
+class SavePresetRequest(BaseModel):
+    preset_name: str
+    description: Optional[str] = ""
+    author: Optional[str] = "Operator"
+
+
+class LoadPresetRequest(BaseModel):
+    preset_id: str
+
+
+class ImportPresetRequest(BaseModel):
+    preset_json: Optional[str] = None
+    preset_data: Optional[dict[str, Any]] = None
+    apply_immediately: bool = False
+
+
+@app.get("/api/bot/presets")
+async def get_bot_presets_endpoint() -> dict[str, Any]:
+    """List all presets in the vault and return active preset metadata."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get("http://127.0.0.1:8001/api/bot/presets", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as e:
+            logger.debug("Failed fetching presets from standalone bot: %s", e)
+
+    pm = get_preset_manager()
+    return {
+        "status": "SUCCESS",
+        "presets": pm.list_presets(),
+        "active_preset": pm.get_active_preset_metadata(),
+    }
+
+
+@app.post("/api/bot/presets/save")
+async def save_bot_preset_endpoint(req: SavePresetRequest) -> dict[str, Any]:
+    """Snapshot current parameters into a new preset."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post("http://127.0.0.1:8001/api/bot/presets/save", json=req.model_dump(), timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as e:
+            logger.warning("Failed forwarding preset save to standalone bot: %s", e)
+
+    pm = get_preset_manager()
+    success, msg, data = pm.save_preset(
+        preset_name=req.preset_name,
+        description=req.description or "",
+        author=req.author or "Operator",
+    )
+    if not success:
+        raise HTTPException(status_code=422, detail=msg)
+    state.is_dirty = True
+    return {"status": "SUCCESS", "message": msg, "preset": data}
+
+
+@app.post("/api/bot/presets/load")
+async def load_bot_preset_endpoint(req: LoadPresetRequest) -> dict[str, Any]:
+    """Atomically load and hot-swap parameters from a preset into the engine."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post("http://127.0.0.1:8001/api/bot/presets/load", json=req.model_dump(), timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as e:
+            logger.warning("Failed forwarding preset load to standalone bot: %s", e)
+
+    pm = get_preset_manager()
+    success, msg, data = pm.load_preset(req.preset_id)
+    if not success:
+        raise HTTPException(status_code=422, detail=msg)
+    state.is_dirty = True
+    return {"status": "SUCCESS", "message": msg, "active_preset": pm.get_active_preset_metadata()}
+
+
+@app.post("/api/bot/presets/unload")
+async def unload_bot_preset_endpoint() -> dict[str, Any]:
+    """Revert configuration back to the Council Certified Baseline."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post("http://127.0.0.1:8001/api/bot/presets/unload", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as e:
+            logger.warning("Failed forwarding preset unload to standalone bot: %s", e)
+
+    pm = get_preset_manager()
+    success, msg, data = pm.unload_preset()
+    if not success:
+        raise HTTPException(status_code=422, detail=msg)
+    state.is_dirty = True
+    return {"status": "SUCCESS", "message": msg, "active_preset": pm.get_active_preset_metadata()}
+
+
+@app.post("/api/bot/presets/upload")
+async def upload_bot_preset_endpoint(req: ImportPresetRequest) -> dict[str, Any]:
+    """Validate and import an uploaded preset JSON into the vault."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post("http://127.0.0.1:8001/api/bot/presets/upload", json=req.model_dump(), timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as e:
+            logger.warning("Failed forwarding preset upload to standalone bot: %s", e)
+
+    pm = get_preset_manager()
+    raw_json = req.preset_json
+    if not raw_json and req.preset_data:
+        raw_json = json.dumps(req.preset_data)
+    if not raw_json:
+        raise HTTPException(status_code=400, detail="Missing preset_json or preset_data in request body")
+
+    success, msg, data = pm.import_preset_json(raw_json)
+    if not success:
+        raise HTTPException(status_code=422, detail=msg)
+
+    if req.apply_immediately:
+        pm.load_preset(data["preset_id"])
+
+    state.is_dirty = True
+    return {"status": "SUCCESS", "message": msg, "preset": data}
+
+
+@app.get("/api/bot/presets/export/{preset_id}")
+async def export_bot_preset_endpoint(preset_id: str) -> Response:
+    """Export a preset as a downloadable JSON file."""
+    pm = get_preset_manager()
+    data = pm.export_preset(preset_id)
+    if not data:
+        raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
+    content = json.dumps(data, indent=2)
+    return Response(
+        content=content,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{preset_id}.json"'},
+    )
+
+
+@app.delete("/api/bot/presets/{preset_id}")
+async def delete_bot_preset_endpoint(preset_id: str) -> dict[str, Any]:
+    """Delete a custom preset from the vault."""
+    holder = get_active_lock_holder()
+    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.delete(f"http://127.0.0.1:8001/api/bot/presets/{preset_id}", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception as e:
+            logger.warning("Failed forwarding preset delete to standalone bot: %s", e)
+
+    pm = get_preset_manager()
+    success, msg = pm.delete_preset(preset_id)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    state.is_dirty = True
+    return {"status": "SUCCESS", "message": msg}
 
 
 @app.get("/api/bot/dual-onnx")
@@ -3991,27 +4237,33 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
 
 @app.post("/api/reset")
 async def reset_portfolio(req: ResetRequest) -> dict[str, Any]:
+    portfolios = []
     if state.sim_agent:
-        portfolios = []
         if hasattr(state.sim_agent, "_portfolio_domination"):
             portfolios.append(state.sim_agent._portfolio_domination)
         if hasattr(state.sim_agent, "_portfolio_onnx"):
             portfolios.append(state.sim_agent._portfolio_onnx)
         if not portfolios and hasattr(state.sim_agent, "_portfolio"):
             portfolios.append(state.sim_agent._portfolio)
+    if getattr(state, "portfolio", None) and state.portfolio not in portfolios:
+        portfolios.append(state.portfolio)
 
-        for p in portfolios:
-            p._balance = Decimal(str(req.capital))
-            p._positions.clear()
-            p._fill_history.clear()
-            p._settlement_history.clear()
-            p._total_trades = 0
-            p._wins = 0
-            p._losses = 0
-            p._starting_balance = Decimal(str(req.capital))
-            p._max_drawdown_limit = p._starting_balance * p._max_drawdown_pct
-            p._circuit_breaker_tripped = False
-            p._peak_equity = p._starting_balance
+    for p in portfolios:
+        p._balance = Decimal(str(req.capital))
+        p._positions.clear()
+        p._fill_history.clear()
+        p._settlement_history.clear()
+        p._total_trades = 0
+        p._wins = 0
+        p._losses = 0
+        p._starting_balance = Decimal(str(req.capital))
+        p._max_drawdown_limit = p._starting_balance * p._max_drawdown_pct
+        p._circuit_breaker_tripped = False
+        p._peak_equity = p._starting_balance
+
+    if getattr(state, "guardrails_agent", None):
+        state.guardrails_agent.reset_circuit_breaker(Decimal(str(req.capital)))
+
     return {"success": True, "capital": req.capital}
 
 
@@ -5589,6 +5841,18 @@ async def certify_bot_endpoint(req: CertifyBotRequest) -> dict[str, Any]:
     }
 
 
+@app.get("/api/bot/seal/status")
+async def get_bot_seal_status_endpoint() -> dict[str, Any]:
+    """Retrieve live Seal of Excellence status for all bots and active strategy."""
+    active_strat = state.active_strategy_bot
+    return {
+        "active_strategy_bot": active_strat,
+        "active_strategy_sealed": state.bot_auditor.has_seal_of_excellence(active_strat),
+        "active_seal": state.bot_auditor.get_seal(active_strat).to_dict() if state.bot_auditor.get_seal(active_strat) else None,
+        **state.bot_auditor.get_all_seals(),
+    }
+
+
 # ---------------------------------------------------------------------------
 # System Resource & CPU/Memory Governor Endpoints
 # ---------------------------------------------------------------------------
@@ -6021,6 +6285,67 @@ def _build_full_state_payload() -> dict[str, Any]:
         "parameters": macro_params,
     }
 
+    # Overlay live ground truth from Bot 2 (Port 8002 Dual ONNX)
+    has_onnx = bool(hasattr(state, "_standalone_onnx_data") and state._standalone_onnx_data and (now_mono - getattr(state, "_last_standalone_onnx_sync", 0.0) < 5.0))
+    if has_onnx:
+        sd_onnx = state._standalone_onnx_data
+        dec = sd_onnx.get("active_decision", {})
+        dual_telemetry.update({
+            "regime": dec.get("regime", sd_onnx.get("hmm_regime", "CHOP_WAIT")),
+            "action": dec.get("action", "HOLD"),
+            "side": dec.get("side"),
+            "quolas_signal": sd_onnx.get("brain_1_signal", "WAIT"),
+            "quolas_confidence": float(sd_onnx.get("brain_1_confidence", 50.0)) / 100.0,
+            "kalshi_signal": sd_onnx.get("brain_2_signal", "WAIT"),
+            "kalshi_confidence": float(sd_onnx.get("brain_2_confidence", 50.0)) / 100.0,
+            "recommended_limit_price": float(dec.get("recommended_limit_price", 0.48)),
+            "expected_value": float(dec.get("expected_value", 0.0)),
+            "recommended_contracts": int(dec.get("recommended_contracts", 0)),
+            "rationale": dec.get("rationale", ""),
+            "active": True,
+            "settled_cycles": int(sd_onnx.get("settled_cycles", 0)),
+            "today_wins": int(sd_onnx.get("today_wins", 0)),
+            "today_losses": int(sd_onnx.get("today_losses", 0)),
+            "today_win_rate": float(sd_onnx.get("today_win_rate", 0.0)),
+            "today_pnl": float(sd_onnx.get("today_pnl", 0.0)),
+        })
+
+    # Overlay live ground truth from Bot 3 (Port 8003 Macro Trend Dominion)
+    has_macro = bool(hasattr(state, "_standalone_macro_data") and state._standalone_macro_data and (now_mono - getattr(state, "_last_standalone_macro_sync", 0.0) < 5.0))
+    if has_macro:
+        sd_m = state._standalone_macro_data
+        m_dec = sd_m.get("decision", {})
+        m_learn = sd_m.get("learning_engine", {})
+        m_params = sd_m.get("parameters", {})
+        macro_telemetry.update({
+            "active": True,
+            "call": m_dec.get("call", "DONT"),
+            "side": m_dec.get("side"),
+            "confidence_pct": float(m_dec.get("confidence_pct", 50.0)),
+            "limit_price_cents": int(m_params.get("limit_price_cents", 52)),
+            "limit_price": float(m_params.get("limit_price_cents", 52)) / 100.0,
+            "expected_value": float(m_dec.get("expected_value", 0.0)),
+            "net_edge_pct": float(m_dec.get("net_edge_pct", 0.0)),
+            "recommended_contracts": int(m_dec.get("recommended_contracts", 0)),
+            "macro_trend": m_dec.get("macro_trend", "BEAR" if diff < 0 else "BULL"),
+            "hmm_regime": sd_m.get("three_brain_matrix", {}).get("hmm_regime", "VOL_EXPANSION"),
+            "spot_signal": sd_m.get("three_brain_matrix", {}).get("spot_signal", "WAIT"),
+            "spot_confidence": float(sd_m.get("three_brain_matrix", {}).get("spot_confidence", 50.0)) / 100.0,
+            "kalshi_signal": sd_m.get("three_brain_matrix", {}).get("kalshi_signal", "WAIT"),
+            "kalshi_confidence": float(sd_m.get("three_brain_matrix", {}).get("kalshi_confidence", 50.0)) / 100.0,
+            "rationale": m_dec.get("rationale", ""),
+            "brier_score": float(m_learn.get("brier_score", 0.25)),
+            "brier_shrinkage_factor": float(m_learn.get("shrinkage_factor", 1.0)),
+            "active_price_cap": float(m_learn.get("active_price_cap", 0.52)),
+            "pruned_deciles": m_learn.get("pruned_deciles", []),
+            "failure_counts": m_learn.get("mistakes_logged", {}),
+            "settled_cycles": int(sd_m.get("settled_cycles", 0)),
+            "today_wins": int(sd_m.get("today_wins", 0)),
+            "today_losses": int(sd_m.get("today_losses", 0)),
+            "today_win_rate": float(sd_m.get("today_win_rate", 0.0)),
+            "today_pnl": float(sd_m.get("today_pnl", 0.0)),
+        })
+
     return {
         "timestamp": now_utc.isoformat(),
         "market": {
@@ -6073,6 +6398,7 @@ def _build_full_state_payload() -> dict[str, Any]:
             "ai_auto_trade": state.ai_auto_trade,
             "active_strategy_bot": state.active_strategy_bot,
             "bot_certified": state.bot_auditor.is_certified(state.active_strategy_bot),
+            "bot_sealed": state.bot_auditor.has_seal_of_excellence(state.active_strategy_bot),
             "mode": state.mode,
             "timeframe": state.active_timeframe.value,
             "domination_discount_price": float(state.domination_discount_price),
@@ -6083,8 +6409,11 @@ def _build_full_state_payload() -> dict[str, Any]:
         "bot_audit_status": {
             "active_bot": state.active_strategy_bot,
             "is_certified": state.bot_auditor.is_certified(state.active_strategy_bot),
+            "is_sealed": state.bot_auditor.has_seal_of_excellence(state.active_strategy_bot),
             "report": state.bot_auditor.get_certification(state.active_strategy_bot).to_dict() if state.bot_auditor.get_certification(state.active_strategy_bot) else None,
+            "seal": state.bot_auditor.get_seal(state.active_strategy_bot).to_dict() if state.bot_auditor.get_seal(state.active_strategy_bot) else None,
         },
+        "seal_of_excellence": state.bot_auditor.get_all_seals(),
         "integrity_status": state.integrity_agent.get_latest_status(),
         "compliance_status": state.law_order_agent.get_compliance_status(),
         "guardrails_status": state.guardrails_agent.get_status(),

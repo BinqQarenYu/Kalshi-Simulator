@@ -2,6 +2,7 @@
 .env
 *.pem
 keys/
+data/remote_control_auth.json
 
 # Python
 __pycache__/

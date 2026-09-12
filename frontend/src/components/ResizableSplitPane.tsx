@@ -45,6 +45,10 @@ export interface ResizableSplitPaneProps {
   panelClassNames?: [string?, string?, string?];
   /** Show live percentage pill during active drag */
   showLivePercentageBadge?: boolean;
+  /** Optional flag to hide the right panel so center panel expands to maximum */
+  isRightPanelHidden?: boolean;
+  /** Callback fired when user clicks the collapsed unhide rail */
+  onToggleRightPanel?: () => void;
 }
 
 export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
@@ -62,6 +66,8 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
   className = '',
   panelClassNames = [],
   showLivePercentageBadge = true,
+  isRightPanelHidden = false,
+  onToggleRightPanel,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -334,7 +340,12 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
           PANEL 2 (CENTER)
           ========================================================================= */}
       <div
-        style={{ width: `${sizes[1]}%`, minWidth: `${minPixelSizes[1]}px` }}
+        style={{
+          width: isRightPanelHidden
+            ? `calc(100% - ${sizes[0]}% - ${onToggleRightPanel ? '28px' : '0px'})`
+            : `${sizes[1]}%`,
+          minWidth: `${minPixelSizes[1]}px`,
+        }}
         className={`h-full overflow-hidden flex flex-col flex-1 min-w-0 relative ${
           panelClassNames[1] || ''
         }`}
@@ -345,51 +356,68 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
       {/* =========================================================================
           DIVIDER 2 (Between Panel 2 and Panel 3)
           ========================================================================= */}
-      <div
-        role="separator"
-        tabIndex={0}
-        aria-orientation="vertical"
-        aria-valuenow={sizes[2]}
-        aria-label="Resize center and right panels"
-        onMouseDown={(e) => handleMouseDown(1, e)}
-        onTouchStart={(e) => handleTouchStart(1, e)}
-        onDoubleClick={() => handleDoubleClick(1)}
-        onMouseEnter={() => setHoveredGutter(1)}
-        onMouseLeave={() => setHoveredGutter(null)}
-        className={`relative z-20 w-1.5 shrink-0 h-full cursor-col-resize flex items-center justify-center transition-colors duration-150 ${
-          activeGutter === 1
-            ? 'bg-[#00bda5] shadow-[0_0_10px_rgba(0,189,165,0.6)]'
-            : hoveredGutter === 1
-            ? 'bg-[#00bda5]/80'
-            : 'bg-[#262d35] hover:bg-[#00bda5]/60'
-        }`}
-      >
-        {/* Invisible expanded hit area for effortless grabbing (12px hit zone) */}
-        <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
-
-        {/* Center tactile grip pill */}
+      {!isRightPanelHidden && (
         <div
-          className={`w-0.5 h-6 rounded-full transition-all duration-150 ${
+          role="separator"
+          tabIndex={0}
+          aria-orientation="vertical"
+          aria-valuenow={sizes[2]}
+          aria-label="Resize center and right panels"
+          onMouseDown={(e) => handleMouseDown(1, e)}
+          onTouchStart={(e) => handleTouchStart(1, e)}
+          onDoubleClick={() => handleDoubleClick(1)}
+          onMouseEnter={() => setHoveredGutter(1)}
+          onMouseLeave={() => setHoveredGutter(null)}
+          className={`relative z-20 w-1.5 shrink-0 h-full cursor-col-resize flex items-center justify-center transition-colors duration-150 ${
             activeGutter === 1
-              ? 'bg-white h-9 shadow'
+              ? 'bg-[#00bda5] shadow-[0_0_10px_rgba(0,189,165,0.6)]'
               : hoveredGutter === 1
-              ? 'bg-white/90 h-8'
-              : 'bg-[#8c9ba5]/40'
+              ? 'bg-[#00bda5]/80'
+              : 'bg-[#262d35] hover:bg-[#00bda5]/60'
           }`}
-        />
-      </div>
+        >
+          {/* Invisible expanded hit area for effortless grabbing (12px hit zone) */}
+          <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
+
+          {/* Center tactile grip pill */}
+          <div
+            className={`w-0.5 h-6 rounded-full transition-all duration-150 ${
+              activeGutter === 1
+                ? 'bg-white h-9 shadow'
+                : hoveredGutter === 1
+                ? 'bg-white/90 h-8'
+                : 'bg-[#8c9ba5]/40'
+            }`}
+          />
+        </div>
+      )}
 
       {/* =========================================================================
-          PANEL 3 (RIGHT)
+          PANEL 3 (RIGHT) OR COLLAPSED UNHIDE TAB STRIP
           ========================================================================= */}
-      <div
-        style={{ width: `${sizes[2]}%`, minWidth: `${minPixelSizes[2]}px` }}
-        className={`h-full overflow-hidden flex flex-col shrink-0 relative ${
-          panelClassNames[2] || ''
-        }`}
-      >
-        {panelNodes[2]}
-      </div>
+      {!isRightPanelHidden ? (
+        <div
+          style={{ width: `${sizes[2]}%`, minWidth: `${minPixelSizes[2]}px` }}
+          className={`h-full overflow-hidden flex flex-col shrink-0 relative ${
+            panelClassNames[2] || ''
+          }`}
+        >
+          {panelNodes[2]}
+        </div>
+      ) : onToggleRightPanel ? (
+        <aside
+          onClick={onToggleRightPanel}
+          title="Unhide Docked Baby Bot Rail"
+          className="w-7 h-full bg-[#12161a] hover:bg-[#1a222a] border-l border-[#262d35] flex flex-col items-center py-4 cursor-pointer transition-colors z-20 group shrink-0 select-none"
+        >
+          <div className="w-5 h-5 rounded bg-[#1f2937] group-hover:bg-[#00c978] group-hover:text-black text-[#8c9ba5] flex items-center justify-center transition shadow mb-4">
+            <span className="text-[10px] font-bold">◀</span>
+          </div>
+          <div className="[writing-mode:vertical-lr] rotate-180 text-[10px] font-mono font-bold tracking-widest text-[#8c9ba5] group-hover:text-[#00c978] uppercase select-none whitespace-nowrap">
+            Docked Bot Rail
+          </div>
+        </aside>
+      ) : null}
 
       {/* =========================================================================
           LIVE TELEMETRY PERCENTAGE BADGE (Visible during active dragging)

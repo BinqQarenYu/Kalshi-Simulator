@@ -345,3 +345,193 @@ def test_take_profit_ceiling_parameter_updates() -> None:
     assert bot.enable_reverse_take_profit_roi is True
     assert bot.reverse_indicator_threshold == 0.85
 
+
+def test_spot_delta_front_run_exit_on_velocity_drop() -> None:
+    """Pillar 4: Pre-empt the 95% -> 34% gamma air pocket.
+
+    When 3s spot velocity dips by more than $15 on BTC, dumps into resting bids.
+    """
+    bot = ThreeStepDominationBot(
+        take_profit_price_threshold=Decimal("0.94"),
+        spot_delta_front_run_threshold=15.0,
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.88"): Decimal("200")}
+    book.no_book = {Decimal("0.11"): Decimal("100")}
+
+    # 3s spot velocity dropped -$18.50
+    decision = bot.evaluate_exit(
+        side=OrderSide.YES,
+        entry_price=Decimal("0.52"),
+        size=1,
+        book=book,
+        time_to_expiry_s=180.0,
+        spot_velocity_3s=-18.5,
+    )
+
+    assert decision.should_exit is True
+    assert decision.exit_reason == "SPOT_DELTA_FRONT_RUN"
+    assert decision.exit_price == Decimal("0.88")
+    assert decision.profit_pct > 65.0
+    assert "SPOT VELOCITY FRONT-RUN" in decision.rationale
+
+
+def test_spot_delta_front_run_holds_when_velocity_benign() -> None:
+    """When 3s spot velocity dip is within normal noise (e.g. -$4), bot does not panic sell."""
+    bot = ThreeStepDominationBot(
+        take_profit_price_threshold=Decimal("0.94"),
+        spot_delta_front_run_threshold=15.0,
+        require_reversal_for_tp_ceiling=True,
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.88"): Decimal("200")}
+    book.no_book = {Decimal("0.11"): Decimal("100")}
+
+    decision = bot.evaluate_exit(
+        side=OrderSide.YES,
+        entry_price=Decimal("0.52"),
+        size=1,
+        book=book,
+        time_to_expiry_s=180.0,
+        spot_velocity_3s=-4.0,
+    )
+
+    assert decision.should_exit is False
+    assert decision.exit_reason == "HOLD"
+
+
+def test_trailing_ratchet_tier1_breakeven_armor() -> None:
+    """Pillar 3 (Tier 1): Entry at 52c, peak bid touched 86c (>= 85c).
+
+    Bid drops back to 52c -> exits to prevent winning trade from turning negative.
+    """
+    bot = ThreeStepDominationBot(
+        enable_trailing_ratchet=True,
+        trailing_ratchet_buffer=Decimal("0.08"),
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.52"): Decimal("100")}
+    book.no_book = {Decimal("0.47"): Decimal("100")}
+
+    decision = bot.evaluate_exit(
+        side=OrderSide.YES,
+        entry_price=Decimal("0.52"),
+        size=1,
+        book=book,
+        time_to_expiry_s=300.0,
+        peak_bid=Decimal("0.86"),  # peak was >= 0.85
+    )
+
+    assert decision.should_exit is True
+    assert decision.exit_reason == "TRAILING_PROFIT_RATCHET"
+    assert decision.exit_price == Decimal("0.52")
+    assert "BREAKEVEN ARMOR" in decision.rationale
+
+
+def test_trailing_ratchet_holds_during_normal_68c_noise() -> None:
+    """Pillar 3: Entry at 52c, peak bid touched 69c. Normal 50c-70c oscillation should NOT trigger exit."""
+    bot = ThreeStepDominationBot(
+        enable_trailing_ratchet=True,
+        trailing_ratchet_buffer=Decimal("0.08"),
+        require_reversal_for_tp_ceiling=True,
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.52"): Decimal("100")}
+    book.no_book = {Decimal("0.47"): Decimal("100")}
+
+    decision = bot.evaluate_exit(
+        side=OrderSide.YES,
+        entry_price=Decimal("0.52"),
+        size=1,
+        book=book,
+        time_to_expiry_s=300.0,
+        peak_bid=Decimal("0.69"),  # peak was only 0.69 (< 0.85)
+    )
+
+    assert decision.should_exit is False
+    assert decision.exit_reason == "HOLD"
+
+
+def test_trailing_ratchet_tier2_profit_trail() -> None:
+    """Pillar 3 (Tier 2): Entry at 50c, peak bid reached 90c (>= 88c).
+
+    Buffer is 8c -> floor is 82c. Current bid drops to 81c -> exits with guaranteed gain.
+    """
+    bot = ThreeStepDominationBot(
+        enable_trailing_ratchet=True,
+        trailing_ratchet_buffer=Decimal("0.08"),
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.81"): Decimal("250")}
+    book.no_book = {Decimal("0.18"): Decimal("100")}
+
+    decision = bot.evaluate_exit(
+        side=OrderSide.YES,
+        entry_price=Decimal("0.50"),
+        size=1,
+        book=book,
+        time_to_expiry_s=240.0,
+        peak_bid=Decimal("0.90"),  # peak was >= 0.88
+    )
+
+    assert decision.should_exit is True
+    assert decision.exit_reason == "TRAILING_PROFIT_RATCHET"
+    assert decision.exit_price == Decimal("0.81")
+    assert decision.profit_pct == 62.0
+    assert "TRAILING PROFIT RATCHET" in decision.rationale
+
+
+def test_breakeven_armor_blocks_gap_down_panic_dumps() -> None:
+    """Pillar 3: When peak reached 86c, but bid gaps down to 35c (air pocket), do NOT dump into the low."""
+    bot = ThreeStepDominationBot(
+        enable_trailing_ratchet=True,
+        trailing_ratchet_buffer=Decimal("0.08"),
+        require_reversal_for_tp_ceiling=True,
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.35"): Decimal("100")}
+    book.no_book = {Decimal("0.64"): Decimal("100")}
+
+    decision = bot.evaluate_exit(
+        side=OrderSide.YES,
+        entry_price=Decimal("0.52"),
+        size=1,
+        book=book,
+        time_to_expiry_s=300.0,
+        peak_bid=Decimal("0.86"),
+    )
+
+    assert decision.should_exit is False
+    assert decision.exit_reason == "HOLD"
+
+
+def test_dynamic_reversal_curve_decay() -> None:
+    """Pillar 2: Dynamic reversal threshold scales from 85% at start down to ~53% at 60s."""
+    bot = ThreeStepDominationBot(
+        enable_dynamic_reversal_curve=True,
+        reverse_indicator_threshold=0.85,
+    )
+
+    # At 900s (15 mins), capped at 85%
+    t_open = bot.compute_dynamic_reversal_threshold(900.0)
+    assert t_open == 0.85
+
+    # At 300s (5 mins): 0.50 + 0.035 * 5 = 0.675
+    t_mid = bot.compute_dynamic_reversal_threshold(300.0)
+    assert abs(t_mid - 0.675) < 1e-4
+
+    # At 60s (1 min): 0.50 + 0.035 * 1 = 0.535
+    t_late = bot.compute_dynamic_reversal_threshold(60.0)
+    assert abs(t_late - 0.535) < 1e-4
+
+    # When disabled, always returns static baseline
+    bot.enable_dynamic_reversal_curve = False
+    assert bot.compute_dynamic_reversal_threshold(60.0) == 0.85
+
+

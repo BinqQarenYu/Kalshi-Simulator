@@ -92,6 +92,20 @@ class ThreeStepDominationBot:
         max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
         discount_limit_price: Decimal = Decimal("0.52"),  # Configurable discount sniper ceiling (48¢-52¢ sweetspot)
         min_confidence: float = 0.70,  # 70% model conviction threshold
+        enable_trailing_ratchet: bool = True,  # High-water mark trailing profit ratchet and breakeven armor
+        trailing_ratchet_buffer: Decimal = Decimal("0.10"),  # $0.10 pullback buffer below peak bid
+        spot_delta_front_run_threshold: float = 28.0,  # $28.0 rolling 3s spot velocity base threshold (2.0σ winning sweetspot)
+        enable_dynamic_spot_velocity: bool = True,  # 4-Regime Fading Mathematics dynamic front-runner
+        velocity_z_score_threshold: float = 2.50,  # 2.50 sigma statistical anomaly threshold
+        moneyness_moat_multiplier: float = 2.0,  # 2.0x sigma*sqrt(t) deep ITM protection moat
+        twap_fading_quarantine_seconds: float = 15.0,  # 15s expiration quarantine (strict hold to $1.00)
+        twap_fading_window_seconds: float = 60.0,  # 60s Silas TWAP fading evaluation window
+        enable_dynamic_reversal_curve: bool = True,  # Time-adaptive reversal curve (decays 85% -> 50% as tau -> 0)
+        opening_quarantine_seconds: float = 90.0,  # Quarantine opening seconds of cycle to eliminate false breakouts
+        onnx_engine: Optional[Any] = None,  # Brain 1 QuoLas Nano Microscope ONNX inference engine
+        twap_immutability_sniper_cents: float = 0.75,  # 75¢ ceiling for Silas TWAP late-cycle arbitrage harvest
+        max_queue_depth_ahead: int = 250,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
+        max_clob_spread_cents: float = 0.05,  # Max allowable bid-ask spread corridor cap ($0.05)
         asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
@@ -118,6 +132,23 @@ class ThreeStepDominationBot:
         self.max_entry_price = Decimal(str(max_entry_price))
         self.discount_limit_price = max(Decimal("0.10"), min(Decimal("0.65"), Decimal(str(discount_limit_price))))
         self.min_confidence = min_confidence if min_confidence <= 1.0 else (min_confidence / 100.0)
+        self.enable_trailing_ratchet = bool(enable_trailing_ratchet)
+        self.trailing_ratchet_buffer = Decimal(str(trailing_ratchet_buffer))
+        if spot_delta_front_run_threshold in (15.0, 28.0) and self.asset != CryptoAsset.BTC:
+            self.spot_delta_front_run_threshold = float(cfg.min_spot_diff)
+        else:
+            self.spot_delta_front_run_threshold = float(spot_delta_front_run_threshold)
+        self.enable_dynamic_spot_velocity = bool(enable_dynamic_spot_velocity)
+        self.velocity_z_score_threshold = float(velocity_z_score_threshold)
+        self.moneyness_moat_multiplier = float(moneyness_moat_multiplier)
+        self.twap_fading_quarantine_seconds = float(twap_fading_quarantine_seconds)
+        self.twap_fading_window_seconds = float(twap_fading_window_seconds)
+        self.enable_dynamic_reversal_curve = bool(enable_dynamic_reversal_curve)
+        self.opening_quarantine_seconds = float(opening_quarantine_seconds)
+        self.onnx_engine = onnx_engine
+        self.twap_immutability_sniper_cents = float(twap_immutability_sniper_cents)
+        self.max_queue_depth_ahead = int(max_queue_depth_ahead)
+        self.max_clob_spread_cents = float(max_clob_spread_cents)
 
         # Underlying Stage 2 EV & Quarter-Kelly Optimizer
         self._ev_engine = StatisticalEVEngine(
@@ -164,7 +195,30 @@ class ThreeStepDominationBot:
             "enable_reverse_take_profit_roi": bool(self.enable_reverse_take_profit_roi),
             "reverse_indicator_threshold": round(float(self.reverse_indicator_threshold) * 100.0, 1),
             "min_take_profit_roi": round(float(self.min_take_profit_roi) * 100.0, 1),
+            "enable_trailing_ratchet": bool(self.enable_trailing_ratchet),
+            "trailing_ratchet_buffer": float(self.trailing_ratchet_buffer),
+            "spot_delta_front_run_threshold": float(self.spot_delta_front_run_threshold),
+            "enable_dynamic_spot_velocity": bool(self.enable_dynamic_spot_velocity),
+            "velocity_z_score_threshold": float(self.velocity_z_score_threshold),
+            "moneyness_moat_multiplier": float(self.moneyness_moat_multiplier),
+            "twap_fading_quarantine_seconds": float(self.twap_fading_quarantine_seconds),
+            "twap_fading_window_seconds": float(self.twap_fading_window_seconds),
+            "enable_dynamic_reversal_curve": bool(self.enable_dynamic_reversal_curve),
+            "opening_quarantine_seconds": float(self.opening_quarantine_seconds),
+            "onnx_veto_active": bool(self.onnx_engine is not None),
+            "twap_immutability_sniper_cents": float(self.twap_immutability_sniper_cents),
+            "max_queue_depth_ahead": int(self.max_queue_depth_ahead),
+            "max_clob_spread_cents": float(self.max_clob_spread_cents),
         }
+
+    def compute_dynamic_reversal_threshold(self, time_to_expiry_s: float) -> float:
+        """Calculate dynamic reversal threshold decaying from base down to 50% as tau -> 0."""
+        if not self.enable_dynamic_reversal_curve:
+            return self.reverse_indicator_threshold
+        tau_mins = max(0.5, min(15.0, time_to_expiry_s / 60.0))
+        # Scales linearly from 50% at tau=0 up to base threshold at tau=10m
+        scaled = 0.50 + 0.035 * tau_mins
+        return min(self.reverse_indicator_threshold, scaled)
 
     def update_parameters(
         self,
@@ -175,6 +229,7 @@ class ThreeStepDominationBot:
         min_edge_pct: Optional[float] = None,
         min_ev_dollars: Optional[float] = None,
         min_spot_diff: Optional[float] = None,
+        typical_1m_volatility: Optional[float] = None,
         vpin_toxic_threshold: Optional[float] = None,
         take_profit_price_threshold: Optional[float] = None,
         enable_take_profit_ceiling: Optional[bool] = None,
@@ -182,6 +237,19 @@ class ThreeStepDominationBot:
         enable_reverse_take_profit_roi: Optional[bool] = None,
         reverse_indicator_threshold: Optional[float] = None,
         min_take_profit_roi: Optional[float] = None,
+        enable_trailing_ratchet: Optional[bool] = None,
+        trailing_ratchet_buffer: Optional[float] = None,
+        spot_delta_front_run_threshold: Optional[float] = None,
+        enable_dynamic_spot_velocity: Optional[bool] = None,
+        velocity_z_score_threshold: Optional[float] = None,
+        moneyness_moat_multiplier: Optional[float] = None,
+        twap_fading_quarantine_seconds: Optional[float] = None,
+        twap_fading_window_seconds: Optional[float] = None,
+        enable_dynamic_reversal_curve: Optional[bool] = None,
+        opening_quarantine_seconds: Optional[float] = None,
+        twap_immutability_sniper_cents: Optional[float] = None,
+        max_queue_depth_ahead: Optional[int] = None,
+        max_clob_spread_cents: Optional[float] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Dynamically update strategy parameters on the fly."""
@@ -203,15 +271,18 @@ class ThreeStepDominationBot:
             self.min_edge_pct = max(0.01, min(0.50, val))
             self._ev_engine.min_edge_pct = self.min_edge_pct
         if min_ev_dollars is not None:
-            self.min_ev_dollars = Decimal(str(max(0.005, min(0.50, float(min_ev_dollars)))))
+            self.min_ev_dollars = Decimal(str(max(0.00, float(min_ev_dollars))))
             self._ev_engine.min_ev_threshold = self.min_ev_dollars
         if min_spot_diff is not None:
-            self.min_spot_diff = max(0.0, float(min_spot_diff))
+            self.min_spot_diff = max(0.000001, float(min_spot_diff))
+        if typical_1m_volatility is not None:
+            self.typical_1m_volatility = max(0.000001, float(typical_1m_volatility))
+            self.default_btc_1m_volatility = self.typical_1m_volatility
         if vpin_toxic_threshold is not None:
             self.vpin_toxic_threshold = max(0.10, min(0.95, float(vpin_toxic_threshold)))
             self._ev_engine.vpin_toxic_threshold = self.vpin_toxic_threshold
         if take_profit_price_threshold is not None:
-            self.take_profit_price_threshold = Decimal(str(max(0.50, min(0.99, float(take_profit_price_threshold)))))
+            self.take_profit_price_threshold = Decimal(str(max(0.70, min(0.99, float(take_profit_price_threshold)))))
         if enable_take_profit_ceiling is not None:
             self.enable_take_profit_ceiling = bool(enable_take_profit_ceiling)
         if require_reversal_for_tp_ceiling is not None:
@@ -222,12 +293,40 @@ class ThreeStepDominationBot:
             val = float(reverse_indicator_threshold)
             if val > 1.0:
                 val = val / 100.0
-            self.reverse_indicator_threshold = max(0.50, min(0.99, val))
+            self.reverse_indicator_threshold = max(0.40, min(0.99, val))
         if min_take_profit_roi is not None:
             val = float(min_take_profit_roi)
             if val > 1.0:
                 val = val / 100.0
-            self.min_take_profit_roi = max(0.05, min(1.0, val))
+            self.min_take_profit_roi = max(0.05, min(2.00, val))
+        if enable_trailing_ratchet is not None:
+            self.enable_trailing_ratchet = bool(enable_trailing_ratchet)
+        if trailing_ratchet_buffer is not None:
+            self.trailing_ratchet_buffer = Decimal(str(max(0.02, min(0.25, float(trailing_ratchet_buffer)))))
+        if spot_delta_front_run_threshold is not None:
+            self.spot_delta_front_run_threshold = max(0.00001, float(spot_delta_front_run_threshold))
+        if enable_dynamic_spot_velocity is not None:
+            self.enable_dynamic_spot_velocity = bool(enable_dynamic_spot_velocity)
+        if velocity_z_score_threshold is not None:
+            self.velocity_z_score_threshold = max(0.5, float(velocity_z_score_threshold))
+        if moneyness_moat_multiplier is not None:
+            self.moneyness_moat_multiplier = max(0.1, float(moneyness_moat_multiplier))
+        if twap_fading_quarantine_seconds is not None:
+            self.twap_fading_quarantine_seconds = max(0.0, float(twap_fading_quarantine_seconds))
+        if twap_fading_window_seconds is not None:
+            self.twap_fading_window_seconds = max(10.0, float(twap_fading_window_seconds))
+        if enable_dynamic_reversal_curve is not None:
+            self.enable_dynamic_reversal_curve = bool(enable_dynamic_reversal_curve)
+        if "opening_quarantine_seconds" in kwargs and kwargs["opening_quarantine_seconds"] is not None:
+            self.opening_quarantine_seconds = max(0.0, min(600.0, float(kwargs["opening_quarantine_seconds"])))
+        elif opening_quarantine_seconds is not None:
+            self.opening_quarantine_seconds = max(0.0, min(600.0, float(opening_quarantine_seconds)))
+        if twap_immutability_sniper_cents is not None:
+            self.twap_immutability_sniper_cents = max(0.50, min(0.95, float(twap_immutability_sniper_cents)))
+        if max_queue_depth_ahead is not None:
+            self.max_queue_depth_ahead = max(10, min(2000, int(max_queue_depth_ahead)))
+        if max_clob_spread_cents is not None:
+            self.max_clob_spread_cents = max(0.01, min(0.25, float(max_clob_spread_cents)))
         logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
@@ -282,6 +381,25 @@ class ThreeStepDominationBot:
             val = best_yes_ask if best_yes_ask is not None else best_no_ask
         return float(val) if val is not None else None
 
+    @staticmethod
+    def _get_queue_ahead(
+        book: Optional[L2BookState],
+        side: Optional[OrderSide],
+        target_price: Decimal,
+    ) -> int:
+        """Calculate existing resting contract depth ahead at target limit price (matching order_simulator)."""
+        if not book or not side:
+            return 0
+        try:
+            target_dec = Decimal(str(target_price))
+            if side == OrderSide.YES and hasattr(book, "yes_book") and book.yes_book:
+                return int(book.yes_book.get(target_dec, 0))
+            elif side == OrderSide.NO and hasattr(book, "no_book") and book.no_book:
+                return int(book.no_book.get(target_dec, 0))
+        except Exception:
+            return 0
+        return 0
+
     def evaluate(
         self,
         book: Optional[L2BookState],
@@ -292,6 +410,7 @@ class ThreeStepDominationBot:
         total_equity: Decimal = Decimal("100.00"),
         max_position_size: int = 1,
         estimated_vpin: float = 0.15,
+        twap_60s: Optional[float] = None,
     ) -> DominationDecision:
         """Execute 3-step cycle analysis and determine optimal playbook execution."""
         if not book or (not book.yes_book and not book.no_book) or spot_price <= 0 or target_strike <= 0:
@@ -320,6 +439,18 @@ class ThreeStepDominationBot:
                           f"Suppressing all trades to prevent adverse whale selection.",
             )
 
+        # Step 0.2: CLOB Spread Corridor Cap (Vance Liquidity Gate)
+        if best_yes_ask is not None and best_yes_bid is not None:
+            clob_spread = float(best_yes_ask - best_yes_bid)
+            if clob_spread > self.max_clob_spread_cents:
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=estimated_vpin,
+                    rationale=f"Wide CLOB Spread Veto: Spread ${clob_spread:.2f} > ${self.max_clob_spread_cents:.2f} corridor cap. "
+                              f"Suppressing all entries to prevent illiquid slippage trap.",
+                )
+
         # Classify Active Playbook & Cycle Duration by Expiration Window
         ticker_str = (getattr(book, "market_ticker", "") or getattr(book, "ticker", "")) if book else ""
         is_5m = ("5M" in ticker_str.upper() and "15M" not in ticker_str.upper()) or "5MIN" in ticker_str.upper()
@@ -344,16 +475,19 @@ class ThreeStepDominationBot:
             )
 
         # Dynamic Playbook Timing Thresholds:
-        # Standard 15M cycle: P3 in [45s, 240s], P2 in (240s, 600s], P1 in (600s, 900s], lock < 45s
-        # 5M Sprint cycle:    P3 in [20s, 80s],  P2 in (80s, 200s],   P1 in (200s, 300s], lock < 20s
+        # Standard 15M cycle: P3 in [45s, 240s], P2 in (240s, 600s], P1 in (600s, p1_max_s], lock < 45s
+        # 5M Sprint cycle:    P3 in [20s, 80s],  P2 in (80s, 200s],   P1 in (200s, p1_max_s], lock < 20s
         if is_5m:
             p3_min_s, p3_max_s = 20, 80
             p2_min_s, p2_max_s = 80, 200
             p1_min_s = 200
+            quarantine_s = min(30.0, self.opening_quarantine_seconds / 3.0)
+            p1_max_s = cycle_duration_s - quarantine_s
         else:
             p3_min_s, p3_max_s = 45, 240
             p2_min_s, p2_max_s = 240, 600
             p1_min_s = 600
+            p1_max_s = cycle_duration_s - self.opening_quarantine_seconds
 
         tau_mins = max(0.1, time_to_expiry_s / 60.0)
 
@@ -414,6 +548,7 @@ class ThreeStepDominationBot:
                 )
 
             actual_ask_p3 = self._safe_market_ask(ev_res.recommended_side, best_yes_ask, best_no_ask)
+            q_ahead_p3 = self._get_queue_ahead(book, ev_res.recommended_side, discount_price)
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -428,6 +563,7 @@ class ThreeStepDominationBot:
                 rationale=rationale,
                 actual_market_ask=actual_ask_p3,
                 cycle_duration_s=cycle_duration_s,
+                queue_ahead=q_ahead_p3,
             )
 
         # -------------------------------------------------------------------
@@ -483,6 +619,7 @@ class ThreeStepDominationBot:
                 )
 
             actual_ask_p2 = self._safe_market_ask(ev_res.recommended_side, best_yes_ask, best_no_ask)
+            q_ahead_p2 = self._get_queue_ahead(book, ev_res.recommended_side, discount_price)
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -497,12 +634,31 @@ class ThreeStepDominationBot:
                 rationale=rationale,
                 actual_market_ask=actual_ask_p2,
                 cycle_duration_s=cycle_duration_s,
+                queue_ahead=q_ahead_p2,
             )
 
         # -------------------------------------------------------------------
         # PLAYBOOK 1: Early Momentum Breakout
         # -------------------------------------------------------------------
-        elif time_to_expiry_s > p1_min_s:
+        # -------------------------------------------------------------------
+        # PLAYBOOK 1: Early Momentum Breakout (with Opening Quarantine & ONNX Veto)
+        # -------------------------------------------------------------------
+        elif time_to_expiry_s > p1_max_s:
+            # Opening Cycle Discovery Quarantine Gate (Anti-False Breakout Shield)
+            diff_str = cfg.format_diff(spot_diff)
+            quarantine_remaining = int(time_to_expiry_s - p1_max_s)
+            return self._build_wait_decision(
+                time_to_expiry_s=time_to_expiry_s,
+                spot_diff=spot_diff,
+                vpin=estimated_vpin,
+                rationale=(
+                    f"[Playbook 1: Early Momentum Breakout] Opening Cycle Quarantine Active | "
+                    f"T={int(time_to_expiry_s)}s left > {int(p1_max_s)}s threshold ({quarantine_remaining}s left in quarantine) | "
+                    f"Spot Diff: {diff_str} | Quarantining early cycle noise to eliminate false breakouts."
+                ),
+            )
+
+        elif p1_min_s < time_to_expiry_s <= p1_max_s:
             stage = "breakout"
             playbook_title = "Playbook 1: Early Momentum Breakout"
 
@@ -531,6 +687,45 @@ class ThreeStepDominationBot:
 
             diff_str = cfg.format_diff(spot_diff)
             if ev_res.has_positive_edge and ev_res.recommended_side:
+                # Brain 1 (QuoLas ONNX) Microstructure Orderflow Veto
+                if self.onnx_engine is not None and book is not None:
+                    try:
+                        onnx_res = self.onnx_engine.process_orderbook_tick(book)
+                        if onnx_res.get("vpin_veto"):
+                            return self._build_wait_decision(
+                                time_to_expiry_s=time_to_expiry_s,
+                                spot_diff=spot_diff,
+                                vpin=estimated_vpin,
+                                rationale=(
+                                    f"[{playbook_title}] ONNX VPIN Toxicity Veto: "
+                                    f"Score={onnx_res.get('vpin_score', 0):.3f} > 0.70. Microstructure flow toxic."
+                                ),
+                            )
+                        sig = str(onnx_res.get("signal", "WAIT")).upper()
+                        conf = float(onnx_res.get("confidence", 0.0))
+                        if ev_res.recommended_side == OrderSide.YES and sig != "LONG":
+                            return self._build_wait_decision(
+                                time_to_expiry_s=time_to_expiry_s,
+                                spot_diff=spot_diff,
+                                vpin=estimated_vpin,
+                                rationale=(
+                                    f"[{playbook_title}] ONNX Microstructure Veto: Proposing BUY YES but Brain 1 signaled {sig} "
+                                    f"(Conf: {conf*100:.1f}%, Wait: {onnx_res.get('prob_wait', 0)*100:.1f}%, Short: {onnx_res.get('prob_short', 0)*100:.1f}%). False breakout blocked."
+                                ),
+                            )
+                        elif ev_res.recommended_side == OrderSide.NO and sig != "SHORT":
+                            return self._build_wait_decision(
+                                time_to_expiry_s=time_to_expiry_s,
+                                spot_diff=spot_diff,
+                                vpin=estimated_vpin,
+                                rationale=(
+                                    f"[{playbook_title}] ONNX Microstructure Veto: Proposing BUY NO but Brain 1 signaled {sig} "
+                                    f"(Conf: {conf*100:.1f}%, Wait: {onnx_res.get('prob_wait', 0)*100:.1f}%, Long: {onnx_res.get('prob_long', 0)*100:.1f}%). False breakout blocked."
+                                ),
+                            )
+                    except Exception as onnx_err:
+                        logger.warning("[DOMINATION BOT] ONNX microstructure check error: %s", onnx_err)
+
                 target_prob = prob_yes if ev_res.recommended_side == OrderSide.YES else prob_no
                 rationale = (
                     f"[{playbook_title}] Early Breakout Velocity | T={int(time_to_expiry_s)}s left | "
@@ -544,6 +739,7 @@ class ThreeStepDominationBot:
                 )
 
             actual_ask_p1 = self._safe_market_ask(ev_res.recommended_side, best_yes_ask, best_no_ask)
+            q_ahead_p1 = self._get_queue_ahead(book, ev_res.recommended_side, discount_price)
             return self._build_decision(
                 playbook_title=playbook_title,
                 stage=stage,
@@ -558,16 +754,116 @@ class ThreeStepDominationBot:
                 rationale=rationale,
                 actual_market_ask=actual_ask_p1,
                 cycle_duration_s=cycle_duration_s,
+                queue_ahead=q_ahead_p1,
             )
 
         # Expiry lock window (< p3_min_s)
         else:
-            return self._build_wait_decision(
-                time_to_expiry_s=time_to_expiry_s,
-                spot_diff=spot_diff,
-                vpin=estimated_vpin,
-                rationale=f"Cycle Closing Window (T={int(time_to_expiry_s)}s < {p3_min_s}s). New entries locked for settlement.",
-            )
+            # -------------------------------------------------------------------
+            # PLAYBOOK 4: Silas TWAP Immutability Sniper (Late-Cycle Alpha Harvest)
+            # -------------------------------------------------------------------
+            if 15.0 <= time_to_expiry_s < p3_min_s:
+                effective_twap = twap_60s if (twap_60s is not None and twap_60s > 0) else spot_price
+                delta_twap = effective_twap - target_strike
+                t_safe = max(1.0, time_to_expiry_s)
+                sigma_1 = self.typical_1m_volatility
+                # Required buffer: at least 1.5 sigma_1 * sqrt(tau) deep ITM
+                moat_req = 1.5 * (sigma_1 / math.sqrt(60.0)) * math.sqrt(t_safe)
+
+                is_yes_guaranteed = (delta_twap > 0) and (delta_twap >= moat_req)
+                is_no_guaranteed = (delta_twap < 0) and (abs(delta_twap) >= moat_req)
+                sniper_ceiling = Decimal(str(self.twap_immutability_sniper_cents))
+
+                if is_yes_guaranteed and best_yes_ask is not None and best_yes_ask <= sniper_ceiling:
+                    net_ev = Decimal("1.00") - best_yes_ask - Decimal("0.01")
+                    ev_res = ExpectedValueResult(
+                        has_positive_edge=True,
+                        recommended_side=OrderSide.YES,
+                        ai_prob=0.999,
+                        market_price=best_yes_ask,
+                        expected_value=net_ev,
+                        net_expected_value=net_ev,
+                        fee_per_contract=Decimal("0.01"),
+                        statistical_edge=round(float(net_ev) / float(best_yes_ask), 4),
+                        kelly_fraction=0.25,
+                        recommended_contracts=1,
+                        rationale="Silas TWAP Sniper",
+                    )
+                    diff_str = cfg.format_diff(delta_twap)
+                    rationale = (
+                        f"[Playbook 4: Silas TWAP Immutability Sniper] Endgame Harvest | "
+                        f"T={int(time_to_expiry_s)}s left | TWAP Cushion: {diff_str} | "
+                        f"Settlement 99.9% mathematically locked | Ask ${best_yes_ask:.2f} <= ${sniper_ceiling:.2f} ceiling | "
+                        f"Net EV: +${net_ev:.2f}/ct | Sniping panicked retail ask."
+                    )
+                    return self._build_decision(
+                        playbook_title="Playbook 4: Silas TWAP Immutability Sniper",
+                        stage="twap_sniper",
+                        p_up=0.999,
+                        p_down=0.001,
+                        p_wait=0.0,
+                        vpin=estimated_vpin,
+                        vpin_is_safe=True,
+                        ev_res=ev_res,
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_diff=spot_diff,
+                        rationale=rationale,
+                        actual_market_ask=float(best_yes_ask),
+                        cycle_duration_s=cycle_duration_s,
+                        queue_ahead=0,
+                    )
+                elif is_no_guaranteed and best_no_ask is not None and best_no_ask <= sniper_ceiling:
+                    net_ev = Decimal("1.00") - best_no_ask - Decimal("0.01")
+                    ev_res = ExpectedValueResult(
+                        has_positive_edge=True,
+                        recommended_side=OrderSide.NO,
+                        ai_prob=0.999,
+                        market_price=best_no_ask,
+                        expected_value=net_ev,
+                        net_expected_value=net_ev,
+                        fee_per_contract=Decimal("0.01"),
+                        statistical_edge=round(float(net_ev) / float(best_no_ask), 4),
+                        kelly_fraction=0.25,
+                        recommended_contracts=1,
+                        rationale="Silas TWAP Sniper",
+                    )
+                    diff_str = cfg.format_diff(delta_twap)
+                    rationale = (
+                        f"[Playbook 4: Silas TWAP Immutability Sniper] Endgame Harvest | "
+                        f"T={int(time_to_expiry_s)}s left | TWAP Cushion: {diff_str} | "
+                        f"Settlement 99.9% mathematically locked | Ask ${best_no_ask:.2f} <= ${sniper_ceiling:.2f} ceiling | "
+                        f"Net EV: +${net_ev:.2f}/ct | Sniping panicked retail ask."
+                    )
+                    return self._build_decision(
+                        playbook_title="Playbook 4: Silas TWAP Immutability Sniper",
+                        stage="twap_sniper",
+                        p_up=0.001,
+                        p_down=0.999,
+                        p_wait=0.0,
+                        vpin=estimated_vpin,
+                        vpin_is_safe=True,
+                        ev_res=ev_res,
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_diff=spot_diff,
+                        rationale=rationale,
+                        actual_market_ask=float(best_no_ask),
+                        cycle_duration_s=cycle_duration_s,
+                        queue_ahead=0,
+                    )
+                else:
+                    return self._build_wait_decision(
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_diff=spot_diff,
+                        vpin=estimated_vpin,
+                        rationale=f"Cycle Closing Window (T={int(time_to_expiry_s)}s < {p3_min_s}s). New entries locked for settlement.",
+                    )
+            else:
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=estimated_vpin,
+                    rationale=f"Expiration Quarantine Zone (T={int(time_to_expiry_s)}s <= 15s). All entries locked for settlement.",
+                )
 
     def _build_decision(
         self,
@@ -584,6 +880,7 @@ class ThreeStepDominationBot:
         rationale: str,
         actual_market_ask: Optional[float] = None,
         cycle_duration_s: float = 900.0,
+        queue_ahead: int = 0,
     ) -> DominationDecision:
         """Construct normalized DominationDecision object with dynamic price cap protection."""
         discount_price_val = float(self.discount_limit_price)
@@ -603,32 +900,58 @@ class ThreeStepDominationBot:
                 )
 
             target_ask = actual_market_ask if actual_market_ask is not None else float(ev_res.market_price)
-            # Tier 1: Absolute hard ceiling above $0.72 (inverted R:R suicide)
-            if target_ask > 0.72:
+
+            # Vance Anti-Toxic Queue Depth Shield:
+            # If order will rest as maker limit (target_ask > discount_price_val)
+            if target_ask > discount_price_val and queue_ahead > self.max_queue_depth_ahead:
                 return self._build_wait_decision(
                     time_to_expiry_s=time_to_expiry_s,
                     spot_diff=spot_diff,
                     vpin=vpin,
                     rationale=(
-                        f"Price Cap Veto (Hard Kill): Recommended {ev_res.recommended_side.value.upper()} ask=${target_ask:.2f} > $0.72 max ceiling. "
-                        f"Inverted risk/reward ratio ({target_ask*100:.0f}c risk to win {(1.0-target_ask)*100:.0f}c). Skipping."
+                        f"Toxic Queue Depth Veto (Whale Armor): {queue_ahead} contracts resting ahead at ${discount_price_val:.2f} "
+                        f"> {self.max_queue_depth_ahead} limit. Refusing back-of-the-wall fill to eliminate adverse whale sweep."
                     ),
                 )
-            cfg = get_asset_config(self.asset)
-            deep_separation_diff = self.min_spot_diff * 2.3
-            # Tier 2: Standard cap ($0.62) unless spot diff is deep in-the-money
-            if target_ask > self.max_entry_price and abs(spot_diff) < deep_separation_diff:
-                deep_sep_str = cfg.format_price(deep_separation_diff)
-                diff_str = cfg.format_diff(spot_diff)
-                return self._build_wait_decision(
-                    time_to_expiry_s=time_to_expiry_s,
-                    spot_diff=spot_diff,
-                    vpin=vpin,
-                    rationale=(
-                        f"Price Cap Veto (Standard): Recommended {ev_res.recommended_side.value.upper()} ask=${target_ask:.2f} > ${self.max_entry_price:.2f} cap. "
-                        f"Requires deep spot separation (|Diff|={diff_str} < {deep_sep_str}). Skipping."
-                    ),
-                )
+
+            if stage == "twap_sniper":
+                if target_ask > self.twap_immutability_sniper_cents:
+                    return self._build_wait_decision(
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_diff=spot_diff,
+                        vpin=vpin,
+                        rationale=(
+                            f"TWAP Sniper Cap Veto: Recommended {ev_res.recommended_side.value.upper()} ask=${target_ask:.2f} "
+                            f"> ${self.twap_immutability_sniper_cents:.2f} max sniper ceiling. Skipping."
+                        ),
+                    )
+            else:
+                # Tier 1: Absolute hard ceiling above $0.72 (inverted R:R suicide)
+                if target_ask > 0.72:
+                    return self._build_wait_decision(
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_diff=spot_diff,
+                        vpin=vpin,
+                        rationale=(
+                            f"Price Cap Veto (Hard Kill): Recommended {ev_res.recommended_side.value.upper()} ask=${target_ask:.2f} > $0.72 max ceiling. "
+                            f"Inverted risk/reward ratio ({target_ask*100:.0f}c risk to win {(1.0-target_ask)*100:.0f}c). Skipping."
+                        ),
+                    )
+                cfg = get_asset_config(self.asset)
+                deep_separation_diff = self.min_spot_diff * 2.3
+                # Tier 2: Standard cap ($0.62) unless spot diff is deep in-the-money
+                if target_ask > self.max_entry_price and abs(spot_diff) < deep_separation_diff:
+                    deep_sep_str = cfg.format_price(deep_separation_diff)
+                    diff_str = cfg.format_diff(spot_diff)
+                    return self._build_wait_decision(
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_diff=spot_diff,
+                        vpin=vpin,
+                        rationale=(
+                            f"Price Cap Veto (Standard): Recommended {ev_res.recommended_side.value.upper()} ask=${target_ask:.2f} > ${self.max_entry_price:.2f} cap. "
+                            f"Requires deep spot separation (|Diff|={diff_str} < {deep_sep_str}). Skipping."
+                        ),
+                    )
 
             # Momentum Alignment Filter (P0 Fix — data: 0W/6L for contrarian NO in VOL_UP)
             # When the asset has moved meaningfully away from strike, bet WITH the direction.
@@ -681,18 +1004,22 @@ class ThreeStepDominationBot:
         chosen_side_str = ev_res.recommended_side.value if ev_res.recommended_side else "wait"
         cfg = get_asset_config(self.asset)
 
-        if (is_yes or is_no) and ev_res.recommended_contracts > 0:
-            target_side = chosen_side_str.upper()
-            potential_reward = 1.0 - discount_price_val
-            payoff_mult = potential_reward / discount_price_val if discount_price_val > 0 else 1.0
-            target_prob = p_up if is_yes else p_down
-            diff_str = cfg.format_diff(spot_diff)
-            rationale = (
-                f"[{playbook_title}] Discount Sniper | Resting Limit BUY {target_side} @ ${discount_price_val:.2f} ($0.00 Fee) | "
-                f"T={int(time_to_expiry_s)}s left | Spot Diff: {diff_str} | "
-                f"Model Prob: {target_prob*100:.1f}% | Risk: ${discount_price_val:.2f} | "
-                f"Reward: +${potential_reward:.2f} ({payoff_mult:.2f}x) | Kelly: {ev_res.recommended_contracts} cts"
-            )
+        if stage == "twap_sniper":
+            limit_px = actual_market_ask if actual_market_ask is not None else float(ev_res.market_price)
+        else:
+            limit_px = discount_price_val
+            if (is_yes or is_no) and ev_res.recommended_contracts > 0:
+                target_side = chosen_side_str.upper()
+                potential_reward = 1.0 - discount_price_val
+                payoff_mult = potential_reward / discount_price_val if discount_price_val > 0 else 1.0
+                target_prob = p_up if is_yes else p_down
+                diff_str = cfg.format_diff(spot_diff)
+                rationale = (
+                    f"[{playbook_title}] Discount Sniper | Resting Limit BUY {target_side} @ ${discount_price_val:.2f} ($0.00 Fee) | "
+                    f"T={int(time_to_expiry_s)}s left | Spot Diff: {diff_str} | "
+                    f"Model Prob: {target_prob*100:.1f}% | Risk: ${discount_price_val:.2f} | "
+                    f"Reward: +${potential_reward:.2f} ({payoff_mult:.2f}x) | Kelly: {ev_res.recommended_contracts} cts"
+                )
 
         return DominationDecision(
             strategy_id=self.STRATEGY_ID,
@@ -717,7 +1044,7 @@ class ThreeStepDominationBot:
             time_to_expiry_s=round(time_to_expiry_s, 1),
             spot_diff=round(spot_diff, cfg.price_decimals),
             order_type="limit",
-            limit_price=discount_price_val,
+            limit_price=limit_px,
         )
 
     def _build_wait_decision(
@@ -803,6 +1130,122 @@ class ThreeStepDominationBot:
 
         return 0.50, 0.50
 
+    def compute_dynamic_spot_velocity_decision(
+        self,
+        side_is_yes: bool,
+        spot_velocity_3s: float,
+        time_to_expiry_s: float,
+        spot_price: float = 0.0,
+        target_strike: float = 0.0,
+        twap_60s: Optional[float] = None,
+        rolling_vol_1m: Optional[float] = None,
+    ) -> tuple[bool, str]:
+        """Evaluate Spot Velocity Front-Run using 4-Regime Fading Mathematics.
+
+        Regime 1 (T > 240s): Macro Drift Zone (Z-Score >= 2.50σ and outside Deep ITM Moat).
+        Regime 2 (60s < T <= 240s): Transition Zone (adaptive moneyness-scaled threshold).
+        Regime 3 (15s < T <= 60s): Silas TWAP Fading Invariance (exit vetoed unless |v| >= v_crit).
+        Regime 4 (T <= 15s): Expiration Quarantine Zone (strict hold to $1.00 settlement).
+        """
+        if not self.enable_dynamic_spot_velocity:
+            adverse_spot_dump = False
+            if side_is_yes and spot_velocity_3s <= -self.spot_delta_front_run_threshold:
+                adverse_spot_dump = True
+            elif (not side_is_yes) and spot_velocity_3s >= self.spot_delta_front_run_threshold:
+                adverse_spot_dump = True
+            return adverse_spot_dump, f"Static Threshold: {self.spot_delta_front_run_threshold:.2f}"
+
+        # Calculate adverse velocity (positive number means moving adversely against our position)
+        adverse_vel_3s = -spot_velocity_3s if side_is_yes else spot_velocity_3s
+
+        if adverse_vel_3s <= 0.0:
+            return False, f"Favorable drift ({spot_velocity_3s:+.2f})"
+
+        # Regime 4: Expiration Quarantine Zone (T_rem <= 15s)
+        # Lock out front-run sells to prevent giving away EV into widening spreads right before $1.00 settlement
+        if time_to_expiry_s <= self.twap_fading_quarantine_seconds:
+            return (
+                False,
+                f"EXPIRATION QUARANTINE: T={time_to_expiry_s:.1f}s <= {self.twap_fading_quarantine_seconds:.0f}s. "
+                f"Sells strictly locked out to protect EV and hold for $1.00 settlement."
+            )
+
+        # Volatility calibration
+        sigma_1 = rolling_vol_1m if (rolling_vol_1m is not None and rolling_vol_1m > 0.001) else self.typical_1m_volatility
+        sigma_s = sigma_1 / math.sqrt(60.0)
+        sigma_3s = max(0.001, sigma_s * math.sqrt(3.0))
+
+        # Moneyness & Deep ITM Moat
+        if spot_price > 0.0 and target_strike > 0.0:
+            moneyness = (spot_price - target_strike) if side_is_yes else (target_strike - spot_price)
+            moat = self.moneyness_moat_multiplier * sigma_s * math.sqrt(max(10.0, time_to_expiry_s))
+            # If position is deep ITM and remaining moneyness after adverse move is still well above moat
+            if moneyness > 0 and moneyness >= moat and (moneyness - adverse_vel_3s) > (0.5 * moat):
+                return (
+                    False,
+                    f"DEEP ITM IMMUNITY: Moneyness +${moneyness:.2f} exceeds dynamic moat +${moat:.2f}. "
+                    f"Position safe from adverse drift."
+                )
+        else:
+            moneyness = 0.0
+
+        # Regime 3: TWAP Fading Zone (15s < T_rem <= 60s)
+        # Silas TWAP Gravity Invariance: Kalshi settles on 60s trailing TWAP.
+        # Future spot velocity impact fades quadratically at O(T_rem^2).
+        if time_to_expiry_s <= self.twap_fading_window_seconds and twap_60s is not None and twap_60s > 0.0 and target_strike > 0.0:
+            delta_twap = (twap_60s - target_strike) if side_is_yes else (target_strike - twap_60s)
+            if delta_twap > 0.0:
+                v_sec = adverse_vel_3s / 3.0
+                t_safe = max(1.0, time_to_expiry_s)
+                v_crit = (2.0 * delta_twap * 60.0) / (t_safe ** 2)
+                if v_sec < v_crit:
+                    return (
+                        False,
+                        f"SILAS TWAP GRAVITY VETO: Adverse velocity {v_sec:+.2f}$/s < v_crit {v_crit:.2f}$/s. "
+                        f"60s TWAP cushion +${delta_twap:.2f} physically intact. Holding to $1.00 settlement."
+                    )
+                else:
+                    return (
+                        True,
+                        f"TWAP BREACH HAZARD: Adverse velocity {v_sec:+.2f}$/s >= v_crit {v_crit:.2f}$/s "
+                        f"threatens settlement TWAP (+${delta_twap:.2f} cushion). Front-running vacuum!"
+                    )
+
+        # Regime 2: Transition Zone (60s < T_rem <= 240s)
+        if time_to_expiry_s <= 240.0:
+            if spot_price > 0.0 and target_strike > 0.0:
+                m_pos = max(0.0, moneyness)
+                scale = math.sqrt(time_to_expiry_s / 60.0)
+                dyn_thresh = max(0.80 * sigma_1, m_pos / max(0.5, scale))
+            else:
+                dyn_thresh = self.spot_delta_front_run_threshold
+
+            if adverse_vel_3s >= dyn_thresh:
+                return (
+                    True,
+                    f"TRANSITION DRIFT HAZARD: 3s adverse velocity {adverse_vel_3s:+.2f} >= dynamic threshold "
+                    f"{dyn_thresh:.2f} (T={time_to_expiry_s:.0f}s). Front-running resting bids!"
+                )
+            else:
+                return (
+                    False,
+                    f"TRANSITION NORMAL: 3s adverse velocity {adverse_vel_3s:+.2f} < dynamic threshold {dyn_thresh:.2f}."
+                )
+
+        # Regime 1: Macro Drift Zone (T_rem > 240s)
+        z_score = adverse_vel_3s / sigma_3s
+        if z_score >= self.velocity_z_score_threshold:
+            return (
+                True,
+                f"MACRO DRIFT SHIFT: Adverse velocity Z-Score {z_score:.2f}σ >= {self.velocity_z_score_threshold:.2f}σ "
+                f"(Adverse {adverse_vel_3s:+.2f}$ in 3s). Front-running trend reversal."
+            )
+        else:
+            return (
+                False,
+                f"MACRO STABLE: Adverse velocity Z-Score {z_score:.2f}σ < {self.velocity_z_score_threshold:.2f}σ."
+            )
+
     def evaluate_exit(
         self,
         side: OrderSide | str,
@@ -812,6 +1255,10 @@ class ThreeStepDominationBot:
         time_to_expiry_s: float,
         spot_price: float = 0.0,
         target_strike: float = 0.0,
+        peak_bid: Optional[Decimal] = None,
+        spot_velocity_3s: float = 0.0,
+        twap_60s: Optional[float] = None,
+        rolling_vol_1m: Optional[float] = None,
     ) -> DominationExitDecision:
         """Evaluate open position against quantitative Take-Profit and Early Liquidation rules."""
         if not book or size <= 0:
@@ -851,12 +1298,14 @@ class ThreeStepDominationBot:
             time_to_expiry_s=time_to_expiry_s,
         )
         reverse_prob = prob_no if side_is_yes else prob_yes
+        dyn_reversal_threshold = self.compute_dynamic_reversal_threshold(time_to_expiry_s)
 
-        # Rule 1: Asymmetric Tail Risk Ceiling (e.g. Bid >= $0.95 or $0.98)
-        # Exits if ceiling reached AND either require_reversal_for_tp_ceiling is False OR reverse_prob >= reverse_indicator_threshold
+        # Rule 1: Asymmetric Tail Risk Ceiling (e.g. Bid >= $0.94 or $0.90)
+        # Exits if ceiling reached AND either require_reversal_for_tp_ceiling is False OR reverse_prob >= dyn_reversal_threshold
         if self.enable_take_profit_ceiling and best_bid >= self.take_profit_price_threshold and net_pnl_per_ct > Decimal("0.00"):
-            reversal_confirmed = (not self.require_reversal_for_tp_ceiling) or (reverse_prob >= self.reverse_indicator_threshold)
+            reversal_confirmed = (not self.require_reversal_for_tp_ceiling) or (reverse_prob >= dyn_reversal_threshold)
             if reversal_confirmed:
+                rev_text = f" with {reverse_prob*100:.1f}% adverse reversal confirmation" if self.require_reversal_for_tp_ceiling else ""
                 return DominationExitDecision(
                     should_exit=True,
                     exit_reason="TAKE_PROFIT_CEILING",
@@ -865,20 +1314,92 @@ class ThreeStepDominationBot:
                     unrealized_pnl=round(total_net_pnl, 4),
                     rationale=(
                         f"🎯 [TAKE PROFIT CEILING] Best bid ${best_bid:.2f} >= ${self.take_profit_price_threshold:.2f} "
-                        f"with {reverse_prob*100:.1f}% reversal conviction (>= {self.reverse_indicator_threshold*100:.0f}%) | "
-                        f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | "
-                        f"Liquidating early to protect banked gains against reversal."
+                        f"reached{rev_text} | Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | "
+                        f"Liquidating immediately to lock in banked gains before gamma cliff."
                     ),
                 )
             else:
                 logger.debug(
                     "[HOLD TO SETTLEMENT] Bid $%.2f >= $%.2f ceiling, but reverse conviction %.1f%% < %.0f%%. Continuing to $1.00 settlement.",
-                    float(best_bid), float(self.take_profit_price_threshold), reverse_prob * 100.0, self.reverse_indicator_threshold * 100.0
+                    float(best_bid), float(self.take_profit_price_threshold), reverse_prob * 100.0, dyn_reversal_threshold * 100.0
                 )
 
-        # Rule 2: Late-Cycle Expiration Defense (T <= 120s, Bid >= $0.85, ROI >= 15%)
+        # Rule 2: High-Frequency Spot Delta Front-Runner (Fading Mathematics)
+        if best_bid >= Decimal("0.85") and net_pnl_per_ct > Decimal("0.00"):
+            should_front_run, fr_rationale = self.compute_dynamic_spot_velocity_decision(
+                side_is_yes=side_is_yes,
+                spot_velocity_3s=spot_velocity_3s,
+                time_to_expiry_s=time_to_expiry_s,
+                spot_price=spot_price,
+                target_strike=target_strike,
+                twap_60s=twap_60s,
+                rolling_vol_1m=rolling_vol_1m,
+            )
+
+            if should_front_run:
+                return DominationExitDecision(
+                    should_exit=True,
+                    exit_reason="SPOT_DELTA_FRONT_RUN",
+                    exit_price=best_bid,
+                    profit_pct=round(roi * 100.0, 2),
+                    unrealized_pnl=round(total_net_pnl, 4),
+                    rationale=(
+                        f"⚡ [SPOT VELOCITY FRONT-RUN] {fr_rationale} | Front-running orderbook vacuum to lock in bid "
+                        f"${best_bid:.2f} (Net +${total_net_pnl:.2f}, +{roi*100:.1f}% ROI) before liquidity evaporates."
+                    ),
+                )
+
+        # Rule 3: High-Water Mark Trailing Profit Ratchet & Deep Breakeven Armor
+        # Calibrated via 5,000-cycle Monte Carlo: only trail after reaching deep profit (peak >= $0.88)
+        # to avoid whipsawing out of normal intra-cycle 50c-70c oscillations.
+        if self.enable_trailing_ratchet and peak_bid is not None and peak_bid > best_bid:
+            effective_peak = max(entry_price, peak_bid)
+
+            # Tier 2 & 3: Major Profit Trail (Active once peak bid >= $0.88)
+            if effective_peak >= Decimal("0.88"):
+                buffer = Decimal("0.06") if effective_peak >= Decimal("0.92") else self.trailing_ratchet_buffer
+                tier_floor = effective_peak - buffer
+                if best_bid <= tier_floor and net_pnl_per_ct > Decimal("0.00"):
+                    return DominationExitDecision(
+                        should_exit=True,
+                        exit_reason="TRAILING_PROFIT_RATCHET",
+                        exit_price=best_bid,
+                        profit_pct=round(roi * 100.0, 2),
+                        unrealized_pnl=round(total_net_pnl, 4),
+                        rationale=(
+                            f"🛡️ [TRAILING PROFIT RATCHET] Bid ${best_bid:.2f} dropped to/below trailing floor ${tier_floor:.2f} "
+                            f"(Peak was ${effective_peak:.2f}) | Locking in +${total_net_pnl:.2f} profit "
+                            f"(+{roi*100:.1f}% ROI) to protect banked gains."
+                        ),
+                    )
+
+            # Tier 1: Deep Breakeven Armor (Active ONLY once peak reached >= $0.85 and gained >= +20c from entry)
+            # Protected by lower bound (entry - 0.04) so it never sells into panic gap-downs
+            if effective_peak >= Decimal("0.85") and effective_peak >= entry_price + Decimal("0.20"):
+                be_floor = entry_price + self.fee_per_contract
+                if (entry_price - Decimal("0.04")) <= best_bid <= be_floor:
+                    return DominationExitDecision(
+                        should_exit=True,
+                        exit_reason="TRAILING_PROFIT_RATCHET",
+                        exit_price=best_bid,
+                        profit_pct=round(roi * 100.0, 2),
+                        unrealized_pnl=round(total_net_pnl, 4),
+                        rationale=(
+                            f"🛡️ [BREAKEVEN ARMOR] Bid ${best_bid:.2f} dropped back to entry/fee floor ${be_floor:.2f} "
+                            f"(Peak was ${effective_peak:.2f}) | Exiting near breakeven to protect capital from negative reversal."
+                        ),
+                    )
+
+        # Rule 4: Late-Cycle Expiration Defense (15s < T <= 120s, Bid >= $0.85, ROI >= 15%)
         # In final 2 minutes, binary gamma risk explodes; lock in gains before unpredictable settlement
-        if time_to_expiry_s <= 120.0 and best_bid >= Decimal("0.85") and roi >= self.late_cycle_roi and net_pnl_per_ct > Decimal("0.00"):
+        # In final 15 seconds, quarantined to hold for $1.00 settlement
+        if (
+            time_to_expiry_s > self.twap_fading_quarantine_seconds
+            and time_to_expiry_s <= 120.0
+            and best_bid >= Decimal("0.85")
+            and roi >= self.late_cycle_roi
+            and net_pnl_per_ct > Decimal("0.00")
+        ):
             return DominationExitDecision(
                 should_exit=True,
                 exit_reason="LATE_CYCLE_HARVEST",
@@ -892,12 +1413,11 @@ class ThreeStepDominationBot:
                 ),
             )
 
-        # Rule 3: Reversal Take-Profit Harvest (ROI >= min_take_profit_roi ONLY IF reverse_prob >= reverse_indicator_threshold)
-        # Protects gains when indicators strongly reverse against open position (>= 85% conviction)
+        # Rule 5: Dynamic Reversal Take-Profit Harvest (ROI >= min_take_profit_roi ONLY IF reverse_prob >= dyn_reversal_threshold)
         if (
             self.enable_reverse_take_profit_roi
             and roi >= self.min_take_profit_roi
-            and reverse_prob >= self.reverse_indicator_threshold
+            and reverse_prob >= dyn_reversal_threshold
             and net_pnl_per_ct > Decimal("0.00")
         ):
             return DominationExitDecision(
@@ -908,7 +1428,7 @@ class ThreeStepDominationBot:
                 unrealized_pnl=round(total_net_pnl, 4),
                 rationale=(
                     f"🚨 [REVERSE SIGNAL TAKE-PROFIT] Indicators show {reverse_prob*100:.1f}% conviction in reverse direction "
-                    f"(>= {self.reverse_indicator_threshold*100:.0f}%) | "
+                    f"(>= {dyn_reversal_threshold*100:.0f}% target) | "
                     f"Net ROI +{roi*100:.1f}% >= +{self.min_take_profit_roi*100:.0f}% target at ${best_bid:.2f} | "
                     f"Net profit +${total_net_pnl:.2f} | Securing banked returns before reversal destroys gains."
                 ),

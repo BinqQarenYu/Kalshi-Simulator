@@ -160,7 +160,7 @@ def test_5m_domination_bot_playbook_scaling():
         time_to_expiry_s=10.0,
     )
     assert d4.recommended_side == "wait"
-    assert "Cycle Closing Window" in d4.rationale
+    assert "Cycle Closing Window" in d4.rationale or "Expiration Quarantine Zone" in d4.rationale
 
 
 def test_5m_win_loss_event_report_generation():

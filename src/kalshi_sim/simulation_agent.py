@@ -538,13 +538,7 @@ class SimulationAgent:
         # ===================================================================
         # BOT 1: 3-Step Domination Bot (Evaluated against _portfolio_domination)
         if self.active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination"):
-            # Q2 Winning Choice: Overnight Cautious Mode (1:00 AM - 6:00 AM ET)
-            # Low liquidity & wide spreads overnight produce noisy chop.
-            # In cautious mode, we require edge >= 12.0% and |Diff| >= $75.00, capped at 1 contract.
-            is_overnight_et = False
-            if is_live:
-                _et_now = datetime.now(ZoneInfo("America/New_York"))
-                is_overnight_et = (1 <= _et_now.hour < 6)
+
             if (
                 not self._portfolio_domination.circuit_breaker_tripped
                 and len(self._portfolio_domination.open_positions) < MAX_CONCURRENT_POSITIONS
@@ -610,19 +604,10 @@ class SimulationAgent:
                         )
 
                     if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
-                        # Q2 Winning Rule: Overnight Cautious Mode enforcement
-                        if is_overnight_et:
-                            if decision.edge_pct < 12.0 or abs(spot_price - target_strike) < 75.0:
-                                logger.info(
-                                    "[OVERNIGHT CAUTIOUS VETO] %s | Edge=%.1f%% < 12.0%% or |Diff|=$%.2f < $75.00. Suppressing overnight noise trade.",
-                                    ticker, decision.edge_pct, abs(spot_price - target_strike)
-                                )
-                                return
-
                         order_size = 1  # Strictly 1 contract for each asset
                         side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
                         logger.info(
-                            "[%s] %-18s | %-3s (%s) | Edge=%+.1f%% | EV=+%s/ct | Size=%d cts%s",
+                            "[%s] %-18s | %-3s (%s) | Edge=%+.1f%% | EV=+%s/ct | Size=%d cts",
                             "LIVE 3-STEP BOT" if is_live else "3-STEP BOT",
                             ticker,
                             decision.recommended_side.upper(),
@@ -630,7 +615,6 @@ class SimulationAgent:
                             decision.edge_pct,
                             f"${max(decision.ev_yes, decision.ev_no):.2f}",
                             order_size,
-                            " [OVERNIGHT CAUTIOUS]" if is_overnight_et else "",
                         )
                         order_type_val = getattr(decision, "order_type", "limit")
                         limit_price_val = Decimal(str(getattr(decision, "limit_price", self._domination_bot.discount_limit_price)))

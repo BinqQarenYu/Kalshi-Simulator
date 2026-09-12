@@ -31,11 +31,16 @@ class Timeframe(str, Enum):
 
 
 class CryptoAsset(str, Enum):
-    """Supported cryptocurrency underlying assets."""
+    """Supported underlying tradeable assets."""
     BTC = "BTC"
     ETH = "ETH"
     SOL = "SOL"
     DOGE = "DOGE"
+    GOLD = "GOLD"
+    HYPER = "HYPER"
+
+
+TradeableAsset = CryptoAsset  # Backward-compatible alias for multi-asset expansion
 
 
 class AssetConfig(BaseModel):
@@ -49,6 +54,7 @@ class AssetConfig(BaseModel):
     typical_strike_step: Decimal
     typical_1m_volatility: Decimal = Decimal("14.00")
     display_prefix: str = "$"
+    coinbase_pair_override: Optional[str] = None
 
     @property
     def symbol(self) -> str:
@@ -62,7 +68,13 @@ class AssetConfig(BaseModel):
 
     @property
     def coinbase_pair(self) -> str:
-        """Coinbase Pro trading pair (e.g. BTC-USD)."""
+        """Coinbase Pro trading pair (e.g. BTC-USD, PAXG-USD, HYPE-USD)."""
+        if self.coinbase_pair_override:
+            return self.coinbase_pair_override
+        if self.asset == CryptoAsset.GOLD:
+            return "PAXG-USD"
+        if self.asset == CryptoAsset.HYPER:
+            return "HYPE-USD"
         return f"{self.asset.value}-USD"
 
     def format_price(self, val: Decimal | float | None) -> str:
@@ -127,6 +139,30 @@ CRYPTO_ASSETS: dict[CryptoAsset, AssetConfig] = {
         typical_strike_step=Decimal("0.0005"),
         typical_1m_volatility=Decimal("0.000045"),
     ),
+    CryptoAsset.GOLD: AssetConfig(
+        asset=CryptoAsset.GOLD,
+        name="Gold (15M)",
+        series_ticker_15m="KXGOLD15M",
+        cf_index_id="XAUUSD",
+        price_decimals=2,
+        min_spot_diff=Decimal("1.50"),
+        typical_strike_step=Decimal("1.00"),
+        typical_1m_volatility=Decimal("0.75"),
+        display_prefix="$",
+        coinbase_pair_override="PAXG-USD",
+    ),
+    CryptoAsset.HYPER: AssetConfig(
+        asset=CryptoAsset.HYPER,
+        name="Hyperliquid (HYPE)",
+        series_ticker_15m="KXHYPE15M",
+        cf_index_id="HYPEUSD_RTI",
+        price_decimals=2,
+        min_spot_diff=Decimal("0.35"),
+        typical_strike_step=Decimal("0.25"),
+        typical_1m_volatility=Decimal("0.08"),
+        display_prefix="$",
+        coinbase_pair_override="HYPE-USD",
+    ),
 }
 
 
@@ -135,6 +171,8 @@ def get_asset_config(asset: str | CryptoAsset) -> AssetConfig:
     if isinstance(asset, CryptoAsset):
         return CRYPTO_ASSETS[asset]
     key = str(asset).upper().strip()
+    if key in ("HYPE", "KXHYPE", "KXHYPE15M"):
+        return CRYPTO_ASSETS[CryptoAsset.HYPER]
     for ca, cfg in CRYPTO_ASSETS.items():
         if ca.value == key or cfg.series_ticker_15m == key or cfg.cf_index_id == key:
             return cfg
@@ -150,6 +188,10 @@ def detect_asset_from_ticker(ticker: str) -> CryptoAsset:
         return CryptoAsset.SOL
     if "DOGE" in t:
         return CryptoAsset.DOGE
+    if "GOLD" in t or "XAU" in t:
+        return CryptoAsset.GOLD
+    if "HYPE" in t or "HYPER" in t:
+        return CryptoAsset.HYPER
     return CryptoAsset.BTC
 
 
@@ -626,6 +668,7 @@ class OrderStatus(str, Enum):
     PARTIAL = "partial"
     CANCELLED = "cancelled"
     RESTING = "resting"
+    EXPIRED = "expired"
 
 
 # ---------------------------------------------------------------------------
@@ -644,6 +687,8 @@ class SimulatedOrder(BaseModel):
     reasoning: str = ""
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: OrderStatus = OrderStatus.PENDING
+    queue_ahead: int = 0
+    filled_size: int = 0
 
 
 class SimulatedFill(BaseModel):

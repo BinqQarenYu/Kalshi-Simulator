@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Kalshi 3-Step Dominion — Pocket Cockpit</title>
+  <script src="/static/qrcode.min.js"></script>
   <style>
     :root {
       --bg: #090a0f;
@@ -95,11 +96,115 @@
     .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
     .dot-err { background: var(--red); }
 
-    /* Multi-Asset Selector Bar */
-    .asset-bar { display: flex; gap: 8px; justify-content: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
-    .asset-btn { flex: 1; padding: 8px 10px; background: transparent; border: 1px solid transparent; border-radius: 6px; color: var(--muted); font-weight: 700; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
-    .asset-btn:hover { color: var(--text); background: rgba(255,255,255,0.03); }
-    .asset-btn.active { background: #1c2233; color: #fff; border: 1px solid #334155; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+    /* Multi-Asset Selector Bar & Institutional Toggle Chips */
+    .asset-bar { display: flex; gap: 6px; align-items: center; justify-content: center; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+    .asset-divider { width: 1px; height: 22px; background: var(--border); margin: 0 1px; }
+    .asset-btn {
+      flex: 1;
+      padding: 7px 8px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 6px;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      user-select: none;
+    }
+    .asset-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.2); }
+    .asset-btn.active {
+      background: #182236;
+      color: #fff;
+      border: 1px solid #38bdf8;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.25);
+    }
+    .asset-btn.active#assetBtn-BTC { border-color: #f7931a; box-shadow: 0 0 8px rgba(247, 147, 26, 0.3); }
+    .asset-btn.active#assetBtn-ETH { border-color: #627eea; box-shadow: 0 0 8px rgba(98, 126, 234, 0.3); }
+    .asset-btn.active#assetBtn-SOL { border-color: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.3); }
+    .asset-btn.active#assetBtn-DOGE { border-color: #e1b303; box-shadow: 0 0 8px rgba(225, 179, 3, 0.3); }
+    .asset-btn.active#assetBtn-GOLD { border-color: #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.3); }
+    .asset-btn.active#assetBtn-HYPER { border-color: #06b6d4; box-shadow: 0 0 8px rgba(6, 182, 212, 0.3); }
+    .asset-btn.active#assetBtn-ALL { border-color: #38bdf8; box-shadow: 0 0 8px rgba(56, 189, 248, 0.35); }
+
+    .asset-btn.incubator-locked {
+      opacity: 0.65;
+      border: 1px dashed rgba(245, 158, 11, 0.45) !important;
+      background: rgba(245, 158, 11, 0.04) !important;
+      cursor: not-allowed !important;
+    }
+    .asset-btn.incubator-locked:hover {
+      opacity: 0.9;
+      border-color: #f59e0b !important;
+      box-shadow: 0 0 8px rgba(245, 158, 11, 0.25) !important;
+    }
+    .incubator-badge {
+      font-size: 0.58rem;
+      font-weight: 800;
+      color: #f59e0b;
+      background: rgba(245, 158, 11, 0.18);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin-left: 4px;
+      letter-spacing: 0.5px;
+      vertical-align: middle;
+    }
+
+    .chip-check {
+      font-size: 0.85rem;
+      font-weight: 800;
+      opacity: 0.45;
+      display: inline-flex;
+      align-items: center;
+    }
+    .asset-btn.active .chip-check {
+      opacity: 1;
+      color: #38bdf8;
+    }
+    .asset-btn.active#assetBtn-BTC .chip-check { color: #f7931a; }
+    .asset-btn.active#assetBtn-ETH .chip-check { color: #818cf8; }
+    .asset-btn.active#assetBtn-SOL .chip-check { color: #34d399; }
+    .asset-btn.active#assetBtn-DOGE .chip-check { color: #facc15; }
+    .asset-btn.active#assetBtn-GOLD .chip-check { color: #fbbf24; }
+    .asset-btn.active#assetBtn-HYPER .chip-check { color: #22d3ee; }
+
+    /* Per-Asset Strategy Parameters Sub-Tabs */
+    .param-asset-tabs { display: flex; gap: 6px; margin-bottom: 12px; background: rgba(255,255,255,0.03); padding: 4px; border-radius: 6px; border: 1px solid var(--border); }
+    .param-tab {
+      flex: 1;
+      padding: 5px 6px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: center;
+      user-select: none;
+    }
+    .param-tab:hover {
+      color: var(--text);
+      background: rgba(255,255,255,0.06);
+    }
+    .param-tab.active {
+      background: #182236;
+      color: #38bdf8;
+      border-color: #38bdf8;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.25);
+    }
+    .param-tab.active#paramTab-BTC { border-color: #f7931a; color: #f7931a; }
+    .param-tab.active#paramTab-ETH { border-color: #818cf8; color: #818cf8; }
+    .param-tab.active#paramTab-SOL { border-color: #34d399; color: #34d399; }
+    .param-tab.active#paramTab-DOGE { border-color: #facc15; color: #facc15; }
+    .param-tab.active#paramTab-GOLD { border-color: #fbbf24; color: #fbbf24; }
+    .param-tab.active#paramTab-HYPER { border-color: #22d3ee; color: #22d3ee; }
 
     /* Header Actions */
     .header-right { display: flex; align-items: center; gap: 8px; }
@@ -193,9 +298,376 @@
     .tooltip b { color: #38bdf8; display: block; margin-bottom: 2px; }
     .tooltip i { color: #94a3b8; display: block; margin-bottom: 4px; font-style: normal; }
 
+    /* Remote Control Modal (Antigravity Style) */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(5, 6, 10, 0.82);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 16px;
+    }
+    .modal-overlay.active {
+      display: flex;
+    }
+    .modal-card {
+      background: #12141c;
+      border: 1px solid #1e2230;
+      border-radius: 12px;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 18px 20px;
+      animation: modalFadeIn 0.15s ease-out;
+    }
+    @keyframes modalFadeIn {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+    }
+    .modal-title-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .modal-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #fff;
+    }
+    .modal-subtitle {
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .modal-close {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: 1.2rem;
+      cursor: pointer;
+      line-height: 1;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .modal-close:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    /* Switch toggle */
+    .switch-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .switch-label {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .switch-sub {
+      font-size: 0.68rem;
+      color: var(--muted);
+    }
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 44px;
+      height: 24px;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: #334155;
+      transition: .2s;
+      border-radius: 24px;
+    }
+    .toggle-slider:before {
+      position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
+      background-color: white;
+      transition: .2s;
+      border-radius: 50%;
+    }
+    .toggle-switch input:checked + .toggle-slider {
+      background-color: var(--green);
+    }
+    .toggle-switch input:checked + .toggle-slider:before {
+      transform: translateX(20px);
+    }
+
+    /* Device Box */
+    .device-box {
+      background: #090a0f;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .device-label {
+      font-size: 0.65rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+    .device-name-val {
+      font-family: monospace;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #38bdf8;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* Network Tabs */
+    .rc-tabs {
+      display: flex;
+      background: #090a0f;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px;
+      gap: 4px;
+    }
+    .rc-tab {
+      flex: 1;
+      padding: 6px 4px;
+      text-align: center;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+    .rc-tab:hover { color: var(--text); }
+    .rc-tab.active {
+      background: #1e2433;
+      color: #fff;
+      font-weight: 700;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+    .rc-tab:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* QR Code Box */
+    .qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 10px 0 4px 0;
+    }
+    .qr-desc {
+      font-size: 0.74rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .qr-canvas-wrap {
+      background: #ffffff;
+      padding: 12px;
+      border-radius: 10px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 180px;
+      min-width: 180px;
+    }
+    .qr-canvas-wrap img, .qr-canvas-wrap canvas {
+      display: block;
+    }
+
+    /* Copy Link Bar */
+    .link-bar {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .link-input {
+      flex: 1;
+      background: #090a0f;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: monospace;
+      font-size: 0.72rem;
+      padding: 8px 10px;
+      outline: none;
+    }
+    .btn-copy-link {
+      background: #1e2433;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .btn-copy-link:hover {
+      background: var(--blue);
+      color: #fff;
+      border-color: var(--blue);
+    }
+
+    /* Token Management Footer */
+    .rc-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      font-size: 0.7rem;
+    }
+    .token-status {
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .rc-btn-group {
+      display: flex;
+      gap: 6px;
+    }
+    .btn-rc-secondary {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 0.68rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-rc-secondary:hover {
+      color: #fff;
+      border-color: #475569;
+    }
+    .btn-rc-danger {
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+    .btn-rc-danger:hover {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border-color: var(--red);
+    }
+
   </style>
 </head>
 <body>
+  <!-- Remote Control Modal (Antigravity Style) -->
+  <div id="remoteModalOverlay" class="modal-overlay" onclick="handleRemoteOverlayClick(event)">
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <div class="modal-title">
+            <span>📱</span>
+            <span>Remote Control</span>
+          </div>
+          <div class="modal-subtitle">Work with local agents from another device.</div>
+        </div>
+        <button class="modal-close" onclick="closeRemoteModal()" title="Close">✕</button>
+      </div>
+
+      <!-- Master Toggle Switch -->
+      <div class="switch-row">
+        <div>
+          <div class="switch-label">Enable Remote Control</div>
+          <div class="switch-sub">Allow verified LAN & tunnel connections</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="remoteMasterToggle" onchange="onToggleRemoteSwitch(this.checked)" checked />
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- Device Name Display -->
+      <div class="device-box">
+        <div class="device-label">Device Name</div>
+        <div class="device-name-val" id="remoteDeviceName">
+          <span>💻</span>
+          <span id="remoteDeviceNameText">desktop-likhahome-plasma-wave</span>
+        </div>
+      </div>
+
+      <!-- Network Mode Tabs (Option B: Full Mesh) -->
+      <div class="rc-tabs">
+        <button id="tabLan" class="rc-tab active" onclick="selectRemoteTab('lan')">Wi-Fi / LAN</button>
+        <button id="tabTailscale" class="rc-tab" onclick="selectRemoteTab('tailscale')">5G / Tailscale</button>
+        <button id="tabTunnel" class="rc-tab" onclick="selectRemoteTab('tunnel')">Cloudflare Tunnel</button>
+      </div>
+
+      <!-- QR Code Container -->
+      <div class="qr-container">
+        <div class="qr-desc">Scan the code to open this device in Remote Control, or copy link.</div>
+        <div class="qr-canvas-wrap">
+          <div id="qrCodeContainer"></div>
+        </div>
+      </div>
+
+      <!-- Copy Link Bar -->
+      <div class="link-bar">
+        <input type="text" id="remoteLinkInput" class="link-input" readonly />
+        <button id="btnCopyRemoteLink" class="btn-copy-link" onclick="copyRemoteLink()">📋 Copy Link</button>
+      </div>
+
+      <!-- Token Management Footer -->
+      <div class="rc-actions">
+        <div class="token-status">
+          <span class="dot" id="tokenStatusDot"></span>
+          <span id="tokenStatusText">Zero-Trust Token Active</span>
+        </div>
+        <div class="rc-btn-group">
+          <button class="btn-rc-secondary" onclick="regenerateRemoteToken()" title="Invalidate current token and create new pairing secret">🔄 Regenerate</button>
+          <button class="btn-rc-secondary btn-rc-danger" onclick="revokeRemoteToken()" title="Revoke all remote access">🛑 Revoke</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Pairing Auth Required Overlay (Visible if unauthenticated remote client) -->
+  <div id="pairingRequiredOverlay" class="modal-overlay" style="display:none; z-index:9999;">
+    <div class="modal-card" style="text-align:center; max-width:360px;">
+      <div style="font-size:2.5rem; margin-bottom:8px;">🔒</div>
+      <div style="font-size:1.1rem; font-weight:700; margin-bottom:6px;">Pairing Required</div>
+      <div style="font-size:0.8rem; color:var(--muted); line-height:1.4; margin-bottom:16px;">
+        This 3-Step Dominion trading station is protected by institutional Zero-Trust auth. Please scan the Remote Control QR code displayed on your desktop screen to authenticate this device.
+      </div>
+      <button class="btn-copy-link" style="width:100%; padding:10px;" onclick="window.location.reload()">↻ Retry Connection</button>
+    </div>
+  </div>
+
   <div class="container">
     
     <!-- Top Header -->
@@ -206,6 +678,9 @@
         <span style="font-size: 0.8rem; color: var(--muted); font-weight: 400;">(24/7 Standalone Engine)</span>
       </div>
       <div class="header-right">
+        <button id="btnRemote" class="btn-view-toggle" onclick="openRemoteModal()" title="Remote Control (Mobile Pairing)">
+          📱 Remote <span id="remoteDot" style="display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--green); margin-left:3px;"></span>
+        </button>
         <button id="btnPinFloat" class="btn-view-toggle" onclick="togglePinFloat()" title="Float on Top of Desktop (Always-on-Top Widget)">📌 Float</button>
         <button id="btnPopout" class="btn-view-toggle" onclick="launchPopoutWidget()" title="Open as Floating Desktop Widget">🗗 Popout</button>
         <button id="viewToggleBtn" class="btn-view-toggle" onclick="toggleViewMode()" title="Toggle Minimized / Detailed View">⤢ Expand</button>
@@ -213,20 +688,41 @@
       </div>
     </div>
 
-    <!-- Multi-Asset Switcher Bar -->
+    <!-- Multi-Asset Switcher Bar with Institutional Checkbox Chips -->
     <div class="asset-bar">
-      <button id="assetBtn-BTC" class="asset-btn active" onclick="switchAsset('BTC')">
+      <button id="assetBtn-ALL" class="asset-btn" onclick="toggleAllAssets()" title="Toggle ALL Assets (Omnichannel Basket)">
+        <span class="chip-check" id="check-ALL">☐</span>
+        <span style="color: #38bdf8;">⚡</span> ALL
+      </button>
+      <div class="asset-divider"></div>
+      <button id="assetBtn-BTC" class="asset-btn active" onclick="toggleAsset('BTC')" title="Toggle Bitcoin (KXBTC15M)">
+        <span class="chip-check" id="check-BTC">☑</span>
         <span style="color: #f7931a;">₿</span> BTC
       </button>
-      <button id="assetBtn-ETH" class="asset-btn" onclick="switchAsset('ETH')">
+      <button id="assetBtn-ETH" class="asset-btn" onclick="toggleAsset('ETH')" title="Toggle Ethereum (KXETH15M)">
+        <span class="chip-check" id="check-ETH">☐</span>
         <span style="color: #627eea;">Ξ</span> ETH
       </button>
-      <button id="assetBtn-SOL" class="asset-btn" onclick="switchAsset('SOL')">
+      <button id="assetBtn-SOL" class="asset-btn" onclick="toggleAsset('SOL')" title="Toggle Solana (KXSOL15M)">
+        <span class="chip-check" id="check-SOL">☐</span>
         <span style="color: #10b981;">●</span> SOL
       </button>
-      <button id="assetBtn-DOGE" class="asset-btn" onclick="switchAsset('DOGE')">
+      <button id="assetBtn-DOGE" class="asset-btn" onclick="toggleAsset('DOGE')" title="Toggle Dogecoin (KXDOGE15M)">
+        <span class="chip-check" id="check-DOGE">☐</span>
         <span style="color: #e1b303;">Ð</span> DOGE
       </button>
+      <button id="assetBtn-GOLD" class="asset-btn" onclick="toggleAsset('GOLD')" title="Toggle Gold (KXGOLD15M)">
+        <span class="chip-check" id="check-GOLD">☐</span>
+        <span style="color: #f59e0b;">🟡</span> <span id="label-GOLD">GOLD</span>
+        <span id="badge-GOLD" class="incubator-badge" style="display: none;">🔒 INCUBATOR</span>
+      </button>
+      <button id="assetBtn-HYPER" class="asset-btn" onclick="toggleAsset('HYPER')" title="Toggle Hyperliquid (KXHYPE15M)">
+        <span class="chip-check" id="check-HYPER">☐</span>
+        <span style="color: #06b6d4;">🌀</span> HYPER
+      </button>
+    </div>
+    <div id="assetModeBanner" style="display: none; font-size: 0.72rem; color: #38bdf8; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px; padding: 5px 10px; margin-bottom: 8px; text-align: center; font-family: 'JetBrains Mono', monospace;">
+      ⚡ <strong>OMNICHANNEL BASKET MODE ACTIVE</strong> • Scanning BTC, ETH, SOL, DOGE, GOLD concurrently • Cap: Max 3 Open Positions • 1 Contract Armor
     </div>
 
     <!-- Master Controls -->
@@ -291,6 +787,14 @@
           <button id="btnSweetspots" onclick="loadSweetspots()" class="btn-sweetspot-sm" title="Load Quant Benchmark Sweetspots ($0.52 Maker / $0.62 Mom / $0.95 TP / 1 Ct)">🎯 Sweetspots</button>
           <button id="btnSaveParams" onclick="saveParameters()" class="btn-save-sm">💾 Apply & Save as Default</button>
         </div>
+      </div>
+      <div class="param-asset-tabs">
+        <button id="paramTab-BTC" class="param-tab active" onclick="switchParamAssetTab('BTC')" type="button">₿ BTC</button>
+        <button id="paramTab-ETH" class="param-tab" onclick="switchParamAssetTab('ETH')" type="button">Ξ ETH</button>
+        <button id="paramTab-SOL" class="param-tab" onclick="switchParamAssetTab('SOL')" type="button">● SOL</button>
+        <button id="paramTab-DOGE" class="param-tab" onclick="switchParamAssetTab('DOGE')" type="button">Ð DOGE</button>
+        <button id="paramTab-GOLD" class="param-tab" onclick="switchParamAssetTab('GOLD')" type="button">🟡 GOLD</button>
+        <button id="paramTab-HYPER" class="param-tab" onclick="switchParamAssetTab('HYPER')" type="button">🌀 HYPER</button>
       </div>
       <div class="params-grid">
         <div class="param-item">
@@ -366,17 +870,88 @@
 
         <div class="param-item">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-            <label class="param-label" style="margin-bottom: 0;">Take Profit Price Ceiling <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br><b>How it works:</b> Automatically sells the contract early if you are winning big.<br><b>Philosophy:</b> Let winners run to 100% payout ($1.00) unless an adverse reversal ≥85% is detected.</div></div></label>
+            <label class="param-label" style="margin-bottom: 0;">Take Profit Price Ceiling <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br><b>How it works:</b> Automatically sells the contract early if you are winning big.<br><b>Philosophy:</b> Unconditional early profit lock without waiting for reversal.</div></div></label>
             <div style="display: flex; align-items: center; gap: 4px;">
-              <button id="btnToggleTpCeilingReversal" type="button" onclick="toggleTpCeilingReversal()" title="Require 85%+ reversal detection to exit at ceiling" style="font-size: 0.62rem; font-weight: 700; padding: 2px 5px; border-radius: 4px; border: 1px solid #0284c7; background: rgba(14,165,233,0.15); color: #38bdf8; cursor: pointer; transition: all 0.15s ease;">🛡️ ≥85% REV</button>
+              <button id="btnToggleTpCeilingReversal" type="button" onclick="toggleTpCeilingReversal()" title="Require adverse reversal detection to exit at ceiling" style="font-size: 0.62rem; font-weight: 700; padding: 2px 5px; border-radius: 4px; border: 1px solid #f59e0b; background: rgba(245,158,11,0.15); color: #fbbf24; cursor: pointer; transition: all 0.15s ease;">⚡ 0-DELAY</button>
               <button id="btnToggleTpCeiling" type="button" onclick="toggleTpCeiling()" style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #10b981; background: rgba(16,185,129,0.15); color: #34d399; cursor: pointer; transition: all 0.15s ease;">🟢 ENABLED</button>
             </div>
           </div>
           <div class="input-wrap">
             <span class="prefix">$</span>
-            <input id="inputTakeProfitPrice" type="number" step="0.01" min="0.50" max="0.99" value="0.95" oninput="markUnsaved()" />
+            <input id="inputTakeProfitPrice" type="number" step="0.01" min="0.50" max="0.99" value="0.94" oninput="markUnsaved()" />
           </div>
-          <span id="tpCeilingHint" class="sweetspot-badge">★ Sweetspot: $0.95 (Eject on ≥85% Reversal; else hold to $1.00)</span>
+          <span id="tpCeilingHint" class="sweetspot-badge">★ Sweetspot: $0.94 (Zero-Delay Profit Harvest)</span>
+        </div>
+
+        <div class="param-item">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+            <label class="param-label" style="margin-bottom: 0;">Trailing Ratchet ($ Buffer) <div class="info-icon">i<div class="tooltip"><b>Trailing Profit Ratchet & Breakeven Armor:</b><br>• Tier 1: Bid ≥ $0.68 locks breakeven floor.<br>• Tier 2: Bid ≥ $0.80 trails peak bid by this buffer.<br><b>Why it matters:</b> Secures big profits while allowing run toward ceiling.</div></div></label>
+            <button id="btnToggleTrailingRatchet" type="button" onclick="toggleTrailingRatchet()" style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #10b981; background: rgba(16,185,129,0.15); color: #34d399; cursor: pointer; transition: all 0.15s ease;">🟢 ENABLED</button>
+          </div>
+          <div class="input-wrap">
+            <span class="prefix">$</span>
+            <input id="inputTrailingBuffer" type="number" step="0.01" min="0.02" max="0.25" value="0.10" oninput="markUnsaved()" />
+          </div>
+          <span class="sweetspot-badge">★ Sweetspot: $0.10 trailing buffer (≥$0.80 peak)</span>
+        </div>
+
+        <div class="param-item">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+            <label class="param-label" style="margin-bottom: 0;">Spot Front-Run (Δ*) <div class="info-icon">i<div class="tooltip" style="width: 280px; line-height: 1.4;"><b>Dynamic Spot Velocity Front-Run & Fading Engine (Δ*):</b><br><b>1. Macro Drift (T &gt; 240s):</b> |Zv| ≥ 2.50σ with Moneyness Moat. Deep ITM never panic dumps.<br><b>2. Transition (60s &lt; T ≤ 240s):</b> Adaptive threshold Δ*(T).<br><b>3. Silas TWAP Gravity (15s &lt; T ≤ 60s):</b> Quadratic decay ~ (T/60)², vetoing false exits when spot wiggles cannot overturn settlement TWAP (v &lt; v_crit).<br><b>4. Expiration Quarantine (T ≤ 15s):</b> Strict hold for $1.00 settlement.<br><b style="color: #10b981;">★ Winning Option:</b> $28.0 (2.0σ) eliminates premature dumps into wide spreads (+166% net yield) while retaining flash crash defense.</div></div></label>
+            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #f59e0b; background: rgba(245,158,11,0.15); color: #fbbf24; font-family: monospace;">⚡ DYNAMIC</span>
+          </div>
+          <div class="input-wrap">
+            <span class="prefix">Δ*</span>
+            <input id="inputSpotDeltaFrontRun" type="number" step="0.01" min="0.0001" max="50.0" value="28.0" oninput="markUnsaved()" />
+          </div>
+          <span id="spotDeltaFrontRunHint" class="sweetspot-badge">★ Sweetspot: Δ-$28.00 (2.0σ Dynamic Fading)</span>
+        </div>
+
+        <div class="param-item">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+            <label class="param-label" style="margin-bottom: 0;">TWAP Sniper Ceiling <div class="info-icon">i<div class="tooltip" style="width: 280px; line-height: 1.4;"><b>Playbook 4: Silas TWAP Immutability Sniper:</b><br>In the late endgame window (T ∈ [15s, 45s]), trailing 60s TWAP mathematically locks settlement. Opportunistically snipes panicked retail limit asks up to this ceiling.<br><b style="color: #10b981;">★ Winning Sweetspot:</b> $0.75 (BTC/ETH/GOLD), $0.72 (SOL), $0.70 (DOGE) captures locked $1.00 payouts.</div></div></label>
+            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #06b6d4; background: rgba(6,182,212,0.15); color: #22d3ee; font-family: monospace;">⚡ LATE-CYCLE</span>
+          </div>
+          <div class="input-wrap">
+            <span class="prefix">$</span>
+            <input id="inputTwapSniperCents" type="number" step="0.01" min="0.50" max="0.95" value="0.75" oninput="markUnsaved()" />
+          </div>
+          <span id="twapSniperHint" class="sweetspot-badge">★ Sweetspot: $0.75 (Late-Cycle Harvest)</span>
+        </div>
+
+        <div class="param-item">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+            <label class="param-label" style="margin-bottom: 0;">Max Queue Ahead <div class="info-icon">i<div class="tooltip" style="width: 280px; line-height: 1.4;"><b>Vance Anti-Toxic Queue Depth Shield:</b><br>Monitors FIFO queue position for resting limit orders at discount price. Cancels or vetoes bids when resting wall ahead exceeds limit, preventing fills only on whale sweeps.<br><b style="color: #10b981;">★ Winning Sweetspot:</b> 250 contracts (BTC), 200 (ETH), 150 (SOL/GOLD), 300 (DOGE).</div></div></label>
+            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #a855f7; background: rgba(168,85,247,0.15); color: #c084fc; font-family: monospace;">🛡️ WHALE ARMOR</span>
+          </div>
+          <div class="input-wrap">
+            <input id="inputMaxQueueDepth" type="number" step="25" min="10" max="5000" value="250" oninput="markUnsaved()" />
+            <span class="suffix">cts</span>
+          </div>
+          <span id="maxQueueDepthHint" class="sweetspot-badge">★ Sweetspot: 250 contracts ahead</span>
+        </div>
+
+        <div class="param-item">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+            <label class="param-label" style="margin-bottom: 0;">Max Spread Corridor <div class="info-icon">i<div class="tooltip" style="width: 280px; line-height: 1.4;"><b>Vance Max CLOB Spread Corridor Cap:</b><br>Vetoes order routing if the active contract bid-ask spread exceeds this cap, preventing toxic executions during orderbook dislocations.<br><b style="color: #10b981;">★ Winning Sweetspot:</b> $0.05 (BTC/GOLD), $0.04 (ETH), $0.06 (SOL), $0.03 (DOGE).</div></div></label>
+            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #10b981; background: rgba(16,185,129,0.15); color: #34d399; font-family: monospace;">📏 CORRIDOR</span>
+          </div>
+          <div class="input-wrap">
+            <span class="prefix">$</span>
+            <input id="inputMaxClobSpread" type="number" step="0.01" min="0.01" max="0.25" value="0.05" oninput="markUnsaved()" />
+          </div>
+          <span id="maxClobSpreadHint" class="sweetspot-badge">★ Sweetspot: $0.05 max CLOB spread</span>
+        </div>
+
+        <div class="param-item">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+            <label class="param-label" style="margin-bottom: 0;">Dynamic Reversal Decay <div class="info-icon">i<div class="tooltip"><b>Dynamic Curve:</b> R*(τ) = min(85%, 50% + 3.5% × τ_mins).<br>Relaxes reversal requirement as time to expiry nears, reflecting exponential gamma jump.</div></div></label>
+            <button id="btnToggleDynamicReversal" type="button" onclick="toggleDynamicReversal()" style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #0284c7; background: rgba(14,165,233,0.15); color: #38bdf8; cursor: pointer; transition: all 0.15s ease;">📈 DYNAMIC</button>
+          </div>
+          <div class="input-wrap" style="background: rgba(14,165,233,0.06); border-color: rgba(14,165,233,0.3);">
+            <span id="dynamicReversalBadge" style="font-size: 0.75rem; font-weight: 700; color: #38bdf8; font-family: monospace;">85% → 50% (τ DECAY)</span>
+          </div>
+          <span class="sweetspot-badge" style="color: #38bdf8;">★ τ-Adaptive Reversal Curve Active</span>
         </div>
 
         <div class="param-item">
@@ -407,6 +982,24 @@
           </div>
           <span id="tpPolicySub" class="sweetspot-badge" style="color: #60a5fa;">🛡️ Reversal Guard: ≥85% Gate Active</span>
         </div>
+
+        <div class="param-item">
+          <label class="param-label">Entry Window Open (Mins) <div class="info-icon">i<div class="tooltip"><b>The Timing Guard:</b> <i>"Earliest entry time allowed in 15M cycle."</i><br><b>How it works:</b> Blocks new trades while remaining cycle time is above this threshold (e.g. 12.0m for BTC, 7.0m for Gold).<br><b>Why it matters:</b> Eliminates early Brownian random-walk noise and coin-flip chop during contract open.</div></div></label>
+          <div class="input-wrap">
+            <input id="inputEntryWindowOpen" type="number" step="0.5" min="1.0" max="14.9" value="12.0" oninput="markUnsaved()" />
+            <span class="suffix">min</span>
+          </div>
+          <span id="entryWindowOpenHint" class="sweetspot-badge">★ Sweetspot: 12.0 min remaining</span>
+        </div>
+
+        <div class="param-item">
+          <label class="param-label">Entry Window Close / Sweep <div class="info-icon">i<div class="tooltip"><b>The Gamma Cliff Shield:</b> <i>"Latest entry cutoff & auto-sweep boundary."</i><br><b>How it works:</b> Halts all new entries below this time (e.g. 4.5m for BTC, 2.0m for Gold). If still flat, immediately cancels and wipes all resting maker limit orders.<br><b>Why it matters:</b> Prevents stale orders from sitting as toxic targets for takers during late-cycle volatility.</div></div></label>
+          <div class="input-wrap">
+            <input id="inputEntryWindowClose" type="number" step="0.5" min="0.5" max="14.0" value="4.5" oninput="markUnsaved()" />
+            <span class="suffix">min</span>
+          </div>
+          <span id="entryWindowCloseHint" class="sweetspot-badge">★ Sweetspot: 4.5 min remaining (Auto-Sweep)</span>
+        </div>
       </div>
       <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border);">
         <button onclick="sweepOrders()" class="btn-sweep-sm">🧹 Sweep Expired Event Orders</button>
@@ -429,7 +1022,7 @@
         <span id="touchVal" class="metric-data" style="color: #60a5fa;">YES: -- / -- | NO: -- / --</span>
       </div>
       <div class="metric-row">
-        <span class="metric-name">BRTI Spot Index (Kalshi 5Hz)</span>
+        <span class="metric-name" id="spotMetricLabel">Spot Index (Kalshi Live)</span>
         <span id="spotVal" class="metric-data">$0.00</span>
       </div>
       <div class="metric-row">
@@ -485,6 +1078,265 @@
   </div>
 
   <script>
+    // ---------------------------------------------------------------------------
+    // Remote Control Client Auth Interceptor & Zero-Trust Auto-Handshake
+    // ---------------------------------------------------------------------------
+    (function initRemoteClientAuth() {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const authQuery = urlParams.get('auth');
+        if (authQuery) {
+          localStorage.setItem('kalshi_rc_token', authQuery);
+          // Clean URL to hide secret token from browser address bar
+          urlParams.delete('auth');
+          const cleanSearch = urlParams.toString() ? ('?' + urlParams.toString()) : '';
+          const cleanUrl = window.location.pathname + cleanSearch + (window.location.hash || '');
+          window.history.replaceState({}, document.title, cleanUrl);
+        }
+      } catch (e) {}
+
+      // Monkey-patch window.fetch to attach X-Remote-Token header
+      const _origFetch = window.fetch;
+      window.fetch = function(input, init) {
+        init = init || {};
+        const token = localStorage.getItem('kalshi_rc_token');
+        if (token) {
+          if (!init.headers) {
+            init.headers = { 'X-Remote-Token': token };
+          } else if (init.headers instanceof Headers) {
+            if (!init.headers.has('X-Remote-Token')) init.headers.append('X-Remote-Token', token);
+          } else if (Array.isArray(init.headers)) {
+            init.headers.push(['X-Remote-Token', token]);
+          } else {
+            if (!init.headers['X-Remote-Token']) init.headers['X-Remote-Token'] = token;
+          }
+        }
+        return _origFetch.call(this, input, init).then(res => {
+          if ((res.status === 401 || res.status === 403) && !isLocalClient()) {
+            showPairingErrorOverlay();
+          }
+          return res;
+        });
+      };
+    })();
+
+    function isLocalClient() {
+      const h = window.location.hostname;
+      return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+    }
+
+    function showPairingErrorOverlay() {
+      const overlay = document.getElementById('pairingRequiredOverlay');
+      if (overlay) overlay.style.display = 'flex';
+    }
+
+    // ---------------------------------------------------------------------------
+    // Remote Control Pairing Modal & Logic (Antigravity Style)
+    // ---------------------------------------------------------------------------
+    let cachedRemoteInfo = null;
+    let currentRemoteTab = 'lan';
+    let qrInstance = null;
+
+    async function openRemoteModal() {
+      const overlay = document.getElementById('remoteModalOverlay');
+      if (!overlay) return;
+      overlay.classList.add('active');
+
+      try {
+        const res = await fetch('/api/remote/info');
+        if (res.ok) {
+          cachedRemoteInfo = await res.json();
+          updateRemoteModalUI(cachedRemoteInfo);
+        }
+      } catch (err) {
+        console.error('Error fetching remote info:', err);
+      }
+    }
+
+    function closeRemoteModal() {
+      const overlay = document.getElementById('remoteModalOverlay');
+      if (overlay) overlay.classList.remove('active');
+    }
+
+    function handleRemoteOverlayClick(event) {
+      if (event.target && event.target.id === 'remoteModalOverlay') {
+        closeRemoteModal();
+      }
+    }
+
+    function updateRemoteModalUI(info) {
+      if (!info) return;
+
+      // Master switch
+      const toggle = document.getElementById('remoteMasterToggle');
+      if (toggle) toggle.checked = !!info.enabled;
+
+      // Device Name
+      const devText = document.getElementById('remoteDeviceNameText');
+      if (devText && info.device_name) devText.textContent = info.device_name;
+
+      // Status indicator
+      const statusDot = document.getElementById('tokenStatusDot');
+      const statusText = document.getElementById('tokenStatusText');
+      if (statusDot) statusDot.style.background = info.enabled ? 'var(--green)' : 'var(--muted)';
+      if (statusText) statusText.textContent = info.enabled ? 'Zero-Trust Token Active' : 'Remote Control Disabled';
+
+      // Tab availability & tooltips
+      const tabTailscale = document.getElementById('tabTailscale');
+      if (tabTailscale) {
+        if (!info.tailscale_ip) {
+          tabTailscale.title = 'Tailscale mesh IP not detected on host';
+          tabTailscale.style.opacity = '0.5';
+        } else {
+          tabTailscale.title = `Tailscale IP: ${info.tailscale_ip}`;
+          tabTailscale.style.opacity = '1';
+        }
+      }
+
+      const tabTunnel = document.getElementById('tabTunnel');
+      if (tabTunnel) {
+        if (!info.tunnel_url) {
+          tabTunnel.title = 'Set KALSHI_TUNNEL_URL in .env to enable Cloudflare/Reverse Tunnel';
+          tabTunnel.style.opacity = '0.5';
+        } else {
+          tabTunnel.title = `Tunnel: ${info.tunnel_url}`;
+          tabTunnel.style.opacity = '1';
+        }
+      }
+
+      // Update selected tab view
+      selectRemoteTab(currentRemoteTab);
+    }
+
+    function selectRemoteTab(tab) {
+      currentRemoteTab = tab;
+      ['lan', 'tailscale', 'tunnel'].forEach(t => {
+        const btn = document.getElementById(`tab${t.charAt(0).toUpperCase() + t.slice(1)}`);
+        if (btn) btn.classList.toggle('active', t === tab);
+      });
+
+      let pairingUrl = '';
+      if (cachedRemoteInfo) {
+        if (tab === 'lan') {
+          pairingUrl = cachedRemoteInfo.lan_pairing_url || `http://${cachedRemoteInfo.local_ip || '127.0.0.1'}:8001/?auth=${cachedRemoteInfo.pairing_token || ''}`;
+        } else if (tab === 'tailscale') {
+          pairingUrl = cachedRemoteInfo.tailscale_pairing_url || (cachedRemoteInfo.tailscale_ip ? `http://${cachedRemoteInfo.tailscale_ip}:8001/?auth=${cachedRemoteInfo.pairing_token || ''}` : '');
+        } else if (tab === 'tunnel') {
+          pairingUrl = cachedRemoteInfo.tunnel_pairing_url || (cachedRemoteInfo.tunnel_url ? `${cachedRemoteInfo.tunnel_url}/?auth=${cachedRemoteInfo.pairing_token || ''}` : '');
+        }
+      }
+
+      const linkInput = document.getElementById('remoteLinkInput');
+      if (linkInput) {
+        linkInput.value = pairingUrl || (tab === 'tailscale' ? 'Tailscale not detected on host desktop' : (tab === 'tunnel' ? 'No tunnel URL configured in .env' : ''));
+      }
+
+      if (pairingUrl && cachedRemoteInfo && cachedRemoteInfo.enabled) {
+        renderQRCode(pairingUrl);
+      } else {
+        const qrBox = document.getElementById('qrCodeContainer');
+        if (qrBox) {
+          qrBox.innerHTML = '<div style="color:#64748b; font-size:0.75rem; text-align:center; padding:50px 10px;">Remote Control Disabled<br>or Network Inactive</div>';
+        }
+      }
+    }
+
+    function renderQRCode(text) {
+      const container = document.getElementById('qrCodeContainer');
+      if (!container || !text) return;
+      container.innerHTML = '';
+      if (typeof QRCode !== 'undefined') {
+        qrInstance = new QRCode(container, {
+          text: text,
+          width: 170,
+          height: 170,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel ? QRCode.CorrectLevel.M : 0
+        });
+      } else {
+        container.innerHTML = '<div style="color:#64748b; font-size:0.75rem; text-align:center; padding:50px 10px;">Loading QR generator...</div>';
+        setTimeout(() => renderQRCode(text), 200);
+      }
+    }
+
+    async function copyRemoteLink() {
+      const input = document.getElementById('remoteLinkInput');
+      const btn = document.getElementById('btnCopyRemoteLink');
+      if (!input || !input.value || input.value.startsWith('Tailscale') || input.value.startsWith('No tunnel')) return;
+
+      try {
+        await navigator.clipboard.writeText(input.value);
+        if (btn) {
+          const orig = btn.innerHTML;
+          btn.innerHTML = '✓ Copied!';
+          btn.style.borderColor = 'var(--green)';
+          btn.style.color = 'var(--green)';
+          setTimeout(() => {
+            btn.innerHTML = orig;
+            btn.style.borderColor = '';
+            btn.style.color = '';
+          }, 2000);
+        }
+      } catch (e) {
+        input.select();
+        document.execCommand('copy');
+      }
+    }
+
+    async function onToggleRemoteSwitch(enabled) {
+      try {
+        const res = await fetch('/api/remote/toggle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: enabled })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          appendLog(`📱 [REMOTE CONTROL] ${data.enabled ? 'Enabled' : 'Disabled'}`);
+          await openRemoteModal();
+        }
+      } catch (err) {
+        appendLog('❌ Error toggling remote control: ' + err);
+      }
+    }
+
+    async function regenerateRemoteToken() {
+      if (!confirm('Regenerate Pairing Token?\n\nThis will immediately disconnect all currently paired mobile devices and generate a new secret.')) {
+        return;
+      }
+      try {
+        const res = await fetch('/api/remote/regenerate', { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          cachedRemoteInfo = data.info;
+          appendLog('🔑 [REMOTE CONTROL] Regenerated pairing token. Scan new QR code.');
+          updateRemoteModalUI(cachedRemoteInfo);
+        }
+      } catch (err) {
+        appendLog('❌ Error regenerating token: ' + err);
+      }
+    }
+
+    async function revokeRemoteToken() {
+      if (!confirm('Revoke Remote Control Access?\n\nThis will immediately disable Remote Control and wipe the active pairing token.')) {
+        return;
+      }
+      try {
+        const res = await fetch('/api/remote/revoke', { method: 'POST' });
+        if (res.ok) {
+          appendLog('🛑 [REMOTE CONTROL] Revoked pairing token and disabled remote access.');
+          const res2 = await fetch('/api/remote/info');
+          if (res2.ok) {
+            cachedRemoteInfo = await res2.json();
+            updateRemoteModalUI(cachedRemoteInfo);
+          }
+        }
+      } catch (err) {
+        appendLog('❌ Error revoking token: ' + err);
+      }
+    }
+
     let isArmed = false;
     let paramsLoaded = false;
     let currentAsset = 'BTC';
@@ -500,11 +1352,43 @@
     }
 
     const ASSET_SPECS = {
-      BTC: { minDiff: 21.0, step: '1.0', max: '200', decimals: 2, hint: 'Skip coin-flip chop near strike ($21.00 BTC)' },
-      ETH: { minDiff: 2.50, step: '0.1', max: '20', decimals: 2, hint: 'Skip coin-flip chop near strike ($2.50 ETH)' },
-      SOL: { minDiff: 0.50, step: '0.05', max: '10', decimals: 2, hint: 'Skip coin-flip chop near strike ($0.50 SOL)' },
-      DOGE: { minDiff: 0.00014, step: '0.00001', max: '0.01', decimals: 5, hint: 'Skip coin-flip chop near strike ($0.00014 DOGE)' }
+      BTC: { minDiff: 35.0, step: '1.0', max: '2000', decimals: 2, hint: 'Skip coin-flip chop near strike ($35.00 BTC)' },
+      ETH: { minDiff: 2.50, step: '0.05', max: '200', decimals: 2, hint: 'Skip coin-flip chop near strike ($2.50 ETH)' },
+      SOL: { minDiff: 0.50, step: '0.01', max: '50', decimals: 2, hint: 'Skip coin-flip chop near strike ($0.50 SOL)' },
+      DOGE: { minDiff: 0.0005, step: '0.00001', max: '0.01', decimals: 5, hint: 'Skip coin-flip chop near strike ($0.0005 DOGE)' },
+      GOLD: { minDiff: 1.50, step: '0.05', max: '100', decimals: 2, hint: 'Skip coin-flip chop near strike ($1.50 GOLD)' },
+      HYPER: { minDiff: 0.35, step: '0.01', max: '50', decimals: 2, hint: 'Skip coin-flip chop near strike ($0.35 HYPER)' },
+      ALL: { minDiff: 35.0, step: '1.0', max: '2000', decimals: 2, hint: 'Omnichannel Basket Mode (Active assets evaluated with native specs)' }
     };
+
+    const PARAM_SWEETSPOTS = {
+      BTC: { discount: '0.51', momentum: '0.63', conf: '81', edge: '6.0', ev: '0.02', diff: '28.00', vol: '14.0', vpin: '0.60', tp: '0.94', tpRoi: '40.0', revThresh: '83', tpCeil: true, tpCeilRev: false, tpRoiEn: true, openMin: '13.5', closeMin: '3.5', trailingRatchet: true, trailingBuffer: '0.10', spotFrontRun: '28.0', dynamicRev: true, twapSniper: '0.75', maxQueue: '250', maxSpread: '0.05' },
+      ETH: { discount: '0.52', momentum: '0.62', conf: '80', edge: '6.0', ev: '0.02', diff: '2.50', vol: '0.60', vpin: '0.60', tp: '0.95', tpRoi: '20.0', revThresh: '85', tpCeil: true, tpCeilRev: false, tpRoiEn: true, openMin: '12.0', closeMin: '4.5', trailingRatchet: true, trailingBuffer: '0.10', spotFrontRun: '2.50', dynamicRev: true, twapSniper: '0.75', maxQueue: '200', maxSpread: '0.04' },
+      SOL: { discount: '0.52', momentum: '0.60', conf: '82', edge: '7.0', ev: '0.02', diff: '0.50', vol: '0.04', vpin: '0.60', tp: '0.95', tpRoi: '20.0', revThresh: '85', tpCeil: true, tpCeilRev: false, tpRoiEn: true, openMin: '11.0', closeMin: '3.5', trailingRatchet: true, trailingBuffer: '0.10', spotFrontRun: '0.50', dynamicRev: true, twapSniper: '0.72', maxQueue: '150', maxSpread: '0.06' },
+      DOGE: { discount: '0.48', momentum: '0.55', conf: '84', edge: '10.0', ev: '0.03', diff: '0.0005', vol: '0.000045', vpin: '0.55', tp: '0.90', tpRoi: '20.0', revThresh: '85', tpCeil: true, tpCeilRev: false, tpRoiEn: true, openMin: '11.0', closeMin: '3.5', trailingRatchet: true, trailingBuffer: '0.10', spotFrontRun: '0.0005', dynamicRev: true, twapSniper: '0.70', maxQueue: '300', maxSpread: '0.03' },
+      GOLD: { discount: '0.48', momentum: '0.55', conf: '86', edge: '8.0', ev: '0.03', diff: '2.50', vol: '0.75', vpin: '0.55', tp: '0.90', tpRoi: '35.0', revThresh: '52', tpCeil: true, tpCeilRev: false, tpRoiEn: true, openMin: '6.5', closeMin: '2.0', trailingRatchet: true, trailingBuffer: '0.10', spotFrontRun: '2.50', dynamicRev: true, twapSniper: '0.75', maxQueue: '150', maxSpread: '0.05' },
+      HYPER: { discount: '0.48', momentum: '0.58', conf: '82', edge: '8.0', ev: '0.02', diff: '0.33', vol: '0.08', vpin: '0.60', tp: '0.95', tpRoi: '20.0', revThresh: '79', tpCeil: true, tpCeilRev: false, tpRoiEn: true, openMin: '12.0', closeMin: '4.5', trailingRatchet: true, trailingBuffer: '0.10', spotFrontRun: '0.33', dynamicRev: true, twapSniper: '0.72', maxQueue: '200', maxSpread: '0.05' }
+    };
+
+    let activeParamAsset = 'BTC';
+
+    function switchParamAssetTab(asset) {
+      if (hasUnsavedChanges) {
+        if (!confirm(`You have unsaved changes on ${activeParamAsset}. Discard and switch to ${asset}?`)) {
+          return;
+        }
+      }
+      activeParamAsset = asset;
+      try {
+        localStorage.setItem('pocket_cockpit_last_tab', asset);
+      } catch (e) {}
+      document.querySelectorAll('.param-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.id === `paramTab-${asset}`);
+      });
+      applyAssetInputConstraints(asset);
+      loadParameters(asset);
+      fetchState(asset);
+    }
 
     function applyAssetInputConstraints(asset) {
       const spec = ASSET_SPECS[asset] || ASSET_SPECS.BTC;
@@ -519,39 +1403,195 @@
       }
     }
 
-    async function switchAsset(asset) {
-      currentAsset = asset;
-      applyAssetInputConstraints(asset);
-      ['BTC', 'ETH', 'SOL', 'DOGE'].forEach(a => {
+    const ALL_SUPPORTED_ASSETS = ['BTC', 'ETH', 'SOL', 'DOGE', 'GOLD', 'HYPER'];
+    let selectedAssets = new Set(['BTC']);
+    let incubatorState = {};
+
+    async function fetchIncubatorStatus() {
+      try {
+        const res = await fetch('/api/incubator/status');
+        if (res.ok) {
+          const d = await res.json();
+          const oldLocked = incubatorState['GOLD'] ? incubatorState['GOLD'].is_locked : true;
+          incubatorState = d.incubator_assets || {};
+          const newLocked = incubatorState['GOLD'] ? incubatorState['GOLD'].is_locked : false;
+          if (oldLocked && !newLocked) {
+            appendLog('🎉 [INCUBATOR RELEASE] Gold has completed certification testing! Lock released for live trading.');
+          }
+          updateAssetBarUI();
+        }
+      } catch (err) {
+        console.debug('Failed to fetch incubator status:', err);
+      }
+    }
+
+    function updateAssetBarUI() {
+      const activeEligible = ALL_SUPPORTED_ASSETS.filter(a => !(incubatorState[a] && incubatorState[a].is_locked));
+      const isAll = (selectedAssets.size === activeEligible.length && activeEligible.length > 0);
+      const isSingle = (selectedAssets.size === 1);
+
+      // Update ALL button & check
+      const allBtn = document.getElementById('assetBtn-ALL');
+      const allCheck = document.getElementById('check-ALL');
+      if (allBtn) allBtn.classList.toggle('active', isAll);
+      if (allCheck) allCheck.textContent = isAll ? '☑' : '☐';
+
+      // Update individual asset buttons & checks
+      ALL_SUPPORTED_ASSETS.forEach(a => {
         const btn = document.getElementById(`assetBtn-${a}`);
+        const check = document.getElementById(`check-${a}`);
+        const badge = document.getElementById(`badge-${a}`);
+        const isLocked = incubatorState[a] && incubatorState[a].is_locked;
+        const isSel = selectedAssets.has(a);
+
         if (btn) {
-          if (a === asset) {
-            btn.classList.add('active');
+          btn.classList.toggle('active', isSel && !isLocked);
+          btn.classList.toggle('incubator-locked', !!isLocked);
+          if (isLocked) {
+            btn.title = `🔒 ${a} is quarantined in Lane 2 Incubator. Live selection is locked. Click for progress details.`;
           } else {
-            btn.classList.remove('active');
+            btn.title = `Toggle ${a}`;
+          }
+        }
+        if (check) {
+          if (isLocked) {
+            check.textContent = '🔒';
+            check.title = 'Quarantined in Incubator';
+          } else {
+            check.textContent = isSel ? '☑' : '☐';
+          }
+        }
+        if (badge) {
+          badge.style.display = isLocked ? 'inline-block' : 'none';
+          if (isLocked) {
+            const cyc = incubatorState[a].completed_cycles || 0;
+            const tgt = incubatorState[a].target_cycles || 30;
+            const wr = incubatorState[a].current_win_rate ? (incubatorState[a].current_win_rate * 100).toFixed(0) : '0';
+            badge.textContent = `🔒 INCUBATOR (${cyc}/${tgt} • ${wr}% WR)`;
           }
         }
       });
+
+      // Update dynamic mode banner
+      const banner = document.getElementById('assetModeBanner');
+      if (banner) {
+        const lockedList = ALL_SUPPORTED_ASSETS.filter(a => incubatorState[a] && incubatorState[a].is_locked);
+        const lockedNotice = lockedList.length ? ` • 🔒 Quarantined in Incubator: [${lockedList.join(', ')}]` : '';
+        if (isAll) {
+          banner.style.display = 'block';
+          banner.innerHTML = `⚡ <strong>OMNICHANNEL BASKET MODE ACTIVE</strong> • Scanning [${activeEligible.join(', ')}] concurrently${lockedNotice} • Cap: Max 3 Open Positions • 1 Contract Armor`;
+        } else if (selectedAssets.size > 1) {
+          banner.style.display = 'block';
+          const listStr = Array.from(selectedAssets).join(', ');
+          banner.innerHTML = `⚡ <strong>CUSTOM BASKET ACTIVE (${selectedAssets.size}/${activeEligible.length})</strong> • Scanning [${listStr}] concurrently${lockedNotice} • Cap: Max 3 Open Positions • 1 Contract Armor`;
+        } else {
+          banner.style.display = 'none';
+        }
+      }
+
+      // Update Spot Index Header Label
       const spotLabel = document.getElementById('spotLabel');
-      if (spotLabel) spotLabel.textContent = `${asset} Spot Index (NOW)`;
-      appendLog(`🔄 Switching active asset to ${asset}...`);
+      if (spotLabel) {
+        if (isAll) {
+          spotLabel.textContent = 'Portfolio Spot Matrix (ALL)';
+        } else if (selectedAssets.size > 1) {
+          spotLabel.textContent = `Portfolio Spot Matrix (${selectedAssets.size} Assets)`;
+        } else {
+          const single = Array.from(selectedAssets)[0];
+          spotLabel.textContent = `${single} Spot Index (NOW)`;
+        }
+      }
+    }
+
+    async function toggleAsset(asset) {
+      if (incubatorState[asset] && incubatorState[asset].is_locked) {
+        const info = incubatorState[asset];
+        const progress = `${info.completed_cycles || 0}/${info.target_cycles || 30} cycles`;
+        const wr = info.current_win_rate ? (info.current_win_rate * 100).toFixed(1) + '%' : '0.0%';
+        alert(`🔒 [LANE 2 INCUBATOR SAFETY INTERLOCK]\n\n` +
+              `Asset ${asset} is quarantined in the Lane 2 Incubator under Council Testing.\n\n` +
+              `• Current Progress: ${progress}\n` +
+              `• Win Rate: ${wr} (Target: >= 65.0% required)\n` +
+              `• Strategy: ${info.strategy || 'GoldInversionBot'}\n` +
+              `• Reason: ${info.lock_reason}\n\n` +
+              `Selection for live trading is locked to protect capital. The lock will release automatically upon satisfying certification.`);
+        appendLog(`⚠️ [SAFETY INTERLOCK] Cannot select ${asset} for live trading: Quarantined in Lane 2 Incubator (${progress}, WR: ${wr}).`);
+        return;
+      }
+      if (selectedAssets.has(asset)) {
+        if (selectedAssets.size <= 1) {
+          appendLog(`⚠️ Invariant: At least 1 asset must remain active. Cannot deselect ${asset}.`);
+          return;
+        }
+        selectedAssets.delete(asset);
+      } else {
+        selectedAssets.add(asset);
+      }
+      updateAssetBarUI();
+      await deployAssetSelection();
+    }
+
+    async function toggleAllAssets() {
+      const activeEligible = ALL_SUPPORTED_ASSETS.filter(a => !(incubatorState[a] && incubatorState[a].is_locked));
+      if (selectedAssets.size === activeEligible.length) {
+        selectedAssets = new Set(['BTC']);
+      } else {
+        selectedAssets = new Set(activeEligible);
+      }
+      updateAssetBarUI();
+      await deployAssetSelection();
+    }
+
+    async function deployAssetSelection() {
+      const assetsArr = Array.from(selectedAssets);
+      const activeEligible = ALL_SUPPORTED_ASSETS.filter(a => !(incubatorState[a] && incubatorState[a].is_locked));
+      const isAll = (assetsArr.length === activeEligible.length && activeEligible.length > 0);
+      const isSingle = (assetsArr.length === 1);
+
+      const desc = isAll
+        ? '⚡ ALL 6 Assets (Omnichannel Basket)'
+        : (isSingle ? `🎯 ${assetsArr[0]} (Single)` : `⚡ Basket: [${assetsArr.join(', ')}]`);
+
+      appendLog(`🔄 Deploying live asset selection: ${desc}...`);
       try {
         const res = await fetch('/api/assets/select', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ asset })
+          body: JSON.stringify({
+            asset: isAll ? 'ALL' : (isSingle ? assetsArr[0] : undefined),
+            assets: assetsArr
+          })
         });
         if (res.ok) {
           const d = await res.json();
-          appendLog(`✅ Active asset is now ${asset}`);
+          appendLog(`✅ Live engine deployed: ${desc}`);
+          if (isSingle) {
+            currentAsset = assetsArr[0];
+            activeParamAsset = currentAsset;
+            applyAssetInputConstraints(currentAsset);
+            document.querySelectorAll('.param-tab').forEach(tab => {
+              tab.classList.toggle('active', tab.id === `paramTab-${currentAsset}`);
+            });
+          }
           await fetchState();
-          await loadParameters();
+          await loadParameters(activeParamAsset);
         } else {
-          appendLog(`❌ Failed to switch asset to ${asset}`);
+          const errData = await res.json().catch(() => ({}));
+          appendLog(`❌ Failed to deploy asset selection: ${errData.detail || res.statusText}`);
         }
       } catch (err) {
-        appendLog(`❌ Error switching asset: ${err}`);
+        appendLog(`❌ Network error deploying asset selection: ${err}`);
       }
+    }
+
+    async function switchAsset(asset) {
+      if (asset === 'ALL') {
+        selectedAssets = new Set(ALL_SUPPORTED_ASSETS);
+      } else {
+        selectedAssets = new Set([asset]);
+      }
+      updateAssetBarUI();
+      await deployAssetSelection();
     }
 
     let hasUnsavedChanges = false;
@@ -628,8 +1668,61 @@
     }
 
     let tpCeilingEnabled = true;
-    let tpCeilingReversalRequired = true;
+    let tpCeilingReversalRequired = false;
     let tpRoiEnabled = true;
+    let trailingRatchetEnabled = true;
+    let dynamicReversalEnabled = true;
+
+    function updateTrailingRatchetBtn() {
+      const btn = document.getElementById('btnToggleTrailingRatchet');
+      if (btn) {
+        if (trailingRatchetEnabled) {
+          btn.innerHTML = '🟢 ENABLED';
+          btn.style.borderColor = '#10b981';
+          btn.style.background = 'rgba(16, 185, 129, 0.15)';
+          btn.style.color = '#34d399';
+        } else {
+          btn.innerHTML = '⚪ DISABLED';
+          btn.style.borderColor = 'var(--border)';
+          btn.style.background = 'rgba(255, 255, 255, 0.05)';
+          btn.style.color = 'var(--muted)';
+        }
+      }
+    }
+
+    function toggleTrailingRatchet() {
+      trailingRatchetEnabled = !trailingRatchetEnabled;
+      updateTrailingRatchetBtn();
+      markUnsaved();
+      playChime('click');
+    }
+
+    function updateDynamicReversalBtn() {
+      const btn = document.getElementById('btnToggleDynamicReversal');
+      const badge = document.getElementById('dynamicReversalBadge');
+      if (btn) {
+        if (dynamicReversalEnabled) {
+          btn.innerHTML = '📈 DYNAMIC';
+          btn.style.borderColor = '#0284c7';
+          btn.style.background = 'rgba(14, 165, 233, 0.15)';
+          btn.style.color = '#38bdf8';
+          if (badge) badge.textContent = '85% → 50% (τ DECAY)';
+        } else {
+          btn.innerHTML = '⚪ STATIC';
+          btn.style.borderColor = 'var(--border)';
+          btn.style.background = 'rgba(255, 255, 255, 0.05)';
+          btn.style.color = 'var(--muted)';
+          if (badge) badge.textContent = 'STATIC THRESHOLD';
+        }
+      }
+    }
+
+    function toggleDynamicReversal() {
+      dynamicReversalEnabled = !dynamicReversalEnabled;
+      updateDynamicReversalBtn();
+      markUnsaved();
+      playChime('click');
+    }
 
     function updateTpCeilingBtn() {
       const btn = document.getElementById('btnToggleTpCeiling');
@@ -642,8 +1735,8 @@
           btn.style.color = '#34d399';
           if (hint) {
             hint.textContent = tpCeilingReversalRequired
-              ? '★ Sweetspot: $0.95 (Eject on ≥85% Reversal; else hold to $1.00)'
-              : '★ Sweetspot: $0.95 (Active Early Eject)';
+              ? '★ Sweetspot: $0.94 (Eject on Reversal Gate; else hold to $1.00)'
+              : '★ Sweetspot: $0.94 (Zero-Delay Profit Harvest)';
           }
         } else {
           btn.innerHTML = '⚪ DISABLED';
@@ -660,20 +1753,20 @@
       const hint = document.getElementById('tpCeilingHint');
       if (btn) {
         if (tpCeilingReversalRequired) {
-          btn.innerHTML = '🛡️ ≥85% REV';
+          btn.innerHTML = '🛡️ REV GATE';
           btn.style.borderColor = '#0284c7';
           btn.style.background = 'rgba(14, 165, 233, 0.15)';
           btn.style.color = '#38bdf8';
         } else {
-          btn.innerHTML = '⚡ ALWAYS';
-          btn.style.borderColor = 'var(--border)';
-          btn.style.background = 'rgba(255, 255, 255, 0.05)';
-          btn.style.color = 'var(--muted)';
+          btn.innerHTML = '⚡ 0-DELAY';
+          btn.style.borderColor = '#f59e0b';
+          btn.style.background = 'rgba(245, 158, 11, 0.15)';
+          btn.style.color = '#fbbf24';
         }
         if (hint && tpCeilingEnabled) {
           hint.textContent = tpCeilingReversalRequired
-            ? '★ Sweetspot: $0.95 (Eject on ≥85% Reversal; else hold to $1.00)'
-            : '★ Sweetspot: $0.95 (Active Early Eject)';
+            ? '★ Sweetspot: $0.94 (Eject on Reversal Gate; else hold to $1.00)'
+            : '★ Sweetspot: $0.94 (Zero-Delay Profit Harvest)';
         }
       }
       updatePolicyBadge();
@@ -739,37 +1832,55 @@
     }
 
     function loadSweetspots() {
-      const spec = ASSET_SPECS[currentAsset] || ASSET_SPECS.BTC;
-      document.getElementById('inputDiscountPrice').value = '0.52';
-      document.getElementById('inputMomentumPrice').value = '0.62';
-      document.getElementById('inputMinConfidence').value = '70';
+      const target = activeParamAsset || currentAsset;
+      const preset = PARAM_SWEETSPOTS[target] || PARAM_SWEETSPOTS.BTC;
+      const spec = ASSET_SPECS[target] || ASSET_SPECS.BTC;
+      document.getElementById('inputDiscountPrice').value = preset.discount;
+      document.getElementById('inputMomentumPrice').value = preset.momentum;
+      document.getElementById('inputMinConfidence').value = preset.conf;
       document.getElementById('inputMaxContracts').value = '1';
-      document.getElementById('inputMinEdge').value = '6.0';
-      document.getElementById('inputMinEv').value = '0.02';
-      document.getElementById('inputMinSpotDiff').value = spec.minDiff.toFixed(spec.decimals);
-      document.getElementById('inputVpinThreshold').value = '0.60';
-      document.getElementById('inputTakeProfitPrice').value = '0.95';
-      document.getElementById('inputTakeProfitRoi').value = '20.0';
-      document.getElementById('inputReverseThreshold').value = '85';
-      tpCeilingEnabled = true;
-      tpCeilingReversalRequired = true;
-      tpRoiEnabled = true;
+      document.getElementById('inputMinEdge').value = preset.edge;
+      document.getElementById('inputMinEv').value = preset.ev;
+      document.getElementById('inputMinSpotDiff').value = preset.diff;
+      document.getElementById('inputVpinThreshold').value = preset.vpin;
+      document.getElementById('inputTakeProfitPrice').value = preset.tp;
+      document.getElementById('inputTakeProfitRoi').value = preset.tpRoi;
+      document.getElementById('inputReverseThreshold').value = preset.revThresh;
+      document.getElementById('inputEntryWindowOpen').value = preset.openMin || '12.0';
+      document.getElementById('inputEntryWindowClose').value = preset.closeMin || '4.5';
+      if (document.getElementById('inputTrailingBuffer')) document.getElementById('inputTrailingBuffer').value = preset.trailingBuffer || '0.10';
+      if (document.getElementById('inputSpotDeltaFrontRun')) document.getElementById('inputSpotDeltaFrontRun').value = preset.spotFrontRun || '28.0';
+      if (document.getElementById('inputTwapSniperCents')) document.getElementById('inputTwapSniperCents').value = preset.twapSniper || '0.75';
+      if (document.getElementById('inputMaxQueueDepth')) document.getElementById('inputMaxQueueDepth').value = preset.maxQueue || '250';
+      if (document.getElementById('inputMaxClobSpread')) document.getElementById('inputMaxClobSpread').value = preset.maxSpread || '0.05';
+      const openHint = document.getElementById('entryWindowOpenHint');
+      if (openHint) openHint.textContent = `★ Sweetspot: ${preset.openMin || '12.0'} min remaining`;
+      const closeHint = document.getElementById('entryWindowCloseHint');
+      if (closeHint) closeHint.textContent = `★ Sweetspot: ${preset.closeMin || '4.5'} min remaining (Auto-Sweep)`;
+      tpCeilingEnabled = preset.tpCeil;
+      tpCeilingReversalRequired = preset.tpCeilRev;
+      tpRoiEnabled = preset.tpRoiEn;
+      trailingRatchetEnabled = preset.trailingRatchet !== false;
+      dynamicReversalEnabled = preset.dynamicRev !== false;
       updateTpCeilingBtn();
       updateTpCeilingReversalBtn();
       updateTpRoiBtn();
+      updateTrailingRatchetBtn();
+      updateDynamicReversalBtn();
       updatePolicyBadge();
 
       const diffHint = document.getElementById('minSpotDiffHint');
-      if (diffHint) diffHint.textContent = `★ Sweetspot: $${spec.minDiff} ${currentAsset}`;
+      if (diffHint) diffHint.textContent = `★ Sweetspot: $${preset.diff} ${target}`;
 
       markUnsaved();
       playChime('preset');
-      appendLog(`🎯 [QUANT BENCHMARK LOADED] $0.52 Maker ($0 Fee) | $0.62 Mom Cap | 70% AI | $0.02 Net EV | $0.95 TP Ceiling (≥85% Reversal Gate) | 1ct Invariant. Click 'Apply & Save as Default' to set as your permanent defaults.`);
+      appendLog(`🎯 [QUANT BENCHMARK LOADED FOR ${target}] $${preset.discount} Maker ($0 Fee) | $${preset.momentum} Mom Cap | ${preset.conf}% AI | Window: ${preset.openMin || '12.0'}m -> ${preset.closeMin || '4.5'}m sweep | $${preset.ev} Net EV | $${preset.diff} Diff | $${preset.tp} TP Ceiling | 1ct Invariant. Click 'Apply & Save as Default' to set as your permanent defaults.`);
     }
 
-    async function loadParameters() {
+    async function loadParameters(asset = null) {
+      const target = asset || activeParamAsset || currentAsset;
       try {
-        const res = await fetch('/api/bot/parameters');
+        const res = await fetch(`/api/bot/parameters?asset=${encodeURIComponent(target)}`);
         if (!res.ok) return;
         const p = await res.json();
         if (p.discount_limit_price !== undefined) document.getElementById('inputDiscountPrice').value = p.discount_limit_price.toFixed(2);
@@ -782,7 +1893,7 @@
         if (p.min_edge_pct !== undefined) document.getElementById('inputMinEdge').value = p.min_edge_pct.toFixed(1);
         if (p.min_ev_dollars !== undefined) document.getElementById('inputMinEv').value = p.min_ev_dollars.toFixed(2);
         if (p.min_spot_diff !== undefined) {
-          const spec = ASSET_SPECS[currentAsset] || ASSET_SPECS.BTC;
+          const spec = ASSET_SPECS[target] || ASSET_SPECS.BTC;
           document.getElementById('inputMinSpotDiff').value = p.min_spot_diff.toFixed(spec.decimals);
         }
         if (p.vpin_toxic_threshold !== undefined) document.getElementById('inputVpinThreshold').value = p.vpin_toxic_threshold.toFixed(2);
@@ -799,16 +1910,50 @@
           tpRoiEnabled = Boolean(p.enable_reverse_take_profit_roi);
           updateTpRoiBtn();
         }
+        if (p.enable_trailing_ratchet !== undefined) {
+          trailingRatchetEnabled = Boolean(p.enable_trailing_ratchet);
+          updateTrailingRatchetBtn();
+        }
+        if (p.trailing_ratchet_buffer !== undefined) {
+          const el = document.getElementById('inputTrailingBuffer');
+          if (el) el.value = p.trailing_ratchet_buffer.toFixed(2);
+        }
+        if (p.spot_delta_front_run_threshold !== undefined) {
+          const el = document.getElementById('inputSpotDeltaFrontRun');
+          if (el) el.value = p.spot_delta_front_run_threshold;
+        }
+        if (p.twap_immutability_sniper_cents !== undefined) {
+          const el = document.getElementById('inputTwapSniperCents');
+          if (el) el.value = p.twap_immutability_sniper_cents.toFixed(2);
+        }
+        if (p.max_queue_depth_ahead !== undefined) {
+          const el = document.getElementById('inputMaxQueueDepth');
+          if (el) el.value = p.max_queue_depth_ahead;
+        }
+        if (p.max_clob_spread_cents !== undefined) {
+          const el = document.getElementById('inputMaxClobSpread');
+          if (el) el.value = p.max_clob_spread_cents.toFixed(2);
+        }
+        if (p.enable_dynamic_reversal_curve !== undefined) {
+          dynamicReversalEnabled = Boolean(p.enable_dynamic_reversal_curve);
+          updateDynamicReversalBtn();
+        }
         if (p.reverse_indicator_threshold !== undefined) {
           document.getElementById('inputReverseThreshold').value = Math.round(p.reverse_indicator_threshold);
         }
         if (p.min_take_profit_roi !== undefined) document.getElementById('inputTakeProfitRoi').value = p.min_take_profit_roi.toFixed(1);
+        if (p.entry_window_open_minutes !== undefined) {
+          document.getElementById('inputEntryWindowOpen').value = p.entry_window_open_minutes.toFixed(1);
+        }
+        if (p.entry_window_close_minutes !== undefined) {
+          document.getElementById('inputEntryWindowClose').value = p.entry_window_close_minutes.toFixed(1);
+        }
         updatePolicyBadge();
         
         clearUnsaved();
         const statusEl = document.getElementById('paramStatusText');
         if (statusEl) {
-          statusEl.textContent = 'Saved defaults in sync';
+          statusEl.textContent = `Saved ${target} defaults in sync`;
           statusEl.style.color = 'var(--muted)';
         }
         paramsLoaded = true;
@@ -821,6 +1966,7 @@
       if (isSavingParams) return;
       isSavingParams = true;
 
+      const target = activeParamAsset || currentAsset;
       const btn = document.getElementById('btnSaveParams');
       const statusEl = document.getElementById('paramStatusText');
 
@@ -830,6 +1976,7 @@
       confVal = Math.min(Math.max(confVal, 0.50), 0.99);
 
       const payload = {
+        asset: target,
         discount_limit_price: parseFloat(document.getElementById('inputDiscountPrice').value) || 0.52,
         momentum_max_price: parseFloat(document.getElementById('inputMomentumPrice').value) || 0.62,
         min_confidence: confVal,
@@ -838,22 +1985,31 @@
         min_ev_dollars: parseFloat(document.getElementById('inputMinEv').value) || 0.02,
         min_spot_diff: parseFloat(document.getElementById('inputMinSpotDiff').value) || 21.0,
         vpin_toxic_threshold: parseFloat(document.getElementById('inputVpinThreshold').value) || 0.60,
-        take_profit_price_threshold: parseFloat(document.getElementById('inputTakeProfitPrice').value) || 0.95,
+        take_profit_price_threshold: parseFloat(document.getElementById('inputTakeProfitPrice').value) || 0.94,
         enable_take_profit_ceiling: tpCeilingEnabled,
         require_reversal_for_tp_ceiling: tpCeilingReversalRequired,
         enable_reverse_take_profit_roi: tpRoiEnabled,
         reverse_indicator_threshold: parseFloat(document.getElementById('inputReverseThreshold').value) || 85.0,
-        min_take_profit_roi: parseFloat(document.getElementById('inputTakeProfitRoi').value) || 20.0
+        min_take_profit_roi: parseFloat(document.getElementById('inputTakeProfitRoi').value) || 20.0,
+        entry_window_open_minutes: parseFloat(document.getElementById('inputEntryWindowOpen').value) || 12.0,
+        entry_window_close_minutes: parseFloat(document.getElementById('inputEntryWindowClose').value) || 4.5,
+        enable_trailing_ratchet: trailingRatchetEnabled,
+        trailing_ratchet_buffer: parseFloat(document.getElementById('inputTrailingBuffer')?.value) || 0.10,
+        spot_delta_front_run_threshold: parseFloat(document.getElementById('inputSpotDeltaFrontRun')?.value) || 28.0,
+        enable_dynamic_reversal_curve: dynamicReversalEnabled,
+        twap_immutability_sniper_cents: parseFloat(document.getElementById('inputTwapSniperCents')?.value) || 0.75,
+        max_queue_depth_ahead: parseInt(document.getElementById('inputMaxQueueDepth')?.value, 10) || 250,
+        max_clob_spread_cents: parseFloat(document.getElementById('inputMaxClobSpread')?.value) || 0.05
       };
 
       try {
         if (btn) {
           btn.disabled = true;
-          btn.innerHTML = '💾 Applying...';
+          btn.innerHTML = `💾 Applying for ${target}...`;
           btn.style.opacity = '0.8';
         }
         if (statusEl) {
-          statusEl.textContent = 'Saving...';
+          statusEl.textContent = `Saving ${target}...`;
           statusEl.style.color = 'var(--amber)';
         }
 
@@ -867,14 +2023,14 @@
           clearUnsaved();
           if (btn) {
             btn.classList.remove('unsaved');
-            btn.innerHTML = '✅ Saved as Default!';
+            btn.innerHTML = `✅ Saved ${target} as Default!`;
           }
           if (statusEl) {
-            statusEl.textContent = 'Saved as default at ' + new Date().toLocaleTimeString();
+            statusEl.textContent = `Saved ${target} as default at ` + new Date().toLocaleTimeString();
             statusEl.style.color = 'var(--green)';
           }
           playChime('success');
-          appendLog(`⚙️ [PARAMETERS SAVED AS DEFAULT] Maker: $${payload.discount_limit_price} | MomCap: $${payload.momentum_max_price} | AI: ${(payload.min_confidence * 100).toFixed(0)}% | 1ct Invariant | MinEdge: ${payload.min_edge_pct}% | MinEV: $${payload.min_ev_dollars} | Dist: $${payload.min_spot_diff} | TP Ceiling: $${payload.take_profit_price_threshold} (${payload.enable_take_profit_ceiling ? 'ENABLED' : 'DISABLED'}) | Persisted to disk as boot default.`);
+          appendLog(`⚙️ [${target} PARAMETERS SAVED AS DEFAULT] Maker: $${payload.discount_limit_price} | MomCap: $${payload.momentum_max_price} | AI: ${(payload.min_confidence * 100).toFixed(0)}% | 1ct Invariant | MinEdge: ${payload.min_edge_pct}% | MinEV: $${payload.min_ev_dollars} | Dist: $${payload.min_spot_diff} | TP Ceiling: $${payload.take_profit_price_threshold} (${payload.enable_take_profit_ceiling ? 'ENABLED' : 'DISABLED'}) | Persisted to disk as boot default.`);
           setTimeout(() => {
             if (btn) {
               btn.disabled = false;
@@ -892,7 +2048,7 @@
             statusEl.style.color = 'var(--red)';
           }
           playChime('error');
-          appendLog('❌ Failed saving parameters: ' + JSON.stringify(err));
+          appendLog(`❌ Failed saving ${target} parameters: ` + JSON.stringify(err));
           setTimeout(() => {
             if (btn) {
               btn.disabled = false;
@@ -912,7 +2068,7 @@
           statusEl.style.color = 'var(--red)';
         }
         playChime('error');
-        appendLog('❌ Error saving parameters: ' + err);
+        appendLog(`❌ Network error saving ${target} parameters: ` + err);
       } finally {
         isSavingParams = false;
       }
@@ -978,23 +2134,37 @@
       }
     }
 
-    async function fetchState() {
+    async function fetchState(targetAsset = null) {
       try {
-        const res = await fetch('/api/state');
+        const queryAsset = targetAsset || activeParamAsset || currentAsset || 'BTC';
+        const res = await fetch(`/api/state?asset=${encodeURIComponent(queryAsset)}`);
         if (!res.ok) return;
         const data = await res.json();
 
-        // Sync active asset
-        const serverAsset = data.active_asset || (data.market && data.market.active_asset);
-        if (serverAsset && serverAsset !== currentAsset) {
-          currentAsset = serverAsset;
-          applyAssetInputConstraints(currentAsset);
-          ['BTC', 'ETH', 'SOL', 'DOGE'].forEach(a => {
-            const btn = document.getElementById(`assetBtn-${a}`);
-            if (btn) btn.classList.toggle('active', a === currentAsset);
-          });
-          const spotLabel = document.getElementById('spotLabel');
-          if (spotLabel) spotLabel.textContent = `${currentAsset} Spot Index (NOW)`;
+        // Sync active asset(s)
+        if (data.active_assets && Array.isArray(data.active_assets) && data.active_assets.length > 0) {
+          const serverSet = new Set(data.active_assets);
+          const changed = serverSet.size !== selectedAssets.size || [...serverSet].some(x => !selectedAssets.has(x));
+          if (changed) {
+            selectedAssets = serverSet;
+            if (selectedAssets.size === 1) {
+              currentAsset = Array.from(selectedAssets)[0];
+              applyAssetInputConstraints(currentAsset);
+            }
+            updateAssetBarUI();
+          }
+        } else {
+          const serverAsset = (data.asset_mode === 'all' || data.active_asset === 'ALL') ? 'ALL' : (data.active_asset || (data.market && data.market.active_asset));
+          if (serverAsset && serverAsset !== currentAsset) {
+            currentAsset = serverAsset;
+            if (serverAsset === 'ALL') {
+              selectedAssets = new Set(ALL_SUPPORTED_ASSETS);
+            } else {
+              selectedAssets = new Set([serverAsset]);
+              applyAssetInputConstraints(currentAsset);
+            }
+            updateAssetBarUI();
+          }
         }
 
         // Arming status
@@ -1031,14 +2201,27 @@
           : '';
         document.getElementById('pnlSub').textContent = `${data.settled_cycles || 0} settled cycles${wr}`;
 
-        const spec = ASSET_SPECS[currentAsset] || ASSET_SPECS.BTC;
+        const viewAsset = data.view_asset || queryAsset || currentAsset;
+        const spec = ASSET_SPECS[viewAsset] || ASSET_SPECS.BTC;
         const dec = spec.decimals >= 4 ? 6 : 2;
         const minDec = spec.decimals >= 4 ? 4 : 2;
+
+        // Header / spot label
+        const spotLabel = document.getElementById('spotLabel');
+        if (spotLabel) {
+          if (viewAsset !== data.active_asset && data.asset_mode !== 'all') {
+            spotLabel.innerHTML = `${viewAsset} Spot (VIEWING) <span style="font-size:0.65rem; color:#f59e0b; font-weight:normal; background:rgba(245,158,11,0.15); padding:1px 5px; border-radius:3px; margin-left:4px;">[Live: ${data.active_asset}]</span>`;
+          } else if (data.asset_mode === 'all') {
+            spotLabel.innerHTML = `${viewAsset} Spot <span style="font-size:0.65rem; color:#38bdf8; font-weight:normal; background:rgba(56,189,248,0.15); padding:1px 5px; border-radius:3px; margin-left:4px;">[BASKET ACTIVE]</span>`;
+          } else {
+            spotLabel.textContent = `${viewAsset} Spot Index (NOW)`;
+          }
+        }
 
         // 3. Target Strike (TO BEAT)
         document.getElementById('strikeHeroVal').textContent = data.target_strike_str || (parseFloat(data.target_strike || 0) > 0 ? `$${parseFloat(data.target_strike).toLocaleString('en-US', {minimumFractionDigits: minDec, maximumFractionDigits: dec})}` : '$0.00');
         document.getElementById('strikeHeroSub').textContent = data.target_time_str 
-          ? `Target Expiry: ${data.target_time_str}` 
+          ? `Target Expiry: ${data.target_time_str} (${viewAsset})` 
           : 'Target Expiry: --:--';
 
         // 4. Spot Index (NOW) & Moneyness Diff
@@ -1056,7 +2239,7 @@
         // 5. Active Cycle Countdown
         const tfName = data.active_timeframe ? data.active_timeframe.toUpperCase() : ((data.active_ticker && data.active_ticker.includes('5M')) ? '5M' : '15M');
         const cycleLabelEl = document.getElementById('cycleLabel');
-        if (cycleLabelEl) cycleLabelEl.textContent = `Active ${tfName} Countdown`;
+        if (cycleLabelEl) cycleLabelEl.textContent = `Active ${viewAsset} ${tfName} Countdown`;
         document.getElementById('cycleVal').textContent = data.time_remaining_str || '--:--';
         document.getElementById('cycleSub').textContent = data.active_ticker || 'No active cycle';
 
@@ -1072,8 +2255,10 @@
 
         // 8. Spot & Strike & Moneyness Diff (Microstructure Telemetry)
         document.getElementById('playbookBadge').textContent = `PLAYBOOK: ${(data.playbook || 'NONE').toUpperCase()}`;
-        document.getElementById('spotVal').textContent = data.spot_price_str || `$${parseFloat(data.spot_price || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
-        document.getElementById('strikeVal').textContent = data.target_strike_str || `$${parseFloat(data.target_strike || 0).toLocaleString('en-US', {minimumFractionDigits: 2})}`;
+        const spotMetricLabel = document.getElementById('spotMetricLabel');
+        if (spotMetricLabel) spotMetricLabel.textContent = `${viewAsset} Spot Index (Kalshi Live)`;
+        document.getElementById('spotVal').textContent = data.spot_price_str || `$${parseFloat(data.spot_price || 0).toLocaleString('en-US', {minimumFractionDigits: minDec, maximumFractionDigits: dec})}`;
+        document.getElementById('strikeVal').textContent = data.target_strike_str || `$${parseFloat(data.target_strike || 0).toLocaleString('en-US', {minimumFractionDigits: minDec, maximumFractionDigits: dec})}`;
         
         const diffEl = document.getElementById('diffVal');
         diffEl.textContent = data.moneyness_diff_str || '$0.00 (+0.00%)';
@@ -1105,7 +2290,16 @@
           document.getElementById('settledSummaryBadge').textContent = (pnl >= 0 ? '+$' : '-$') + Math.abs(pnl).toFixed(2) + ` (${data.settled_cycles} Cycles)`;
         }
 
-        // 8. Health Badges
+        // 8. Remote Control Status Sync
+        if (data.remote_control) {
+          cachedRemoteInfo = data.remote_control;
+          const remoteDot = document.getElementById('remoteDot');
+          if (remoteDot) {
+            remoteDot.style.background = data.remote_control.enabled ? 'var(--green)' : 'var(--muted)';
+          }
+        }
+
+        // 9. Health Badges
         document.getElementById('dotWs').className = data.kalshi_ws_connected ? 'dot' : 'dot dot-err';
         document.getElementById('dotSpot').className = (data.brti_connected || data.spot_connected) ? 'dot' : 'dot dot-err';
 
@@ -1282,11 +2476,23 @@
       }
     }
 
-    // Initialize view mode, load initial parameters and start polling
+    // Initialize view mode, recall last viewed parameter tab, load parameters and start polling
     initViewMode();
-    loadParameters();
-    setInterval(fetchState, 1000);
-    fetchState();
+    try {
+      const savedTab = localStorage.getItem('pocket_cockpit_last_tab');
+      if (savedTab && ALL_SUPPORTED_ASSETS.includes(savedTab)) {
+        activeParamAsset = savedTab;
+        document.querySelectorAll('.param-tab').forEach(tab => {
+          tab.classList.toggle('active', tab.id === `paramTab-${savedTab}`);
+        });
+        applyAssetInputConstraints(savedTab);
+      }
+    } catch (e) {}
+    loadParameters(activeParamAsset);
+    fetchIncubatorStatus();
+    setInterval(() => fetchIncubatorStatus(), 3000);
+    setInterval(() => fetchState(), 1000);
+    fetchState(activeParamAsset);
   </script>
 </body>
 </html>

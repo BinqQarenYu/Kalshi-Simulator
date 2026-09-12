@@ -74,14 +74,15 @@ class DatasetBuilder:
             logger.warning("Tick file %s is empty or does not exist.", file_path)
             return []
 
-        book_mgr = OrderBookManager()
+        book_mgr = OrderBookManager(enforce_consecutive_seq=False)
         extractor = KalshiOrderflowFeatureExtractor(
             target_depth=self.target_depth,
             spatial_alpha=self.spatial_alpha,
         )
 
         frames: List[TickFrame] = []
-        current_ticker = "KXBTC15M"
+        default_tkr = file_path.stem.replace("stream_", "") if "stream_" in file_path.stem else "KXBTC15M"
+        current_ticker = default_tkr
 
         tick_idx = 0
         with open(file_path, "rb") as f:
@@ -141,7 +142,7 @@ class DatasetBuilder:
                         logger.debug("Failed parsing snapshot: %s", e)
                         continue
 
-                elif record_type == "OrderBookDelta":
+                elif record_type == "OrderBookDelta" or ("delta" in data and "price" in data and "side" in data):
                     try:
                         delta = OrderBookDelta(
                             market_ticker=ticker_str,

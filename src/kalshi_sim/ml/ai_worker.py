@@ -39,6 +39,7 @@ class AIWorker:
         self.orderbook_manager = orderbook_manager
         self._sim_agent = sim_agent
         self.compute_interval_seconds = refresh_interval_s if refresh_interval_s is not None else compute_interval_seconds
+        self._refresh_interval_s = self.compute_interval_seconds
         self.hmm_brain = hmm_brain
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None

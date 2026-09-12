@@ -1,0 +1,197 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-09-12T19:06:20.470812+00:00",
+  "active_live_strategy": "3_step_domination_bot",
+  "seals": {
+    "3_step_domination_bot": {
+      "bot_id": "3_step_domination_bot",
+      "bot_name": "3-Step Domination Bot",
+      "seal_status": "SEALED_EXCELLENT",
+      "seal_token": "SEAL-DOM1-D07ADE18D284",
+      "live_trading_authorized": true,
+      "granted_at": "2026-09-12T19:04:22.750352+00:00",
+      "council_signoff": "COUNCIL-SANCTIONED-BASELINE-V3.2",
+      "settled_cycles_verified": 48,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.625,
+      "profit_factor": 1.45,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 1 Live",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "dominion_2_bot": {
+      "bot_id": "dominion_2_bot",
+      "bot_name": "Dominion 2 Bot (Anti-Pin Scalper)",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "SEAL-DOMI-CF08A2BEC2B4",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-12T19:04:22.752683+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 18,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.556,
+      "profit_factor": 1.12,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "the_onnx_strategy": {
+      "bot_id": "the_onnx_strategy",
+      "bot_name": "The ONNX Strategy",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "SEAL-DOMI-CF08A2BEC2B4",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-12T19:06:20.470702+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 18,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.556,
+      "profit_factor": 1.12,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "macro_trend_dominion": {
+      "bot_id": "macro_trend_dominion",
+      "bot_name": "Macro Trend Dominion",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "SEAL-MACR-B51D4981A00C",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-12T19:04:22.754060+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 12,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.5,
+      "profit_factor": 0.95,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "macro_onnx": {
+      "bot_id": "macro_onnx",
+      "bot_name": "Macro Trend Dominion",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "SEAL-MACR-00701973B3A3",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-12T19:04:22.755545+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "dual_onnx": {
+      "bot_id": "dual_onnx",
+      "bot_name": "The ONNX Strategy",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "SEAL-DUAL-4B18D7FB45AE",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-12T19:04:22.757072+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "onnx_macro_v2": {
+      "bot_id": "onnx_macro_v2",
+      "bot_name": "The ONNX Strategy",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "SEAL-ONNX-EB6EE23159DD",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-12T19:04:22.761779+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "dual_onnx_bot": {
+      "bot_id": "dual_onnx_bot",
+      "bot_name": "The ONNX Strategy",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "SEAL-DUAL-84414D279AC7",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-12T19:04:22.763708+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "dual_onnx_arbitrage": {
+      "bot_id": "dual_onnx_arbitrage",
+      "bot_name": "The ONNX Strategy",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "SEAL-DUAL-D75A91CB0E57",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-12T19:04:22.765871+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "dual_onnx_arbitrage_bot": {
+      "bot_id": "dual_onnx_arbitrage_bot",
+      "bot_name": "The ONNX Strategy",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "SEAL-DUAL-E7AE9F6BA17A",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-12T19:04:22.767846+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    }
+  }
+}
