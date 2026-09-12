@@ -10,7 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")
 
 from kalshi_sim.ml.continuous_trainer import (
     ContinuousModelTrainer,

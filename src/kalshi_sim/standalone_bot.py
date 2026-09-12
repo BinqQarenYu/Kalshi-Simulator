@@ -431,7 +431,7 @@ class StandaloneBotEngine:
 
             today_reports = [
                 r for r in all_reports
-                if (r.get("execution_mode") == "live" or r.get("bot_type") == "live")
+                if (r.get("execution_mode") == "live" or r.get("bot_type") == "live" or not self.is_live)
                 and (today_prefix in r.get("ticker", "") or today_iso in str(r.get("timestamp_utc", "")))
             ]
             self.settled_cycles = len(today_reports)

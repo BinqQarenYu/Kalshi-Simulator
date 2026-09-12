@@ -4002,27 +4002,27 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
 
 @app.post("/api/reset")
 async def reset_portfolio(req: ResetRequest) -> dict[str, Any]:
+    state.starting_capital = Decimal(str(req.capital))
     if state.sim_agent:
-        portfolios = []
-        if hasattr(state.sim_agent, "_portfolio_domination"):
-            portfolios.append(state.sim_agent._portfolio_domination)
-        if hasattr(state.sim_agent, "_portfolio_onnx"):
-            portfolios.append(state.sim_agent._portfolio_onnx)
-        if not portfolios and hasattr(state.sim_agent, "_portfolio"):
-            portfolios.append(state.sim_agent._portfolio)
+        for attr in ["_portfolio_domination", "_portfolio_onnx", "_portfolio_macro_trend", "_portfolio_dominion2", "_portfolio"]:
+            if hasattr(state.sim_agent, attr):
+                p = getattr(state.sim_agent, attr)
+                p._balance = Decimal(str(req.capital))
+                p._positions.clear()
+                p._fill_history.clear()
+                p._settlement_history.clear()
+                p._total_trades = 0
+                p._wins = 0
+                p._losses = 0
+                p._starting_balance = Decimal(str(req.capital))
+                p._max_drawdown_limit = p._starting_balance * p._max_drawdown_pct
+                p._circuit_breaker_tripped = False
+                p._peak_equity = p._starting_balance
 
-        for p in portfolios:
-            p._balance = Decimal(str(req.capital))
-            p._positions.clear()
-            p._fill_history.clear()
-            p._settlement_history.clear()
-            p._total_trades = 0
-            p._wins = 0
-            p._losses = 0
-            p._starting_balance = Decimal(str(req.capital))
-            p._max_drawdown_limit = p._starting_balance * p._max_drawdown_pct
-            p._circuit_breaker_tripped = False
-            p._peak_equity = p._starting_balance
+    if state.guardrails_agent:
+        state.guardrails_agent.reset_circuit_breaker(Decimal(str(req.capital)))
+
+    state.is_dirty = True
     return {"success": True, "capital": req.capital}
 
 

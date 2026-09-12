@@ -13,8 +13,14 @@ from typing import Dict, Optional, Tuple, Union
 
 import numpy as np
 import onnxruntime as ort
-import torch
-import torch.nn as nn
+try:
+    import torch
+    import torch.nn as nn
+    TORCH_AVAILABLE = True
+except (ImportError, OSError):
+    torch = None
+    nn = None
+    TORCH_AVAILABLE = False
 
 from kalshi_sim.ml.model import QuoLasMicroscopeNet
 

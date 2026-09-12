@@ -9,7 +9,10 @@ from kalshi_sim.server import app, _build_full_state_payload
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(app)
+    c = TestClient(app)
+    c.post("/api/circuit-breaker/reset")
+    c.post("/api/reset", json={"capital": 10000.0})
+    return c
 
 
 def test_health_endpoint(client: TestClient) -> None:
@@ -94,6 +97,8 @@ def test_reset_portfolio_endpoint(client: TestClient) -> None:
 
 
 def test_place_and_close_order_endpoint(client: TestClient) -> None:
+    client.post("/api/circuit-breaker/reset")
+    client.post("/api/reset", json={"capital": 10000.0})
     with client:
         # Place order
         order_res = client.post("/api/orders", json={"side": "yes", "size": 10, "order_type": "market"})
@@ -120,6 +125,8 @@ def test_close_nonexistent_position(client: TestClient) -> None:
 
 
 def test_resting_limit_order_lifecycle(client: TestClient) -> None:
+    client.post("/api/circuit-breaker/reset")
+    client.post("/api/reset", json={"capital": 10000.0})
     with client:
         # Place resting limit order
         resp = client.post(

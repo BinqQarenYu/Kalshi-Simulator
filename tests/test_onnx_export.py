@@ -6,7 +6,8 @@ from pathlib import Path
 import numpy as np
 import onnxruntime as ort
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")
 
 from kalshi_sim.ml.export_onnx import (
     benchmark_onnx_inference,

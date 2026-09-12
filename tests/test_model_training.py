@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 import numpy as np
 import pytest
-import torch
+
+torch = pytest.importorskip("torch")
 
 from kalshi_sim.ml.model import QuoLasMicroscopeNet
 from kalshi_sim.ml.train_model import FocalLoss, ModelTrainer, OrderflowDataset

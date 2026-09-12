@@ -57,6 +57,7 @@ def test_backtest_engine_execution(synthetic_tick_frames: list[TickFrame]) -> No
 
 def test_model_comparator_with_onnx_candidate(tmp_path: Path, synthetic_tick_frames: list[TickFrame]) -> None:
     """Test comparing multiple models with ModelComparator."""
+    pytest.importorskip("torch")
     # 1. Export a candidate ONNX model
     model = QuoLasMicroscopeNet(input_dim=28, hidden_dim=32, num_classes=3, num_blocks=1)
     onnx_path = tmp_path / "model_alpha.onnx"
