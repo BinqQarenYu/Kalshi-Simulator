@@ -129,6 +129,11 @@ class KalshiONNXEngine:
         latest_trades: Optional[List[TradeEvent]] = None,
     ) -> Dict[str, Any]:
         """Execute feature extraction and sub-millisecond ONNX inference for an L2 tick."""
+        raw_vector = self.extractor.extract_features_from_book(book, latest_trades)
+        return self.process_feature_vector(raw_vector)
+
+    def process_feature_vector(self, raw_vector: np.ndarray) -> Dict[str, Any]:
+        """Execute sub-millisecond ONNX inference directly on a 28-dimensional raw feature vector."""
         # 1. Hot-reload check (throttled to max once per second to avoid blocking filesystem stat calls on tick hot path)
         now = time.monotonic()
         if now - self._last_mtime_check > self._check_interval:
@@ -142,10 +147,7 @@ class KalshiONNXEngine:
                 except Exception:
                     pass
 
-        # 2. Extract 28-dimensional raw feature vector
-        raw_vector = self.extractor.extract_features_from_book(book, latest_trades)
-
-        # 3. Apply z-score normalization
+        # 2. Apply z-score normalization
         if self.feat_mean is not None and self.feat_std is not None:
             normed = (raw_vector - self.feat_mean) / (self.feat_std + 1e-8)
         else:

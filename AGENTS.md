@@ -51,6 +51,9 @@ Zero TypeScript compilation errors and a clean build in `frontend/dist/`.
    - **Zero Branch-per-Bot Anti-Pattern**: Never branch the repo or spawn git worktrees to run different bots. All bots exist as modular Python classes in `strategies/`.
    - **Three Distinct Lanes**: Lane 1 (Live Real Money, 1 bot at a time), Lane 2 (Shadow / Incubator, paper trading on live ticks for cooking new bots), Lane 3 (Offline Simulation & Backtesting).
    - **Unified Dashboard**: Single port and unified server manage all lanes without process lock collisions.
+8. **Multi-Bot Anti-Cannibalism & Wash-Trading Shield**:
+   - Multiple bots on the same account must **NEVER** hold opposing positions (YES vs NO) on the same contract cycle.
+   - Any opposing submission is blocked synchronously by `LiveCoordinator` to eliminate guaranteed negative-arbitrage loss (-4¢/pair) and CFTC wash-trading violations.
 
 ---
 

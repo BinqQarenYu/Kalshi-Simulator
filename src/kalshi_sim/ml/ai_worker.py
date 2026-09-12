@@ -15,7 +15,9 @@ from typing import Any, Callable, Dict, List, Optional
 
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
-from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
+from kalshi_sim.ml.dual_onnx_schemas import DualONNXRegime
+from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
+from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.schemas import OrderSide
 
@@ -28,19 +30,28 @@ class AIWorker:
     def __init__(
         self,
         orderbook_manager: OrderBookManager,
-        sim_agent: Any = None,
-        refresh_interval_s: float = 0.25,
+        sim_agent: Optional[Any] = None,
+        compute_interval_seconds: float = 0.05,  # 20 Hz calculation loop
+        hmm_brain: Optional[Any] = None,
+        refresh_interval_s: Optional[float] = None,
+        **kwargs: Any,
     ) -> None:
-        self._orderbook = orderbook_manager
+        self.orderbook_manager = orderbook_manager
         self._sim_agent = sim_agent
-        self._refresh_interval_s = refresh_interval_s
+        self.compute_interval_seconds = refresh_interval_s if refresh_interval_s is not None else compute_interval_seconds
+        self.hmm_brain = hmm_brain
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None
         self._last_compute_duration_ms: float = 0.0
         self.active_strategy_bot: str = "3_step_domination_bot"  # Default: 3-Step Domination Bot
-        self._macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_trend_dominion", strategy_name="Macro Trend Dominion")
+        self._macro_trend_bot = MacroTrendDominionBot(
+            strategy_id="macro_trend_dominion",
+            strategy_name="Macro Trend Dominion",
+            hmm_brain=self.hmm_brain,
+        )
         self._domination_bot = ThreeStepDominationBot()
         self._dominion2_bot = Dominion2Bot()
+        self._dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
 
         # Thread-safe in-memory cached AI signals
         self._cached_signals: dict[str, Any] = {
@@ -69,8 +80,11 @@ class AIWorker:
         self._sim_agent = sim_agent
 
     def set_active_strategy(self, strategy_id: str) -> None:
-        """Switch active strategy bot ('macro_onnx', 'macro_trend_dominion', '3_step_domination_bot', 'dominion_2_bot', or 'onnx_microstructure_bot')."""
-        if strategy_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+        """Switch active strategy bot ('dual_onnx', 'macro_onnx', 'macro_trend_dominion', '3_step_domination_bot', 'dominion_2_bot', or 'onnx_microstructure_bot')."""
+        if strategy_id in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "the_onnx_strategy", "onnx_macro_v2"):
+            self.active_strategy_bot = "dual_onnx"
+            logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
+        elif strategy_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
             self.active_strategy_bot = "macro_onnx"
             logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
         elif strategy_id in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
@@ -140,8 +154,66 @@ class AIWorker:
                         trades = self._sim_agent._recent_trades.get(ticker, []) if hasattr(self._sim_agent, "_recent_trades") else []
                         equity = self._sim_agent._portfolio.equity if (hasattr(self._sim_agent, "_portfolio") and self._sim_agent._portfolio) else Decimal("100.00")
 
-                        # 0. Strategy: Macro ONNX & Macro Trend Dominion
-                        if self.active_strategy_bot in (
+                        # 0. Strategy: Dual-ONNX Contradiction Arbitrage
+                        if self.active_strategy_bot in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "the_onnx_strategy", "onnx_macro_v2"):
+                            btc_book, btc_trades = None, None
+                            try:
+                                if hasattr(self._sim_agent, "_btc_orderflow_feed") and self._sim_agent._btc_orderflow_feed:
+                                    btc_book, btc_trades = self._sim_agent._btc_orderflow_feed.get_btc_l2_state()
+                            except Exception:
+                                pass
+
+                            spot_diff = float(spot_price - target_strike)
+                            dec_dual = self._dual_onnx_bot.evaluate(
+                                spot_l2=btc_book if btc_book is not None else book,
+                                kalshi_l2=book,
+                                time_to_expiry_s=time_to_expiry_s,
+                                spot_diff=spot_diff,
+                                latest_spot_trades=btc_trades if btc_trades is not None else trades,
+                                latest_kalshi_trades=trades,
+                            )
+                            compute_duration = (asyncio.get_event_loop().time() - start_t) * 1000.0
+                            self._last_compute_duration_ms = compute_duration
+
+                            p_up_val = dec_dual.quolas_confidence if dec_dual.quolas_signal == "UP" else (1.0 - dec_dual.quolas_confidence if dec_dual.quolas_signal == "DOWN" else 0.50)
+                            p_down_val = dec_dual.quolas_confidence if dec_dual.quolas_signal == "DOWN" else (1.0 - dec_dual.quolas_confidence if dec_dual.quolas_signal == "UP" else 0.50)
+
+                            self._cached_signals = {
+                                "strategy_id": "dual_onnx",
+                                "strategy_name": "Dual-ONNX Contradiction Arbitrage",
+                                "active_playbook": dec_dual.regime.value if hasattr(dec_dual.regime, "value") else str(dec_dual.regime),
+                                "playbook_stage": "dual_onnx",
+                                "regime": dec_dual.regime.value if hasattr(dec_dual.regime, "value") else str(dec_dual.regime),
+                                "action": dec_dual.action,
+                                "quolas_signal": dec_dual.quolas_signal,
+                                "quolas_confidence": dec_dual.quolas_confidence,
+                                "kalshi_signal": dec_dual.kalshi_signal,
+                                "kalshi_confidence": dec_dual.kalshi_confidence,
+                                "p_up": p_up_val,
+                                "p_down": p_down_val,
+                                "p_wait": 0.00 if dec_dual.quolas_signal != "WAIT" else 1.00,
+                                "vpin": 0.15,
+                                "vpin_is_safe": dec_dual.regime != DualONNXRegime.TOXIC_VETO,
+                                "ev_yes": float(dec_dual.expected_value) if dec_dual.side == "yes" else 0.0,
+                                "ev_no": float(dec_dual.expected_value) if dec_dual.side == "no" else 0.0,
+                                "edge_yes": float(dec_dual.expected_value) if dec_dual.side == "yes" else 0.0,
+                                "edge_no": float(dec_dual.expected_value) if dec_dual.side == "no" else 0.0,
+                                "expected_value": float(dec_dual.expected_value),
+                                "statistical_edge": float(dec_dual.expected_value),
+                                "kelly_f_yes": 0.10 if dec_dual.side == "yes" else 0.0,
+                                "kelly_f_no": 0.10 if dec_dual.side == "no" else 0.0,
+                                "recommended_side": dec_dual.side or "wait",
+                                "recommended_contracts": dec_dual.recommended_contracts,
+                                "recommended_limit_price": float(dec_dual.recommended_limit_price),
+                                "rationale": dec_dual.rationale,
+                                "compute_latency_ms": round(compute_duration, 2),
+                                "cross_brain_skew_ms": round(getattr(self._dual_onnx_bot, "last_temporal_skew_ms", 0.0), 2),
+                                "is_temporally_synced": getattr(self._dual_onnx_bot, "is_temporally_synced", True),
+                                "slower_brain": getattr(self._dual_onnx_bot, "slower_brain", "IN_SYNC"),
+                            }
+
+                        # 1. Strategy: Macro ONNX & Macro Trend Dominion
+                        elif self.active_strategy_bot in (
                             "macro_onnx",
                             "macro_onnx_bot",
                             "macro_trend_onnx_fusion",

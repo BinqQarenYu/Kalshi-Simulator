@@ -554,6 +554,24 @@ class L2BookState:
         return (bid + ask) / 2
 
     @property
+    def micro_price(self) -> Decimal | None:
+        """Volume-weighted micro-price at top of book: (bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty)."""
+        bid = self.best_yes_bid
+        ask = self.best_yes_ask
+        if bid is None or ask is None:
+            return None
+        bid_qty = self.yes_book.get(bid, Decimal("0"))
+        if self.is_spot:
+            ask_qty = self.no_book.get(ask, Decimal("0"))
+        else:
+            nb = self.best_no_bid
+            ask_qty = self.no_book.get(nb, Decimal("0")) if nb is not None else Decimal("0")
+        total_qty = bid_qty + ask_qty
+        if total_qty <= Decimal("0"):
+            return (bid + ask) / 2
+        return (bid_qty * ask + ask_qty * bid) / total_qty
+
+    @property
     def is_stale(self) -> bool:
         return self._stale
 

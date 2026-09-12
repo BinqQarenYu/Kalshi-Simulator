@@ -28,7 +28,8 @@ from kalshi_sim.db import DatabaseWriter, get_db_writer
 from kalshi_sim.execution_logger import ExecutionLogger
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
-from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
+from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
+from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
@@ -84,6 +85,7 @@ class SimulationAgent:
         guardrails: Optional[AgentGuardrails] = None,
         btc_orderflow_feed: Optional[BtcOrderflowFeed] = None,
         bot_auditor: Optional[BotDeploymentAuditor] = None,
+        hmm_brain: Optional[Any] = None,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
@@ -93,19 +95,26 @@ class SimulationAgent:
         self._guardrails = guardrails or AgentGuardrails()
         self._btc_orderflow_feed = btc_orderflow_feed or BtcOrderflowFeed()
         self.bot_auditor = bot_auditor or BotDeploymentAuditor(guardrails=self._guardrails)
+        self.hmm_brain = hmm_brain
 
         # Strategy Portfolios ($15 each starting capital)
         self._portfolio_macro_trend = Portfolio(starting_balance=starting_capital)
         self._portfolio_dominion2 = Portfolio(starting_balance=starting_capital)
         self._portfolio_domination = Portfolio(starting_balance=starting_capital)
         self._portfolio_onnx = Portfolio(starting_balance=starting_capital)
+        self._portfolio_dual_onnx = Portfolio(starting_balance=starting_capital)
         self._simulator = OrderSimulator()
         self._exec_logger = ExecutionLogger(data_dir=data_dir)
         self._onnx_engine = KalshiONNXEngine(model_path=model_path)
         self._ev_engine = StatisticalEVEngine()
-        self._macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_onnx", strategy_name="Macro ONNX Bot")
+        self._macro_trend_bot = MacroTrendDominionBot(
+            strategy_id="macro_trend_dominion",
+            strategy_name="Macro Trend Dominion",
+            hmm_brain=self.hmm_brain,
+        )
         self._dominion2_bot = Dominion2Bot()
         self._domination_bot = ThreeStepDominationBot()
+        self._dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
         self.active_strategy_bot: str = "3_step_domination_bot"
         self.execution_mode: str = "simulated"
         self._db_writer = db_writer or get_db_writer()
@@ -116,6 +125,12 @@ class SimulationAgent:
             ("dominion_2_bot", self._dominion2_bot),
             ("macro_trend_dominion", self._macro_trend_bot),
             ("macro_onnx", self._macro_trend_bot),
+            ("dual_onnx", self._dual_onnx_bot),
+            ("the_onnx_strategy", self._dual_onnx_bot),
+            ("onnx_macro_v2", self._dual_onnx_bot),
+            ("dual_onnx_bot", self._dual_onnx_bot),
+            ("dual_onnx_arbitrage", self._dual_onnx_bot),
+            ("dual_onnx_arbitrage_bot", self._dual_onnx_bot),
         ]:
             self.bot_auditor.audit_bot(b_id, b_inst, mode=self.execution_mode)
 
@@ -151,6 +166,15 @@ class SimulationAgent:
             return self._portfolio_dominion2
         elif self.active_strategy_bot == "onnx_microstructure_bot":
             return self._portfolio_onnx
+        elif self.active_strategy_bot in (
+            "dual_onnx",
+            "the_onnx_strategy",
+            "onnx_macro_v2",
+            "dual_onnx_bot",
+            "dual_onnx_arbitrage",
+            "dual_onnx_arbitrage_bot",
+        ):
+            return self._portfolio_dual_onnx
         return self._portfolio_domination
 
     @property
@@ -160,6 +184,14 @@ class SimulationAgent:
     @property
     def guardrails(self) -> AgentGuardrails:
         return self._guardrails
+
+    def set_active_strategy(self, bot_id: str) -> None:
+        """Switch active strategy bot."""
+        if bot_id in ("dual_onnx", "the_onnx_strategy", "onnx_macro_v2", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
+            self.active_strategy_bot = "dual_onnx"
+        else:
+            self.active_strategy_bot = bot_id
+        logger.info("SimulationAgent active strategy switched to: %s", self.active_strategy_bot)
 
     async def start(self) -> None:
         """Start background tasks (P&L reporting, settlement checks)."""
@@ -218,7 +250,12 @@ class SimulationAgent:
             # Process and match any active resting limit orders on this book
             filled_resting = self._simulator.process_resting_orders(book)
             for ord, fill in filled_resting:
-                target_p = self._portfolio_domination if ("domination" in ord.reasoning.lower() or "3_step" in ord.reasoning.lower()) else self._portfolio
+                if any(k in ord.reasoning.lower() for k in ("dual_onnx", "onnx_strategy", "onnx_macro")):
+                    target_p = self._portfolio_dual_onnx
+                elif "domination" in ord.reasoning.lower() or "3_step" in ord.reasoning.lower():
+                    target_p = self._portfolio_domination
+                else:
+                    target_p = self.portfolio
                 if target_p.can_afford(fill.cost):
                     tf = self._ticker_timeframe_map.get(ticker, Timeframe.FIFTEEN_MIN)
                     target_p.open_position(fill, tf)
@@ -240,12 +277,16 @@ class SimulationAgent:
             return self._domination_bot
         elif bot_id == "onnx_microstructure_bot":
             return self._onnx_engine
+        elif bot_id in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "the_onnx_strategy", "onnx_macro_v2"):
+            return self._dual_onnx_bot
         return None
 
     def set_active_strategy(self, strategy_id: str) -> None:
         """Switch active strategy bot with mandatory pre-deployment audit certification gate."""
         target = strategy_id
-        if target in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+        if target in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "the_onnx_strategy", "onnx_macro_v2"):
+            target = "dual_onnx"
+        elif target in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
             target = "macro_onnx"
         elif target in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
             target = "macro_trend_dominion"
@@ -288,7 +329,8 @@ class SimulationAgent:
         """Evaluate trading decisions concurrently for both 3-Step Domination and ONNX Neural Net bots."""
         timeframe = self._ticker_timeframe_map.get(ticker)
         if timeframe is None:
-            return
+            timeframe = Timeframe.FIVE_MIN if ("5M" in ticker and "15M" not in ticker) else Timeframe.FIFTEEN_MIN
+            self._ticker_timeframe_map[ticker] = timeframe
 
         trades = self._recent_trades.get(ticker, [])
 
@@ -495,7 +537,7 @@ class SimulationAgent:
 
         # ===================================================================
         # BOT 1: 3-Step Domination Bot (Evaluated against _portfolio_domination)
-        if not is_live or self.active_strategy_bot == "3_step_domination_bot":
+        if self.active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination"):
             # Q2 Winning Choice: Overnight Cautious Mode (1:00 AM - 6:00 AM ET)
             # Low liquidity & wide spreads overnight produce noisy chop.
             # In cautious mode, we require edge >= 12.0% and |Diff| >= $75.00, capped at 1 contract.
@@ -607,113 +649,202 @@ class SimulationAgent:
                 except Exception as exc:
                     logger.debug("Domination bot evaluation error: %s", exc)
 
-        # Paper bots disabled: only 3-Step Dominion is authorized to trade!
-        return
+        # ===================================================================
+        # BOT: The ONNX Strategy (Dual-Brain Spot Lead vs Kalshi Lag CLOB)
+        # Evaluated against _portfolio_dual_onnx in Lane 2 Paper Trading on Live Market Ticks
+        # ===================================================================
+        if self.active_strategy_bot in (
+            "dual_onnx",
+            "the_onnx_strategy",
+            "onnx_macro_v2",
+            "dual_onnx_bot",
+            "dual_onnx_arbitrage",
+            "dual_onnx_arbitrage_bot",
+        ):
+            if (
+                not self._portfolio_dual_onnx.circuit_breaker_tripped
+                and len(self._portfolio_dual_onnx.open_positions) < MAX_CONCURRENT_POSITIONS
+                and self._portfolio_dual_onnx.get_position(ticker) is None
+                and not (hasattr(self._simulator, "_resting_orders") and self._simulator._resting_orders.get(ticker))
+                and ticker not in self._guardrails._cycle_locks
+            ):
+                if not hasattr(self, "_last_dual_onnx_eval_time"):
+                    self._last_dual_onnx_eval_time: dict[str, float] = {}
+                _d_now = time.monotonic()
+                if _d_now - self._last_dual_onnx_eval_time.get(ticker, 0.0) >= 1.0:
+                    self._last_dual_onnx_eval_time[ticker] = _d_now
+                    try:
+                        target_strike = float(market_info.target_strike if market_info else 78650.0)
+                        if self._spot_price_getter:
+                            try:
+                                spot_price = float(self._spot_price_getter())
+                            except Exception:
+                                spot_price = target_strike
+                        else:
+                            spot_price = float(market_info.target_strike if market_info else 78650.0)
+                        time_to_expiry_s = 600.0
+
+                        if market_info and market_info.expiration_time:
+                            now_utc = datetime.now(timezone.utc)
+                            rem_secs = (market_info.expiration_time - now_utc).total_seconds()
+                            if rem_secs <= 15.0:
+                                return
+                            time_to_expiry_s = rem_secs
+
+                        btc_book, btc_trades = None, None
+                        try:
+                            if hasattr(self, "_btc_orderflow_feed") and self._btc_orderflow_feed:
+                                btc_book, btc_trades = self._btc_orderflow_feed.get_btc_l2_state()
+                                if not getattr(self._dual_onnx_bot, "candle_builder", None):
+                                    self._dual_onnx_bot.candle_builder = getattr(self._btc_orderflow_feed, "candle_builder_1m", None) or getattr(self._btc_orderflow_feed, "candle_builder_5m", None)
+                        except Exception:
+                            pass
+
+                        spot_diff = float(spot_price - target_strike)
+                        l2_book = book.get_state() if hasattr(book, "get_state") else book
+                        dec_dual = self._dual_onnx_bot.evaluate(
+                            spot_l2=btc_book if btc_book is not None else l2_book,
+                            kalshi_l2=l2_book,
+                            time_to_expiry_s=time_to_expiry_s,
+                            spot_diff=spot_diff,
+                            latest_spot_trades=btc_trades if btc_trades is not None else trades,
+                            latest_kalshi_trades=trades,
+                        )
+
+                        if dec_dual.side in ("yes", "no") and dec_dual.recommended_contracts > 0:
+                            side_enum = OrderSide.YES if dec_dual.side == "yes" else OrderSide.NO
+                            order_size = 1  # Strictly 1 contract under Tier 0 Micro-Bankroll Armor
+                            limit_price_val = Decimal(str(round(dec_dual.recommended_limit_price, 2)))
+                            logger.info(
+                                "[SHADOW PAPER ONNX STRATEGY] %-18s | %-3s (%s) | EV=+$%s | Size=%d ct @ $%s | Rationale=%s",
+                                ticker,
+                                dec_dual.side.upper(),
+                                dec_dual.regime.value if hasattr(dec_dual.regime, "value") else str(dec_dual.regime),
+                                f"{float(dec_dual.expected_value):.2f}",
+                                order_size,
+                                f"{float(limit_price_val):.2f}",
+                                dec_dual.rationale,
+                            )
+                            await self._place_virtual_order(
+                                book=book,
+                                ticker=ticker,
+                                side=side_enum,
+                                max_size=order_size,
+                                timeframe=timeframe,
+                                reasoning=dec_dual.rationale,
+                                portfolio=self._portfolio_dual_onnx,
+                                bot_type="onnx_macro_v2",
+                                order_type="limit",
+                                limit_price=limit_price_val,
+                            )
+                    except Exception as exc:
+                        logger.warning("Dual ONNX bot evaluation error on %s: %s", ticker, exc)
 
         # ===================================================================
         # BOT 2: ONNX Microstructure Neural Net Bot (Evaluated against _portfolio_onnx)
         # ===================================================================
-        now_ts = time.time()
-        if not hasattr(self, "_last_onnx_ts"):
-            self._last_onnx_ts: dict[str, float] = {}
+        if self.active_strategy_bot in ("onnx_microstructure_bot", "onnx_bot"):
+            now_ts = time.time()
+            if not hasattr(self, "_last_onnx_ts"):
+                self._last_onnx_ts: dict[str, float] = {}
 
-        if (
-            now_ts - self._last_onnx_ts.get(ticker, 0.0) >= 0.5
-            and not self._portfolio_onnx.circuit_breaker_tripped
-            and len(self._portfolio_onnx.open_positions) < MAX_CONCURRENT_POSITIONS
-            and self._portfolio_onnx.get_position(ticker) is None
-        ):
-            self._last_onnx_ts[ticker] = now_ts
-            try:
-                t0 = time.perf_counter()
-                onnx_res = await asyncio.to_thread(
-                    self._onnx_engine.process_orderbook_tick, book, trades
-                )
-                latency_ms = (time.perf_counter() - t0) * 1000.0
-
-                onnx_signal = onnx_res.get("signal", "WAIT")
-                onnx_conf = onnx_res.get("confidence", 0.0)
-                vpin_score = onnx_res.get("vpin_score", 0.0)
-
-                self._eval_count = getattr(self, "_eval_count", 0) + 1
-                if onnx_signal in ("LONG", "SHORT") or self._eval_count % 10 == 0:
-                    logger.info(
-                        "[ONNX AI]   %-18s | Signal=%-5s (%4.1f%%) | VPIN=%.2f | OFI_L1=%+.2f | Latency=%.2fms",
-                        ticker, onnx_signal, onnx_conf * 100.0, vpin_score, onnx_res.get("ofi_l1", 0.0), latency_ms
+            if (
+                now_ts - self._last_onnx_ts.get(ticker, 0.0) >= 0.5
+                and not self._portfolio_onnx.circuit_breaker_tripped
+                and len(self._portfolio_onnx.open_positions) < MAX_CONCURRENT_POSITIONS
+                and self._portfolio_onnx.get_position(ticker) is None
+            ):
+                self._last_onnx_ts[ticker] = now_ts
+                try:
+                    t0 = time.perf_counter()
+                    onnx_res = await asyncio.to_thread(
+                        self._onnx_engine.process_orderbook_tick, book, trades
                     )
+                    latency_ms = (time.perf_counter() - t0) * 1000.0
 
-                if not onnx_res.get("vpin_veto"):
-                    rel_long = onnx_res.get("rel_long", onnx_res.get("prob_long", 0.33))
-                    rel_short = onnx_res.get("rel_short", onnx_res.get("prob_short", 0.33))
-                    prob_wait = onnx_res.get("prob_wait", 0.34)
+                    onnx_signal = onnx_res.get("signal", "WAIT")
+                    onnx_conf = onnx_res.get("confidence", 0.0)
+                    vpin_score = onnx_res.get("vpin_score", 0.0)
 
-                    if onnx_signal == "LONG":
-                        prob_long = max(0.55, rel_long)
-                        prob_short = 1.0 - prob_long
-                        prob_wait_in = 0.0
-                    elif onnx_signal == "SHORT":
-                        prob_short = max(0.55, rel_short)
-                        prob_long = 1.0 - prob_short
-                        prob_wait_in = 0.0
-                    else:
-                        prob_long = rel_long
-                        prob_short = rel_short
-                        prob_wait_in = prob_wait
-
-                    best_yes_ask = book.best_yes_ask
-                    best_yes_bid = book.best_yes_bid
-                    best_no_ask = (Decimal("1.00") - best_yes_bid) if best_yes_bid is not None else None
-
-                    ev_result = self._ev_engine.compute_optimal_execution(
-                        prob_up=prob_long,
-                        prob_down=prob_short,
-                        best_yes_ask=best_yes_ask,
-                        best_no_ask=best_no_ask,
-                        total_equity=self._portfolio_onnx.equity,
-                        max_position_size=1,  # 1 contract for other bots only
-                        vpin=vpin_score,
-                        prob_wait=prob_wait_in,
-                    )
-
-                    now_mono = time.monotonic()
-                    if ev_result.recommended_side is not None or now_mono - self._last_pred_log_time.get(ticker, 0.0) >= 3.0:
-                        self._last_pred_log_time[ticker] = now_mono
-                        self._db_writer.enqueue_ai_prediction(
-                            ticker=ticker,
-                            p_up=prob_long,
-                            p_down=prob_short,
-                            p_wait=prob_wait,
-                            vpin=vpin_score,
-                            ev_yes=float(ev_result.expected_value if ev_result.recommended_side == OrderSide.YES else 0.0),
-                            ev_no=float(ev_result.expected_value if ev_result.recommended_side == OrderSide.NO else 0.0),
-                            recommended_side=ev_result.recommended_side.value if ev_result.recommended_side else "none",
-                            rationale=ev_result.rationale,
-                        )
-
-                    if ev_result.has_positive_edge and ev_result.recommended_side is not None:
+                    self._eval_count = getattr(self, "_eval_count", 0) + 1
+                    if onnx_signal in ("LONG", "SHORT") or self._eval_count % 10 == 0:
                         logger.info(
-                            "[STAGE 2 EV] %-18s | %-3s @ $%-4s | AI_P=%.1f%% | EV=+%s/ct | Edge=%+.1f%% | Kelly=%.1f%% (%d cts)",
-                            ticker,
-                            ev_result.recommended_side.value.upper(),
-                            ev_result.market_price,
-                            ev_result.ai_prob * 100.0,
-                            f"${ev_result.expected_value:.3f}",
-                            ev_result.statistical_edge * 100.0,
-                            ev_result.kelly_fraction * 100.0,
-                            ev_result.recommended_contracts,
+                            "[ONNX AI]   %-18s | Signal=%-5s (%4.1f%%) | VPIN=%.2f | OFI_L1=%+.2f | Latency=%.2fms",
+                            ticker, onnx_signal, onnx_conf * 100.0, vpin_score, onnx_res.get("ofi_l1", 0.0), latency_ms
                         )
-                        await self._place_virtual_order(
-                            book=book,
-                            ticker=ticker,
-                            side=ev_result.recommended_side,
-                            max_size=ev_result.recommended_contracts,
-                            timeframe=timeframe,
-                            reasoning=ev_result.rationale,
-                            portfolio=self._portfolio_onnx,
-                            bot_type="onnx_microstructure_bot",
+
+                    if not onnx_res.get("vpin_veto"):
+                        rel_long = onnx_res.get("rel_long", onnx_res.get("prob_long", 0.33))
+                        rel_short = onnx_res.get("rel_short", onnx_res.get("prob_short", 0.33))
+                        prob_wait = onnx_res.get("prob_wait", 0.34)
+
+                        if onnx_signal == "LONG":
+                            prob_long = max(0.55, rel_long)
+                            prob_short = 1.0 - prob_long
+                            prob_wait_in = 0.0
+                        elif onnx_signal == "SHORT":
+                            prob_short = max(0.55, rel_short)
+                            prob_long = 1.0 - prob_short
+                            prob_wait_in = 0.0
+                        else:
+                            prob_long = rel_long
+                            prob_short = rel_short
+                            prob_wait_in = prob_wait
+
+                        best_yes_ask = book.best_yes_ask
+                        best_yes_bid = book.best_yes_bid
+                        best_no_ask = (Decimal("1.00") - best_yes_bid) if best_yes_bid is not None else None
+
+                        ev_result = self._ev_engine.compute_optimal_execution(
+                            prob_up=prob_long,
+                            prob_down=prob_short,
+                            best_yes_ask=best_yes_ask,
+                            best_no_ask=best_no_ask,
+                            total_equity=self._portfolio_onnx.equity,
+                            max_position_size=1,  # 1 contract for other bots only
+                            vpin=vpin_score,
+                            prob_wait=prob_wait_in,
                         )
-            except Exception as exc:
-                logger.debug("ONNX bot evaluation error: %s", exc)
+
+                        now_mono = time.monotonic()
+                        if ev_result.recommended_side is not None or now_mono - self._last_pred_log_time.get(ticker, 0.0) >= 3.0:
+                            self._last_pred_log_time[ticker] = now_mono
+                            self._db_writer.enqueue_ai_prediction(
+                                ticker=ticker,
+                                p_up=prob_long,
+                                p_down=prob_short,
+                                p_wait=prob_wait,
+                                vpin=vpin_score,
+                                ev_yes=float(ev_result.expected_value if ev_result.recommended_side == OrderSide.YES else 0.0),
+                                ev_no=float(ev_result.expected_value if ev_result.recommended_side == OrderSide.NO else 0.0),
+                                recommended_side=ev_result.recommended_side.value if ev_result.recommended_side else "none",
+                                rationale=ev_result.rationale,
+                            )
+
+                        if ev_result.has_positive_edge and ev_result.recommended_side is not None:
+                            logger.info(
+                                "[STAGE 2 EV] %-18s | %-3s @ $%-4s | AI_P=%.1f%% | EV=+%s/ct | Edge=%+.1f%% | Kelly=%.1f%% (%d cts)",
+                                ticker,
+                                ev_result.recommended_side.value.upper(),
+                                ev_result.market_price,
+                                ev_result.ai_prob * 100.0,
+                                f"${ev_result.expected_value:.3f}",
+                                ev_result.statistical_edge * 100.0,
+                                ev_result.kelly_fraction * 100.0,
+                                ev_result.recommended_contracts,
+                            )
+                            await self._place_virtual_order(
+                                book=book,
+                                ticker=ticker,
+                                side=ev_result.recommended_side,
+                                max_size=ev_result.recommended_contracts,
+                                timeframe=timeframe,
+                                reasoning=ev_result.rationale,
+                                portfolio=self._portfolio_onnx,
+                                bot_type="onnx_microstructure_bot",
+                            )
+                except Exception as exc:
+                    logger.debug("ONNX bot evaluation error: %s", exc)
 
     async def on_ticker_update(self, update: TickerUpdate) -> None:
         """Process a ticker update — update caches and mark-to-market both portfolios."""
@@ -732,6 +863,8 @@ class SimulationAgent:
             self._portfolio_onnx.mark_to_market(update.market_ticker, update.yes_bid)
             if hasattr(self, "_portfolio_dominion2") and self._portfolio_dominion2 is not None:
                 self._portfolio_dominion2.mark_to_market(update.market_ticker, update.yes_bid)
+            if hasattr(self, "_portfolio_dual_onnx") and self._portfolio_dual_onnx is not None:
+                self._portfolio_dual_onnx.mark_to_market(update.market_ticker, update.yes_bid)
 
     def settle_expired_market(
         self, ticker: str, market_info: MarketInfo, final_tick: TickerUpdate
@@ -753,6 +886,8 @@ class SimulationAgent:
         ]
         if hasattr(self, "_portfolio_dominion2") and self._portfolio_dominion2 is not None:
             portfolios_to_settle.append((self._portfolio_dominion2, "dominion_2_bot"))
+        if hasattr(self, "_portfolio_dual_onnx") and self._portfolio_dual_onnx is not None:
+            portfolios_to_settle.append((self._portfolio_dual_onnx, "onnx_macro_v2"))
 
         for p_inst, b_type in portfolios_to_settle:
             result = settle_position(
@@ -784,6 +919,21 @@ class SimulationAgent:
                     balance_after=p_inst.balance,
                     cycle_id=result.ticker,
                 )
+                if hasattr(self, "_macro_trend_bot") and hasattr(self._macro_trend_bot, "record_cycle_outcome"):
+                    if b_type in ("macro_trend_dominion", "macro_onnx", "macro_trend", "macro_trend_dominion_bot"):
+                        try:
+                            self._macro_trend_bot.record_cycle_outcome(
+                                cycle_id=result.ticker,
+                                ticker=result.ticker,
+                                call=result.side.value.upper(),
+                                predicted_prob=0.65,
+                                fill_price=result.entry_price,
+                                outcome=result.outcome.upper(),
+                                pnl=result.pnl,
+                                execution_mode=self.execution_mode,
+                            )
+                        except Exception as exc:
+                            logger.debug("Failed to record macro dominion cycle outcome: %s", exc)
                 try:
                     from kalshi_sim.server import record_win_loss_event_report
                     strike_val = market_info.floor_strike if market_info.floor_strike is not None else (market_info.target_strike if market_info.target_strike is not None else Decimal("0.0"))
@@ -967,6 +1117,7 @@ class SimulationAgent:
             est_price = no_ask if no_ask is not None else Decimal("0.50")
 
         # Agent_Guardrails Pre-Trade Gatekeeper (1-trade-per-cycle lock, cooldown, anti-kamikaze sizing)
+        is_live_flag = getattr(self, "execution_mode", "simulated") == "live"
         is_ok, g_reason, approved_size, g_diag = self._guardrails.validate_pre_trade_intent(
             ticker=ticker,
             side=side.value if hasattr(side, "value") else str(side),
@@ -977,6 +1128,7 @@ class SimulationAgent:
             cycle_id=ticker,
             is_bot=True,
             bot_type=b_type,
+            is_live=is_live_flag,
         )
         if not is_ok or approved_size <= 0:
             now_mono = time.monotonic()
@@ -1177,22 +1329,85 @@ class SimulationAgent:
         if order_type == "limit" and limit_price is not None:
             est_cost = limit_price * sim_size
             if not active_p.can_afford(est_cost):
-                logger.warning("[%s] Cannot afford resting limit order: $%s > balance $%s", b_type, est_cost, active_p.balance)
+                logger.warning("[%s] Cannot afford limit order: $%s > balance $%s", b_type, est_cost, active_p.balance)
+                self._guardrails.release_in_flight_intent(ticker)
                 return
             l2_book = book.get_state() if hasattr(book, "get_state") else book
-            resting_ord = self._simulator.simulate_limit_order(
-                book=l2_book,
-                side=side,
-                size=sim_size,
-                limit_price=limit_price,
-                timeframe=timeframe,
-                reasoning=reasoning,
-            )
-            logger.info(
-                "[%s RESTING MAKER LIMIT ORDER PLACED] %s %d cts @ $%s on %s ($0.00 Fee) | OrderID: %s",
-                b_type, side.value.upper(), sim_size, limit_price, ticker, resting_ord.order_id,
-            )
-            return
+            try:
+                res = self._simulator.simulate_limit_order(
+                    book=l2_book,
+                    side=side,
+                    size=sim_size,
+                    limit_price=limit_price,
+                    timeframe=timeframe,
+                    reasoning=reasoning,
+                )
+                if res is not None:
+                    # Marketable limit order immediately filled!
+                    order, fill = res
+                    active_p.open_position(fill, timeframe)
+                    self._guardrails.record_trade_inception(
+                        trade_id=order.order_id,
+                        ticker=ticker,
+                        side=side.value if hasattr(side, "value") else str(side),
+                        size=fill.size,
+                        price=fill.fill_price,
+                        cost=fill.cost,
+                        fee=fill.fee,
+                        bot_type=b_type,
+                        execution_mode="simulated",
+                        rationale=reasoning,
+                        vpin=0.15,
+                        ai_prob=float(snapshot.win_rate or 0.70),
+                        cycle_id=ticker,
+                    )
+                    if self._exec_logger:
+                        self._exec_logger.log_execution(order, fill)
+                    self._db_writer.enqueue_trade(
+                        trade_id=order.order_id,
+                        ticker=ticker,
+                        side=side.value if hasattr(side, "value") else str(side),
+                        size=fill.size,
+                        price=float(fill.fill_price),
+                        gross_value=float(fill.fill_price * fill.size),
+                        fees=float(fill.fee),
+                        bot_type=b_type,
+                        execution_mode="simulated",
+                        status="filled",
+                    )
+                    logger.info(
+                        "[%s LIMIT ORDER FILLED] %s %d cts @ $%s on %s | OrderID: %s",
+                        b_type, side.value.upper(), fill.size, fill.fill_price, ticker, order.order_id,
+                    )
+                    return
+                else:
+                    # Non-marketable: place as resting maker limit order on the book
+                    resting_ord = self._simulator.place_resting_limit_order(
+                        book=l2_book,
+                        side=side,
+                        size=sim_size,
+                        limit_price=limit_price,
+                        timeframe=timeframe,
+                        reasoning=reasoning,
+                    )
+                    logger.info(
+                        "[%s RESTING MAKER LIMIT ORDER PLACED] %s %d cts @ $%s on %s ($0.00 Fee) | OrderID: %s",
+                        b_type, side.value.upper(), sim_size, limit_price, ticker, resting_ord.order_id,
+                    )
+                    self._guardrails.record_resting_order(
+                        order_id=resting_ord.order_id,
+                        ticker=ticker,
+                        side=side.value if hasattr(side, "value") else str(side),
+                        size=sim_size,
+                        price=limit_price,
+                        cycle_id=ticker,
+                        bot_type=b_type,
+                    )
+                    return
+            except Exception as lim_exc:
+                self._guardrails.release_in_flight_intent(ticker)
+                logger.warning("[%s] Failed to place/simulate limit order on %s: %s", b_type, ticker, lim_exc)
+                return
 
         # Calculate recent spot velocity for adverse selection modeling
         velocity = 0.0
@@ -1336,12 +1551,16 @@ class SimulationAgent:
             await asyncio.sleep(SETTLEMENT_CHECK_INTERVAL_S)
             try:
                 now = datetime.now(timezone.utc)
-                for p_inst, b_type in [
+                portfolios_to_check = [
                     (self._portfolio_macro_trend, "macro_trend_dominion"),
                     (self._portfolio_dominion2, "dominion_2_bot"),
                     (self._portfolio_domination, "3_step_domination_bot"),
                     (self._portfolio_onnx, "onnx_microstructure_bot"),
-                ]:
+                ]
+                if hasattr(self, "_portfolio_dual_onnx") and self._portfolio_dual_onnx is not None:
+                    portfolios_to_check.append((self._portfolio_dual_onnx, "onnx_macro_v2"))
+
+                for p_inst, b_type in portfolios_to_check:
                     expired_tickers = check_expirations(
                         positions=p_inst.open_positions,
                         markets=self._market_cache,
@@ -1350,7 +1569,18 @@ class SimulationAgent:
                     for ticker in expired_tickers:
                         market_info = self._market_cache.get(ticker)
                         if market_info is None:
-                            continue
+                            market_info = MarketInfo(
+                                ticker=ticker,
+                                series_ticker=ticker.split("-")[0] if "-" in ticker else "KXBTC15M",
+                                title=ticker,
+                                subtitle="",
+                                status=MarketStatus.CLOSED,
+                                close_time=now,
+                                expiration_time=now,
+                                floor_strike=None,
+                                cap_strike=None,
+                                strike_type="greater",
+                            )
                         last_update = self._ticker_cache.get(ticker)
                         self.settle_expired_market(ticker, market_info, last_update)
             except Exception as exc:

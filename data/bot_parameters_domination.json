@@ -1,0 +1,23 @@
+{
+  "assets": {
+    "BTC": {
+      "min_spot_diff": 28.0
+    }
+  },
+  "discount_limit_price": 0.52,
+  "momentum_max_price": 0.62,
+  "min_confidence": 70.0,
+  "min_edge_pct": 6.0,
+  "min_ev_dollars": 0.02,
+  "typical_1m_volatility": 14.0,
+  "vpin_toxic_threshold": 0.6,
+  "take_profit_price_threshold": 0.95,
+  "enable_take_profit_ceiling": true,
+  "require_reversal_for_tp_ceiling": true,
+  "enable_reverse_take_profit_roi": true,
+  "reverse_indicator_threshold": 95.0,
+  "min_take_profit_roi": 45.0,
+  "max_contracts": 1,
+  "active_asset": "BTC",
+  "updated_at": "2026-09-11T04:55:46.820545+00:00"
+}

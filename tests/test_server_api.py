@@ -606,3 +606,60 @@ def test_export_ticks_security_sanitization(client: TestClient) -> None:
         valid_resp = client.get("/api/export/ticks?timeframe=mock")
         # Should be either 200 (if tick files exist) or 404 (if no tick files found), but NOT 400
         assert valid_resp.status_code in (200, 404)
+
+
+def test_bot_parameters_onnx_dials_endpoint() -> None:
+    """Verify strategy parameter dials endpoint updates and persists dials."""
+    with TestClient(app) as client:
+        # 1. Update ONNX Strategy dials via POST /api/bot/parameters
+        dials_payload = {
+            "brain_priority_mode": "TREND_ALIGNED_SCALP",
+            "contract_scaling_mode": "TIER_0_STRICT_1",
+            "volatility_floor": 12.0,
+            "volatility_ceiling": 48.0,
+            "entry_discount_depth": 0.46,
+            "tape_confirmation_ticks": 3,
+            "taker_cross_ev_threshold": 0.09,
+            "dynamic_moat_multiplier": 1.25,
+        }
+        post_resp = client.post("/api/bot/parameters", json=dials_payload)
+        assert post_resp.status_code == 200
+        data = post_resp.json()
+        assert data["brain_priority_mode"] == "TREND_ALIGNED_SCALP"
+        assert data["contract_scaling_mode"] == "TIER_0_STRICT_1"
+        assert data["volatility_floor"] == 12.0
+        assert data["volatility_ceiling"] == 48.0
+        assert data["entry_discount_depth"] == 0.46
+        assert data["tape_confirmation_ticks"] == 3
+
+        # 2. Verify GET /api/bot/parameters reflects updated dials
+        get_resp = client.get("/api/bot/parameters")
+        assert get_resp.status_code == 200
+        p = get_resp.json()
+        assert p["brain_priority_mode"] == "TREND_ALIGNED_SCALP"
+        assert p["contract_scaling_mode"] == "TIER_0_STRICT_1"
+        assert p["volatility_floor"] == 12.0
+        assert p["volatility_ceiling"] == 48.0
+        assert p["entry_discount_depth"] == 0.46
+        assert p["tape_confirmation_ticks"] == 3
+
+        # 3. Verify GET /api/bot/strategies lists The ONNX Strategy metadata
+        strat_resp = client.get("/api/bot/strategies")
+        assert strat_resp.status_code == 200
+        strats = strat_resp.json()["strategies"]
+        onnx_strat = next((s for s in strats if s["id"] == "dual_onnx"), None)
+        assert onnx_strat is not None
+        assert "The ONNX Strategy" in onnx_strat["name"]
+        assert onnx_strat.get("strategy_id") == "the_onnx_strategy"
+
+        # 4. Verify GET /api/bot/dual-onnx contains dials in telemetry
+        tele_resp = client.get("/api/bot/dual-onnx")
+        assert tele_resp.status_code == 200
+        tele = tele_resp.json()["dual_onnx_telemetry"]
+        assert "brain_priority_mode" in tele
+        assert "contract_scaling_mode" in tele
+        assert "volatility_floor" in tele
+        assert "volatility_ceiling" in tele
+        assert "entry_discount_depth" in tele
+        assert "tape_confirmation_ticks" in tele
+

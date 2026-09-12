@@ -24,7 +24,7 @@ interface WinLossReportsModalProps {
   isLiveMode?: boolean;
 }
 
-export type TraderCategory = 'all' | '3_step_dom' | 'macro_onnx' | 'dominion_2' | 'macro_trend' | 'onnx_ml' | 'live';
+export type TraderCategory = 'all' | '3_step_dom' | 'onnx_macro' | 'macro_onnx' | 'dominion_2' | 'macro_trend' | 'ofi_sprint' | 'onnx_ml' | 'live';
 
 export const isLiveReport = (r: any): boolean =>
   r.execution_mode === 'live' || r.bot_type === 'live' || Boolean(r.report_id?.startsWith('WLR-LIVE-'));
@@ -61,17 +61,39 @@ export const formatAssetPrice = (price: number | undefined | null, asset: string
   return asset === 'DOGE' ? price.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 }) : price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+export const isOnnxMacroBot = (r: any) =>
+  r.bot_id === 'onnx_macro_v2' ||
+  r.bot_id === 'the_onnx_strategy' ||
+  r.bot_id === 'dual_onnx' ||
+  r.bot_type === 'onnx_macro_v2' ||
+  r.bot_type === 'the_onnx_strategy' ||
+  r.bot_type === 'dual_onnx' ||
+  Boolean(
+    r.ai_rationale?.toLowerCase().includes('dual onnx') ||
+    r.ai_rationale?.toLowerCase().includes('the onnx strategy') ||
+    r.ai_rationale?.toLowerCase().includes('dual-brain') ||
+    r.strategy_name?.toLowerCase().includes('onnx')
+  );
+
+export const isOfiSprintBot = (r: any) =>
+  r.bot_id === 'ofi_sprint_scalper' ||
+  r.bot_type === 'ofi_sprint_scalper' ||
+  r.bot_type === 'ofi_scalper' ||
+  Boolean(r.ai_rationale?.toLowerCase().includes('ofi sprint'));
+
 export const isMacroOnnxBot = (r: any) => r.bot_type === 'macro_onnx' || r.bot_type === 'macro_onnx_bot' || r.bot_type === 'macro_trend_onnx_fusion' || (r.ai_rationale?.toLowerCase().includes('macro') && r.ai_rationale?.toLowerCase().includes('onnx'));
-export const isMacroBot = (r: any) => !isMacroOnnxBot(r) && (r.bot_type === 'macro_trend_dominion' || r.bot_type === 'macro_trend' || r.ai_rationale?.toLowerCase().includes('macro trend'));
+export const isMacroBot = (r: any) => !isMacroOnnxBot(r) && !isOnnxMacroBot(r) && (r.bot_type === 'macro_trend_dominion' || r.bot_type === 'macro_trend' || r.ai_rationale?.toLowerCase().includes('macro trend'));
 export const isDom2Bot = (r: any) => r.bot_type === 'dominion_2_bot' || r.bot_type === 'dominion2' || r.bot_type === 'dominion_v2' || r.ai_rationale?.toLowerCase().includes('dominion 2');
 export const isDomBot = (r: any) => r.bot_type === '3_step_domination_bot' || r.bot_type === 'domination' || (!r.bot_type && r.ai_rationale?.toLowerCase().includes('domination') && !r.ai_rationale?.toLowerCase().includes('dominion 2'));
-export const isOnnxBot = (r: any) => r.bot_type === 'onnx_ml_bot' || r.bot_type === 'onnx' || (r.ai_rationale?.toLowerCase().includes('onnx') && !isMacroOnnxBot(r));
+export const isOnnxBot = (r: any) => r.bot_type === 'onnx_ml_bot' || r.bot_type === 'onnx' || (r.ai_rationale?.toLowerCase().includes('onnx') && !isMacroOnnxBot(r) && !isOnnxMacroBot(r));
 
 export const getTraderCategory = (r: any): TraderCategory => {
   if (isLiveReport(r)) return 'live';
+  if (isOnnxMacroBot(r)) return 'onnx_macro';
   if (isMacroOnnxBot(r)) return 'macro_onnx';
   if (isMacroBot(r)) return 'macro_trend';
   if (isDom2Bot(r)) return 'dominion_2';
+  if (isOfiSprintBot(r)) return 'ofi_sprint';
   if (isOnnxBot(r)) return 'onnx_ml';
   return '3_step_dom';
 };
@@ -79,10 +101,12 @@ export const getTraderCategory = (r: any): TraderCategory => {
 export const getTraderBadge = (cat: TraderCategory) => {
   switch (cat) {
     case 'live': return { name: 'Live Production', short: 'Live Kalshi', icon: '🔴', color: 'bg-rose-500/20 text-rose-300 border-rose-500/40' };
-    case 'macro_onnx': return { name: 'Macro ONNX Fusion', short: 'Macro ONNX', icon: '🧠', color: 'bg-purple-500/20 text-purple-300 border-purple-500/40' };
+    case 'onnx_macro': return { name: 'The ONNX Strategy (Dual-Brain)', short: 'ONNX Strategy', icon: '🧠', color: 'bg-purple-500/20 text-purple-300 border-purple-500/40' };
+    case 'macro_onnx': return { name: 'Macro ONNX Fusion', short: 'Macro ONNX', icon: '🧠', color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40' };
     case 'macro_trend': return { name: 'Macro Trend Dominion', short: 'Macro Trend', icon: '📈', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' };
     case 'dominion_2': return { name: 'Dominion 2 (Multi-Asset)', short: 'Dominion 2', icon: '👑', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' };
-    case 'onnx_ml': return { name: 'ONNX ML Net', short: 'ONNX ML', icon: '🔬', color: 'bg-blue-500/20 text-blue-300 border-blue-500/40' };
+    case 'ofi_sprint': return { name: 'OFI Sprint Scalper', short: 'OFI Scalp', icon: '⚡', color: 'bg-blue-500/20 text-blue-300 border-blue-500/40' };
+    case 'onnx_ml': return { name: 'ONNX ML Net', short: 'ONNX ML', icon: '🔬', color: 'bg-teal-500/20 text-teal-300 border-teal-500/40' };
     default: return { name: '3-Step Domination', short: '3-Step Dom', icon: '⚡', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40' };
   }
 };
@@ -139,6 +163,17 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
   const todayWinRate = todayCount > 0 ? (todayWins / todayCount) * 100 : 0;
   const todayPnL = todayReports.reduce((acc, r) => acc + (r.pnl || 0), 0);
 
+  const traderStats = useMemo(() => {
+    const categories: TraderCategory[] = ['3_step_dom', 'onnx_macro', 'dominion_2', 'macro_trend', 'ofi_sprint', 'macro_onnx', 'onnx_ml', 'live'];
+    return categories.map((cat) => {
+      const subset = reports.filter((r) => getTraderCategory(r) === cat);
+      const w = subset.filter((r) => r.outcome === 'win').length;
+      const l = subset.filter((r) => r.outcome === 'loss').length;
+      const pnl = subset.reduce((acc, r) => acc + (r.pnl || 0), 0);
+      const wr = subset.length > 0 ? (w / subset.length) * 100 : 0;
+      return { cat, badge: getTraderBadge(cat), total: subset.length, wins: w, losses: l, winRate: wr, pnl };
+    });
+  }, [reports]);
   const baseReports = reports.filter((r) => {
     if (dateScope === 'today' && !isTodayReport(r)) return false;
     if (modeFilter === 'live' && !isLiveReport(r)) return false;
@@ -311,7 +346,7 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
             <span className="flex items-center gap-1.5 text-gray-300"><Bot className="h-3.5 w-3.5 text-blue-400" /><span>Who Traded — Bot &amp; Strategy Breakdown</span></span>
             <span className="text-[10px] text-gray-500">Click any bot card to isolate execution records</span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2">
             {traderStats.map((ts) => {
               const isSelected = traderFilter === ts.cat;
               return (

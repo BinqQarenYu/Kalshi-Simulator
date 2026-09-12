@@ -89,15 +89,26 @@ class ModelTrainer:
             weight_decay=self.weight_decay,
         )
 
-    def compute_class_weights(self, y_train: np.ndarray) -> torch.Tensor:
-        """Compute balanced inverse class frequencies."""
-        classes, counts = np.unique(y_train, return_counts=True)
-        total = len(y_train)
-        weights = total / (len(classes) * counts.astype(np.float32))
-        weight_tensor = torch.ones(3, dtype=torch.float32)
-        for c, w in zip(classes, weights):
-            weight_tensor[int(c)] = float(w)
-        return weight_tensor.to(self.device)
+    def compute_class_weights(self, y_train: np.ndarray, num_classes: int = 3) -> torch.Tensor:
+        """Calculate inverse-frequency class weights for the training set:
+        weights = total_samples / (num_classes * class_counts), normalized across classes.
+        """
+        total_samples = len(y_train)
+        if total_samples == 0:
+            return torch.ones(num_classes, dtype=torch.float32, device=self.device) / float(num_classes)
+
+        class_counts = np.array([float(np.sum(y_train == c)) for c in range(num_classes)], dtype=np.float32)
+        weights = np.zeros(num_classes, dtype=np.float32)
+        valid = class_counts > 0
+        if np.any(valid):
+            weights[valid] = total_samples / (float(num_classes) * class_counts[valid])
+            sum_w = float(np.sum(weights))
+            if sum_w > 0:
+                weights = weights / sum_w
+        else:
+            weights = np.ones(num_classes, dtype=np.float32) / float(num_classes)
+
+        return torch.as_tensor(weights, dtype=torch.float32, device=self.device)
 
     def train_epoch(
         self, dataloader: DataLoader, criterion: nn.Module
@@ -185,7 +196,7 @@ class ModelTrainer:
         checkpoint_dir = Path(checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        class_weights = self.compute_class_weights(y_train)
+        class_weights = self.compute_class_weights(y_train, num_classes=self.model.num_classes)
         criterion = FocalLoss(alpha=class_weights, gamma=1.5)
 
         train_ds = OrderflowDataset(X_train, y_train)

@@ -272,8 +272,6 @@ def test_guardrail_3step_domination_sole_authorization_and_one_contract() -> Non
     other_bot_types = [
         "dominion_2_bot",
         "onnx_microstructure_bot",
-        "macro_trend_dominion",
-        "macro_onnx",
         "scalp",
         "momentum",
         "swing",
@@ -425,5 +423,132 @@ def test_guardrail_max_2_contracts_per_cycle() -> None:
     assert ok3 is False
     assert "CYCLE" in reason3
     assert size3 == 0
+
+
+def test_onnx_strategy_paper_authorization_and_live_blocking() -> None:
+    """Verify Lane 2 isolation: The ONNX Strategy is authorized in paper mode, but strictly blocked in live mode."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    cycle = "KXBTC15M-26SEP091745-45"
+
+    for onnx_alias in ("onnx_macro_v2", "dual_onnx", "the_onnx_strategy"):
+        # 1. In Paper Mode (is_live=False): Authorized and capped to 1 contract
+        ok_paper, reason_paper, size_paper, _ = guardrails.validate_pre_trade_intent(
+            ticker=f"{cycle}-{onnx_alias}-paper",
+            side="yes",
+            requested_size=5,
+            est_price=Decimal("0.48"),
+            total_equity=Decimal("25.00"),
+            vpin=0.10,
+            is_bot=True,
+            bot_type=onnx_alias,
+            is_live=False,
+        )
+        assert ok_paper is True, f"Failed for {onnx_alias} in paper mode: {reason_paper}"
+        assert size_paper == 1
+
+        # 2. In Live Mode (is_live=True): Prohibited, only 3-Step Dominion allowed
+        ok_live, reason_live, size_live, _ = guardrails.validate_pre_trade_intent(
+            ticker=f"{cycle}-{onnx_alias}-live",
+            side="yes",
+            requested_size=1,
+            est_price=Decimal("0.48"),
+            total_equity=Decimal("25.00"),
+            vpin=0.10,
+            is_bot=True,
+            bot_type=onnx_alias,
+            is_live=True,
+        )
+        assert ok_live is False, f"Expected {onnx_alias} to be blocked in live mode!"
+        assert "LIVE BOT TRADING PROHIBITED" in reason_live
+        assert size_live == 0
+
+
+def test_onnx_strategy_promoted_live_authorization() -> None:
+    """Verify that once authorized for Live Mode, The ONNX Strategy can route live orders under micro-bankroll cap."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    cycle = "KXBTC15M-26SEP091800-00"
+
+    # Promote and authorize ONNX strategy
+    guardrails.authorize_live_bot("the_onnx_strategy")
+
+    for onnx_alias in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot"):
+        ok_live, reason_live, size_live, _ = guardrails.validate_pre_trade_intent(
+            ticker=f"{cycle}-{onnx_alias}-promoted-live",
+            side="yes",
+            requested_size=5,  # Requests 5
+            est_price=Decimal("0.48"),
+            total_equity=Decimal("20.51"),  # Nano-bankroll ($20.51)
+            vpin=0.10,
+            is_bot=True,
+            bot_type=onnx_alias,
+            is_live=True,
+        )
+        assert ok_live is True, f"Failed for {onnx_alias} promoted in live mode: {reason_live}"
+        # Strictly hard-capped to 1 contract under nano-bankroll armor
+        assert size_live == 1
+
+
+def test_macro_trend_dominion_paper_authorization_and_live_blocking() -> None:
+    """Verify Lane 2 isolation: Macro Trend Dominion is authorized in paper mode, but strictly blocked in live mode."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    cycle = "KXBTC15M-26SEP101800-00"
+
+    for macro_alias in ("macro_trend_dominion", "macro_onnx", "macro_trend"):
+        # 1. In Paper Mode (is_live=False): Authorized and capped to 1 contract
+        ok_paper, reason_paper, size_paper, _ = guardrails.validate_pre_trade_intent(
+            ticker=f"{cycle}-{macro_alias}-paper",
+            side="yes",
+            requested_size=5,
+            est_price=Decimal("0.48"),
+            total_equity=Decimal("25.00"),
+            vpin=0.10,
+            is_bot=True,
+            bot_type=macro_alias,
+            is_live=False,
+        )
+        assert ok_paper is True, f"Failed for {macro_alias} in paper mode: {reason_paper}"
+        assert size_paper == 1
+
+        # 2. In Live Mode (is_live=True): Prohibited without explicit promotion
+        ok_live, reason_live, size_live, _ = guardrails.validate_pre_trade_intent(
+            ticker=f"{cycle}-{macro_alias}-live",
+            side="yes",
+            requested_size=1,
+            est_price=Decimal("0.48"),
+            total_equity=Decimal("25.00"),
+            vpin=0.10,
+            is_bot=True,
+            bot_type=macro_alias,
+            is_live=True,
+        )
+        assert ok_live is False, f"Expected {macro_alias} to be blocked in live mode!"
+        assert "LIVE BOT TRADING PROHIBITED" in reason_live
+        assert size_live == 0
+
+
+def test_macro_trend_dominion_promoted_live_authorization() -> None:
+    """Verify that once authorized for Live Mode, Macro Trend Dominion can route live orders under micro-bankroll cap."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    cycle = "KXBTC15M-26SEP101815-15"
+
+    # Promote and authorize Macro Trend Dominion
+    guardrails.authorize_live_bot("macro_trend_dominion")
+
+    for macro_alias in ("macro_trend_dominion", "macro_onnx", "macro_trend"):
+        ok_live, reason_live, size_live, _ = guardrails.validate_pre_trade_intent(
+            ticker=f"{cycle}-{macro_alias}-promoted-live",
+            side="yes",
+            requested_size=5,
+            est_price=Decimal("0.48"),
+            total_equity=Decimal("20.51"),
+            vpin=0.10,
+            is_bot=True,
+            bot_type=macro_alias,
+            is_live=True,
+        )
+        assert ok_live is True, f"Failed for {macro_alias} promoted in live mode: {reason_live}"
+        assert size_live == 1
+
+
 
 

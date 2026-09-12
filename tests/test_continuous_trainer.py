@@ -103,7 +103,7 @@ def test_training_cycle_execution(tmp_path: Path) -> None:
     assert trainer.last_val_acc is not None
     assert trainer.samples_trained >= 30
     assert trainer.models_promoted >= 1
-    assert (models_dir / "nano_microscope_overhauled.onnx").exists()
+    assert (models_dir / "quolas.onnx").exists() or (models_dir / "kalshi_onnx.onnx").exists()
     assert (models_dir / "feature_stats.json").exists()
 
 
@@ -135,3 +135,34 @@ def test_pause_resume_lifecycle(tmp_path: Path) -> None:
     trainer.stop()
     assert trainer._running is False
     assert trainer.get_status()["status"] == "STOPPED"
+
+
+def test_stratified_anchor_sampling() -> None:
+    """Verify stratified replay buffer sampling from anchor dataset."""
+    # Create an imbalanced dataset:
+    # UP (0): 600 samples
+    # DOWN (1): 300 samples
+    # WAIT (2): 2000 samples
+    n_up, n_down, n_wait = 600, 300, 2000
+    total = n_up + n_down + n_wait
+    X = np.random.randn(total, 28).astype(np.float32)
+    y = np.array([0] * n_up + [1] * n_down + [2] * n_wait, dtype=np.int64)
+
+    X_strat, y_strat = ContinuousModelTrainer.sample_stratified_anchor(
+        X, y, max_per_class=500, num_classes=3, seed=42
+    )
+
+    assert len(X_strat) == 500 + 300 + 500  # 1300
+    assert len(y_strat) == 1300
+    assert np.sum(y_strat == 0) == 500  # UP capped at 500
+    assert np.sum(y_strat == 1) == 300  # DOWN had only 300, so all 300 kept
+    assert np.sum(y_strat == 2) == 500  # WAIT capped at 500
+    assert X_strat.shape == (1300, 28)
+    assert np.all(np.isfinite(X_strat))
+
+    # Test edge case: empty dataset
+    X_empty, y_empty = ContinuousModelTrainer.sample_stratified_anchor(
+        np.empty((0, 28), dtype=np.float32), np.empty((0,), dtype=np.int64)
+    )
+    assert len(X_empty) == 0
+    assert len(y_empty) == 0

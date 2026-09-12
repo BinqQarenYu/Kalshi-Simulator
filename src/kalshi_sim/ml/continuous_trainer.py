@@ -105,6 +105,19 @@ def export_and_verify_onnx(
     dummy_toxic = torch.randn(1, 13, dtype=torch.float32, device=device)
 
     try:
+        # Protect against Windows cp1252 charmap encoding crashes from PyTorch internal emoji prints
+        if sys.platform == "win32":
+            if hasattr(sys.stdout, "reconfigure"):
+                try:
+                    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+            if hasattr(sys.stderr, "reconfigure"):
+                try:
+                    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+
         torch.onnx.export(
             exportable,
             (dummy_spatial, dummy_toxic),
@@ -117,6 +130,7 @@ def export_and_verify_onnx(
                 "action_logits": {0: "batch"},
             },
             opset_version=18,
+            dynamo=False,
         )
 
         # Verification pass with ONNX Runtime
@@ -166,7 +180,7 @@ class ContinuousModelTrainer:
         self,
         data_dir: Path = Path("data"),
         models_dir: Path = Path("models"),
-        onnx_model_name: str = "nano_microscope_overhauled.onnx",
+        onnx_model_name: str = "quolas.onnx",
         training_interval_seconds: float = 180.0,
         batch_size: int = 32,
         learning_rate: float = 2e-4,
@@ -323,6 +337,43 @@ class ContinuousModelTrainer:
                 time.sleep(sleep_step)
                 slept += sleep_step
 
+    @staticmethod
+    def sample_stratified_anchor(
+        X_anchor: np.ndarray,
+        y_anchor: np.ndarray,
+        max_per_class: int = 500,
+        num_classes: int = 3,
+        seed: Optional[int] = None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Sample balanced quantities of UP (0), DOWN (1), and WAIT (2) from anchor dataset.
+
+        Samples up to max_per_class (default 500) per class (up to 1500 total),
+        or proportional to available counts if a class has fewer.
+        """
+        if len(X_anchor) == 0 or len(y_anchor) == 0:
+            feat_dim = X_anchor.shape[1] if X_anchor.ndim > 1 else 28
+            return np.empty((0, feat_dim), dtype=np.float32), np.empty((0,), dtype=np.int64)
+
+        rng = np.random.default_rng(seed)
+        selected_indices_list: List[np.ndarray] = []
+
+        for c in range(num_classes):
+            c_indices = np.where(y_anchor == c)[0]
+            if len(c_indices) == 0:
+                continue
+            if len(c_indices) <= max_per_class:
+                selected_indices_list.append(c_indices)
+            else:
+                chosen = rng.choice(c_indices, size=max_per_class, replace=False)
+                selected_indices_list.append(chosen)
+
+        if not selected_indices_list:
+            feat_dim = X_anchor.shape[1] if X_anchor.ndim > 1 else 28
+            return np.empty((0, feat_dim), dtype=np.float32), np.empty((0,), dtype=np.int64)
+
+        all_selected = np.sort(np.concatenate(selected_indices_list))
+        return X_anchor[all_selected], y_anchor[all_selected]
+
     def _execute_training_cycle(self) -> None:
         """Execute one complete data extraction, training, validation, and promotion cycle."""
         self.status = "EXTRACTING"
@@ -331,9 +382,11 @@ class ContinuousModelTrainer:
         # 1. Harvest recent tick logs
         builder = DatasetBuilder(
             horizon_steps=15,
-            price_diff_threshold=0.01,
+            horizon_seconds=20.0,
+            price_diff_threshold=0.03,
             sample_stride=5,
             max_frames_per_file=self.max_frames_per_file,
+            max_wait_ratio=0.50,
         )
 
         X_recent, y_recent = builder.build_from_directory(
@@ -342,7 +395,7 @@ class ContinuousModelTrainer:
             max_files=self.max_recent_tick_files,
         )
 
-        # 2. Merge with anchor dataset if available to avoid catastrophic forgetting
+        # 2. Merge with anchor dataset if available using balanced stratified replay buffer
         anchor_file = self.models_dir / "dataset_v1.npz"
         X_all: np.ndarray
         y_all: np.ndarray
@@ -352,14 +405,15 @@ class ContinuousModelTrainer:
                 anchor_data = np.load(anchor_file)
                 X_anchor = anchor_data["X_train"]
                 y_anchor = anchor_data["y_train"]
-                # Subsample anchor to balance recent vs historical
+                X_anchor_strat, y_anchor_strat = self.sample_stratified_anchor(
+                    X_anchor, y_anchor, max_per_class=500, num_classes=3
+                )
                 if len(X_recent) > 0:
-                    sub_idx = np.random.choice(len(X_anchor), size=min(len(X_anchor), 1500), replace=False)
-                    X_all = np.vstack([X_anchor[sub_idx], X_recent])
-                    y_all = np.concatenate([y_anchor[sub_idx], y_recent])
+                    X_all = np.vstack([X_anchor_strat, X_recent])
+                    y_all = np.concatenate([y_anchor_strat, y_recent])
                 else:
-                    X_all = X_anchor
-                    y_all = y_anchor
+                    X_all = X_anchor_strat
+                    y_all = y_anchor_strat
             except Exception as d_exc:
                 logger.debug("Failed loading anchor dataset: %s", d_exc)
                 X_all = X_recent
@@ -470,6 +524,13 @@ class ContinuousModelTrainer:
                     self.models_promoted,
                     self.onnx_model_path.name,
                 )
+
+                # Push updated models and feature stats to Google Drive
+                try:
+                    from kalshi_sim.gdrive_sync import push_models_to_gdrive
+                    push_models_to_gdrive(self.models_dir)
+                except Exception as gd_exc:
+                    logger.debug("[CONTINUOUS TRAINER] GDrive push on promotion skipped/failed: %s", gd_exc)
             else:
                 self.status = "EVALUATED"
         else:

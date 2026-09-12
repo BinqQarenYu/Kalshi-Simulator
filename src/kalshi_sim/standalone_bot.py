@@ -50,6 +50,7 @@ from kalshi_sim.auth import (
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
 from kalshi_sim.cfbenchmarks_sync import CFBenchmarksSync
 from kalshi_sim.db import get_db, get_db_writer, DatabaseWriter
+from kalshi_sim.live_coordinator import LiveCoordinator
 from kalshi_sim.ml.domination_bot import DominationDecision, ThreeStepDominationBot
 from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
 from kalshi_sim.orderbook import OrderBookManager
@@ -162,6 +163,9 @@ class StandaloneBotEngine:
         self.auditor = BotDeploymentAuditor()
         self.orderbook = OrderBookManager(enforce_consecutive_seq=False)
 
+        # Load user-saved persistent default parameters if present
+        self._load_persisted_parameters()
+
         # 2. Run Pre-Flight Certification Audit
         mode_str = "live" if is_live else "simulated"
         audit_rep = self.auditor.audit_bot("3_step_domination_bot", self.bot, mode=mode_str)
@@ -223,9 +227,17 @@ class StandaloneBotEngine:
         self.last_decision: Optional[DominationDecision] = None
         self.last_eval_time: float = 0.0
 
+        # Partitioned Budget & Live Coordinator
+        budget_env = os.getenv("KALSHI_DOM_BUDGET")
+        self.budget_dollars: Optional[Decimal] = Decimal(budget_env) if budget_env else None
+        self.coordinator = LiveCoordinator()
+        if self.budget_dollars:
+            logger.info("💰 [BUDGET] Virtual budget cap: $%s", self.budget_dollars)
+
         # Database persistence writer
         self.db_writer = DatabaseWriter(db_manager=get_db(self.data_dir / "kalshi_history.db"))
         self.active_resting_orders: Dict[str, Dict[str, Any]] = {}
+        self.active_position: Optional[Dict[str, Any]] = None
         self.coinbase_connected: bool = False
         self.binance_connected: bool = False
 
@@ -255,6 +267,7 @@ class StandaloneBotEngine:
         self.active_asset = asset
         self.active_cfg = get_asset_config(asset)
         self.bot.set_asset(asset)
+        self._load_persisted_parameters()
         self.active_ticker = ""
         self.target_strike = Decimal("0.00")
         if self.cf_sync:
@@ -264,13 +277,94 @@ class StandaloneBotEngine:
                 self.twap_60s_price = self.cf_sync.get_twap(asset)
         logger.info("Switched Standalone Bot active asset to %s (%s)", self.active_cfg.name, asset.value)
 
+    def _get_params_file_path(self) -> Path:
+        """Return the persistent parameters file path."""
+        return self.data_dir / "bot_parameters_domination.json"
+
+    def _load_persisted_parameters(self) -> None:
+        """Load user-saved parameters from disk to serve as default values."""
+        params_file = self._get_params_file_path()
+        if not params_file.exists():
+            return
+        try:
+            with open(params_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                logger.warning("⚠️ [PARAM PERSISTENCE] Invalid format in %s, using factory defaults.", params_file)
+                return
+
+            asset_key = self.active_asset.value if hasattr(self.active_asset, "value") else str(self.active_asset)
+            asset_params = data.get("assets", {}).get(asset_key, {})
+            # Merge global params with asset-specific params (excluding asset/active_asset)
+            global_params = {k: v for k, v in data.items() if k not in ("assets", "active_asset", "asset", "updated_at")}
+            merged = {**global_params, **asset_params}
+
+            if merged:
+                # Disallow altering 1-contract sizing armor or resetting selected asset
+                merged.pop("max_contracts", None)
+                merged.pop("asset", None)
+                self.update_parameters(persist=False, **merged)
+                logger.info("💾 [PARAM PERSISTENCE] Loaded user defaults from %s for %s: %s", params_file.name, asset_key, merged)
+        except Exception as exc:
+            logger.warning("⚠️ [PARAM PERSISTENCE] Error loading %s: %s. Using factory defaults.", params_file, exc)
+
+    def _persist_parameters(self) -> None:
+        """Atomically persist active parameters to disk as the new defaults."""
+        params_file = self._get_params_file_path()
+        tmp_file = params_file.with_suffix(".json.tmp")
+        try:
+            existing_data: Dict[str, Any] = {"assets": {}}
+            if params_file.exists():
+                try:
+                    with open(params_file, "r", encoding="utf-8") as f:
+                        loaded = json.load(f)
+                        if isinstance(loaded, dict):
+                            existing_data = loaded
+                            if "assets" not in existing_data:
+                                existing_data["assets"] = {}
+                except Exception:
+                    existing_data = {"assets": {}}
+
+            current_params = self.get_parameters()
+            asset_key = self.active_asset.value if hasattr(self.active_asset, "value") else str(self.active_asset)
+
+            # Separate asset-specific moat from global dials
+            asset_specific_keys = {"min_spot_diff"}
+            asset_data = {k: v for k, v in current_params.items() if k in asset_specific_keys}
+            existing_data.setdefault("assets", {})[asset_key] = asset_data
+
+            # Global parameters apply across assets (skip asset/active_asset)
+            for k, v in current_params.items():
+                if k not in asset_specific_keys and k not in ("asset", "active_asset"):
+                    existing_data[k] = v
+
+            existing_data["active_asset"] = asset_key
+            existing_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+            # Strict Micro-Bankroll invariant
+            existing_data["max_contracts"] = 1
+
+            # Atomic write via tempfile swap
+            with open(tmp_file, "w", encoding="utf-8") as f:
+                json.dump(existing_data, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_file, params_file)
+            logger.info("💾 [PARAM PERSISTENCE] Successfully saved active parameters as new defaults to %s", params_file.name)
+        except Exception as exc:
+            logger.error("❌ [PARAM PERSISTENCE] Failed to persist parameters: %s", exc)
+            if tmp_file.exists():
+                try:
+                    tmp_file.unlink()
+                except Exception:
+                    pass
+
     def get_parameters(self) -> Dict[str, Any]:
         """Return strategy parameters and guardrail thresholds."""
         params = self.bot.get_parameters()
         params["max_contracts"] = self.guardrails.max_micro_bankroll_contracts
         return params
 
-    def update_parameters(self, **kwargs) -> Dict[str, Any]:
+    def update_parameters(self, persist: bool = True, **kwargs) -> Dict[str, Any]:
         """Dynamically update strategy parameters and guardrail caps."""
         max_contracts = kwargs.pop("max_contracts", None)
         if max_contracts is not None:
@@ -282,6 +376,8 @@ class StandaloneBotEngine:
         if vpin_thresh is not None:
             self.guardrails.vpin_toxic_threshold = float(vpin_thresh)
         self.bot.update_parameters(**kwargs)
+        if persist:
+            self._persist_parameters()
         return self.get_parameters()
 
     async def start(self) -> None:
@@ -365,7 +461,11 @@ class StandaloneBotEngine:
             logger.debug("Error syncing PnL reports: %s", exc)
 
     async def sync_balance(self) -> None:
-        """Sync live account balance from Kalshi portfolio."""
+        """Sync live account balance from Kalshi portfolio.
+
+        When budget partitioning is active (--budget flag), balance_dollars is
+        clamped to min(real_balance, budget_cap).
+        """
         if self.order_client:
             try:
                 data = await self.order_client.get_balance()
@@ -377,14 +477,95 @@ class StandaloneBotEngine:
                     self.shard2_balance_dollars = b2
                 else:
                     self.shard2_balance_dollars = self.total_balance_dollars
-                self.balance_dollars = self.total_balance_dollars
+                if self.budget_dollars is not None:
+                    self.balance_dollars = min(self.total_balance_dollars, self.budget_dollars)
+                else:
+                    self.balance_dollars = self.total_balance_dollars
             except Exception as e:
                 logger.debug("Balance sync error: %s", e)
 
+    async def sync_positions(self) -> None:
+        """Sync live open positions from Kalshi exchange to track for take-profit ceiling."""
+        if self.order_client:
+            try:
+                positions = await self.order_client.get_positions()
+                found = False
+                for p in positions:
+                    ticker = p.get("ticker") or p.get("market_ticker")
+                    if ticker == self.active_ticker:
+                        pos_raw = p.get("position", p.get("position_fp", 0))
+                        try:
+                            pos_cnt = int(float(str(pos_raw)))
+                        except (ValueError, TypeError):
+                            pos_cnt = 0
+                        if pos_cnt > 0:
+                            side_raw = p.get("side", "yes")
+                            side = OrderSide.YES if str(side_raw).lower() == "yes" else OrderSide.NO
+                            entry_p = self.bot.discount_limit_price
+                            if self.active_position and self.active_position.get("entry_price"):
+                                entry_p = self.active_position["entry_price"]
+                            self.active_position = {
+                                "ticker": self.active_ticker,
+                                "side": side,
+                                "size": pos_cnt,
+                                "entry_price": entry_p,
+                                "entry_time": self.active_position.get("entry_time", time.time()) if self.active_position else time.time(),
+                            }
+                            found = True
+                            break
+                if not found and self.active_position and self.active_position.get("ticker") == self.active_ticker:
+                    self.active_position = None
+            except Exception as pe:
+                logger.debug("Error syncing positions from Kalshi: %s", pe)
+
+    def _record_exit_report(
+        self,
+        ticker: str,
+        side: str,
+        size: int,
+        entry_price: float,
+        exit_price: float,
+        net_pnl: float,
+        exit_reason: str,
+    ) -> None:
+        """Persist early take-profit exit report to win_loss_reports.json."""
+        reports_file = self.data_dir / "win_loss_reports.json"
+        all_reports: List[Dict[str, Any]] = []
+        if reports_file.exists():
+            try:
+                all_reports = json.loads(reports_file.read_text(encoding="utf-8"))
+            except Exception:
+                all_reports = []
+
+        report_id = f"WLR-TP-{ticker}-{int(time.time())}"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        report = {
+            "report_id": report_id,
+            "ticker": ticker,
+            "bot_side": side.upper(),
+            "outcome": "win",
+            "pnl": round(net_pnl, 2),
+            "roi_pct": round(((exit_price - entry_price) / max(0.01, entry_price)) * 100.0, 2),
+            "contracts": size,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "settlement_price": exit_price,
+            "timestamp_utc": now_iso,
+            "execution_mode": "live" if self.order_client else "paper",
+            "bot_type": "3_step_domination_bot",
+            "exit_reason": exit_reason,
+        }
+        all_reports.insert(0, report)
+        try:
+            reports_file.write_text(json.dumps(all_reports, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.error("Error writing exit win_loss_report: %s", e)
+
     async def _balance_polling_loop(self) -> None:
-        """Poll balance and PnL settlements every 5 seconds."""
+        """Poll balance, positions, and PnL settlements every 5 seconds."""
         while self._running:
             await self.sync_balance()
+            await self.sync_positions()
             self.sync_pnl_reports()
             await asyncio.sleep(5.0)
 
@@ -648,6 +829,85 @@ class StandaloneBotEngine:
             if t_rem <= 0:
                 return
 
+            # 0. Early Exit & Take Profit Price Ceiling Evaluation
+            if (
+                self.active_position
+                and self.active_position.get("ticker") == self.active_ticker
+                and self.active_position.get("size", 0) > 0
+            ):
+                pos = self.active_position
+                exit_dec = self.bot.evaluate_exit(
+                    side=pos["side"],
+                    entry_price=pos["entry_price"],
+                    size=pos["size"],
+                    book=book,
+                    time_to_expiry_s=t_rem,
+                    spot_price=float(self.current_btc_spot),
+                    target_strike=float(self.target_strike),
+                )
+                if exit_dec.should_exit:
+                    logger.info(
+                        "🎯 [TAKE PROFIT TRIGGERED] %s: %s | Net PnL: +$%s | Exit price: $%s",
+                        exit_dec.exit_reason,
+                        exit_dec.rationale,
+                        exit_dec.unrealized_pnl,
+                        exit_dec.exit_price,
+                    )
+                    sold_ok = True
+                    if self.is_live and self.order_client:
+                        try:
+                            sell_res = await self.order_client.place_order(
+                                ticker=pos["ticker"],
+                                side=pos["side"],
+                                count=pos["size"],
+                                action="sell",
+                                order_type="limit",
+                                price_dollars=exit_dec.exit_price,
+                                exchange_index=2,
+                            )
+                            if not sell_res:
+                                sold_ok = False
+                                logger.error("Failed to execute sell order on Kalshi for %s", pos["ticker"])
+                        except Exception as se:
+                            sold_ok = False
+                            logger.error("Error dispatching sell order: %s", se)
+
+                    if sold_ok:
+                        self.db_writer.enqueue_trade(
+                            trade_id=f"tp_{int(time.time()*1000)}",
+                            ticker=pos["ticker"],
+                            side=str(pos["side"]).lower(),
+                            size=pos["size"],
+                            price=float(exit_dec.exit_price),
+                            gross_value=float(exit_dec.exit_price * Decimal(str(pos["size"]))),
+                            fees=float(self.bot.fee_per_contract * Decimal(str(pos["size"]))),
+                            vpin=0.15,
+                            timeframe=self.get_current_timeframe(),
+                            bot_type="3_step_domination_bot",
+                            execution_mode="live" if (self.is_live and self.order_client) else "paper",
+                            status="take_profit_exit",
+                        )
+                        self.today_pnl += exit_dec.unrealized_pnl
+                        self.today_wins += 1
+                        self.settled_cycles += 1
+                        self.consecutive_losses = 0
+                        self._record_exit_report(
+                            ticker=pos["ticker"],
+                            side=str(pos["side"]).lower(),
+                            size=pos["size"],
+                            entry_price=float(pos["entry_price"]),
+                            exit_price=float(exit_dec.exit_price),
+                            net_pnl=float(exit_dec.unrealized_pnl),
+                            exit_reason=exit_dec.exit_reason,
+                        )
+                        self.active_position = None
+                        self.sync_pnl_reports()
+                        logger.info("✅ [TAKE PROFIT EXECUTED] Position closed at $%s ceiling! Banked +$%s.", exit_dec.exit_price, exit_dec.unrealized_pnl)
+                        await self.sync_balance()
+                        return
+                # Position is held, do not enter again in the same cycle
+                return
+
             # 1. Strategy Evaluation
             try:
                 decision = self.bot.evaluate(
@@ -714,7 +974,19 @@ class StandaloneBotEngine:
                 except Exception as e:
                     logger.debug("Failed open order anti-burst check: %s", e)
 
-                # 6. Dispatch Live Order
+                # 6. Cross-Bot CFTC Anti-Wash Trading Coordinator Check
+                is_permitted, coord_reason = self.coordinator.check_trade_permission(
+                    ticker=target_ticker,
+                    proposed_side=rec_side,
+                    bot_id="3_step_domination_bot",
+                    requested_contracts=approved_size,
+                )
+                if not is_permitted:
+                    logger.warning("🛡️ [COORDINATOR VETO] %s on %s: %s", rec_side.upper(), target_ticker, coord_reason)
+                    self.guardrails.release_in_flight_intent(target_ticker)
+                    return
+
+                # 7. Dispatch Live Order
                 logger.info(
                     "🚀 [LIVE ORDER INCEPTION] %s %d contracts @ $%s on %s (Playbook: %s, Edge: +%.1f%%)",
                     rec_side.upper(), approved_size, est_price, target_ticker, decision.active_playbook, decision.edge_pct * 100
@@ -746,13 +1018,39 @@ class StandaloneBotEngine:
                         cycle_id=target_ticker,
                         bot_type="3_step_domination_bot",
                     )
-                    self.active_resting_orders[order_id] = {
-                        "ticker": target_ticker,
-                        "side": rec_side,
-                        "size": approved_size,
-                        "price": est_price,
-                        "placed_at": time.time(),
-                    }
+                    fill_cnt = 0
+                    try:
+                        fill_cnt = int(float(str(order_res.get("fill_count", 0))))
+                    except Exception:
+                        fill_cnt = 0
+                    if fill_cnt > 0 or str(order_res.get("status", "")).lower() in ("executed", "filled"):
+                        self.active_position = {
+                            "ticker": target_ticker,
+                            "side": rec_side,
+                            "size": approved_size,
+                            "entry_price": est_price,
+                            "entry_time": time.time(),
+                            "order_id": order_id,
+                        }
+                        logger.info("⚡ [IMMEDIATE FILL] %s %d contracts @ $%s on %s", rec_side.upper(), approved_size, est_price, target_ticker)
+                    else:
+                        self.active_resting_orders[order_id] = {
+                            "ticker": target_ticker,
+                            "side": rec_side,
+                            "size": approved_size,
+                            "price": est_price,
+                            "placed_at": time.time(),
+                        }
+                    # Record trade in cross-bot coordinator for anti-wash protection
+                    expiry_ts = self.active_market_close_dt.timestamp() if self.active_market_close_dt else None
+                    self.coordinator.record_trade(
+                        ticker=target_ticker,
+                        side=rec_side,
+                        contracts=approved_size,
+                        price=float(est_price),
+                        bot_id="3_step_domination_bot",
+                        expiry_ts=expiry_ts,
+                    )
                     # Persist live trade to SQLite via DatabaseWriter
                     self.db_writer.enqueue_trade(
                         trade_id=f"live_{order_id}",
@@ -862,6 +1160,29 @@ class StandaloneBotEngine:
                                         )
                         except Exception as o_err:
                             logger.debug("Error querying open orders in watchdog: %s", o_err)
+
+                    # 1.5 Detect fills on active resting orders
+                    if self.active_resting_orders:
+                        try:
+                            open_orders = await self.order_client.get_open_orders()
+                            open_oids = {o.get("order_id") for o in open_orders}
+                            for oid, o_info in list(self.active_resting_orders.items()):
+                                if oid not in open_oids and o_info.get("ticker") == self.active_ticker:
+                                    self.active_position = {
+                                        "ticker": self.active_ticker,
+                                        "side": o_info.get("side", "yes"),
+                                        "size": o_info.get("size", 1),
+                                        "entry_price": o_info.get("price", Decimal("0.52")),
+                                        "entry_time": time.time(),
+                                        "order_id": oid,
+                                    }
+                                    self.active_resting_orders.pop(oid, None)
+                                    logger.info(
+                                        "🎉 [ORDER FILLED] Resting order %s on %s FILLED! Position active for Take Profit monitoring.",
+                                        oid, self.active_ticker
+                                    )
+                        except Exception as f_err:
+                            logger.debug("Error checking resting order fills: %s", f_err)
 
                     # 2. Continuous Finished Event Sweep: Cancel resting orders on any non-active or past contracts
                     try:
@@ -1030,7 +1351,10 @@ class StandaloneBotEngine:
                                 "ev_edge": 0.10,
                                 "balance_after": float(balance_after),
                                 "bot_type": bot_type,
+                                "bot_id": "3_step_domination_bot",
+                                "strategy_id": "3_step_domination_bot",
                                 "execution_mode": "live",
+                                "lane": "LANE 1 (LIVE)",
                                 "timestamp_utc": settled_ts,
                             }
 
@@ -1237,7 +1561,32 @@ async def get_state() -> Dict[str, Any]:
     # Position info
     resting_count = len(app_engine.active_resting_orders)
     locked = app_engine.guardrails.is_cycle_locked(app_engine.active_ticker)
-    if resting_count > 0:
+    has_pos = bool(app_engine.active_position and app_engine.active_position.get("size", 0) > 0)
+    if has_pos:
+        pos_data = app_engine.active_position or {}
+        pos_side = str(pos_data.get("side", "yes")).upper()
+        pos_size = int(pos_data.get("size", 1))
+        entry_p = Decimal(str(pos_data.get("entry_price", "0.52")))
+        cur_bid = app_engine.best_yes_bid if pos_side == "YES" else app_engine.best_no_bid
+        if cur_bid is not None:
+            pnl_dec = (cur_bid - entry_p) * Decimal(str(pos_size))
+            sign = "+" if pnl_dec >= Decimal("0.00") else "-"
+            tp_thresh = app_engine.bot.take_profit_price_threshold
+            tp_diff = tp_thresh - cur_bid
+            pos_str = f"HOLDING {pos_size} {pos_side} @ ${entry_p:.2f} (Bid: ${cur_bid:.2f} | {sign}${abs(pnl_dec):.2f})"
+            if app_engine.bot.enable_take_profit_ceiling:
+                if app_engine.bot.require_reversal_for_tp_ceiling:
+                    pos_sub = f"TP Ceiling: ${tp_thresh:.2f} · Gated by {app_engine.bot.reverse_indicator_threshold*100:.0f}% Reversal"
+                else:
+                    pos_sub = f"TP Ceiling: ${tp_thresh:.2f} (Dist: ${tp_diff:.2f}) · Auto-Exit Active"
+            elif app_engine.bot.enable_reverse_take_profit_roi:
+                pos_sub = f"Holding · Reversal TP ({app_engine.bot.min_take_profit_roi*100:.0f}% @ {app_engine.bot.reverse_indicator_threshold*100:.0f}% Rev) Active"
+            else:
+                pos_sub = f"Holding to expiry · Auto-Exits Disabled"
+        else:
+            pos_str = f"HOLDING {pos_size} {pos_side} @ ${entry_p:.2f}"
+            pos_sub = f"TP Ceiling: ${app_engine.bot.take_profit_price_threshold:.2f}"
+    elif resting_count > 0:
         pos_str = f"MAKER RESTING ({resting_count} active)"
         pos_sub = f"Resting limit order at ${app_engine.bot.discount_limit_price:.2f}"
     elif locked:
@@ -1306,6 +1655,13 @@ async def get_state() -> Dict[str, Any]:
         "spot_connected": app_engine.spot_connected,
         "coinbase_connected": app_engine.coinbase_connected,
         "binance_connected": app_engine.binance_connected,
+        "enable_take_profit_ceiling": app_engine.bot.enable_take_profit_ceiling,
+        "take_profit_price_threshold": float(app_engine.bot.take_profit_price_threshold),
+        "require_reversal_for_tp_ceiling": app_engine.bot.require_reversal_for_tp_ceiling,
+        "enable_reverse_take_profit_roi": app_engine.bot.enable_reverse_take_profit_roi,
+        "reverse_indicator_threshold": float(app_engine.bot.reverse_indicator_threshold) * 100.0,
+        "min_take_profit_roi": float(app_engine.bot.min_take_profit_roi) * 100.0,
+        "has_active_position": has_pos,
         "parameters": app_engine.get_parameters(),
         "orderbook_ladder": [
             {
@@ -1420,14 +1776,32 @@ async def panic_halt() -> Dict[str, Any]:
 
 
 class ParametersUpdateRequest(BaseModel):
-    discount_limit_price: Optional[float] = Field(default=None, ge=0.10, le=0.50, description="Maker discount limit price ceiling")
+    discount_limit_price: Optional[float] = Field(default=None, ge=0.10, le=0.65, description="Maker discount limit price ceiling")
     max_contracts: Optional[int] = Field(default=None, ge=1, le=1, description="Max contracts per cycle trade (strictly 1)")
     min_edge_pct: Optional[float] = Field(default=None, ge=1.0, le=50.0, description="Minimum edge percentage")
     min_ev_dollars: Optional[float] = Field(default=None, ge=0.01, le=0.50, description="Minimum net EV dollars per contract")
     min_spot_diff: Optional[float] = Field(default=None, ge=0.0, le=200.0, description="Minimum distance from strike to avoid coin flips")
     vpin_toxic_threshold: Optional[float] = Field(default=None, ge=0.10, le=0.95, description="VPIN toxicity threshold")
     take_profit_price_threshold: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Take profit ceiling")
+    enable_take_profit_ceiling: Optional[bool] = Field(default=None, description="Take profit ceiling enabled toggle")
+    require_reversal_for_tp_ceiling: Optional[bool] = Field(default=None, description="Require 85%+ reversal detection to exit at ceiling")
+    enable_reverse_take_profit_roi: Optional[bool] = Field(default=None, description="Only take profit on min_take_profit_roi if indicators >= 85% reverse")
+    reverse_indicator_threshold: Optional[float] = Field(default=None, ge=50.0, le=99.0, description="Conviction threshold in opposite direction required for take-profit harvest (e.g. 85.0%)")
     min_take_profit_roi: Optional[float] = Field(default=None, ge=5.0, le=100.0, description="Minimum take profit ROI percentage")
+    min_confidence: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Minimum ONNX neural net confidence")
+    momentum_max_price: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Maximum allowable entry price for momentum trades")
+    brain_priority_mode: Optional[str] = Field(default=None, description="Brain priority arbitration mode: TREND_ALIGNED_SCALP, CONTRADICTION_SNIPER, UNANIMOUS_CONSENSUS")
+    contract_scaling_mode: Optional[str] = Field(default=None, description="Contract sizing mode: TIER_0_STRICT_1, TIER_1_CONVICTION_2, TIER_2_KELLY")
+    volatility_floor: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="Dead chop cutoff threshold in dollars ($)")
+    volatility_ceiling: Optional[float] = Field(default=None, ge=10.0, le=500.0, description="News event / high chaos cutoff in dollars ($)")
+    entry_discount_depth: Optional[float] = Field(default=None, ge=0.10, le=0.65, description="Entry discount limit depth ceiling ($0.35 - $0.65)")
+    tape_confirmation_ticks: Optional[int] = Field(default=None, ge=1, le=10, description="Number of consecutive orderflow tape ticks required for entry confirmation")
+    taker_cross_ev_threshold: Optional[float] = Field(default=None, ge=0.01, le=0.30, description="Minimum EV required to pay taker spread/fee")
+    dynamic_moat_multiplier: Optional[float] = Field(default=None, ge=0.5, le=3.0, description="Dynamic moat volatility multiplier")
+    max_temporal_skew_ms: Optional[float] = Field(default=None, ge=100.0, le=10000.0, description="Max cross-brain temporal skew in milliseconds")
+    gamma_cliff_seconds: Optional[float] = Field(default=None, ge=10.0, le=300.0, description="Gamma cliff late-cycle cutoff in seconds")
+    auto_cancel_on_veto: Optional[bool] = Field(default=None, description="Automatically cancel resting orders on veto/cutoff")
+    dynamic_volatility_mode: Optional[str] = Field(default=None, description="Volatility mode: REALIZED_ATR or FIXED_14")
 
 
 @app.get("/api/bot/parameters")
@@ -1556,11 +1930,14 @@ def main() -> None:
     parser.add_argument("--no-browser", action="store_true", default=False, help="Do not open browser automatically")
     parser.add_argument("--widget", action="store_true", default=False, help="Launch as a floating desktop widget (app mode + always on top)")
     parser.add_argument("--asset", type=str, default="BTC", choices=["BTC", "ETH", "SOL", "DOGE"], help="Active crypto asset (default: BTC)")
+    parser.add_argument("--budget", type=float, default=None, help="Virtual budget cap in USD for partitioned dual-engine live trading")
     args = parser.parse_args()
     if args.force:
         os.environ["KALSHI_FORCE_LOCK"] = "true"
     if args.asset:
         os.environ["KALSHI_ACTIVE_ASSET"] = args.asset.upper()
+    if args.budget is not None:
+        os.environ["KALSHI_DOM_BUDGET"] = str(args.budget)
 
     if args.widget:
         def _delayed_widget():

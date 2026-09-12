@@ -102,6 +102,11 @@ export interface AISignals {
   order_type?: string;
   limit_price?: number;
   discount_limit_price?: number;
+  quolas_signal?: string;
+  quolas_confidence?: number;
+  kalshi_signal?: string;
+  kalshi_confidence?: number;
+  dual_onnx_regime?: 'MOMENTUM_SCALP' | 'CONTRADICTION_ARBITRAGE' | 'CHOP_WAIT' | 'TOXIC_VETO' | string;
 }
 
 export interface BtcOrderflowSummary {
@@ -119,6 +124,7 @@ export interface BtcOrderflowSummary {
 }
 
 export type StrategyBotId =
+  | 'dual_onnx'
   | 'macro_onnx'
   | 'macro_trend_dominion'
   | 'dominion_2_bot'
@@ -199,11 +205,13 @@ export interface WinLossEventReport {
   settlement_spot_price?: number;
   asset?: string;
   bot_side: 'yes' | 'no';
+  side?: 'yes' | 'no';
   contracts: number;
   entry_price: number;
   settlement_price: number;
   outcome: 'win' | 'loss' | 'breakeven' | 'flat';
   pnl: number;
+  net_pnl?: number;
   roi_pct: number;
   ai_confidence: number;
   ai_rationale: string;
@@ -211,8 +219,25 @@ export interface WinLossEventReport {
   ev_edge: number;
   balance_after: number;
   bot_type?: string;
+  bot_id?: string;
+  strategy_id?: string;
   execution_mode?: string;
+  lane?: string;
   timestamp_utc: string;
+}
+
+export interface BotPerformanceSummary {
+  bot_id: string;
+  bot_name: string;
+  execution_mode: 'live' | 'paper' | 'all';
+  total_events: number;
+  wins: number;
+  losses: number;
+  win_rate_pct: number;
+  total_pnl: number;
+  profit_factor: number;
+  avg_pnl_per_cycle: number;
+  last_trade_time?: string;
 }
 
 export interface WinLossReportsSummary {
@@ -227,6 +252,7 @@ export interface WinLossReportsSummary {
 
 export interface WinLossReportsResponse {
   summary: WinLossReportsSummary;
+  bot_summary?: BotPerformanceSummary;
   domination_summary?: WinLossReportsSummary;
   onnx_summary?: WinLossReportsSummary;
   live_summary?: WinLossReportsSummary;
@@ -372,6 +398,130 @@ export interface DashboardState {
   };
   btc_orderflow?: BtcOrderflowSummary;
   continuous_training?: ContinuousTrainingTelemetry;
+  dual_onnx_telemetry?: DualONNXTelemetry;
+  macro_trend_dominion_telemetry?: MacroDominionTelemetry;
+  hmm_macro_regime?: HMMMacroRegimeTelemetry;
+  preflight_gates?: PreflightGates;
+}
+
+export interface HMMMacroRegimeTelemetry {
+  current_regime: 'STABLE_RANGE' | 'VOL_EXPANSION' | 'RISK_OFF' | string;
+  probabilities?: Record<string, number>;
+  confidence?: number;
+  sample_count?: number;
+  last_updated?: string;
+  [key: string]: any;
+}
+
+export interface MacroDominionTelemetry {
+  active: boolean;
+  strategy_id: string;
+  strategy_name: string;
+  call: 'YES' | 'NO' | 'DONT' | string;
+  side: 'yes' | 'no' | 'wait' | string;
+  confidence_pct: number;
+  limit_price_cents: number;
+  limit_price: number;
+  expected_value: number;
+  net_edge_pct: number;
+  recommended_contracts: number;
+  macro_trend: 'BULL' | 'BEAR' | 'CHOP' | string;
+  hmm_regime: 'STABLE_RANGE' | 'VOL_EXPANSION' | 'RISK_OFF' | string;
+  spot_signal: string;
+  spot_confidence: number;
+  kalshi_signal: string;
+  kalshi_confidence: number;
+  rationale: string;
+  brier_score: number;
+  brier_shrinkage_factor: number;
+  active_price_cap: number;
+  pruned_deciles: number[];
+  failure_counts: Record<string, number>;
+  parameters?: Record<string, any>;
+}
+
+export interface DualONNXTelemetry {
+  regime: 'MOMENTUM_SCALP' | 'CONTRADICTION_ARBITRAGE' | 'CHOP_WAIT' | 'TOXIC_VETO' | string;
+  action: string;
+  side: string | null;
+  quolas_signal: string;
+  quolas_confidence: number;
+  kalshi_signal: string;
+  kalshi_confidence: number;
+  recommended_limit_price: number;
+  expected_value: number;
+  recommended_contracts: number;
+  rationale: string;
+  active: boolean;
+  // The 5 Strategy Execution Dials
+  brain_priority_mode?: 'TREND_ALIGNED_SCALP' | 'CONTRADICTION_SNIPER' | 'UNANIMOUS_CONSENSUS' | string;
+  contract_scaling_mode?: 'TIER_0_STRICT_1' | 'TIER_1_CONVICTION_2' | 'TIER_2_KELLY' | string;
+  volatility_floor?: number;
+  volatility_ceiling?: number;
+  entry_discount_depth?: number;
+  tape_confirmation_ticks?: number;
+  taker_cross_ev_threshold?: number;
+  dynamic_moat_multiplier?: number;
+  current_atr?: number;
+  tape_streak?: number;
+}
+
+export interface BotParameters {
+  strategy_id?: string;
+  strategy_name?: string;
+  brain_priority_mode?: 'TREND_ALIGNED_SCALP' | 'CONTRADICTION_SNIPER' | 'UNANIMOUS_CONSENSUS' | string;
+  contract_scaling_mode?: 'TIER_0_STRICT_1' | 'TIER_1_CONVICTION_2' | 'TIER_2_KELLY' | string;
+  volatility_floor?: number;
+  volatility_ceiling?: number;
+  entry_discount_depth?: number;
+  tape_confirmation_ticks?: number;
+  taker_cross_ev_threshold?: number;
+  dynamic_moat_multiplier?: number;
+  discount_limit_price?: number;
+  discount_ceiling?: number;
+  max_contracts?: number;
+  min_confidence?: number;
+  min_ev_dollars?: number;
+  min_edge_pct?: number;
+  min_spot_diff?: number;
+  vpin_toxic_threshold?: number;
+  momentum_max_price?: number;
+  take_profit_price_threshold?: number;
+  enable_take_profit_ceiling?: boolean;
+  require_reversal_for_tp_ceiling?: boolean;
+  enable_reverse_take_profit_roi?: boolean;
+  reverse_indicator_threshold?: number;
+  min_take_profit_roi?: number;
+  [key: string]: any;
+}
+
+export interface PreflightGate {
+  status: 'PASS' | 'VETO' | 'READY' | 'LOCKED' | 'WAIT';
+  label: string;
+  reason: string;
+  [key: string]: any;
+}
+
+export interface PreflightGates {
+  moat_gate: PreflightGate & {
+    current_diff: number;
+    abs_diff: number;
+    required_moat: number;
+    floor: number;
+    sweet_spot: number;
+    ceiling: number;
+  };
+  vpin_gate: PreflightGate & {
+    current_vpin: number;
+    threshold: number;
+  };
+  cycle_lock_gate: PreflightGate & {
+    locked: boolean;
+  };
+  edge_gate: PreflightGate & {
+    edge_pct: number;
+    ev: number;
+  };
 }
 
 export interface ContinuousTrainingTelemetry {

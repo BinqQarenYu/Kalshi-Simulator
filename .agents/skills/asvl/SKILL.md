@@ -5,34 +5,41 @@ description: Autonomous end-to-end self-verification loop skill for goal-based t
 
 # Autonomous Self-Verification Loop Skill (ASVL) - Antigravity Edition
 
-## 1. Goal-Based Input Architecture
-Do not execute commands as a series of micro-tasks. Immediately convert every incoming request into a high-level Goal-Based structure:
+## 1. Goal-Oriented Execution & Codeflow Integration
+ASVL is the execution and verification engine of Antigravity. It takes the **Granular Task Contract** from **Agent Codeflow** and anchors it into a structured, goal-based execution run:
 - **Goal**: A clear, high-level description of the ultimate outcome.
-- **Success Criteria**: A list of 3–5 specific, quantifiable, and testable outcomes required to satisfy the goal.
-- **Context**: Relevant background, constraints, codebase state, and active workspace parameters.
+- **Success Criteria**: A checklist of 3–5 specific, quantifiable, and testable outcomes required to satisfy the goal.
+- **File Boundaries**: Strictly enforced from Codeflow's **File Boundary Matrix** (zero edits in the Forbidden Zone).
+- **Step-by-Step Micro-Execution**: Execute Codeflow's atomic steps sequentially (Step 1 Types -> Step 2 Logic -> Step 3 UI) rather than attempting an unverified monolithic overhaul.
 
 ## 2. Self-Verification & Testing Setup
-Before modifying or creating any code, configure an automated mechanism to verify your work. Do not rely on human review.
-- **Project-Specific Test Harness**: Adhere strictly to the project rules defined in `autonomousself.md`. Run `pytest tests/` for backend verification, and `npm run typecheck` + `npm run build` for frontend verification. Do not invent alternative test commands.
-- **Continuous Evaluation Cycle**: Embed execution in a continuous loop:
-  `Build ──> Verify ──> Fix ──> Re-Verify ──> Complete`
-- **Strict Instruction**: Never ask the user to test or confirm if code works; execute the verification autonomously using available system tools. Review `autonomousself.md` for specific trading standard constraints during implementation.
+Before declaring any code complete, configure and run automated verification tools autonomously. Do not rely on human review.
+- **Project-Specific Test Harness**: Adhere strictly to the project rules defined in [`4-autonomous-execution.md`](file:///.agents/rules/4-autonomous-execution.md) and [`1-trading-invariants.md`](file:///.agents/rules/1-trading-invariants.md):
+  - Backend targeted test: `python -m pytest tests/<target_test>.py -v`
+  - Backend full suite: `python -m pytest tests/ -q` (all 296+ tests must pass)
+  - Frontend typecheck: `npm --prefix frontend run typecheck` (`tsc --noEmit`)
+  - Frontend production build: `npm --prefix frontend run build` (`vite build`)
+- **Dual-Tier Continuous Evaluation Loop**:
+  1. *Micro-Step Loop (Per Task)*: `BUILD ──> TARGET VERIFY ──> FIX` on each Codeflow atomic step.
+  2. *Final Regression Loop*: `FULL TEST BATTERY ──> BUILD CHECK ──> COMPLETE GATE`.
+- **Zero Human Verification Request**: Never ask the user to test or confirm if code works; execute empirical verification autonomously using shell and diagnostic tools.
 
 ## 3. Antigravity-Native Autonomy Rules
 During execution, operate as a fully autonomous agent thread within the Antigravity engine without prompting for intermediate human approval:
 - **End-to-End Task Execution**: Do not yield control, request mid-task approval, or return partial progress. Continuously chain internal agent steps, terminal commands, and tool calls until all success criteria are satisfied.
-- **Antigravity Tooling & Sensible Defaults**: Independently select and invoke available platform capabilities (e.g., local shell execution, workspace search, file mutations). If environment details, configuration keys, or implementation variables are unspecified, apply industry-standard defaults without halting execution.
+- **Antigravity Tooling & Sensible Defaults**: Independently select and invoke available platform capabilities (shell execution, workspace search, targeted file edits). If minor implementation details are unspecified, apply institutional standards without halting execution.
 - **Autonomous Error Recovery**: If build steps fail, terminal commands error out, or verification loops detect regressions, inspect execution logs, resolve issues, and immediately re-trigger the verification loop.
-- **System Blocker Escalation**: Yield execution control to the user ONLY if you hit an unrecoverable system boundary—such as missing external API credentials, missing system privileges, or an unresolvable platform blocker.
+- **System Blocker Escalation**: Yield execution control to the user ONLY if you hit an unrecoverable system boundary—such as missing external API credentials, OS-level permission locks, or platform service outages.
 
 ## 4. Definitive Completion Gates
 Exit the autonomous loop and return control to the user ONLY when ALL completion conditions are met:
 
 ### Complete When:
 - [ ] All success criteria from the goal are met and verified.
-- [ ] You have actively executed and verified the work yourself (tests, terminal outputs, or simulations).
+- [ ] Code changes respect Codeflow's File Boundary Matrix (zero unintended diffs in Forbidden Zone).
+- [ ] You have actively executed and verified the work yourself (`pytest`, `npm run typecheck`, `npm run build`).
 - [ ] No known bugs, compile warnings, or broken features remain.
-- [ ] Code is clean, optimized, and fully documented.
+- [ ] Code is clean, optimized, and fully documented with invariant protections.
 - [ ] The deliverable is ready for immediate human deployment or use.
 
 ### Not Complete If:
@@ -42,9 +49,10 @@ Exit the autonomous loop and return control to the user ONLY when ALL completion
 
 ## 5. Execution Loop Reference Template
 Process all implementation tasks using this internal step-by-step cycle:
-1. **PLAN**: Break the goal into actionable, sequential steps and map dependencies.
-2. **BUILD**: Implement code, logic, configurations, or scripts.
-3. **VERIFY**: Run automated tests, shell checks, or diagnostic scripts.
-4. **COMPARE**: Evaluate actual outputs against the success criteria checklist.
-5. **FIX**: If gaps or errors exist, isolate the issue and loop back to Step 2 (BUILD).
-6. **COMPLETE**: Once all criteria pass, document the changes and yield control with a fully verified deliverable.
+1. **INGEST**: Take Codeflow's `GRANULAR TASK CONTRACT` (Workflow Map, File Boundaries, Micro-Steps).
+2. **PLAN**: Anchor the steps into measurable Success Criteria and verification commands.
+3. **BUILD (Atomic)**: Implement Step 1 (Types/Schemas), Step 2 (Logic), Step 3 (UI).
+4. **VERIFY (Step)**: Run immediate targeted checks (e.g. `npm run typecheck` or targeted `pytest`).
+5. **FIX**: If gaps or errors exist, isolate root cause and re-verify.
+6. **REGRESSION CHECK**: Run the full project test harness (`pytest tests/ -q` and `npm run build`).
+7. **COMPLETE**: Document changes in a walkthrough artifact and present verified results.

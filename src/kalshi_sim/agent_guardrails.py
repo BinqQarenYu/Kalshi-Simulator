@@ -50,6 +50,15 @@ class AgentGuardrails:
         self._peak_equity: Optional[Decimal] = None
         self._circuit_breaker_tripped: bool = False
 
+        # Certified Live Strategies
+        self.authorized_live_bots: set[str] = {
+            "3_step_domination_bot",
+            "3_step_domination",
+            "domination",
+            "3step_dominion",
+            "three_step_domination",
+        }
+
         # Telemetry & Audit
         self._total_validations: int = 0
         self._total_rejections: int = 0
@@ -57,6 +66,26 @@ class AgentGuardrails:
         self._recent_inceptions: list[dict[str, Any]] = []
         self._recent_rejections: list[dict[str, Any]] = []
         self._last_log_rejection_ts: dict[str, float] = {}
+
+    def authorize_live_bot(self, bot_type: str) -> None:
+        """Promote and authorize a certified strategy for Live Mode."""
+        self.authorized_live_bots.add(bot_type)
+        if bot_type in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot"):
+            self.authorized_live_bots.update({
+                "the_onnx_strategy",
+                "dual_onnx",
+                "dual_onnx_bot",
+                "dual_onnx_arbitrage",
+                "dual_onnx_arbitrage_bot",
+                "onnx_macro_v2",
+            })
+        if bot_type in ("macro_trend_dominion", "macro_onnx", "macro_trend_dominion_bot", "macro_trend"):
+            self.authorized_live_bots.update({
+                "macro_trend_dominion",
+                "macro_onnx",
+                "macro_trend_dominion_bot",
+                "macro_trend",
+            })
 
     # -------------------------------------------------------------------------
     # 1. Pre-Trade Intent Validation
@@ -175,14 +204,38 @@ class AgentGuardrails:
             bankroll_cap = max(self.max_micro_bankroll_contracts, int(total_equity / Decimal("25.00")))
 
         # Rule: Strictly 1 contract per trade, max 2 shares total per cycle.
-        # Only 3-Step Dominion authorized to trade; all other bots deactivated.
+        # Certified Live Strategies: Bots in self.authorized_live_bots are permitted for live order routing.
+        # Lane 2 Shadow Paper Trading: Certified bots authorized for paper trading.
         is_primary_domination = (
             bot_type in ("3_step_domination_bot", "3_step_domination", "domination", "3step_dominion", "three_step_domination")
             or bot_type is None
         )
+        is_authorized_live_bot = (
+            bot_type in self.authorized_live_bots
+            or bot_type is None
+        )
+        is_authorized_paper_bot = (
+            is_authorized_live_bot
+            or bot_type in (
+                "onnx_macro_v2",
+                "dual_onnx",
+                "the_onnx_strategy",
+                "dual_onnx_bot",
+                "dual_onnx_arbitrage",
+                "dual_onnx_arbitrage_bot",
+                "macro_trend_dominion",
+                "macro_onnx",
+                "macro_trend",
+                "macro_trend_dominion_bot",
+            )
+        )
         if is_bot:
-            if not is_primary_domination:
-                msg = f"BOT TRADING PROHIBITED: Only 3-Step Dominion bot is authorized to trade. Bot '{bot_type}' is deactivated."
+            if is_live and not is_authorized_live_bot:
+                msg = f"LIVE BOT TRADING PROHIBITED: Bot '{bot_type}' is not authorized to route live orders."
+                self._record_rejection("bot_prohibited", msg, ticker, now_utc)
+                return False, msg, 0, {"bot_type": bot_type}
+            elif not is_live and not (is_primary_domination or is_authorized_paper_bot):
+                msg = f"BOT TRADING PROHIBITED: Bot '{bot_type}' is deactivated and not authorized for paper trading."
                 self._record_rejection("bot_prohibited", msg, ticker, now_utc)
                 return False, msg, 0, {"bot_type": bot_type}
             else:

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { AISignals } from '../types';
+import { AISignals, MacroDominionTelemetry } from '../types';
 import {
   Cpu,
   Zap,
@@ -19,6 +19,7 @@ import {
   Sparkles,
   Crown,
   Shield,
+  Layers,
 } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
 import { getAssetMeta } from '../utils/assets';
@@ -31,6 +32,7 @@ interface AIMicrostructureCardProps {
   onOpenReports?: () => void;
   dominationDiscountPrice?: number;
   onUpdateDiscountPrice?: (price: number) => Promise<any>;
+  macroDominionTelemetry?: MacroDominionTelemetry;
 }
 
 export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.memo(({
@@ -41,6 +43,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   onOpenReports,
   dominationDiscountPrice,
   onUpdateDiscountPrice,
+  macroDominionTelemetry,
 }) => {
   const assetMeta = getAssetMeta(activeAsset);
   const [isTesting, setIsTesting] = useState<boolean>(false);
@@ -77,8 +80,9 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   };
 
   const activeStrategy = signals.strategy_id || '3_step_domination_bot';
-  const isMacroOnnx = activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion';
-  const isMacroTrend = !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend');
+  const isDualOnnx = activeStrategy === 'dual_onnx' || activeStrategy === 'dual_onnx_bot' || activeStrategy === 'dual_onnx_arbitrage';
+  const isMacroOnnx = !isDualOnnx && (activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion');
+  const isMacroTrend = !isDualOnnx && !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend');
   const isDominion2 = activeStrategy === 'dominion_2_bot';
   const is3StepBot = activeStrategy === '3_step_domination_bot';
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';
@@ -180,7 +184,11 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             className="flex items-center gap-2 px-3 py-1.5 bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded-xl transition-all shadow-sm group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
             title="Click to switch strategy bot"
           >
-            {isMacroOnnx ? (
+            {isDualOnnx ? (
+              <div className="h-5 w-5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center">
+                <Layers className="h-3.5 w-3.5 text-cyan-300" />
+              </div>
+            ) : isMacroOnnx ? (
               <div className="h-5 w-5 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
                 <Cpu className="h-3.5 w-3.5 text-purple-300" />
               </div>
@@ -204,7 +212,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
             <div className="text-left">
               <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                <span>{isMacroOnnx ? 'Macro ONNX Bot' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2 Bot' : is3StepBot ? '3-Step Domination Bot' : 'ONNX Microstructure Bot'}</span>
+                <span>{isDualOnnx ? 'Dual-ONNX Arbitrage' : isMacroOnnx ? 'Macro ONNX Bot' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2 Bot' : is3StepBot ? '3-Step Domination Bot' : 'ONNX Microstructure Bot'}</span>
                 <ChevronDown className={`h-3 w-3 text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
               </div>
             </div>
@@ -217,7 +225,38 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 Select Quantitative Trading Bot
               </div>
 
-              {/* Champion: Macro ONNX Bot */}
+              {/* Champion: Dual-ONNX Arbitrage Bot */}
+              <button
+                type="button"
+                role="option"
+                aria-selected={isDualOnnx}
+                onClick={() => handleStrategyChange('dual_onnx')}
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
+                  isDualOnnx
+                    ? 'bg-cyan-500/20 border border-cyan-500/50'
+                    : 'hover:bg-[#21262d] border border-transparent'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="h-7 w-7 rounded-lg bg-cyan-500/25 border border-cyan-500/50 flex items-center justify-center shrink-0 mt-0.5">
+                    <Layers className="h-4 w-4 text-cyan-300" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>Dual-ONNX Arbitrage</span>
+                      <span className="px-1.5 py-0.2 text-[9px] font-mono bg-cyan-500/30 text-cyan-200 border border-cyan-500/40 rounded-full font-bold">
+                        Dual-Brain (New)
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
+                      Spot Microscope vs Kalshi Lag • Contradiction Discount Snipe
+                    </p>
+                  </div>
+                </div>
+                {isDualOnnx && <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-1" />}
+              </button>
+
+              {/* Macro ONNX Bot */}
               <button
                 type="button"
                 role="option"
@@ -429,6 +468,48 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 ? 'SKIPPING'
                 : 'EDGE READY'}
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Macro Trend Dominion: 15M 3-Brain Consensus & Learning Badge */}
+      {isMacroTrend && (
+        <div className="flex flex-col gap-2 p-3 bg-cyan-950/20 border border-cyan-500/40 rounded-xl font-mono text-xs shadow-inner">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-cyan-400" />
+              <span className="font-bold text-white uppercase text-[11px]">15M 3-Brain Consensus</span>
+            </div>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+              (macroDominionTelemetry?.call || signals.recommended_side?.toUpperCase()) === 'YES'
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                : (macroDominionTelemetry?.call || signals.recommended_side?.toUpperCase()) === 'NO'
+                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+            }`}>
+              CALL: {macroDominionTelemetry?.call || (signals.recommended_side === 'yes' ? 'YES' : signals.recommended_side === 'no' ? 'NO' : 'DONT')}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1.5 text-center text-[10px]">
+            <div className="p-1.5 bg-[#0e131a] rounded border border-[#212a36]">
+              <div className="text-gray-400 text-[9px]">Calibrated Win</div>
+              <div className="font-bold text-cyan-300">
+                {macroDominionTelemetry?.confidence_pct ? `${macroDominionTelemetry.confidence_pct.toFixed(0)}%` : `${((signals.onnx_confidence ?? 0.72) * 100).toFixed(0)}%`}
+              </div>
+            </div>
+            <div className="p-1.5 bg-[#0e131a] rounded border border-[#212a36]">
+              <div className="text-gray-400 text-[9px]">Sweetspot Limit</div>
+              <div className="font-bold text-white">
+                {macroDominionTelemetry?.limit_price_cents ?? 52}¢ ($0 Fee)
+              </div>
+            </div>
+            <div className="p-1.5 bg-[#0e131a] rounded border border-[#212a36]">
+              <div className="text-gray-400 text-[9px]">Online Learning</div>
+              <div className="font-bold text-emerald-400">
+                {macroDominionTelemetry?.brier_score !== undefined ? `Brier ${macroDominionTelemetry.brier_score.toFixed(3)}` : 'Active'}
+              </div>
+            </div>
           </div>
         </div>
       )}

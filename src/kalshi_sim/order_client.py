@@ -288,16 +288,30 @@ class KalshiLiveOrderClient:
         # In Kalshi's V2 single-book architecture:
         # Buying YES = side "bid", price = yes_price
         # Buying NO  = side "ask", price = 1.0 - no_price (or equivalent YES price)
-        if side_val == "yes":
-            v2_side = "bid"
-            v2_price = price_dollars if price_dollars is not None else Decimal("0.65")
-        else:
-            # Buying NO is matching against the ask side or posting ask
-            v2_side = "ask"
-            if price_dollars is not None:
-                v2_price = Decimal("1.00") - price_dollars
+        # Selling YES = side "ask", price = yes_price (or hitting the bid)
+        # Selling NO  = side "bid", price = 1.0 - no_price (or hitting the ask)
+        action_val = str(action).lower()
+        if action_val == "sell":
+            if side_val == "yes":
+                v2_side = "ask"
+                v2_price = price_dollars if price_dollars is not None else Decimal("0.95")
             else:
-                v2_price = Decimal("0.35")
+                v2_side = "bid"
+                if price_dollars is not None:
+                    v2_price = Decimal("1.00") - price_dollars
+                else:
+                    v2_price = Decimal("0.05")
+        else:
+            if side_val == "yes":
+                v2_side = "bid"
+                v2_price = price_dollars if price_dollars is not None else Decimal("0.65")
+            else:
+                # Buying NO is matching against the ask side or posting ask
+                v2_side = "ask"
+                if price_dollars is not None:
+                    v2_price = Decimal("1.00") - price_dollars
+                else:
+                    v2_price = Decimal("0.35")
 
         is_limit = order_type.lower() == "limit"
         payload: Dict[str, Any] = {

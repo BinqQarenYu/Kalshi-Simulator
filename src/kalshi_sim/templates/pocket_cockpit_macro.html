@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kalshi Macro Trend Dominion — Pocket Cockpit [Port 8003]</title>
+  <style>
+    :root {
+      --bg: #090a0f;
+      --card: #12141c;
+      --card-alt: #161924;
+      --border: #1e2230;
+      --text: #f0f2f5;
+      --muted: #8b949e;
+      --green: #10b981;
+      --green-glow: rgba(16, 185, 129, 0.25);
+      --red: #ef4444;
+      --red-glow: rgba(239, 68, 68, 0.25);
+      --amber: #f59e0b;
+      --amber-glow: rgba(245, 158, 11, 0.25);
+      --blue: #3b82f6;
+      --cyan: #06b6d4;
+      --cyan-glow: rgba(6, 182, 212, 0.25);
+      --purple: #a855f7;
+      --purple-glow: rgba(168, 85, 247, 0.25);
+      --emerald: #059669;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", monospace; }
+    body { background-color: var(--bg); color: var(--text); padding: 14px; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+    .container { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 12px; }
+
+    /* Header */
+    .header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .title { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.5px; display: flex; align-items: center; gap: 8px; }
+    .badge { font-size: 0.72rem; padding: 3px 8px; border-radius: 4px; font-weight: 700; text-transform: uppercase; }
+    .badge-live { background: rgba(16, 185, 129, 0.15); color: var(--green); border: 1px solid var(--green); }
+    .badge-shadow { background: rgba(168, 85, 247, 0.15); color: var(--purple); border: 1px solid var(--purple); }
+    .badge-standby { background: rgba(139, 148, 158, 0.15); color: var(--muted); border: 1px solid var(--muted); }
+    .badge-port { background: #1e2230; color: var(--cyan); border: 1px solid var(--cyan); }
+
+    /* Interlock Alert */
+    .interlock-banner { background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.3); border-radius: 8px; padding: 8px 12px; font-size: 0.75rem; display: flex; align-items: center; gap: 8px; color: #a5f3fc; }
+
+    /* Master Controls */
+    .controls-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .btn { padding: 12px; border-radius: 8px; border: none; font-size: 0.9rem; font-weight: 700; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+    .btn-arm { background: #064e3b; color: #a7f3d0; border: 1px solid var(--green); box-shadow: 0 0 12px var(--green-glow); }
+    .btn-arm.armed { background: var(--green); color: #022c22; }
+    .btn-disarm { background: #1c1917; color: #a8a29e; border: 1px solid #44403c; }
+    .btn-disarm.disarmed { background: #44403c; color: #fafaf9; }
+    .btn-panic { background: #450a0a; color: #fecaca; border: 1px solid var(--red); grid-column: span 2; padding: 10px; }
+    .btn-panic:hover { background: var(--red); color: #fff; box-shadow: 0 0 16px var(--red-glow); }
+    .btn-sweep { background: rgba(14, 165, 233, 0.12); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.4); grid-column: span 2; padding: 9px; font-size: 0.8rem; }
+    .btn-sweep:hover { background: rgba(14, 165, 233, 0.22); color: #fff; border-color: #38bdf8; box-shadow: 0 0 14px rgba(14, 165, 233, 0.3); }
+
+    /* 15M Hero Decision Card */
+    .hero-card { background: linear-gradient(135deg, #101422 0%, #151b2d 100%); border: 1px solid #28334f; border-radius: 10px; padding: 14px; position: relative; overflow: hidden; }
+    .hero-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .hero-title { font-size: 0.75rem; text-transform: uppercase; color: var(--cyan); font-weight: 800; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; }
+    .hero-decision-badge { font-size: 1.4rem; font-weight: 900; padding: 6px 16px; border-radius: 6px; text-transform: uppercase; font-family: monospace; display: inline-flex; align-items: center; gap: 6px; }
+    .decision-yes { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid var(--green); box-shadow: 0 0 14px var(--green-glow); }
+    .decision-no { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid var(--red); box-shadow: 0 0 14px var(--red-glow); }
+    .decision-dont { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid var(--amber); box-shadow: 0 0 14px var(--amber-glow); }
+    .hero-body { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; text-align: center; }
+    .hero-stat { background: rgba(10, 14, 24, 0.6); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+    .hero-stat-lbl { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; font-weight: 700; }
+    .hero-stat-val { font-size: 1.15rem; font-weight: 800; font-family: monospace; margin-top: 2px; }
+    .hero-rationale { font-size: 0.72rem; color: #cbd5e1; margin-top: 10px; background: rgba(0,0,0,0.3); border-radius: 6px; padding: 6px 10px; border-left: 2px solid var(--cyan); }
+
+    /* 3-Brain Consensus Grid */
+    .brain-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .brain-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; }
+    .brain-card.spot { border-top: 3px solid var(--cyan); }
+    .brain-card.kalshi { border-top: 3px solid var(--purple); }
+    .brain-card.hmm { border-top: 3px solid var(--green); }
+    .brain-title { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+    .brain-val { font-size: 1.05rem; font-weight: 800; font-family: monospace; margin: 2px 0; }
+    .brain-sub { font-size: 0.68rem; color: var(--muted); }
+
+    /* Mistake-Learning Bar */
+    .learning-card { background: var(--card-alt); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .learning-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .learning-title { font-size: 0.74rem; font-weight: 800; color: #f1f5f9; display: flex; align-items: center; gap: 6px; }
+    .learning-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; }
+    .learning-box { background: #0c0e14; border: 1px solid var(--border); border-radius: 4px; padding: 6px 4px; }
+    .learning-lbl { font-size: 0.62rem; color: var(--muted); font-weight: 700; }
+    .learning-val { font-size: 0.95rem; font-weight: 800; font-family: monospace; margin-top: 2px; }
+
+    /* Market Touch & Countdown */
+    .market-banner { background: var(--card-alt); border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .market-header { display: flex; justify-content: space-between; align-items: center; }
+    .market-ticker { font-size: 0.85rem; font-weight: 700; color: #fff; font-family: monospace; }
+    .market-timer { font-size: 1.3rem; font-weight: 800; font-family: monospace; color: var(--green); }
+    .market-timer.cliff { color: var(--red); animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    .touch-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; }
+    .touch-box { background: #0c0e14; border: 1px solid var(--border); border-radius: 4px; padding: 6px 4px; }
+    .touch-lbl { font-size: 0.62rem; color: var(--muted); font-weight: 700; }
+    .touch-val { font-size: 0.95rem; font-weight: 800; font-family: monospace; }
+
+    /* Accordion Parameters */
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+    .panel-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; user-select: none; }
+    .panel-title { font-size: 0.85rem; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+    .param-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .param-group { display: flex; flex-direction: column; gap: 3px; }
+    .param-label-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+    .param-label { font-size: 0.68rem; color: var(--muted); font-weight: 600; text-transform: uppercase; }
+    .param-input, .param-select { background: #090a0f; border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; color: #fff; font-family: monospace; font-size: 0.82rem; }
+    .param-input:focus, .param-select:focus { outline: none; border-color: var(--cyan); }
+    .btn-apply { background: var(--cyan); color: #082f49; font-weight: 700; padding: 8px; border: none; border-radius: 4px; cursor: pointer; grid-column: span 2; margin-top: 6px; }
+    .btn-apply:hover { opacity: 0.9; box-shadow: 0 0 10px var(--cyan-glow); }
+
+    /* Info Badges & Tooltips */
+    .info-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.4);
+      color: var(--cyan); font-size: 0.62rem; font-weight: 800;
+      cursor: pointer; line-height: 1; transition: all 0.15s ease;
+    }
+    .info-btn:hover { background: var(--cyan); color: #0c0e14; box-shadow: 0 0 8px var(--cyan-glow); }
+
+    /* Modal Overlay for Deep Inspection */
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(4, 6, 10, 0.85); backdrop-filter: blur(4px);
+      z-index: 999; align-items: center; justify-content: center; padding: 16px;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-card {
+      background: #0f131d; border: 1px solid #28324a; border-radius: 12px;
+      max-width: 440px; width: 100%; padding: 18px 20px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 15px rgba(56, 189, 248, 0.1);
+      display: flex; flex-direction: column; gap: 12px; animation: modalPop 0.2s ease-out;
+    }
+    @keyframes modalPop { 0% { opacity: 0; transform: scale(0.95); } 100% { opacity: 1; transform: scale(1); } }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+    .modal-title { font-size: 0.92rem; font-weight: 800; color: #fff; }
+    .modal-close { background: transparent; border: none; color: var(--muted); font-size: 1.3rem; cursor: pointer; }
+    .modal-close:hover { color: #fff; }
+    .modal-section { display: flex; flex-direction: column; gap: 3px; }
+    .modal-sec-title { font-size: 0.66rem; font-weight: 700; text-transform: uppercase; color: var(--muted); }
+    .modal-sec-content { font-size: 0.76rem; color: #cbd5e1; line-height: 1.45; background: #090c14; border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; padding: 8px 10px; }
+    .modal-sec-content code { font-family: monospace; color: var(--cyan); background: rgba(56, 189, 248, 0.1); padding: 1px 4px; border-radius: 3px; }
+    .btn-modal-close { background: #1e293b; border: 1px solid #334155; color: #f1f5f9; font-weight: 700; font-size: 0.75rem; padding: 6px 14px; border-radius: 6px; cursor: pointer; align-self: flex-end; }
+
+    /* Recent Settlements List */
+    .log-list { list-style: none; display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; }
+    .log-item { display: flex; justify-content: space-between; font-size: 0.72rem; padding: 4px 6px; border-radius: 4px; background: #0c0e14; border-left: 2px solid var(--border); }
+    .log-item.win { border-left-color: var(--green); }
+    .log-item.loss { border-left-color: var(--red); }
+
+    .widget-bar { display: flex; gap: 8px; justify-content: flex-end; }
+    .btn-widget { background: #1e2230; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px; font-size: 0.72rem; cursor: pointer; }
+    .btn-widget:hover { color: #fff; border-color: var(--cyan); }
+
+    .text-green { color: var(--green); }
+    .text-red { color: var(--red); }
+    .text-amber { color: var(--amber); }
+    .text-cyan { color: var(--cyan); }
+    .text-purple { color: var(--purple); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="title">
+        <span>🧠</span> Macro Trend Dominion
+        <span class="badge badge-port">PORT 8003</span>
+      </div>
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <span id="badge-mode" class="badge badge-shadow">PAPER</span>
+        <span id="badge-status" class="badge badge-standby">STANDBY</span>
+      </div>
+    </div>
+
+    <!-- Interlock Banner -->
+    <div id="interlock-banner" class="interlock-banner">
+      <span>🛡️</span>
+      <span id="interlock-text">Verifying mutual interlock...</span>
+    </div>
+
+    <!-- Master Controls -->
+    <div class="controls-grid">
+      <button id="btn-arm" class="btn btn-arm" onclick="toggleArm(true)">
+        <span>⚡ ARM BOT 3</span>
+        <span style="font-size: 0.65rem; opacity: 0.8;">Autonomous 15M Orders</span>
+      </button>
+      <button id="btn-disarm" class="btn btn-disarm" onclick="toggleArm(false)">
+        <span>🛑 DISARM</span>
+        <span style="font-size: 0.65rem; opacity: 0.8;">Passive Monitoring</span>
+      </button>
+      <button class="btn btn-panic" onclick="triggerPanic()">
+        🚨 EMERGENCY PANIC HALT & SWEEP RESTING ORDERS
+      </button>
+      <button class="btn btn-sweep" onclick="triggerSweep()">
+        🧹 Sweep Open Resting Orders
+      </button>
+    </div>
+
+    <!-- 15M Definitive Decision Card -->
+    <div class="hero-card">
+      <div class="hero-header">
+        <div class="hero-title">
+          <span>🎯</span> 15-Minute Definitive Consensus
+        </div>
+        <div id="hero-action-badge" class="hero-decision-badge decision-dont">
+          DONT
+        </div>
+      </div>
+      <div class="hero-body">
+        <div class="hero-stat">
+          <div class="hero-stat-lbl">Calibrated Win %</div>
+          <div id="hero-confidence" class="hero-stat-val text-cyan">50.0%</div>
+        </div>
+        <div class="hero-stat">
+          <div class="hero-stat-lbl">Sweetspot Limit</div>
+          <div id="hero-limit-price" class="hero-stat-val text-green">48¢</div>
+        </div>
+        <div class="hero-stat">
+          <div class="hero-stat-lbl">Net EV / Contract</div>
+          <div id="hero-ev" class="hero-stat-val text-amber">+$0.00</div>
+        </div>
+      </div>
+      <div id="hero-rationale" class="hero-rationale">
+        Awaiting initial 15M cycle evaluation...
+      </div>
+    </div>
+
+    <!-- 3-Brain Consensus Grid -->
+    <div class="brain-grid">
+      <div class="brain-card spot">
+        <div class="brain-title">Brain 1: Binance Spot</div>
+        <div id="brain-spot-sig" class="brain-val text-cyan">WAIT</div>
+        <div id="brain-spot-conf" class="brain-sub">50.0% Conf</div>
+      </div>
+      <div class="brain-card kalshi">
+        <div class="brain-title">Brain 2: Kalshi L2</div>
+        <div id="brain-kalshi-sig" class="brain-val text-purple">WAIT</div>
+        <div id="brain-kalshi-conf" class="brain-sub">50.0% Conf</div>
+      </div>
+      <div class="brain-card hmm">
+        <div class="brain-title">Brain 3: 5m HMM</div>
+        <div id="brain-hmm-regime" class="brain-val text-green">STABLE</div>
+        <div id="brain-macro-trend" class="brain-sub">CHOP</div>
+      </div>
+    </div>
+
+    <!-- Mistake-Learning Engine Bar -->
+    <div class="learning-card">
+      <div class="learning-header">
+        <div class="learning-title">
+          <span>🧠</span> Mistake-Learning Engine (Dual Paper & Live)
+        </div>
+        <span id="learning-status-badge" class="badge badge-port">RECALIBRATING</span>
+      </div>
+      <div class="learning-grid">
+        <div class="learning-box">
+          <div class="learning-lbl">Brier Score</div>
+          <div id="learn-brier" class="learning-val text-cyan">0.2500</div>
+        </div>
+        <div class="learning-box">
+          <div class="learning-lbl">Shrinkage</div>
+          <div id="learn-shrinkage" class="learning-val text-green">1.000</div>
+        </div>
+        <div class="learning-box">
+          <div class="learning-lbl">Cycles / Mistakes</div>
+          <div id="learn-counts" class="learning-val">0 / 0</div>
+        </div>
+        <div class="learning-box">
+          <div class="learning-lbl">Pruned Deciles</div>
+          <div id="learn-pruned" class="learning-val text-amber">None</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Market Strip -->
+    <div class="market-banner">
+      <div class="market-header">
+        <div id="mkt-ticker" class="market-ticker">KXBTC15M-CYCLE</div>
+        <div id="mkt-timer" class="market-timer">15:00</div>
+      </div>
+      <div class="touch-grid">
+        <div class="touch-box">
+          <div class="touch-lbl">Spot Price ($S_t$)</div>
+          <div id="mkt-spot" class="touch-val text-cyan">$0.00</div>
+        </div>
+        <div class="touch-box">
+          <div class="touch-lbl">Target Strike (K)</div>
+          <div id="mkt-strike" class="touch-val text-purple">$0.00</div>
+        </div>
+        <div class="touch-box">
+          <div class="touch-lbl">Diff ($S_t - K$)</div>
+          <div id="mkt-diff" class="touch-val">+$0.00</div>
+        </div>
+        <div class="touch-box">
+          <div class="touch-lbl">Inside Touch</div>
+          <div id="mkt-inside" class="touch-val">-- / --</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9 Strategy Dials Drawer -->
+    <div class="panel">
+      <div class="panel-header" onclick="toggleDrawer()">
+        <div class="panel-title">
+          <span>⚙️</span> 9 Strategy Dials
+        </div>
+        <span id="drawer-arrow">▼</span>
+      </div>
+      <div id="drawer-content" class="param-grid">
+        <!-- 1. Limit Price -->
+        <div class="param-group">
+          <div class="param-label-row">
+            <span class="param-label">Limit Price (¢)</span>
+            <button class="info-btn" onclick="openModal('limit_price_cents')">i</button>
+          </div>
+          <input type="number" id="inp-limit_price_cents" class="param-input" min="1" max="89" value="52" />
+        </div>
+        <!-- 2. Min Confidence -->
+        <div class="param-group">
+          <div class="param-label-row">
+            <span class="param-label">Min Confidence %</span>
+            <button class="info-btn" onclick="openModal('min_confidence_pct')">i</button>
+          </div>
+          <input type="number" id="inp-min_confidence_pct" class="param-input" min="50" max="90" step="1" value="65" />
+        </div>
+        <!-- 3. Min EV Dollars -->
+        <div class="param-group">
+          <div class="param-label-row">
+            <span class="param-label">Min Net EV ($)</span>
+            <button class="info-btn" onclick="openModal('min_ev_dollars')">i</button>
+          </div>
+          <input type="number" id="inp-min_ev_dollars" class="param-input" min="0.01" max="0.30" step="0.01" value="0.03" />
+        </div>
+        <!-- 4. Volatility Moat -->
+        <div class="param-group">
+          <div class="param-label-row">
+            <span class="param-label">Vol Moat Buffer ($)</span>
+            <button class="info-btn" onclick="openModal('volatility_moat_dollars')">i</button>
+          </div>
+          <input type="number" id="inp-volatility_moat_dollars" class="param-input" min="5" max="100" step="1" value="28" />
+        </div>
+        <!-- 5. HMM Veto -->
+        <div class="param-group">
+          <div class="param-label-row">
+            <span class="param-label">HMM RISK_OFF Veto</span>
+            <button class="info-btn" onclick="openModal('hmm_risk_off_veto')">i</button>
+          </div>
+          <select id="inp-hmm_risk_off_veto" class="param-select">
+            <option value="true">Enabled (Veto on Stress)</option>
+            <option value="false">Disabled (Trade in Stress)</option>
+          </select>
+        </div>
+        <!-- 6. Macro Trend Window -->
+        <div class="param-group">
+          <div class="param-label-row">
+            <span class="param-label">Macro Trend Window</span>
+            <button class="info-btn" onclick="openModal('macro_trend_window')">i</button>
+          </div>
+          <select id="inp-macro_trend_window" class="param-select">
+            <option value="15m+30m">15M + 30M Consensus</option>
+            <option value="15m">15M Single Window</option>
+            <option value="1h">1H Macro Lead</option>
+          </select>
+        </div>
+        <!-- 7. Take Profit -->
+        <div class="param-group">
+          <div class="param-label-row">
+            <span class="param-label">Take Profit Harvest (¢)</span>
+            <button class="info-btn" onclick="openModal('take_profit_harvest_cents')">i</button>
+          </div>
+          <input type="number" id="inp-take_profit_harvest_cents" class="param-input" min="80" max="98" value="95" />
+        </div>
+        <!-- 8. Adaptive Learning Rate -->
+        <div class="param-group">
+          <div class="param-label-row">
+            <span class="param-label">Adaptive Learning Rate</span>
+            <button class="info-btn" onclick="openModal('adaptive_learning_rate')">i</button>
+          </div>
+          <input type="number" id="inp-adaptive_learning_rate" class="param-input" min="0.01" max="0.50" step="0.01" value="0.20" />
+        </div>
+        <!-- 9. Max Contracts Armor -->
+        <div class="param-group" style="grid-column: span 2;">
+          <div class="param-label-row">
+            <span class="param-label">Sizing Armor (Contracts)</span>
+            <button class="info-btn" onclick="openModal('max_contracts')">i</button>
+          </div>
+          <input type="text" class="param-input" value="1 contract (Locked by Micro-Bankroll Armor)" disabled style="opacity: 0.6;" />
+        </div>
+        <button class="btn-apply" onclick="saveParameters()">Save & Apply Parameters</button>
+      </div>
+    </div>
+
+    <!-- Recent Settlements -->
+    <div class="panel">
+      <div class="panel-title" style="margin-bottom: 8px;">
+        <span>📜</span> Recent Cycle Settlements & Mistakes
+      </div>
+      <ul id="settlements-list" class="log-list">
+        <li class="log-item">No settled cycles recorded yet.</li>
+      </ul>
+    </div>
+
+    <!-- Floating Widget Controls -->
+    <div class="widget-bar">
+      <button class="btn-widget" onclick="pinWindow(true)">📌 Always On Top</button>
+      <button class="btn-widget" onclick="pinWindow(false)">Unpin</button>
+      <button class="btn-widget" onclick="launchWidget()">🪟 Minimized Widget</button>
+    </div>
+  </div>
+
+  <!-- Deep Parameter Modal -->
+  <div id="param-modal" class="modal-overlay" onclick="closeModal(event)">
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="modal-title" id="modal-title">Parameter Detail</div>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-section">
+        <div class="modal-sec-title">Plain-English Translation</div>
+        <div class="modal-sec-content" id="modal-translation">--</div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-sec-title">How It Works (Mechanism)</div>
+        <div class="modal-sec-content" id="modal-mechanism">--</div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-sec-title">Why It Matters (Risk Defense)</div>
+        <div class="modal-sec-content" id="modal-importance">--</div>
+      </div>
+      <div class="modal-section">
+        <div class="modal-sec-title">Quantitative Sweetspot</div>
+        <div class="modal-sec-content" id="modal-sweetspot"><code>--</code></div>
+      </div>
+      <button class="btn-modal-close" onclick="closeModal()">Close Inspection</button>
+    </div>
+  </div>
+
+  <script>
+    const DIAL_GUIDES = {
+      limit_price_cents: {
+        title: "Limit Price (¢)",
+        translation: "The maximum price you will pay to enter a contract.",
+        mechanism: "Places resting maker orders strictly at or below this penny price, qualifying for $0.00 maker fees.",
+        importance: "Prevents buying at 70¢-85¢ where one bad loss wipes out 4 good wins.",
+        sweetspot: "48¢ to 52¢ (Ensures deep positive asymmetric risk/reward)."
+      },
+      min_confidence_pct: {
+        title: "Minimum Confidence %",
+        translation: "The minimum consensus certainty required before pulling the trigger.",
+        mechanism: "Combines Spot ONNX, Kalshi L2, and HMM probabilities. Vetoes if below threshold.",
+        importance: "Filters out low-conviction 50/50 toss-ups that churn trading fees.",
+        sweetspot: "60.0% to 70.0% (Balancing selective edge with cycle frequency)."
+      },
+      min_ev_dollars: {
+        title: "Minimum Net EV ($)",
+        translation: "The expected profit per contract after subtracting fees.",
+        mechanism: "Formula: EV = (Prob * ($1 - Entry)) - ((1 - Prob) * Entry) - Fee.",
+        importance: "Guarantees mathematical expectation is positive over hundreds of cycles.",
+        sweetspot: "+$0.03 to +$0.08 per contract."
+      },
+      volatility_moat_dollars: {
+        title: "Volatility Moat ($)",
+        translation: "The safe buffer Bitcoin spot must hold away from the strike price.",
+        mechanism: "Requires |Spot - Strike| >= buffer. Vetoes near-strike Brownian noise.",
+        importance: "Protects against 1-minute random whipsaws that flip contracts at the bell.",
+        sweetspot: "$25.00 to $35.00 distance."
+      },
+      hmm_risk_off_veto: {
+        title: "HMM RISK_OFF Veto",
+        translation: "The emergency market-stress circuit breaker.",
+        mechanism: "When the 5m Markov model detects high volatility dispersion, halts all trading.",
+        importance: "Prevents stepping in front of liquidation cascades.",
+        sweetspot: "Enabled (Always keep checked for live trading)."
+      },
+      macro_trend_window: {
+        title: "Macro Trend Window",
+        translation: "The timeframe used to gauge multi-cycle directional momentum.",
+        mechanism: "Calculates exponential moving trends over 15M, 30M, and 1H candles.",
+        importance: "Ensures we trade in harmony with high-timeframe institutional flow.",
+        sweetspot: "15m+30m Consensus."
+      },
+      take_profit_harvest_cents: {
+        title: "Take Profit Harvest (¢)",
+        translation: "The target price to exit early and lock in gains before expiration.",
+        mechanism: "Places resting sell orders at 95¢ when contract moves deep in the money.",
+        importance: "Eliminates last-minute gamma risk and binary flip risk.",
+        sweetspot: "94¢ to 96¢."
+      },
+      adaptive_learning_rate: {
+        title: "Adaptive Learning Rate",
+        translation: "How fast the engine calibrates confidence after wrong predictions.",
+        mechanism: "Multiplies Brier shrinkage factor against probability estimates.",
+        importance: "Shrinks sizing and tightens price caps during unexpected regime shifts.",
+        sweetspot: "0.15 to 0.25."
+      },
+      max_contracts: {
+        title: "Max Contracts Armor",
+        translation: "Strict 1-contract position limit.",
+        mechanism: "Hard-coded in Agent Guardrails to preserve capital under $75 bankrolls.",
+        importance: "Prevents runaway revenge-trading and catastrophic drawdowns.",
+        sweetspot: "Strictly 1 contract."
+      }
+    };
+
+    let isDrawerOpen = true;
+
+    function toggleDrawer() {
+      isDrawerOpen = !isDrawerOpen;
+      document.getElementById('drawer-content').style.display = isDrawerOpen ? 'grid' : 'none';
+      document.getElementById('drawer-arrow').textContent = isDrawerOpen ? '▼' : '►';
+    }
+
+    function openModal(dialKey) {
+      const guide = DIAL_GUIDES[dialKey];
+      if (!guide) return;
+      document.getElementById('modal-title').textContent = guide.title;
+      document.getElementById('modal-translation').textContent = guide.translation;
+      document.getElementById('modal-mechanism').textContent = guide.mechanism;
+      document.getElementById('modal-importance').textContent = guide.importance;
+      document.getElementById('modal-sweetspot').innerHTML = `<code>${guide.sweetspot}</code>`;
+      document.getElementById('param-modal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('param-modal').classList.remove('active');
+    }
+
+    async function toggleArm(arm) {
+      const ep = arm ? '/api/arm' : '/api/disarm';
+      await fetch(ep, { method: 'POST' });
+      fetchState();
+    }
+
+    async function triggerPanic() {
+      if (confirm("🚨 Halt Bot 3 and sweep all resting orders?")) {
+        await fetch('/api/panic', { method: 'POST' });
+        fetchState();
+      }
+    }
+
+    async function triggerSweep() {
+      await fetch('/api/sweep', { method: 'POST' });
+      fetchState();
+    }
+
+    async function saveParameters() {
+      const payload = {
+        limit_price_cents: parseInt(document.getElementById('inp-limit_price_cents').value),
+        min_confidence_pct: parseFloat(document.getElementById('inp-min_confidence_pct').value),
+        min_ev_dollars: parseFloat(document.getElementById('inp-min_ev_dollars').value),
+        volatility_moat_dollars: parseFloat(document.getElementById('inp-volatility_moat_dollars').value),
+        hmm_risk_off_veto: document.getElementById('inp-hmm_risk_off_veto').value === 'true',
+        macro_trend_window: document.getElementById('inp-macro_trend_window').value,
+        take_profit_harvest_cents: parseInt(document.getElementById('inp-take_profit_harvest_cents').value),
+        adaptive_learning_rate: parseFloat(document.getElementById('inp-adaptive_learning_rate').value),
+      };
+      await fetch('/api/parameters', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      alert("✅ Bot 3 Strategy Dials updated.");
+      fetchState();
+    }
+
+    async function pinWindow(topmost) {
+      await fetch('/api/window/pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ topmost })
+      });
+    }
+
+    async function launchWidget() {
+      await fetch('/api/window/launch-widget', { method: 'POST' });
+    }
+
+    async function fetchState() {
+      try {
+        const res = await fetch('/api/state');
+        if (!res.ok) return;
+        const d = await res.json();
+
+        // Badges
+        const bMode = document.getElementById('badge-mode');
+        bMode.textContent = d.execution_mode;
+        bMode.className = `badge ${d.execution_mode === 'LIVE' ? 'badge-live' : 'badge-shadow'}`;
+
+        const bStatus = document.getElementById('badge-status');
+        bStatus.textContent = d.armed ? 'ARMED' : 'DISARMED';
+        bStatus.className = `badge ${d.armed ? 'badge-live' : 'badge-standby'}`;
+
+        // Arm buttons styling
+        document.getElementById('btn-arm').className = `btn btn-arm ${d.armed ? 'armed' : ''}`;
+        document.getElementById('btn-disarm').className = `btn btn-disarm ${!d.armed ? 'disarmed' : ''}`;
+
+        // Interlock
+        document.getElementById('interlock-text').textContent = d.mutual_interlock_msg || 'Lane 2 Incubator Active';
+
+        // 15M Hero Decision Card
+        const dec = d.decision;
+        const hBadge = document.getElementById('hero-action-badge');
+        if (dec) {
+          hBadge.textContent = dec.call;
+          hBadge.className = `hero-decision-badge ${dec.call === 'YES' ? 'decision-yes' : dec.call === 'NO' ? 'decision-no' : 'decision-dont'}`;
+          document.getElementById('hero-confidence').textContent = `${dec.confidence_pct.toFixed(1)}%`;
+          document.getElementById('hero-limit-price').textContent = `${dec.limit_price_cents}¢`;
+          const evSign = dec.expected_value >= 0 ? '+' : '';
+          document.getElementById('hero-ev').textContent = `${evSign}$${dec.expected_value.toFixed(2)}`;
+          document.getElementById('hero-rationale').textContent = dec.rationale || 'Consensus active.';
+        } else {
+          hBadge.textContent = 'DONT';
+          hBadge.className = 'hero-decision-badge decision-dont';
+        }
+
+        // 3-Brain Consensus Grid
+        const b = d.three_brain_matrix || {};
+        document.getElementById('brain-spot-sig').textContent = b.spot_signal || 'WAIT';
+        document.getElementById('brain-spot-conf').textContent = `${(b.spot_confidence || 50).toFixed(1)}% Conf`;
+        document.getElementById('brain-kalshi-sig').textContent = b.kalshi_signal || 'WAIT';
+        document.getElementById('brain-kalshi-conf').textContent = `${(b.kalshi_confidence || 50).toFixed(1)}% Conf`;
+        document.getElementById('brain-hmm-regime').textContent = b.hmm_regime || 'STABLE';
+        document.getElementById('brain-macro-trend').textContent = b.macro_trend || 'CHOP';
+
+        // Learning Engine
+        const l = d.learning_engine || {};
+        document.getElementById('learn-brier').textContent = (l.brier_score || 0.25).toFixed(4);
+        document.getElementById('learn-shrinkage').textContent = (l.shrinkage_factor || 1.0).toFixed(3);
+        document.getElementById('learn-counts').textContent = `${l.cycles_evaluated || 0} / ${l.mistakes_logged || 0}`;
+        const pr = l.pruned_deciles && l.pruned_deciles.length > 0 ? l.pruned_deciles.join(', ') : 'None';
+        document.getElementById('learn-pruned').textContent = pr;
+
+        // Market Strip
+        document.getElementById('mkt-ticker').textContent = d.active_ticker || 'KXBTC15M';
+        const mTimer = document.getElementById('mkt-timer');
+        mTimer.textContent = d.time_remaining_str || '15:00';
+        if (d.expiry_countdown_seconds < 90) {
+          mTimer.classList.add('cliff');
+        } else {
+          mTimer.classList.remove('cliff');
+        }
+        document.getElementById('mkt-spot').textContent = `$${(d.spot_price || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        document.getElementById('mkt-strike').textContent = `$${(d.target_strike || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+        document.getElementById('mkt-diff').textContent = d.spot_diff_str || '+$0.00';
+        const touch = (d.best_yes_bid && d.best_yes_ask) ? `${d.best_yes_bid}¢ / ${d.best_yes_ask}¢` : '-- / --';
+        document.getElementById('mkt-inside').textContent = touch;
+
+        // Settlements
+        const repList = document.getElementById('settlements-list');
+        if (d.recent_reports && d.recent_reports.length > 0) {
+          repList.innerHTML = d.recent_reports.map(r => `
+            <li class="log-item ${r.win ? 'win' : 'loss'}">
+              <span><strong>${r.cycle}</strong> ${r.side} (${r.price_cents}¢) &rarr; ${r.outcome}</span>
+              <span style="font-family: monospace; font-weight: 700;">${r.pnl_dollars >= 0 ? '+' : ''}$${r.pnl_dollars.toFixed(2)}</span>
+            </li>
+          `).join('');
+        }
+      } catch (err) {
+        console.error("Telemetry fetch error:", err);
+      }
+    }
+
+    setInterval(fetchState, 600);
+    fetchState();
+  </script>
+</body>
+</html>

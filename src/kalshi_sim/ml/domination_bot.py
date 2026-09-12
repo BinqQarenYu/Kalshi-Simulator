@@ -53,7 +53,7 @@ class DominationDecision:
     time_to_expiry_s: float
     spot_diff: float
     order_type: str = "limit"
-    limit_price: float = 0.48
+    limit_price: float = 0.52
 
 
 @dataclass(frozen=True)
@@ -81,12 +81,17 @@ class ThreeStepDominationBot:
         vpin_safe_threshold: float = 0.35,
         default_btc_1m_volatility: float = 14.0,  # $14 typical 1-min BTC spot std dev
         take_profit_price_threshold: Decimal = Decimal("0.95"),  # 95c tail risk ceiling
+        enable_take_profit_ceiling: bool = True,  # Take profit price ceiling toggle
+        require_reversal_for_tp_ceiling: bool = True,  # Only exit at ceiling if indicators >= 85% reverse; if not, continue to expiry
+        enable_reverse_take_profit_roi: bool = True,  # Only take profit on min_take_profit_roi if indicators >= 85% reverse
+        reverse_indicator_threshold: float = 0.85,  # 85% conviction in opposite direction required
         min_take_profit_roi: float = 0.20,  # +20% minimum ROI for early exit
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
         fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
         max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
-        discount_limit_price: Decimal = Decimal("0.48"),  # Configurable discount sniper ceiling
+        discount_limit_price: Decimal = Decimal("0.52"),  # Configurable discount sniper ceiling (48¢-52¢ sweetspot)
+        min_confidence: float = 0.70,  # 70% model conviction threshold
         asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
@@ -102,12 +107,17 @@ class ThreeStepDominationBot:
             self.typical_1m_volatility = default_btc_1m_volatility
         self.default_btc_1m_volatility = self.typical_1m_volatility  # backward compatibility
         self.take_profit_price_threshold = take_profit_price_threshold
+        self.enable_take_profit_ceiling = enable_take_profit_ceiling
+        self.require_reversal_for_tp_ceiling = require_reversal_for_tp_ceiling
+        self.enable_reverse_take_profit_roi = enable_reverse_take_profit_roi
+        self.reverse_indicator_threshold = reverse_indicator_threshold if reverse_indicator_threshold <= 1.0 else (reverse_indicator_threshold / 100.0)
         self.min_take_profit_roi = min_take_profit_roi
         self.late_cycle_roi = late_cycle_roi
         self.fee_per_contract = fee_per_contract
         self.min_spot_diff = min_spot_diff if min_spot_diff is not None else float(cfg.min_spot_diff)
         self.max_entry_price = Decimal(str(max_entry_price))
-        self.discount_limit_price = max(Decimal("0.10"), min(Decimal("0.50"), discount_limit_price))
+        self.discount_limit_price = max(Decimal("0.10"), min(Decimal("0.65"), Decimal(str(discount_limit_price))))
+        self.min_confidence = min_confidence if min_confidence <= 1.0 else (min_confidence / 100.0)
 
         # Underlying Stage 2 EV & Quarter-Kelly Optimizer
         self._ev_engine = StatisticalEVEngine(
@@ -132,7 +142,7 @@ class ThreeStepDominationBot:
     def set_discount_limit_price(self, new_price: Decimal | float | str) -> None:
         """Dynamically update the maker discount limit price ceiling."""
         dec_price = Decimal(str(new_price))
-        clamped = max(Decimal("0.10"), min(Decimal("0.50"), dec_price))
+        clamped = max(Decimal("0.10"), min(Decimal("0.65"), dec_price))
         self.discount_limit_price = clamped
         logger.info("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
 
@@ -141,12 +151,18 @@ class ThreeStepDominationBot:
         return {
             "asset": self.asset.value if hasattr(self, "asset") else "BTC",
             "discount_limit_price": float(self.discount_limit_price),
+            "momentum_max_price": float(self.max_entry_price),
+            "min_confidence": round(float(self.min_confidence) * 100.0, 1) if self.min_confidence <= 1.0 else round(float(self.min_confidence), 1),
             "min_edge_pct": round(float(self.min_edge_pct) * 100.0, 1),
             "min_ev_dollars": float(self.min_ev_dollars),
             "min_spot_diff": float(self.min_spot_diff),
             "typical_1m_volatility": float(self.typical_1m_volatility),
             "vpin_toxic_threshold": round(float(self.vpin_toxic_threshold), 2),
             "take_profit_price_threshold": float(self.take_profit_price_threshold),
+            "enable_take_profit_ceiling": bool(self.enable_take_profit_ceiling),
+            "require_reversal_for_tp_ceiling": bool(self.require_reversal_for_tp_ceiling),
+            "enable_reverse_take_profit_roi": bool(self.enable_reverse_take_profit_roi),
+            "reverse_indicator_threshold": round(float(self.reverse_indicator_threshold) * 100.0, 1),
             "min_take_profit_roi": round(float(self.min_take_profit_roi) * 100.0, 1),
         }
 
@@ -154,18 +170,32 @@ class ThreeStepDominationBot:
         self,
         asset: Optional[str | CryptoAsset] = None,
         discount_limit_price: Optional[float] = None,
+        momentum_max_price: Optional[float] = None,
+        min_confidence: Optional[float] = None,
         min_edge_pct: Optional[float] = None,
         min_ev_dollars: Optional[float] = None,
         min_spot_diff: Optional[float] = None,
         vpin_toxic_threshold: Optional[float] = None,
         take_profit_price_threshold: Optional[float] = None,
+        enable_take_profit_ceiling: Optional[bool] = None,
+        require_reversal_for_tp_ceiling: Optional[bool] = None,
+        enable_reverse_take_profit_roi: Optional[bool] = None,
+        reverse_indicator_threshold: Optional[float] = None,
         min_take_profit_roi: Optional[float] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """Dynamically update strategy parameters on the fly."""
         if asset is not None:
             self.set_asset(asset)
         if discount_limit_price is not None:
             self.set_discount_limit_price(discount_limit_price)
+        if momentum_max_price is not None:
+            self.max_entry_price = Decimal(str(max(0.50, min(0.99, float(momentum_max_price)))))
+        if min_confidence is not None:
+            val = float(min_confidence)
+            if val > 1.0:
+                val = val / 100.0
+            self.min_confidence = max(0.50, min(0.99, val))
         if min_edge_pct is not None:
             val = float(min_edge_pct)
             if val > 1.0:
@@ -182,6 +212,17 @@ class ThreeStepDominationBot:
             self._ev_engine.vpin_toxic_threshold = self.vpin_toxic_threshold
         if take_profit_price_threshold is not None:
             self.take_profit_price_threshold = Decimal(str(max(0.50, min(0.99, float(take_profit_price_threshold)))))
+        if enable_take_profit_ceiling is not None:
+            self.enable_take_profit_ceiling = bool(enable_take_profit_ceiling)
+        if require_reversal_for_tp_ceiling is not None:
+            self.require_reversal_for_tp_ceiling = bool(require_reversal_for_tp_ceiling)
+        if enable_reverse_take_profit_roi is not None:
+            self.enable_reverse_take_profit_roi = bool(enable_reverse_take_profit_roi)
+        if reverse_indicator_threshold is not None:
+            val = float(reverse_indicator_threshold)
+            if val > 1.0:
+                val = val / 100.0
+            self.reverse_indicator_threshold = max(0.50, min(0.99, val))
         if min_take_profit_roi is not None:
             val = float(min_take_profit_roi)
             if val > 1.0:
@@ -549,6 +590,18 @@ class ThreeStepDominationBot:
 
         # Dynamic Two-Tier Entry Price Cap (Q3 Winning Choice)
         if ev_res.recommended_side in (OrderSide.YES, OrderSide.NO) and ev_res.recommended_contracts > 0:
+            target_prob = p_up if ev_res.recommended_side == OrderSide.YES else p_down
+            if target_prob < self.min_confidence:
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=vpin,
+                    rationale=(
+                        f"AI Conviction Veto: {ev_res.recommended_side.value.upper()} model conviction={target_prob*100:.1f}% "
+                        f"< {self.min_confidence*100:.0f}% threshold. Awaiting higher statistical conviction."
+                    ),
+                )
+
             target_ask = actual_market_ask if actual_market_ask is not None else float(ev_res.market_price)
             # Tier 1: Absolute hard ceiling above $0.72 (inverted R:R suicide)
             if target_ask > 0.72:
@@ -703,6 +756,53 @@ class ThreeStepDominationBot:
             limit_price=float(self.discount_limit_price),
         )
 
+    def compute_market_probabilities(
+        self,
+        book: Optional[L2BookState],
+        spot_price: float,
+        target_strike: float,
+        time_to_expiry_s: float,
+    ) -> tuple[float, float]:
+        """Compute live cumulative market probabilities (prob_yes, prob_no).
+
+        Uses digital option normal CDF with dynamic volatility and order flow imbalance.
+        If spot/strike are unavailable, falls back to book implied probabilities.
+        """
+        if spot_price > 0.0 and target_strike > 0.0:
+            tau_mins = max(0.1, time_to_expiry_s / 60.0)
+            tau_sqrt = math.sqrt(tau_mins)
+            vol_floor = 0.285 * self.typical_1m_volatility
+            expected_vol = max(vol_floor, self.typical_1m_volatility * tau_sqrt)
+            spot_diff = spot_price - target_strike
+
+            book_skew = 0.0
+            if book and hasattr(book, "get_depth"):
+                try:
+                    bids, asks = book.get_depth(3)
+                    yes_vol = float(sum(lv.quantity for lv in bids)) if bids else 0.0
+                    no_vol = float(sum(lv.quantity for lv in asks)) if asks else 0.0
+                    if (yes_vol + no_vol) > 0:
+                        book_skew = (yes_vol - no_vol) / (yes_vol + no_vol)
+                except Exception:
+                    book_skew = 0.0
+
+            skew_mult = 0.857 * self.typical_1m_volatility if time_to_expiry_s > 60.0 else 0.0
+            z_score = (spot_diff + book_skew * skew_mult) / expected_vol
+            prob_yes_raw = _standard_normal_cdf(z_score)
+            prob_yes = max(0.001, min(0.999, prob_yes_raw))
+            prob_no = 1.0 - prob_yes
+            return prob_yes, prob_no
+
+        if book:
+            if book.best_yes_bid is not None and book.best_yes_bid > Decimal("0.00"):
+                p_yes = float(book.best_yes_bid)
+                return max(0.001, min(0.999, p_yes)), max(0.001, min(0.999, 1.0 - p_yes))
+            if book.best_no_bid is not None and book.best_no_bid > Decimal("0.00"):
+                p_no = float(book.best_no_bid)
+                return max(0.001, min(0.999, 1.0 - p_no)), max(0.001, min(0.999, p_no))
+
+        return 0.50, 0.50
+
     def evaluate_exit(
         self,
         side: OrderSide | str,
@@ -743,21 +843,38 @@ class ThreeStepDominationBot:
         total_net_pnl = net_pnl_per_ct * Decimal(str(size))
         roi = float(gross_pnl_per_ct / safe_entry)
 
+        # Compute indicator probabilities and reverse direction conviction
+        prob_yes, prob_no = self.compute_market_probabilities(
+            book=book,
+            spot_price=spot_price,
+            target_strike=target_strike,
+            time_to_expiry_s=time_to_expiry_s,
+        )
+        reverse_prob = prob_no if side_is_yes else prob_yes
+
         # Rule 1: Asymmetric Tail Risk Ceiling (e.g. Bid >= $0.95 or $0.98)
-        # Eliminates holding to $1.00 when 95%+ of value is captured and remaining upside is tiny
-        if best_bid >= self.take_profit_price_threshold and net_pnl_per_ct > Decimal("0.00"):
-            return DominationExitDecision(
-                should_exit=True,
-                exit_reason="TAKE_PROFIT_CEILING",
-                exit_price=best_bid,
-                profit_pct=round(roi * 100.0, 2),
-                unrealized_pnl=round(total_net_pnl, 4),
-                rationale=(
-                    f"🎯 [TAKE PROFIT CEILING] Best bid ${best_bid:.2f} >= ${self.take_profit_price_threshold:.2f} ceiling | "
-                    f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | "
-                    f"Liquidating early to eliminate asymmetric late-cycle reversal risk."
-                ),
-            )
+        # Exits if ceiling reached AND either require_reversal_for_tp_ceiling is False OR reverse_prob >= reverse_indicator_threshold
+        if self.enable_take_profit_ceiling and best_bid >= self.take_profit_price_threshold and net_pnl_per_ct > Decimal("0.00"):
+            reversal_confirmed = (not self.require_reversal_for_tp_ceiling) or (reverse_prob >= self.reverse_indicator_threshold)
+            if reversal_confirmed:
+                return DominationExitDecision(
+                    should_exit=True,
+                    exit_reason="TAKE_PROFIT_CEILING",
+                    exit_price=best_bid,
+                    profit_pct=round(roi * 100.0, 2),
+                    unrealized_pnl=round(total_net_pnl, 4),
+                    rationale=(
+                        f"🎯 [TAKE PROFIT CEILING] Best bid ${best_bid:.2f} >= ${self.take_profit_price_threshold:.2f} "
+                        f"with {reverse_prob*100:.1f}% reversal conviction (>= {self.reverse_indicator_threshold*100:.0f}%) | "
+                        f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | "
+                        f"Liquidating early to protect banked gains against reversal."
+                    ),
+                )
+            else:
+                logger.debug(
+                    "[HOLD TO SETTLEMENT] Bid $%.2f >= $%.2f ceiling, but reverse conviction %.1f%% < %.0f%%. Continuing to $1.00 settlement.",
+                    float(best_bid), float(self.take_profit_price_threshold), reverse_prob * 100.0, self.reverse_indicator_threshold * 100.0
+                )
 
         # Rule 2: Late-Cycle Expiration Defense (T <= 120s, Bid >= $0.85, ROI >= 15%)
         # In final 2 minutes, binary gamma risk explodes; lock in gains before unpredictable settlement
@@ -775,8 +892,14 @@ class ThreeStepDominationBot:
                 ),
             )
 
-        # Rule 3: High-Gain Target ROI Harvest (ROI >= 20% and Bid >= $0.80)
-        if roi >= self.min_take_profit_roi and best_bid >= Decimal("0.80") and net_pnl_per_ct > Decimal("0.00"):
+        # Rule 3: Reversal Take-Profit Harvest (ROI >= min_take_profit_roi ONLY IF reverse_prob >= reverse_indicator_threshold)
+        # Protects gains when indicators strongly reverse against open position (>= 85% conviction)
+        if (
+            self.enable_reverse_take_profit_roi
+            and roi >= self.min_take_profit_roi
+            and reverse_prob >= self.reverse_indicator_threshold
+            and net_pnl_per_ct > Decimal("0.00")
+        ):
             return DominationExitDecision(
                 should_exit=True,
                 exit_reason="TAKE_PROFIT_ROI",
@@ -784,8 +907,10 @@ class ThreeStepDominationBot:
                 profit_pct=round(roi * 100.0, 2),
                 unrealized_pnl=round(total_net_pnl, 4),
                 rationale=(
-                    f"💰 [TAKE PROFIT ROI] Net ROI +{roi*100:.1f}% >= +{self.min_take_profit_roi*100:.0f}% target at ${best_bid:.2f} | "
-                    f"Net profit +${total_net_pnl:.2f} | Securing banked returns."
+                    f"🚨 [REVERSE SIGNAL TAKE-PROFIT] Indicators show {reverse_prob*100:.1f}% conviction in reverse direction "
+                    f"(>= {self.reverse_indicator_threshold*100:.0f}%) | "
+                    f"Net ROI +{roi*100:.1f}% >= +{self.min_take_profit_roi*100:.0f}% target at ${best_bid:.2f} | "
+                    f"Net profit +${total_net_pnl:.2f} | Securing banked returns before reversal destroys gains."
                 ),
             )
 

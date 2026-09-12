@@ -40,6 +40,18 @@ def check_expirations(
     for ticker in positions:
         market = markets.get(ticker)
         if market is None:
+            # Fallback: check if the ticker timestamp itself indicates it has expired
+            try:
+                parts = ticker.split("-")
+                if len(parts) >= 2:
+                    ts_part = parts[1][:11]  # e.g., 26SEP091745
+                    dt = datetime.strptime(ts_part, "%y%b%d%H%M").replace(tzinfo=timezone.utc)
+                    if current_time >= dt:
+                        if ticker not in seen:
+                            seen.add(ticker)
+                            expired.append(ticker)
+            except Exception:
+                pass
             continue
 
         is_expired = False
@@ -48,6 +60,12 @@ def check_expirations(
         elif (
             market.latest_expiration_time is not None
             and current_time >= market.latest_expiration_time
+        ):
+            is_expired = True
+        elif (
+            hasattr(market, "expiration_time")
+            and market.expiration_time is not None
+            and current_time >= market.expiration_time
         ):
             is_expired = True
 

@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import aiohttp
 import orjson
 
+from kalshi_sim.ml.quolas_core.candle_builder import CandleBuilder
 from kalshi_sim.schemas import L2BookState, TradeEvent
 from kalshi_sim.ws_connection import create_aiohttp_connector
 
@@ -46,6 +47,10 @@ class BtcOrderflowFeed:
         self._running: bool = False
         self._worker_task: Optional[asyncio.Task] = None
         self._on_tick_callbacks: List[Callable[[Decimal], None]] = []
+
+        # Real-time QuoLas OHLCV Candle Builders (5m for HMM Markov, 1m for fast trend)
+        self.candle_builder_5m = CandleBuilder(interval_seconds=300, max_candles=500)
+        self.candle_builder_1m = CandleBuilder(interval_seconds=60, max_candles=500)
 
         # Initialize mock seed so book is never empty before first WebSocket frame
         self.seed_orderflow(spot_price=85000.0)
@@ -79,6 +84,7 @@ class BtcOrderflowFeed:
         # Seed initial trades if empty
         if not self.trades:
             now_dt = datetime.now(timezone.utc)
+            now_ms = int(time.time() * 1000)
             for i in range(10):
                 side = "buy" if i % 2 == 0 else "sell"
                 p_trade = sp_dec + Decimal(str(round((i - 5) * 0.10, 2)))
@@ -93,6 +99,13 @@ class BtcOrderflowFeed:
                     price=p_trade,
                 )
                 self.trades.append(t)
+                self.candle_builder_5m.process_tick("BTCUSDT", float(p_trade), 0.25, now_ms)
+                self.candle_builder_1m.process_tick("BTCUSDT", float(p_trade), 0.25, now_ms)
+
+    def get_candles(self, symbol: str = "BTCUSDT", interval_seconds: int = 300, count: int = 288) -> List[Dict[str, Any]]:
+        """Retrieve recent OHLCV candles for HMM Markov and macro trend strategies."""
+        builder = self.candle_builder_5m if interval_seconds >= 300 else self.candle_builder_1m
+        return builder.get_candles(symbol, count=count)
 
     def get_btc_l2_state(self) -> Tuple[L2BookState, List[TradeEvent]]:
         """Return an atomic snapshot of the continuous Bitcoin L2 orderbook and recent trades."""
@@ -263,6 +276,15 @@ class BtcOrderflowFeed:
 
         # Accumulate CVD with rolling dampening
         self.rolling_cvd = (self.rolling_cvd * 0.9995) + signed_qty
+
+        # Feed real-time 5m and 1m QuoLas candle builders for HMM and momentum
+        try:
+            p_float = float(p)
+            q_float = float(q)
+            self.candle_builder_5m.process_tick("BTCUSDT", p_float, q_float, ts_ms)
+            self.candle_builder_1m.process_tick("BTCUSDT", p_float, q_float, ts_ms)
+        except Exception as c_exc:
+            logger.debug("[BTC ORDERFLOW] Candle builder tick error: %s", c_exc)
 
         # Dispatch fast callbacks for spot price listeners
         self._dispatch_on_tick(p)

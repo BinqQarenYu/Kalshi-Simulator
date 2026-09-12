@@ -136,19 +136,23 @@ def test_domination_bot_discount_sniper_maker_execution() -> None:
 
 def test_domination_bot_dynamic_discount_update() -> None:
     """Verify that calling set_discount_limit_price dynamically tunes the sniper ceiling."""
-    bot = ThreeStepDominationBot(discount_limit_price=Decimal("0.48"))
+    bot = ThreeStepDominationBot()
+    assert bot.discount_limit_price == Decimal("0.52")
+
+    # Tune to 48 cents
+    bot.set_discount_limit_price(0.48)
     assert bot.discount_limit_price == Decimal("0.48")
 
     # Tune down to 30 cents
     bot.set_discount_limit_price(0.30)
     assert bot.discount_limit_price == Decimal("0.30")
 
-    # Clamped within safe boundaries [0.10, 0.50]
+    # Clamped within safe boundaries [0.10, 0.65]
     bot.set_discount_limit_price(0.05)
     assert bot.discount_limit_price == Decimal("0.10")
 
     bot.set_discount_limit_price(0.75)
-    assert bot.discount_limit_price == Decimal("0.50")
+    assert bot.discount_limit_price == Decimal("0.65")
 
 
 def test_domination_bot_asset_calibration() -> None:

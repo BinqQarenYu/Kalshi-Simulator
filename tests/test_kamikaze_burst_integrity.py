@@ -286,6 +286,13 @@ def test_integrity_live_daemon_status() -> None:
     assert checks.get("Kalshi ET Clock Alignment") == "PASS"
     assert checks.get("Kalshi Spot Price Precision") == "PASS"
 
-    # Verify active strategy is valid institutional bot (3-Step Domination or Macro Trend Dominion)
-    assert strat_data.get("active_strategy") in ("3_step_domination_bot", "macro_trend_dominion", "macro_onnx")
+    # Verify active strategy is valid institutional bot (3-Step Domination, The ONNX Strategy, or Macro Trend Dominion)
+    assert strat_data.get("active_strategy") in (
+        "3_step_domination_bot",
+        "macro_trend_dominion",
+        "macro_onnx",
+        "dual_onnx",
+        "the_onnx_strategy",
+        "onnx_macro_v2",
+    )
 
