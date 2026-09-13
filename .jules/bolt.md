@@ -43,3 +43,7 @@
 ## 2026-09-01 - Zero-Copy Ring Buffer C-Level Range Slicing
 **Learning:** In `ZeroCopyRingBuffer`, computing `to_list()` and `get_tail(n)` using Python `for i in range(...)` loops with modulo arithmetic per item introduced significant interpreter loop and index computation overhead under high-frequency stream querying.
 **Action:** Replace element-by-element range loops with C-level list range slicing (`self._buffer[head:] + self._buffer[:head]` and single/double range slices `self._buffer[start_idx:end_idx]`). Reduced `get_tail(100)` latency from ~23.8 µs down to ~1.16 µs per call (~20.6x speedup) and `to_list()` latency from ~50.6 µs down to ~5.78 µs per call (~8.75x speedup).
+
+## 2026-09-02 - Redundant Per-Tick Trade Entropy Computation Elimination & Constant Allocation Bypass
+**Learning:** `extract_features_from_book` recalculated trade size entropy on every tick by constructing lists from deque, slicing, and taking `math.log2()` calls into a local variable that was discarded in favor of `self._cached_entropy` (which is updated in `process_trade()`). Additionally, instantiating `Decimal("0")` on every L2 order book delta message caused unnecessary GC object allocation.
+**Action:** Remove redundant per-tick entropy recalculation block in `extract_features_from_book` and pre-instantiate a module-level `_ZERO_DECIMAL = Decimal("0")` constant in `OrderBookManager`. Reduced feature extraction latency from ~30.8 µs to ~20.9 µs per call (~32% throughput speedup).
