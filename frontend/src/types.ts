@@ -542,6 +542,8 @@ export interface BotParameters {
   twap_immutability_sniper_cents?: number;
   max_queue_depth_ahead?: number;
   max_clob_spread_cents?: number;
+  moneyness_moat_multiplier?: number;
+  opening_quarantine_seconds?: number;
   [key: string]: any;
 }
 
@@ -693,4 +695,24 @@ export interface IncubatorPostMortem {
   diagnosis: string;
   timestamp: string;
 }
+
+export interface NeuralEngineSpec {
+  id: string;
+  name: string;
+  filename: string;
+  version: string;
+  dimension: number;
+  features_description: string;
+  target_assets: string[];
+  supported_venues: string[];
+  role: string;
+  status: 'ACTIVE_LANE_1' | 'STANDALONE_LAB' | 'STANDBY';
+  architecture: string;
+  input_shape: string;
+  output_shape: string;
+  latency_budget_ms: number;
+  physics_features?: string[];
+  adapters?: string[];
+}
+
 

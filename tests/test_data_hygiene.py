@@ -87,3 +87,68 @@ def test_data_authenticity_checker(tmp_path: Path):
     res2 = mgr.verify_data_authenticity()
     assert res2["status"] == "FAIL_MOCK_CONTAMINATION"
     assert res2["synthetic_mock_detected"] >= 1
+
+
+def test_purge_aged_streams(tmp_path: Path):
+    """Rolling retention: only untraded streams older than max_age_days are purged."""
+    import os
+
+    mgr = DataHygieneManager(data_dir=tmp_path, active_buffer_seconds=0.0)
+
+    # Create an "old" untraded stream (20 days ago)
+    old_stream = tmp_path / "stream_OLD-TICKER.jsonl"
+    old_stream.write_text('{"side": "yes", "price": 0.50}\n' * 10)
+    old_time = time.time() - (20 * 86400)
+    os.utime(old_stream, (old_time, old_time))
+
+    # Create an "old" compressed untraded stream
+    old_gz = tmp_path / "stream_OLD-GZ-TICKER.jsonl.gz"
+    import gzip
+    with gzip.open(old_gz, "wt") as f:
+        f.write('{"side": "no", "price": 0.48}\n' * 5)
+    os.utime(old_gz, (old_time, old_time))
+
+    # Create a "recent" untraded stream (2 days ago — should NOT be purged)
+    recent_stream = tmp_path / "stream_RECENT-TICKER.jsonl"
+    recent_stream.write_text('{"side": "yes", "price": 0.55}\n' * 10)
+    recent_time = time.time() - (2 * 86400)
+    os.utime(recent_stream, (recent_time, recent_time))
+
+    # Dry run first
+    count_dry, _ = mgr.purge_aged_streams(max_age_days=14, dry_run=True)
+    assert count_dry == 2  # Both old files identified
+    assert old_stream.exists()  # Not actually deleted
+    assert old_gz.exists()
+
+    # Real purge
+    count, reclaimed = mgr.purge_aged_streams(max_age_days=14, dry_run=False)
+    assert count == 2
+    assert reclaimed > 0
+    assert not old_stream.exists()
+    assert not old_gz.exists()
+    assert recent_stream.exists()  # Protected by age
+
+
+def test_canonical_stream_path_prefers_gz(tmp_path: Path):
+    """get_canonical_stream_path returns .jsonl.gz when it exists."""
+    mgr = DataHygieneManager(data_dir=tmp_path)
+
+    ticker = "KXBTC15M-26SEP111600-00"
+
+    # When neither file exists, returns .jsonl
+    p1 = mgr.get_canonical_stream_path(ticker)
+    assert p1.name.endswith(".jsonl")
+    assert not p1.name.endswith(".jsonl.gz")
+
+    # Create .jsonl — should return .jsonl
+    jsonl_path = tmp_path / "stream_KXBTC15M-26SEP111600-00.jsonl"
+    jsonl_path.write_text("{}\n")
+    p2 = mgr.get_canonical_stream_path(ticker)
+    assert p2 == jsonl_path
+
+    # Create .jsonl.gz — should now prefer .gz
+    gz_path = tmp_path / "stream_KXBTC15M-26SEP111600-00.jsonl.gz"
+    gz_path.write_bytes(b"\x1f\x8b" + b"\x00" * 8)  # minimal gzip header stub
+    p3 = mgr.get_canonical_stream_path(ticker)
+    assert p3 == gz_path
+

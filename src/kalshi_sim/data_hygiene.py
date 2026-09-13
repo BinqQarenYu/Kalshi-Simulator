@@ -183,12 +183,20 @@ class DataHygieneManager:
         return purged_count, bytes_reclaimed
 
     def get_canonical_stream_path(self, ticker: str) -> Path:
-        """Returns the single canonical path for a contract's tick stream (stream_<safe_ticker>.jsonl)."""
+        """Returns the single canonical path for a contract's tick stream.
+
+        Prefers compressed `.jsonl.gz` if it exists, otherwise falls back to `.jsonl`.
+        """
         safe_ticker = ticker.replace("/", "_").replace(":", "_")
+        gz_path = self.data_dir / f"stream_{safe_ticker}.jsonl.gz"
+        if gz_path.exists():
+            return gz_path
         return self.data_dir / f"stream_{safe_ticker}.jsonl"
 
     def verify_data_authenticity(self, sample_lines: int = 100) -> Dict[str, Any]:
         """Audit historical tick files to guarantee they contain authentic Kalshi L2/RTI records."""
+        import gzip as _gzip
+
         results = {
             "audited_contracts": 0,
             "valid_kalshi_records": 0,
@@ -197,13 +205,16 @@ class DataHygieneManager:
         }
 
         stream_files = list(self.data_dir.glob("stream_*.jsonl"))
+        stream_files += [f for f in self.data_dir.glob("stream_*.jsonl.gz")
+                         if f.with_suffix("").stem + ".jsonl" not in {p.name for p in stream_files}]
         results["audited_contracts"] = len(stream_files)
 
         valid_types = {"OrderBookDelta", "OrderBookSnapshot", "TickerUpdate", "TradeEvent"}
 
         for sf in stream_files[:50]:  # Sample top 50
             try:
-                with open(sf, "r", encoding="utf-8") as f:
+                opener = _gzip.open if sf.name.endswith(".gz") else open
+                with opener(sf, "rt", encoding="utf-8") as f:
                     for i, line in enumerate(f):
                         if i >= sample_lines:
                             break
@@ -219,12 +230,65 @@ class DataHygieneManager:
             results["status"] = "FAIL_MOCK_CONTAMINATION"
         return results
 
+    def purge_aged_streams(
+        self,
+        max_age_days: int = 14,
+        dry_run: bool = False,
+    ) -> Tuple[int, int]:
+        """Delete untraded stream files older than max_age_days.
+
+        Only purges streams that are NOT associated with traded tickers
+        (canonical traded streams are always preserved).
+
+        Returns:
+            Tuple of (files_purged_count, bytes_reclaimed)
+        """
+        if not self.data_dir.exists():
+            return 0, 0
+
+        traded_tickers = self.get_traded_tickers()
+        cutoff = time.time() - (max_age_days * 86400)
+        purged_count = 0
+        bytes_reclaimed = 0
+
+        for filepath in list(self.data_dir.iterdir()):
+            name = filepath.name
+            if not name.startswith("stream_"):
+                continue
+            if filepath.is_dir():
+                continue
+
+            # Extract ticker from filename
+            tkr = name.replace("stream_", "").replace(".jsonl", "").replace(".gz", "")
+            if tkr in traded_tickers:
+                continue  # Never purge traded streams
+
+            try:
+                stat = filepath.stat()
+                if stat.st_mtime >= cutoff:
+                    continue  # Not old enough
+                sz = stat.st_size
+                if not dry_run:
+                    filepath.unlink()
+                    logger.info("Purged aged stream: %s (%d bytes, %.1f days old)",
+                                name, sz, (time.time() - stat.st_mtime) / 86400)
+                purged_count += 1
+                bytes_reclaimed += sz
+            except PermissionError:
+                logger.warning("File locked, skipping: %s", name)
+            except Exception as e:
+                logger.error("Failed to purge aged stream %s: %s", name, e)
+
+        return purged_count, bytes_reclaimed
+
 
 def main() -> None:
     """CLI tool for Data Hygiene & Single-Copy Integrity."""
     parser = argparse.ArgumentParser(description="Kalshi Simulator Data Hygiene & Canonical Store Manager")
     parser.add_argument("--audit", action="store_true", help="Print audit report of data directory")
     parser.add_argument("--purge", action="store_true", help="Execute safe purge of redundant & empty files")
+    parser.add_argument("--retention-days", type=int, default=None,
+                        help="Purge untraded streams older than N days (default: 14)")
     parser.add_argument("--verify-truth", action="store_true", help="Audit tick files for real-data authenticity")
     parser.add_argument("--dry-run", action="store_true", help="Dry run without deleting files")
 
@@ -238,6 +302,13 @@ def main() -> None:
         print(f"Audited Contracts: {res['audited_contracts']}")
         print(f"Valid Exchange Records: {res['valid_kalshi_records']}")
         print(f"Synthetic Mock Detected: {res['synthetic_mock_detected']}")
+
+    elif args.retention_days is not None:
+        days = args.retention_days if args.retention_days > 0 else 14
+        count, reclaimed = mgr.purge_aged_streams(max_age_days=days, dry_run=args.dry_run)
+        mode = "DRY RUN" if args.dry_run else "EXECUTED"
+        print(f"[{mode}] Retention purge ({days}d): {count:,} aged streams removed. "
+              f"Reclaimed {reclaimed / 1024 / 1024:.1f} MB.")
 
     elif args.purge:
         count, reclaimed = mgr.purge_redundant_files(dry_run=args.dry_run)

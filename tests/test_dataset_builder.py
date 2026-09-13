@@ -236,3 +236,29 @@ def test_dynamic_wait_undersampling() -> None:
     X_all, y_all = builder.build_dataset_from_frames(frames, max_wait_ratio=None)
     assert len(X_all) > 4
     assert np.sum(y_all == 2) > 2
+
+
+def test_parse_gzip_tick_file(sample_jsonl_file: Path, tmp_path: Path) -> None:
+    """Test transparent parsing of gzip-compressed .jsonl.gz tick files."""
+    import gzip
+
+    gz_file = tmp_path / "ticks_test.jsonl.gz"
+    with open(sample_jsonl_file, "rb") as f_in, gzip.open(gz_file, "wb") as f_out:
+        f_out.write(f_in.read())
+
+    builder = DatasetBuilder(horizon_steps=5, price_diff_threshold=0.01)
+    frames_raw = builder.parse_tick_file(sample_jsonl_file)
+    frames_gz = builder.parse_tick_file(gz_file)
+
+    assert len(frames_gz) == len(frames_raw)
+    assert len(frames_gz) > 0
+    # Verify exact feature equality
+    for f_r, f_g in zip(frames_raw, frames_gz):
+        assert f_r.timestamp == f_g.timestamp
+        assert f_r.mid_price == f_g.mid_price
+        np.testing.assert_allclose(f_r.features, f_g.features)
+
+    # Test build_from_directory with .gz pattern
+    X_gz, y_gz = builder.build_from_directory(tmp_path, file_pattern="ticks_test.jsonl.gz")
+    assert len(X_gz) > 0
+
