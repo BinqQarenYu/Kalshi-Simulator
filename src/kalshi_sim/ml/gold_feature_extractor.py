@@ -190,7 +190,31 @@ class GoldOrderflowFeatureExtractor:
                 self.process_trade(t)
 
         # 1. Book Depth Extraction
-        if hasattr(book, "get_depth_tuples"):
+        if hasattr(book, "get_depth_float_tuples"):
+            top_yes, top_no = book.get_depth_float_tuples(self.target_depth)
+            if not top_yes or not top_no:
+                return np.zeros(self.FEATURE_DIM, dtype=np.float32)
+
+            best_bid = top_yes[0][0]
+            is_spot = getattr(book, "is_spot", False) or best_bid > 10.0
+
+            if is_spot:
+                best_ask = top_no[0][0] if top_no else (best_bid + 0.01)
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                mid = (best_bid + best_ask) * 0.5
+                spread_bps = max(0.0001, ((best_ask - best_bid) / mid) * 100.0)
+            else:
+                best_ask = (1.0 - top_no[0][0]) if top_no else (best_bid + 0.01)
+                if best_bid <= 0:
+                    best_bid = 0.01
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                spread_bps = max(0.001, min(0.25, best_ask - best_bid))
+
+            bid_sizes = [qty for _, qty in top_yes]
+            ask_sizes = [qty for _, qty in top_no]
+        elif hasattr(book, "get_depth_tuples"):
             top_yes, top_no = book.get_depth_tuples(self.target_depth)
             if not top_yes or not top_no:
                 return np.zeros(self.FEATURE_DIM, dtype=np.float32)
