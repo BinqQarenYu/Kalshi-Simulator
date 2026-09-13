@@ -5,7 +5,7 @@
   ],
   "asset_mode": "single",
   "is_armed": true,
-  "updated_at": "2026-09-12T19:21:20.683005+00:00",
+  "updated_at": "2026-09-13T13:46:45.591815+00:00",
   "max_contracts": 1,
   "assets": {
     "BTC": {
@@ -14,7 +14,7 @@
       "min_confidence": 81.0,
       "min_edge_pct": 6.0,
       "min_ev_dollars": 0.02,
-      "min_spot_diff": 28.0,
+      "min_spot_diff": 21.0,
       "typical_1m_volatility": 14.0,
       "vpin_toxic_threshold": 0.6,
       "take_profit_price_threshold": 0.92,
@@ -29,6 +29,9 @@
       "enable_dynamic_reversal_curve": true,
       "entry_window_open_minutes": 13.0,
       "entry_window_close_minutes": 3.5,
+      "twap_immutability_sniper_cents": 0.75,
+      "max_queue_depth_ahead": 250,
+      "max_clob_spread_cents": 0.05,
       "max_contracts": 1,
       "opening_quarantine_seconds": 90.0,
       "brain_priority_mode": "TREND_ALIGNED_SCALP",
@@ -43,10 +46,7 @@
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0,
-      "twap_immutability_sniper_cents": 0.75,
-      "max_queue_depth_ahead": 250,
-      "max_clob_spread_cents": 0.05
+      "twap_fading_window_seconds": 60.0
     },
     "ETH": {
       "discount_limit_price": 0.48,
@@ -69,15 +69,15 @@
       "enable_dynamic_reversal_curve": true,
       "entry_window_open_minutes": 12.0,
       "entry_window_close_minutes": 4.5,
+      "twap_immutability_sniper_cents": 0.75,
+      "max_queue_depth_ahead": 200,
+      "max_clob_spread_cents": 0.04,
       "max_contracts": 1,
       "enable_dynamic_spot_velocity": true,
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0,
-      "twap_immutability_sniper_cents": 0.75,
-      "max_queue_depth_ahead": 200,
-      "max_clob_spread_cents": 0.04
+      "twap_fading_window_seconds": 60.0
     },
     "SOL": {
       "discount_limit_price": 0.48,
@@ -100,15 +100,15 @@
       "enable_dynamic_reversal_curve": true,
       "entry_window_open_minutes": 11.0,
       "entry_window_close_minutes": 3.5,
+      "twap_immutability_sniper_cents": 0.72,
+      "max_queue_depth_ahead": 150,
+      "max_clob_spread_cents": 0.06,
       "max_contracts": 1,
       "enable_dynamic_spot_velocity": true,
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0,
-      "twap_immutability_sniper_cents": 0.72,
-      "max_queue_depth_ahead": 150,
-      "max_clob_spread_cents": 0.06
+      "twap_fading_window_seconds": 60.0
     },
     "DOGE": {
       "discount_limit_price": 0.48,
@@ -131,15 +131,15 @@
       "enable_dynamic_reversal_curve": true,
       "entry_window_open_minutes": 11.0,
       "entry_window_close_minutes": 3.5,
+      "twap_immutability_sniper_cents": 0.7,
+      "max_queue_depth_ahead": 300,
+      "max_clob_spread_cents": 0.03,
       "max_contracts": 1,
       "enable_dynamic_spot_velocity": true,
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0,
-      "twap_immutability_sniper_cents": 0.7,
-      "max_queue_depth_ahead": 300,
-      "max_clob_spread_cents": 0.03
+      "twap_fading_window_seconds": 60.0
     },
     "GOLD": {
       "discount_limit_price": 0.48,
@@ -162,15 +162,15 @@
       "enable_dynamic_reversal_curve": true,
       "entry_window_open_minutes": 6.5,
       "entry_window_close_minutes": 2.0,
+      "twap_immutability_sniper_cents": 0.75,
+      "max_queue_depth_ahead": 150,
+      "max_clob_spread_cents": 0.05,
       "max_contracts": 1,
       "enable_dynamic_spot_velocity": true,
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0,
-      "twap_immutability_sniper_cents": 0.75,
-      "max_queue_depth_ahead": 150,
-      "max_clob_spread_cents": 0.05
+      "twap_fading_window_seconds": 60.0
     },
     "HYPER": {
       "discount_limit_price": 0.48,
@@ -193,15 +193,15 @@
       "enable_dynamic_reversal_curve": true,
       "entry_window_open_minutes": 12.0,
       "entry_window_close_minutes": 4.5,
+      "twap_immutability_sniper_cents": 0.72,
+      "max_queue_depth_ahead": 200,
+      "max_clob_spread_cents": 0.05,
       "max_contracts": 1,
       "enable_dynamic_spot_velocity": true,
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 2.0,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0,
-      "twap_immutability_sniper_cents": 0.72,
-      "max_queue_depth_ahead": 200,
-      "max_clob_spread_cents": 0.05
+      "twap_fading_window_seconds": 60.0
     }
   },
   "discount_limit_price": 0.51,
@@ -209,7 +209,7 @@
   "min_confidence": 81.0,
   "min_edge_pct": 6.0,
   "min_ev_dollars": 0.02,
-  "min_spot_diff": 28.0,
+  "min_spot_diff": 21.0,
   "typical_1m_volatility": 14.0,
   "vpin_toxic_threshold": 0.6,
   "take_profit_price_threshold": 0.92,
@@ -224,6 +224,9 @@
   "enable_dynamic_reversal_curve": true,
   "entry_window_open_minutes": 13.0,
   "entry_window_close_minutes": 3.5,
+  "twap_immutability_sniper_cents": 0.75,
+  "max_queue_depth_ahead": 250,
+  "max_clob_spread_cents": 0.05,
   "opening_quarantine_seconds": 90.0,
   "brain_priority_mode": "TREND_ALIGNED_SCALP",
   "contract_scaling_mode": "TIER_0_STRICT_1",
@@ -237,8 +240,5 @@
   "velocity_z_score_threshold": 2.5,
   "moneyness_moat_multiplier": 2.0,
   "twap_fading_quarantine_seconds": 15.0,
-  "twap_fading_window_seconds": 60.0,
-  "twap_immutability_sniper_cents": 0.75,
-  "max_queue_depth_ahead": 250,
-  "max_clob_spread_cents": 0.05
+  "twap_fading_window_seconds": 60.0
 }

@@ -542,6 +542,8 @@ export interface BotParameters {
   twap_immutability_sniper_cents?: number;
   max_queue_depth_ahead?: number;
   max_clob_spread_cents?: number;
+  moneyness_moat_multiplier?: number;
+  opening_quarantine_seconds?: number;
   [key: string]: any;
 }
 

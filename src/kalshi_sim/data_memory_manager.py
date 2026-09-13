@@ -8,6 +8,7 @@ for high-frequency financial market streams (L2 deltas, ticks, feature tensors).
 from __future__ import annotations
 
 import asyncio
+import gzip
 import logging
 import time
 from collections import OrderedDict
@@ -182,12 +183,14 @@ class MarketDataMemoryManager:
         max_active_tickers: int = 50,
         batch_flush_size: int = 100,
         flush_interval_seconds: float = 1.0,
+        compress_offload: bool = False,
     ) -> None:
         self.data_dir = data_dir
         self.max_hot_ticks_per_ticker = max_hot_ticks_per_ticker
         self.max_active_tickers = max_active_tickers
         self.batch_flush_size = batch_flush_size
         self.flush_interval_seconds = flush_interval_seconds
+        self.compress_offload = compress_offload
 
         # LRU mapping: ticker -> ZeroCopyRingBuffer[dict]
         self._buffers: OrderedDict[str, ZeroCopyRingBuffer[dict]] = OrderedDict()
@@ -346,13 +349,22 @@ class MarketDataMemoryManager:
         for ticker, lines in grouped.items():
             # Clean filename for ticker
             safe_ticker = ticker.replace("/", "_").replace(":", "_")
-            filepath = self.data_dir / f"stream_{safe_ticker}.jsonl"
-            try:
-                with open(filepath, "ab") as f:
-                    for line in lines:
-                        f.write(line)
-            except Exception as e:
-                logger.error("Disk write error for %s: %s", filepath, e)
+            if self.compress_offload:
+                filepath = self.data_dir / f"stream_{safe_ticker}.jsonl.gz"
+                try:
+                    with gzip.open(filepath, "ab", compresslevel=1) as f:
+                        for line in lines:
+                            f.write(line)
+                except Exception as e:
+                    logger.error("Disk write error for %s: %s", filepath, e)
+            else:
+                filepath = self.data_dir / f"stream_{safe_ticker}.jsonl"
+                try:
+                    with open(filepath, "ab") as f:
+                        for line in lines:
+                            f.write(line)
+                except Exception as e:
+                    logger.error("Disk write error for %s: %s", filepath, e)
 
     async def _flush_remaining_queue(self) -> None:
         """Drain all remaining items in the queue."""
