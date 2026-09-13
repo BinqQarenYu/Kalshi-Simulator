@@ -14,7 +14,92 @@ import {
   Flame,
   Info,
   X,
+  Coins,
+  Globe,
+  Sparkles,
+  ExternalLink,
+  ChevronRight,
+  Database,
 } from 'lucide-react';
+import { NeuralEngineSpec } from '../types';
+
+const NEURAL_ENGINES: NeuralEngineSpec[] = [
+  {
+    id: 'brain_1_spot_macro',
+    name: 'Brain 1: Spot Macro Anchor',
+    filename: 'nano_microscope_overhauled.onnx',
+    version: 'v2.4.1',
+    dimension: 28,
+    features_description: '28-D Spot Microstructure (Binance 5Hz L2 Depth + aggTrade, CVD, VPIN)',
+    target_assets: ['BTC', 'ETH', 'SOL'],
+    supported_venues: ['Kalshi', 'Binance'],
+    role: 'Global Macro Trajectory & Lead-Lag Momentum Anchor',
+    status: 'ACTIVE_LANE_1',
+    architecture: 'QuoLasMicroscopeNet (28 -> 64 -> 32 -> 3 Softmax)',
+    input_shape: '(B, 28) float32 [features_28d]',
+    output_shape: '(B, 3) float32 [P(UP), P(DOWN), P(WAIT)]',
+    latency_budget_ms: 1.8,
+    physics_features: [
+      'OFI L1/5/15 Order Flow Imbalance',
+      '5-Minute Cumulative Volume Delta (CVD)',
+      'Volume-Synchronized Toxicity (VPIN)',
+      '10-Level Spatial Exponential Book Decay'
+    ],
+    adapters: ['Kalshi CME CF BRTI 5Hz', 'Binance Spot L2 Feed']
+  },
+  {
+    id: 'brain_2_kalshi_sniper',
+    name: 'Brain 2: Micro Scalp Sniper',
+    filename: 'kalshi_onnx.onnx',
+    version: 'v1.8.0',
+    dimension: 28,
+    features_description: '28-D Kalshi Binary CLOB Depth & Inside Touch Momentum (15–30s horizon)',
+    target_assets: ['KXBTC15M', 'KXETH15M'],
+    supported_venues: ['Kalshi'],
+    role: 'Local CLOB Spread Compression & Fast Execution Sniper',
+    status: 'ACTIVE_LANE_1',
+    architecture: 'KalshiMicroscopeNet (28 -> 64 -> 32 -> 3 Softmax)',
+    input_shape: '(B, 28) float32 [features_28d]',
+    output_shape: '(B, 3) float32 [P(UP), P(DOWN), P(WAIT)]',
+    latency_budget_ms: 1.2,
+    physics_features: [
+      'Kalshi 15-Level Binary Depth Decay',
+      'Inside Touch Velocity & Spread BPS',
+      'Resting Order Absorption Index',
+      'Adverse Selection Price Drift Guard'
+    ],
+    adapters: ['Kalshi WebSocket CLOB Feed']
+  },
+  {
+    id: 'brain_3_gold_spacetime',
+    name: 'Brain 3: Gold Spacetime & Tri-Venue Engine',
+    filename: 'gold.onnx',
+    version: 'v3.0.0-PRO',
+    dimension: 32,
+    features_description: '32-D Gold Orderflow + Spatial Book Convexity + Spacetime Option Physics',
+    target_assets: ['XAU', 'PAXG', 'GOLD'],
+    supported_venues: ['Kalshi', 'Polymarket', 'Binance'],
+    role: 'Multi-Venue Gold Binary Options & Prediction Microstructure Engine',
+    status: 'STANDALONE_LAB',
+    architecture: 'QuoLasGoldMicroscopeNet (32 -> LayerNorm -> ResNet 64 -> 32 -> 3 Softmax)',
+    input_shape: '(B, 32) float32 [features_32d]',
+    output_shape: '(B, 3) float32 [P(UP), P(DOWN), P(WAIT)]',
+    latency_budget_ms: 1.5,
+    physics_features: [
+      'Standardized Moneyness: z_t = (S_t - K) / (σ * sqrt(τ/60))',
+      'Time-to-Expiry Normalized: τ_norm = τ / 900.0',
+      'OFI Acceleration: ΔOFI_L5 = OFI_t - OFI_{t-3}',
+      'Settlement TWAP Delta: (S_t - TWAP_60s) / σ',
+      '15-Level Spatial Exponential Book Decay (α=0.425)',
+      '13-D Toxic Microstructure (VPIN, CVD, Trade Entropy, Whales, Spoofing)'
+    ],
+    adapters: [
+      'KalshiAdapter (60s Trailing TWAP Parity + CFTC Quadratic Taker Cap)',
+      'PolymarketAdapter (Point-in-Time Oracle Pyth/Chainlink + USDC CLOB)',
+      'BinanceAdapter (Composite Mark Index + Basis-Point Tiered Fees)'
+    ]
+  }
+];
 
 interface StrategyParameters {
   strategy_id?: string;
@@ -155,6 +240,7 @@ const PARAM_DOCS: Record<string, ParamDoc> = {
 export const ONNXSettingsPanel: React.FC = () => {
   const [params, setParams] = useState<StrategyParameters | null>(null);
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
+  const [selectedEngine, setSelectedEngine] = useState<NeuralEngineSpec | null>(null);
   const [saving, setSaving] = useState<boolean>(false);
   const [success, setSuccess] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -359,6 +445,128 @@ export const ONNXSettingsPanel: React.FC = () => {
           <span>{errorMsg}</span>
         </div>
       )}
+
+      {/* Neural Engine Fleet & Multi-Brain Architecture Matrix */}
+      <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-4 space-y-3">
+        <div className="flex items-center justify-between border-b border-[#21262d] pb-2.5">
+          <div className="flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-cyan-400" />
+            <span className="font-bold text-white uppercase text-[11px] tracking-wider">
+              Neural Engine Fleet &amp; Multi-Brain Architecture Matrix
+            </span>
+          </div>
+          <span className="text-[10px] text-gray-400 font-mono">
+            3 ONNX Engines • 1 Standalone Multilateral Brain
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          {NEURAL_ENGINES.map((eng) => {
+            const isGold = eng.id === 'brain_3_gold_spacetime';
+            return (
+              <div
+                key={eng.id}
+                className={`p-3.5 rounded-xl border flex flex-col justify-between transition-all ${
+                  isGold
+                    ? 'bg-amber-950/20 border-amber-500/40 hover:border-amber-400 shadow-sm'
+                    : 'bg-[#0d1117] border-[#262d35] hover:border-cyan-500/40 shadow-sm'
+                }`}
+              >
+                <div className="space-y-2.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      {isGold ? (
+                        <div className="h-7 w-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0">
+                          <Coins className="w-4 h-4 text-amber-400" />
+                        </div>
+                      ) : (
+                        <div className="h-7 w-7 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center shrink-0">
+                          <Layers className="w-4 h-4 text-cyan-400" />
+                        </div>
+                      )}
+                      <div>
+                        <div className="font-bold text-white text-xs flex items-center gap-1.5">
+                          <span>{eng.name}</span>
+                          {isGold && (
+                            <span className="px-1.5 py-0.2 text-[8px] font-mono bg-amber-500/30 text-amber-200 border border-amber-500/50 rounded-full font-bold">
+                              NEW
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] font-mono text-gray-400">{eng.filename}</div>
+                      </div>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 text-[9px] font-mono font-bold rounded-full border shrink-0 ${
+                        eng.status === 'ACTIVE_LANE_1'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                          : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      }`}
+                    >
+                      {eng.status === 'ACTIVE_LANE_1' ? 'LANE 1 LIVE' : 'STANDALONE LAB'}
+                    </span>
+                  </div>
+
+                  <p className="text-[10px] text-slate-300 leading-snug">
+                    {eng.features_description}
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-1.5 pt-0.5 text-[10px] font-mono">
+                    <div className="bg-[#090c14] p-1.5 rounded border border-white/5">
+                      <span className="text-gray-500 block text-[8px] uppercase">Tensor Dimension</span>
+                      <span className="font-bold text-cyan-300">{eng.dimension}-D Vector</span>
+                    </div>
+                    <div className="bg-[#090c14] p-1.5 rounded border border-white/5">
+                      <span className="text-gray-500 block text-[8px] uppercase">Latency Budget</span>
+                      <span className="font-bold text-emerald-300">&lt; {eng.latency_budget_ms}ms</span>
+                    </div>
+                  </div>
+
+                  {/* Venues & Target Assets Badges */}
+                  <div className="space-y-1 pt-1">
+                    <div className="text-[9px] text-gray-400 font-semibold uppercase flex items-center gap-1">
+                      <Globe className="w-2.5 h-2.5 text-blue-400" />
+                      <span>Supported Venues &amp; Adapters</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1">
+                      {eng.supported_venues.map((venue) => (
+                        <span
+                          key={venue}
+                          className="px-1.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[9px] font-mono rounded"
+                        >
+                          {venue}
+                        </span>
+                      ))}
+                      {eng.target_assets.map((asset) => (
+                        <span
+                          key={asset}
+                          className="px-1.5 py-0.5 bg-purple-500/15 border border-purple-500/30 text-purple-300 text-[9px] font-mono rounded"
+                        >
+                          {asset}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-white/5 mt-3 flex items-center justify-between">
+                  <span className="text-[9px] font-mono text-gray-500">
+                    {eng.version}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEngine(eng)}
+                    className="flex items-center gap-1 text-[10px] font-bold text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer px-2 py-1 rounded hover:bg-cyan-500/10 border border-transparent hover:border-cyan-500/30"
+                  >
+                    <span>Inspect Specs</span>
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       {/* 4-Quadrant Control Matrix */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -896,6 +1104,151 @@ export const ONNXSettingsPanel: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Deep Neural Engine Specification Modal */}
+      {selectedEngine && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in"
+          onClick={() => setSelectedEngine(null)}
+        >
+          <div
+            className="bg-[#0f131d] border border-[#28324a] rounded-2xl max-w-2xl w-full p-6 space-y-4 shadow-2xl overflow-y-auto max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-[#262d35] pb-3">
+              <div className="flex items-center gap-3">
+                <div className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 border ${
+                  selectedEngine.id === 'brain_3_gold_spacetime'
+                    ? 'bg-amber-500/20 border-amber-500/40'
+                    : 'bg-cyan-500/20 border-cyan-500/40'
+                }`}>
+                  {selectedEngine.id === 'brain_3_gold_spacetime' ? (
+                    <Coins className="w-5 h-5 text-amber-400" />
+                  ) : (
+                    <Cpu className="w-5 h-5 text-cyan-400" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-white text-sm">{selectedEngine.name}</h3>
+                    <span className={`px-2 py-0.5 text-[9px] font-mono font-bold rounded-full border ${
+                      selectedEngine.status === 'ACTIVE_LANE_1'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    }`}>
+                      {selectedEngine.status === 'ACTIVE_LANE_1' ? 'LANE 1 LIVE' : 'STANDALONE LAB ENGINE'}
+                    </span>
+                  </div>
+                  <div className="text-xs font-mono text-gray-400 mt-0.5">
+                    Model Binary: <span className="text-cyan-300">{selectedEngine.filename}</span> • {selectedEngine.version}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedEngine(null)}
+                className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Top Specs Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+              <div className="bg-[#090c14] p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-500 text-[9px] block uppercase">Vector Dim</span>
+                <span className="font-bold text-cyan-300 text-sm">{selectedEngine.dimension}-D</span>
+              </div>
+              <div className="bg-[#090c14] p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-500 text-[9px] block uppercase">Inference Speed</span>
+                <span className="font-bold text-emerald-300 text-sm">&lt; {selectedEngine.latency_budget_ms}ms</span>
+              </div>
+              <div className="bg-[#090c14] p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-500 text-[9px] block uppercase">Input Shape</span>
+                <span className="font-bold text-purple-300 text-[11px] truncate block">{selectedEngine.input_shape}</span>
+              </div>
+              <div className="bg-[#090c14] p-2.5 rounded-xl border border-white/5">
+                <span className="text-gray-500 text-[9px] block uppercase">Output Shape</span>
+                <span className="font-bold text-amber-300 text-[11px] truncate block">{selectedEngine.output_shape}</span>
+              </div>
+            </div>
+
+            {/* Neural Graph Architecture */}
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Neural Architecture Topology</span>
+              </div>
+              <div className="bg-[#090c14] p-3 rounded-xl border border-white/5 font-mono text-xs text-slate-200">
+                {selectedEngine.architecture}
+              </div>
+            </div>
+
+            {/* Mathematical & Physical Feature Breakdown */}
+            {selectedEngine.physics_features && (
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Feature Formulation &amp; Physics Dimensions</span>
+                </div>
+                <div className="bg-[#090c14] p-3 rounded-xl border border-white/5 space-y-1.5">
+                  {selectedEngine.physics_features.map((feat, idx) => (
+                    <div key={idx} className="flex items-start gap-2 text-xs font-mono text-slate-300">
+                      <span className="text-cyan-400 font-bold shrink-0">#{idx + 1}</span>
+                      <span>{feat}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tri-Venue Adapter Protocol */}
+            {selectedEngine.adapters && (
+              <div className="space-y-1.5">
+                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Globe className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Tri-Venue Adapter Protocol &amp; Settlement Routing</span>
+                </div>
+                <div className="bg-[#090c14] p-3 rounded-xl border border-white/5 space-y-2">
+                  {selectedEngine.adapters.map((adapter, idx) => (
+                    <div key={idx} className="flex items-center justify-between text-xs font-mono bg-[#12161f] p-2 rounded-lg border border-white/5">
+                      <div className="flex items-center gap-2">
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="text-white">{adapter}</span>
+                      </div>
+                      <span className="text-[9px] text-emerald-300 bg-emerald-500/15 px-2 py-0.5 rounded border border-emerald-500/30">
+                        VERIFIED
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Invariant Guarantees Strip */}
+            <div className="p-3 rounded-xl bg-cyan-950/20 border border-cyan-500/30 text-xs text-cyan-200 space-y-1">
+              <div className="font-bold flex items-center gap-1.5 uppercase text-[10px]">
+                <Shield className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Microstructure Safety &amp; Decoupled Invariant</span>
+              </div>
+              <p className="text-[11px] text-slate-300">
+                This ONNX engine operates strictly with <strong>zero IEEE-754 floating-point drift</strong> (Python <code>Decimal</code> throughout settlement logic) and enforces micro-bankroll armor (1 contract hard-cap).
+              </p>
+            </div>
+
+            {/* Close Action */}
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={() => setSelectedEngine(null)}
+                className="px-5 py-2 bg-[#1e293b] hover:bg-[#334155] text-white text-xs font-bold rounded-xl border border-[#334155] transition-colors cursor-pointer"
+              >
+                Close Engine Specs
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

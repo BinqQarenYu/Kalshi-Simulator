@@ -619,3 +619,23 @@ export interface IncubatorPostMortem {
   timestamp: string;
 }
 
+export interface NeuralEngineSpec {
+  id: string;
+  name: string;
+  filename: string;
+  version: string;
+  dimension: number;
+  features_description: string;
+  target_assets: string[];
+  supported_venues: string[];
+  role: string;
+  status: 'ACTIVE_LANE_1' | 'STANDALONE_LAB' | 'STANDBY';
+  architecture: string;
+  input_shape: string;
+  output_shape: string;
+  latency_budget_ms: number;
+  physics_features?: string[];
+  adapters?: string[];
+}
+
+
