@@ -43,3 +43,7 @@
 ## 2026-09-01 - Zero-Copy Ring Buffer C-Level Range Slicing
 **Learning:** In `ZeroCopyRingBuffer`, computing `to_list()` and `get_tail(n)` using Python `for i in range(...)` loops with modulo arithmetic per item introduced significant interpreter loop and index computation overhead under high-frequency stream querying.
 **Action:** Replace element-by-element range loops with C-level list range slicing (`self._buffer[head:] + self._buffer[:head]` and single/double range slices `self._buffer[start_idx:end_idx]`). Reduced `get_tail(100)` latency from ~23.8 µs down to ~1.16 µs per call (~20.6x speedup) and `to_list()` latency from ~50.6 µs down to ~5.78 µs per call (~8.75x speedup).
+
+## 2026-09-02 - Property Getter Bypass & Module-Level Decimal Zero Constant in L2 Delta Ingestion
+**Learning:** Accessing `book.yes_book` / `book.no_book` Python property getters and calling `Decimal("0")` dynamically on every delta update in high-frequency WebSocket order book processing adds property lookup and object instantiation overhead.
+**Action:** Access internal `book._yes_book` and `book._no_book` attributes directly in internal `OrderBookManager.apply_delta` loops and reuse a pre-computed module-level `_ZERO = Decimal("0")` constant. Reduced `apply_delta` latency from ~2.27 µs to ~1.54 µs per delta (~32% latency reduction / ~47% throughput boost).

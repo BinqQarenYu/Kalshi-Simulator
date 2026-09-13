@@ -21,6 +21,8 @@ from kalshi_sim.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# Pre-computed Decimal zero constant to bypass allocation overhead in tick loops
+_ZERO = Decimal("0")
 
 import time
 
@@ -112,12 +114,12 @@ class OrderBookManager:
                 return book
             book._stale = False
 
-        # Apply delta to the appropriate side book
-        side_book = book.yes_book if delta.side == "yes" else book.no_book
-        current_qty = side_book.get(delta.price, Decimal("0"))
+        # Apply delta to the appropriate side book directly (bypassing property getter overhead & Decimal allocations)
+        side_book = book._yes_book if delta.side == "yes" else book._no_book
+        current_qty = side_book.get(delta.price, _ZERO)
         new_qty = current_qty + delta.delta
 
-        if new_qty <= Decimal("0"):
+        if new_qty <= _ZERO:
             side_book.pop(delta.price, None)
         else:
             side_book[delta.price] = new_qty
