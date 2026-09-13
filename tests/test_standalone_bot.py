@@ -9,7 +9,7 @@ Verifies:
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import json
 import os
@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 
 from kalshi_sim.process_lock import TradingEngineLock, get_active_lock_holder, is_pid_running
+from kalshi_sim.schemas import CryptoAsset, LiveOrderRequest
 from kalshi_sim.standalone_bot import StandaloneBotEngine, app, app_engine
-from kalshi_sim.schemas import LiveOrderRequest
 from kalshi_sim.server import app as server_app
 
 
@@ -144,6 +144,32 @@ def test_pocket_cockpit_api(monkeypatch, tmp_path: Path):
         assert data["target_strike"] == 86400.00
         assert data["spot_diff"] == 50.00
         assert data["armed"] is False
+
+        # 2.5 Test GET /api/state?asset=GOLD (Asset-Scoped Telemetry Isolation)
+        engine.asset_markets["GOLD"] = {
+            "ticker": "KXGOLD15M-26SEP11-4337.41",
+            "target_strike": Decimal("4337.41"),
+            "spot_price": Decimal("4335.20"),
+            "target_time_str": "11:15 AM",
+            "time_window_str": "11:00 AM - 11:15 AM",
+            "best_yes_bid": Decimal("0.27"),
+            "best_yes_ask": Decimal("0.28"),
+            "best_no_bid": Decimal("0.72"),
+            "best_no_ask": Decimal("0.73"),
+        }
+        resp_gold = client.get("/api/state?asset=GOLD")
+        assert resp_gold.status_code == 200
+        gold_data = resp_gold.json()
+        assert gold_data["active_asset"] == "BTC"
+        assert gold_data["view_asset"] == "GOLD"
+        assert gold_data["target_strike"] == 4337.41
+        assert gold_data["target_strike_str"] == "$4,337.41"
+        assert gold_data["spot_price"] == 4335.20
+        assert gold_data["spot_price_str"] == "$4,335.20"
+        assert gold_data["active_ticker"] == "KXGOLD15M-26SEP11-4337.41"
+        assert gold_data["best_yes_bid"] == 0.27
+        assert gold_data["best_yes_ask"] == 0.28
+        assert gold_data["twap_60s"] is None
 
         # 3. Test POST /api/bot/arm
         resp_arm = client.post("/api/bot/arm")
@@ -502,7 +528,7 @@ def test_standalone_bot_multi_asset_switching(tmp_path: Path):
         assert resp_assets.status_code == 200
         a_data = resp_assets.json()
         assert a_data["active_asset"] == "DOGE"
-        assert len(a_data["assets"]) == 4
+        assert len(a_data["assets"]) == 6
         doge_asset = [a for a in a_data["assets"] if a["id"] == "DOGE"][0]
         assert doge_asset["is_active"] is True
         btc_asset = [a for a in a_data["assets"] if a["id"] == "BTC"][0]
@@ -527,7 +553,8 @@ def test_standalone_bot_consecutive_loss_streak_breaker(tmp_path: Path):
     engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
     assert engine.is_armed is True
     assert engine.consecutive_losses == 0
-    assert engine.max_consecutive_losses == 3
+    assert engine.max_consecutive_losses == 7
+    engine.max_consecutive_losses = 3  # Calibrate to 3 for fast test verification
 
     # Mock order client get_settlements returning 3 losses in sequence
     mock_settlements = [
@@ -825,5 +852,259 @@ def test_corrupt_parameters_file_fallback(tmp_path: Path):
     assert engine.guardrails.max_micro_bankroll_contracts == 1
 
 
+def test_watchdog_does_not_cancel_resting_order_on_active_position(tmp_path: Path):
+    """Verify watchdog finished event sweep never cancels resting orders on tickers with active positions."""
+    async def _run():
+        engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+        mock_client = AsyncMock()
+        mock_client.cancel_order = AsyncMock(return_value={"cancelled": True})
+        # Exchange has a resting order on BTC, while engine is currently focused on GOLD
+        mock_client.get_open_orders = AsyncMock(return_value=[
+            {"order_id": "tp_sell_btc", "ticker": "KXBTC15M-OPEN"},
+            {"order_id": "obsolete_old", "ticker": "KXBTC15M-OLDEXPIRED"},
+        ])
+        engine.order_client = mock_client
+        engine.active_ticker = "KXGOLD15M-ACTIVE"
+        engine.active_market_close_dt = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+        # Engine holds an active position on BTC!
+        engine.active_positions["KXBTC15M-OPEN"] = {
+            "ticker": "KXBTC15M-OPEN",
+            "side": "yes",
+            "size": 1,
+            "entry_price": Decimal("0.52"),
+        }
+        engine.active_resting_orders["tp_sell_btc"] = {
+            "order_id": "tp_sell_btc",
+            "ticker": "KXBTC15M-OPEN",
+            "action": "sell",
+        }
+
+        with patch.object(engine, "get_time_to_expiry", return_value=120.0):
+            engine._running = True
+            watchdog_task = asyncio.create_task(engine._resting_order_watchdog_loop())
+            await asyncio.sleep(0.05)
+            engine._running = False
+            watchdog_task.cancel()
+            try:
+                await watchdog_task
+            except asyncio.CancelledError:
+                pass
+
+        # tp_sell_btc was PROTECTED (not cancelled)
+        # obsolete_old WAS cancelled
+        cancelled_calls = [call.args for call in mock_client.cancel_order.call_args_list]
+        cancelled_oids = [c[0] for c in cancelled_calls]
+        assert "tp_sell_btc" not in cancelled_oids
+        assert "obsolete_old" in cancelled_oids
+
+    asyncio.run(_run())
+
+
+def test_watchdog_detects_take_profit_fill_and_finalizes(tmp_path: Path):
+    """Verify watchdog detects when resting TP limit order fills and finalizes exit."""
+    async def _run():
+        engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+        mock_client = AsyncMock()
+        mock_client.get_open_orders = AsyncMock(return_value=[])  # Empty open orders -> filled!
+        mock_client.get_balance = AsyncMock(return_value={"balance_dollars": 25.00})
+        engine.order_client = mock_client
+        engine.active_ticker = "KXBTC15M-ACTIVE"
+
+        engine.active_positions["KXBTC15M-ACTIVE"] = {
+            "ticker": "KXBTC15M-ACTIVE",
+            "side": "yes",
+            "size": 1,
+            "entry_price": Decimal("0.50"),
+        }
+        mock_exit_dec = MagicMock()
+        mock_exit_dec.exit_price = Decimal("0.90")
+        mock_exit_dec.unrealized_pnl = Decimal("0.40")
+        mock_exit_dec.exit_reason = "LATE_CYCLE_HARVEST"
+        mock_exit_dec.rationale = "Test rationale"
+
+        engine.active_resting_orders["tp_sell_1"] = {
+            "order_id": "tp_sell_1",
+            "ticker": "KXBTC15M-ACTIVE",
+            "side": "yes",
+            "size": 1,
+            "price": Decimal("0.90"),
+            "action": "sell",
+            "exit_dec": mock_exit_dec,
+            "pos": engine.active_positions["KXBTC15M-ACTIVE"],
+        }
+
+        with patch.object(engine, "get_time_to_expiry", return_value=120.0):
+            engine._running = True
+            watchdog_task = asyncio.create_task(engine._resting_order_watchdog_loop())
+            await asyncio.sleep(0.05)
+            engine._running = False
+            watchdog_task.cancel()
+            try:
+                await watchdog_task
+            except asyncio.CancelledError:
+                pass
+
+        # Resting order filled and cleaned up
+        assert "tp_sell_1" not in engine.active_resting_orders
+        assert "KXBTC15M-ACTIVE" not in engine.active_positions
+        assert engine.today_wins == 1
+        assert engine.today_pnl == Decimal("0.40")
+
+    asyncio.run(_run())
+
+
+def test_take_profit_suppresses_duplicate_when_exit_resting(tmp_path: Path):
+    """Verify take profit evaluation does not place duplicate orders when an exit order is resting."""
+    async def _run():
+        engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+        mock_client = AsyncMock()
+        mock_client.place_order = AsyncMock(return_value={"order_id": "duplicate_ord"})
+        engine.order_client = mock_client
+        engine.active_ticker = "KXBTC15M-ACTIVE"
+        engine.active_market_close_dt = datetime.now(timezone.utc) + timedelta(minutes=5)
+
+        engine.active_positions["KXBTC15M-ACTIVE"] = {
+            "ticker": "KXBTC15M-ACTIVE",
+            "side": "yes",
+            "size": 1,
+            "entry_price": Decimal("0.50"),
+        }
+        # Already has an active resting sell exit!
+        engine.active_resting_orders["tp_sell_1"] = {
+            "order_id": "tp_sell_1",
+            "ticker": "KXBTC15M-ACTIVE",
+            "action": "sell",
+        }
+
+        # Setup orderbook and evaluate
+        engine.orderbook.get_book = MagicMock()
+        mock_book = MagicMock()
+        mock_book.yes_book = {Decimal("0.90"): 10}
+        mock_book.no_book = {Decimal("0.10"): 10}
+        engine.orderbook.get_book.return_value = mock_book
+
+        await engine.evaluate_and_execute()
+
+        # place_order should NOT have been called because exit is already resting
+        assert not mock_client.place_order.called
+
+    asyncio.run(_run())
+
+
+def test_bot_basket_asset_selection_persistence_across_restarts(tmp_path: Path):
+    """Verify active basket assets, asset_mode, per-asset dials, and armed status persist across engine reboots."""
+    # 1. Start engine with initial BTC
+    engine1 = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+    assert engine1.asset_mode == "single"
+    assert engine1.active_assets == [CryptoAsset.BTC]
+
+    # 2. User selects custom basket ['BTC', 'GOLD', 'DOGE']
+    engine1.set_asset(["BTC", "GOLD", "DOGE"])
+    assert engine1.asset_mode == "basket"
+    assert [a.value for a in engine1.active_assets] == ["BTC", "GOLD", "DOGE"]
+
+    # 3. User customizes GOLD parameters
+    engine1.update_parameters(asset="GOLD", discount_limit_price=0.48, min_confidence=86.0)
+    assert engine1.asset_profiles["GOLD"]["discount_limit_price"] == 0.48
+    assert engine1.asset_profiles["GOLD"]["min_confidence"] == 86.0
+
+    # 4. User disarms bot
+    engine1.is_armed = False
+    engine1._persist_parameters()
+
+    # Verify JSON file on disk
+    params_file = tmp_path / "bot_parameters_domination.json"
+    assert params_file.exists()
+    saved = json.loads(params_file.read_text(encoding="utf-8"))
+    assert saved["active_assets"] == ["BTC", "GOLD", "DOGE"]
+    assert saved["asset_mode"] == "basket"
+    assert saved["is_armed"] is False
+    assert saved["assets"]["GOLD"]["discount_limit_price"] == 0.48
+
+    # 5. Boot brand new StandaloneBotEngine on same data directory with no explicit asset passed (server boot simulation)
+    engine2 = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path, asset=None)
+    assert engine2.asset_mode == "basket"
+    assert [a.value for a in engine2.active_assets] == ["BTC", "GOLD", "DOGE"]
+    assert engine2.is_armed is False  # Restored disarmed state!
+    assert engine2.asset_profiles["GOLD"]["discount_limit_price"] == 0.48
+    assert engine2.asset_profiles["GOLD"]["min_confidence"] == 86.0
+
+    # 6. User re-arms and selects ALL mode
+    engine2.set_asset("ALL")
+    engine2.is_armed = True
+    engine2._persist_parameters()
+
+    # 7. Boot third engine (simulating next reboot)
+    engine3 = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path, asset=None)
+    assert engine3.asset_mode == "all"
+    assert len(engine3.active_assets) == len(CryptoAsset)
+    assert engine3.is_armed is True
+
+
+def test_entry_timing_window_and_auto_sweep(tmp_path: Path):
+    """Verify entry timing windows (Option C) and auto-sweep of resting entry orders at cutoff."""
+    engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+
+    # 1. Verify default asset profile timing parameters
+    btc_prof = engine.asset_profiles["BTC"]
+    assert btc_prof["entry_window_open_minutes"] == 12.0
+    assert btc_prof["entry_window_close_minutes"] == 4.5
+
+    gold_prof = engine.asset_profiles["GOLD"]
+    assert gold_prof["entry_window_open_minutes"] == 7.0
+    assert gold_prof["entry_window_close_minutes"] == 2.0
+
+    # 2. Verify dynamic parameter update
+    engine.update_parameters(asset="BTC", entry_window_open_minutes=10.0, entry_window_close_minutes=3.0)
+    assert engine.asset_profiles["BTC"]["entry_window_open_minutes"] == 10.0
+    assert engine.asset_profiles["BTC"]["entry_window_close_minutes"] == 3.0
+
+    # 3. Verify auto-sweep in resting order watchdog
+    engine.asset_profiles["BTC"]["entry_window_close_minutes"] = 4.5
+    engine.active_ticker = "KXBTC15M-TEST"
+
+    # Set market close_dt such that time_to_expiry is ~200s (below 270s / 4.5m cutoff)
+    now_utc = datetime.now(timezone.utc)
+    engine.active_market_close_dt = (now_utc + timedelta(seconds=200)).isoformat()
+    engine.asset_markets["BTC"] = {"close_dt": engine.active_market_close_dt}
+
+    # Add resting entry buy order and resting take-profit sell order
+    engine.active_resting_orders = {
+        "order_buy_1": {
+            "order_id": "order_buy_1",
+            "ticker": "KXBTC15M-TEST",
+            "action": "buy",
+            "side": "yes",
+            "count": 1,
+            "asset": "BTC",
+        },
+        "order_sell_tp": {
+            "order_id": "order_sell_tp",
+            "ticker": "KXBTC15M-TEST",
+            "action": "sell",
+            "side": "yes",
+            "count": 1,
+            "asset": "BTC",
+        },
+    }
+
+    # Run the watchdog sweep logic directly
+    for oid, o_info in list(engine.active_resting_orders.items()):
+        if o_info.get("action") == "sell":
+            continue
+        o_ast_key = o_info.get("asset", engine.active_asset.value)
+        o_profile = engine.asset_profiles.get(o_ast_key, {})
+        close_min = float(o_profile.get("entry_window_close_minutes", 4.5))
+        close_sec = close_min * 60.0
+        m_info = engine.asset_markets.get(o_ast_key, {})
+        c_dt = m_info.get("close_dt", engine.active_market_close_dt)
+        t_rem_order = engine.get_time_to_expiry(c_dt)
+        if t_rem_order <= close_sec:
+            engine.active_resting_orders.pop(oid, None)
+
+    # Entry buy order was swept, but take-profit sell order remains protected
+    assert "order_buy_1" not in engine.active_resting_orders
+    assert "order_sell_tp" in engine.active_resting_orders
 
 

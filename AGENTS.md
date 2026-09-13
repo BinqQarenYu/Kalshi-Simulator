@@ -42,8 +42,9 @@ Zero TypeScript compilation errors and a clean build in `frontend/dist/`.
    - Sizing is strictly hard-capped to **1 contract for each asset** (`BTC`, `ETH`, `SOL`, `DOGE`).
 4. **Kalshi Taker Fees**:
    - Taker fee: `ceil(0.07 * C * P * (1 - P))` with $0.01 floor and $0.02 cap per contract. Maker resting orders receive $0.00 fee.
-5. **Adverse Selection Guard**:
-   - When Bitcoin spot velocity |\Delta \text{Spot}| > $15, simulate adverse selection price drift (+$0.01).
+5. **Adverse Selection Guard & Dynamic Spot Velocity Front-Run ($\Delta^*$)**:
+   - Spot Velocity Front-Run operates via 4-regime fading mathematics: Macro Drift ($T > 240$s, $|Z_v| \ge 2.50\sigma$), Transition ($60\text{s} < T \le 240$s, adaptive $\Delta^*(T)$ with $2.0\sigma$ winning sweetspot \$28.00 BTC), Silas TWAP Gravity ($15\text{s} < T \le 60$s, quadratic decay $\sim (T/60)^2$ vetoing exits where $v < v_{\text{crit}}$), and Expiration Quarantine ($T \le 15$s, strict hold for \$1.00 settlement).
+   - In simulation, fast market adverse drift (+$0.01) is triggered when spot velocity exceeds calibrated asset thresholds.
 6. **CF Benchmarks BRTI 5Hz & Settlement TWAP Parity**:
    - Spot price ($S_t$) and moneyness ($S_t - K$) must stream from Kalshi's authenticated CME CF Bitcoin Real-Time Index feed (`cfbenchmarks_value_5hz` at 200ms) with official trailing 60s TWAP (`avg_60s_data`) for exact settlement parity.
 7. **Pluggable Strategy Architecture & Multi-Lane Execution**:

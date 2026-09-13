@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.schemas import L2BookState, OrderBookLevel, OrderSide
+from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderBookLevel, OrderSide
 
 
 def test_domination_bot_playbook3_late_gamma_snub() -> None:
@@ -446,3 +446,191 @@ def test_domination_bot_extreme_volatility_swing_empty_ask_no_crash() -> None:
         assert decision_down.p_down > 0.90
 
 
+def test_domination_bot_playbook1_opening_quarantine_veto() -> None:
+    """Verify that Playbook 1 strictly outputs WAIT when in the opening cycle quarantine window."""
+    bot = ThreeStepDominationBot(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0)
+
+    book = L2BookState(market_ticker="KXBTC15M-T79000")
+    book.yes_book = {Decimal("0.50"): Decimal("100")}
+    book.no_book = {Decimal("0.50"): Decimal("100")}
+
+    # T = 850s > 810s ceiling (Quarantine active during opening 90s of 900s cycle)
+    decision = bot.evaluate(
+        book=book,
+        spot_price=79100.0,  # +$100.00 breakout proposal (clears proximity moat)
+        target_strike=79000.0,
+        time_to_expiry_s=850.0,
+        total_equity=Decimal("25.00"),
+        max_position_size=1,
+    )
+
+    assert decision.recommended_side == "wait"
+    assert "Opening Cycle Quarantine Active" in decision.rationale
+    assert "Playbook 1" in decision.rationale
+
+
+def test_domination_bot_playbook1_post_quarantine_activation() -> None:
+    """Verify that Playbook 1 activates normally once the quarantine window has expired."""
+    bot = ThreeStepDominationBot(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0)
+
+    book = L2BookState(market_ticker="KXBTC15M-T79000")
+    book.yes_book = {Decimal("0.48"): Decimal("100")}
+    book.no_book = {Decimal("0.52"): Decimal("100")}
+
+    # T = 750s <= 810s ceiling (Quarantine expired, Playbook 1 active)
+    decision = bot.evaluate(
+        book=book,
+        spot_price=79080.0,  # +$80.00 strong breakout
+        target_strike=79000.0,
+        time_to_expiry_s=750.0,
+        total_equity=Decimal("25.00"),
+        max_position_size=1,
+    )
+
+    assert "Playbook 1" in decision.active_playbook
+    assert decision.playbook_stage == "breakout"
+    assert decision.recommended_side == "yes"
+
+
+def test_domination_bot_playbook1_onnx_microstructure_veto() -> None:
+    """Verify that Playbook 1 vetoes a breakout proposal when ONNX signals opposing flow or wait."""
+    class MockONNXEngine:
+        def __init__(self, signal: str, confidence: float = 0.85, vpin_veto: bool = False):
+            self.signal = signal
+            self.confidence = confidence
+            self.vpin_veto = vpin_veto
+
+        def process_orderbook_tick(self, book):
+            return {
+                "signal": self.signal,
+                "confidence": self.confidence,
+                "vpin_veto": self.vpin_veto,
+                "vpin_score": 0.50,
+                "prob_wait": 0.80 if self.signal == "WAIT" else 0.10,
+                "prob_long": 0.85 if self.signal == "LONG" else 0.05,
+                "prob_short": 0.85 if self.signal == "SHORT" else 0.05,
+            }
+
+    # 1. Opposing signal: Proposing BUY YES on spot diff, but ONNX signals SHORT (downward absorption)
+    mock_opposing = MockONNXEngine(signal="SHORT")
+    bot_opposing = ThreeStepDominationBot(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0, onnx_engine=mock_opposing)
+
+    book = L2BookState(market_ticker="KXBTC15M-T79000")
+    book.yes_book = {Decimal("0.48"): Decimal("100")}
+    book.no_book = {Decimal("0.52"): Decimal("100")}
+
+    decision_veto = bot_opposing.evaluate(
+        book=book,
+        spot_price=79080.0,  # +$80.00 breakout
+        target_strike=79000.0,
+        time_to_expiry_s=750.0,
+        total_equity=Decimal("25.00"),
+        max_position_size=1,
+    )
+
+    assert decision_veto.recommended_side == "wait"
+    assert "ONNX Microstructure Veto" in decision_veto.rationale
+    assert "Brain 1 signaled SHORT" in decision_veto.rationale
+
+    # 2. Confirmed signal: ONNX signals LONG -> trade passes!
+    mock_agree = MockONNXEngine(signal="LONG")
+    bot_agree = ThreeStepDominationBot(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0, onnx_engine=mock_agree)
+
+    decision_pass = bot_agree.evaluate(
+        book=book,
+        spot_price=79080.0,
+        target_strike=79000.0,
+        time_to_expiry_s=750.0,
+        total_equity=Decimal("25.00"),
+        max_position_size=1,
+    )
+    assert decision_pass.recommended_side == "yes"
+
+
+def test_domination_bot_clob_spread_corridor_veto() -> None:
+    """Test Frontier 3: Vance Max CLOB Spread Corridor Cap vetoes wide/illiquid markets."""
+    bot = ThreeStepDominationBot(
+        max_clob_spread_cents=0.05,  # 5¢ max corridor
+        min_spot_diff=35.0,
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T79000")
+    # Best YES bid is 0.40; Best YES ask is 0.52 (via NO bid of 0.48) -> Spread is 12¢ > 5¢
+    book.yes_book = {Decimal("0.40"): Decimal("100")}
+    book.no_book = {Decimal("0.48"): Decimal("100")}
+
+    decision = bot.evaluate(
+        book=book,
+        spot_price=79080.0,
+        target_strike=79000.0,
+        time_to_expiry_s=400.0,
+        total_equity=Decimal("50.00"),
+        max_position_size=1,
+    )
+
+    assert decision.recommended_side == "wait"
+    assert "Wide CLOB Spread Veto" in decision.rationale
+    assert "corridor cap" in decision.rationale
+
+
+def test_domination_bot_anti_toxic_queue_depth_veto() -> None:
+    """Test Frontier 2: Vance Anti-Toxic Queue Depth Shield vetoes resting behind massive whale walls."""
+    bot = ThreeStepDominationBot(
+        max_queue_depth_ahead=250,  # 250 contracts limit
+        discount_limit_price=Decimal("0.52"),
+        max_clob_spread_cents=0.10,  # Allow spread to isolate queue test
+        min_spot_diff=35.0,
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T79000")
+    # Market ask is 0.58 (> 0.52 discount limit), so order must rest as a maker bid at 0.52
+    # 400 contracts already resting at 0.52 (> 250 limit)
+    book.yes_book = {Decimal("0.52"): Decimal("400"), Decimal("0.50"): Decimal("100")}
+    book.no_book = {Decimal("0.42"): Decimal("100")}  # YES ask = 1 - 0.42 = 0.58
+
+    decision = bot.evaluate(
+        book=book,
+        spot_price=79080.0,
+        target_strike=79000.0,
+        time_to_expiry_s=400.0,
+        total_equity=Decimal("50.00"),
+        max_position_size=1,
+    )
+
+    assert decision.recommended_side == "wait"
+    assert "Toxic Queue Depth Veto" in decision.rationale
+    assert "400 contracts resting ahead" in decision.rationale
+
+
+def test_domination_bot_playbook4_silas_twap_immutability_sniper() -> None:
+    """Test Frontier 1: Silas TWAP Immutability Sniper harvests late-cycle retail panic dumps."""
+    bot = ThreeStepDominationBot(
+        twap_immutability_sniper_cents=0.75,  # 75¢ ceiling
+        max_clob_spread_cents=0.06,
+        min_spot_diff=35.0,
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T79000")
+    # Retail panicking: offering YES at 0.72 (NO bid is 0.28 -> YES ask is 0.72)
+    # Best YES bid is 0.69 -> Spread is 3¢ <= 5¢
+    book.yes_book = {Decimal("0.69"): Decimal("50")}
+    book.no_book = {Decimal("0.28"): Decimal("100")}
+
+    # T = 30s (within [15s, 45s] window). Spot +$60 above strike, TWAP +$55 above strike.
+    decision = bot.evaluate(
+        book=book,
+        spot_price=79060.0,
+        target_strike=79000.0,
+        time_to_expiry_s=30.0,
+        twap_60s=79055.0,
+        total_equity=Decimal("50.00"),
+        max_position_size=1,
+    )
+
+    assert decision.strategy_id == "3_step_domination_bot"
+    assert decision.playbook_stage == "twap_sniper"
+    assert "Playbook 4: Silas TWAP Immutability Sniper" in decision.active_playbook
+    assert decision.recommended_side == "yes"
+    assert decision.recommended_contracts == 1
+    assert decision.limit_price == 0.72
+    assert "Endgame Harvest" in decision.rationale

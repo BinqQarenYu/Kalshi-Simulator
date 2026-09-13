@@ -197,6 +197,7 @@ class ContinuousModelTrainer:
         max_recent_tick_files: int = 15,
         max_frames_per_file: int = 500,
         min_samples_to_train: int = 64,
+        file_pattern: str = "stream_*.jsonl",
         enabled: bool = True,
     ) -> None:
         self.data_dir = Path(data_dir)
@@ -212,6 +213,7 @@ class ContinuousModelTrainer:
         self.max_recent_tick_files = max_recent_tick_files
         self.max_frames_per_file = max_frames_per_file
         self.min_samples_to_train = min_samples_to_train
+        self.file_pattern = file_pattern
 
         # Lifecycle and State
         self._enabled = enabled
@@ -393,7 +395,14 @@ class ContinuousModelTrainer:
         self.status = "EXTRACTING"
         logger.info("🧠 [CONTINUOUS TRAINER] Starting new learning cycle (Cycle #%d)...", self.cycles_completed + 1)
 
-        # 1. Harvest recent tick logs
+        # 1. Harvest recent tick logs (prioritize stream_*.jsonl canonical tape)
+        pattern_to_use = self.file_pattern
+        matched_files = list(self.data_dir.glob(self.file_pattern))
+        if not matched_files and self.file_pattern == "stream_*.jsonl":
+            fallback_files = list(self.data_dir.glob("ticks_*.jsonl"))
+            if fallback_files:
+                pattern_to_use = "ticks_*.jsonl"
+
         builder = DatasetBuilder(
             horizon_steps=15,
             horizon_seconds=20.0,
@@ -405,7 +414,7 @@ class ContinuousModelTrainer:
 
         X_recent, y_recent = builder.build_from_directory(
             self.data_dir,
-            file_pattern="ticks_*.jsonl",
+            file_pattern=pattern_to_use,
             max_files=self.max_recent_tick_files,
         )
 

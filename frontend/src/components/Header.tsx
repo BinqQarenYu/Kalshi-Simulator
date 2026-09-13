@@ -6,7 +6,7 @@
 
 import React, { useState } from 'react';
 import { MarketState, MemoryProfileData, IntegrityStatus, ComplianceStatus, SystemResourceMetrics, LivePortfolioState, CryptoAsset } from '../types';
-import { Bot, RefreshCw, Radio, Share2, ArrowDownToLine, MessageSquare, Volume2, VolumeX, Activity, Zap, Play, Award, Loader2, ShieldCheck, ShieldAlert, Scale, Cpu, Wallet, AlertOctagon, BarChart3 } from 'lucide-react';
+import { Bot, RefreshCw, Radio, Share2, ArrowDownToLine, MessageSquare, Volume2, VolumeX, Activity, Zap, Play, Award, Loader2, ShieldCheck, ShieldAlert, Scale, Cpu, Wallet, AlertOctagon, BarChart3, TrendingUp } from 'lucide-react';
 import { soundFX } from '../utils/audioFX';
 
 interface HeaderProps {
@@ -296,67 +296,49 @@ export const Header: React.FC<HeaderProps> = ({
           className={`flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#161b22] border text-xs shadow-md cursor-default ${
             activeStrategyBot === '3_step_domination_bot'
               ? 'border-amber-500/40 shadow-amber-500/10'
-              : activeStrategyBot === 'macro_onnx'
+              : activeStrategyBot === 'macro_onnx' || activeStrategyBot === 'onnx_microstructure_bot'
               ? 'border-purple-500/40 shadow-purple-500/10'
-              : activeStrategyBot === 'macro_trend_dominion'
-              ? 'border-cyan-500/40 shadow-cyan-500/10'
-              : activeStrategyBot === 'dominion_2_bot'
-              ? 'border-emerald-500/40 shadow-emerald-500/10'
-              : 'border-blue-500/40 shadow-blue-500/10'
+              : 'border-cyan-500/40 shadow-cyan-500/10'
           }`}
           title={`Active Strategy Bot: ${
             activeStrategyBot === '3_step_domination_bot'
-              ? '3-Step Domination Bot (Playbook 1: Early Momentum, Playbook 2: Mid OFI Drift, Playbook 3: Gamma Snub)'
-              : activeStrategyBot === 'macro_onnx'
-              ? 'Macro ONNX Bot (84.6% Win Rate • Multi-Scale Macro Trend + Retrained ONNX Microstructure)'
-              : activeStrategyBot === 'macro_trend_dominion'
-              ? 'Macro Trend Dominion (1-Hour Trend Following)'
-              : activeStrategyBot === 'dominion_2_bot'
-              ? 'Dominion 2 Bot (Anti-Pin Scalper)'
-              : 'ONNX Microstructure Bot'
+              ? 'Bot 1: 3-Step Domination Bot (Port 8001 • Lane 1 LIVE)'
+              : activeStrategyBot === 'macro_onnx' || activeStrategyBot === 'onnx_microstructure_bot'
+              ? 'Bot 2: ONNX Strategy / Dual-Brain ONNX (Port 8002 • Lane 2 Shadow)'
+              : 'Bot 3: Macro Trend Dominion (Port 8003 • Lane 2 Shadow)'
           }`}
         >
           <div className={`h-2 w-2 rounded-full animate-ping ${
             activeStrategyBot === '3_step_domination_bot'
               ? 'bg-amber-400'
-              : activeStrategyBot === 'macro_onnx'
+              : activeStrategyBot === 'macro_onnx' || activeStrategyBot === 'onnx_microstructure_bot'
               ? 'bg-purple-400'
-              : activeStrategyBot === 'macro_trend_dominion'
-              ? 'bg-cyan-400'
-              : activeStrategyBot === 'dominion_2_bot'
-              ? 'bg-emerald-400'
-              : 'bg-blue-400'
+              : 'bg-cyan-400'
           }`} />
           {activeStrategyBot === '3_step_domination_bot' ? (
             <Zap className="h-3.5 w-3.5 text-amber-400" />
-          ) : activeStrategyBot === 'macro_onnx' ? (
+          ) : activeStrategyBot === 'macro_onnx' || activeStrategyBot === 'onnx_microstructure_bot' ? (
             <Cpu className="h-3.5 w-3.5 text-purple-400" />
-          ) : activeStrategyBot === 'dominion_2_bot' ? (
-            <Award className="h-3.5 w-3.5 text-emerald-400" />
           ) : (
-            <Cpu className="h-3.5 w-3.5 text-blue-400" />
+            <TrendingUp className="h-3.5 w-3.5 text-cyan-400" />
           )}
           <div className="flex items-center gap-1.5">
             <span className="text-[#8b949e] font-sans text-[11px] hidden sm:inline">Active Bot:</span>
             <span className="font-bold text-white text-[11px]">
               {activeStrategyBot === '3_step_domination_bot'
-                ? '3-Step Domination'
-                : activeStrategyBot === 'macro_onnx'
-                ? 'Macro ONNX'
-                : activeStrategyBot === 'macro_trend_dominion'
-                ? 'Macro Trend'
-                : activeStrategyBot === 'dominion_2_bot'
-                ? 'Dominion 2'
-                : 'ONNX ML'}
+                ? 'Bot 1 (3-Step Dom)'
+                : activeStrategyBot === 'macro_onnx' || activeStrategyBot === 'onnx_microstructure_bot'
+                ? 'Bot 2 (ONNX Dual-Brain)'
+                : 'Bot 3 (Macro Trend)'}
             </span>
             {activeStrategyBot === '3_step_domination_bot' && (
               <span className="px-1.5 py-0.2 text-[9px] font-mono bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-full font-extrabold">
-                Playbooks Active
+                Lane 1 Live
               </span>
             )}
-            {activeStrategyBot === 'macro_onnx' && (
+            {activeStrategyBot !== '3_step_domination_bot' && (
               <span className="px-1.5 py-0.2 text-[9px] font-mono bg-purple-500/30 text-purple-200 border border-purple-500/40 rounded-full font-extrabold">
-                84.6% WR • Champ
+                Lane 2 Shadow
               </span>
             )}
           </div>

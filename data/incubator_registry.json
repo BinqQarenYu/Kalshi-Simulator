@@ -1,0 +1,36 @@
+{
+  "title": "Kalshi Desk Lane 2 Incubator Registry",
+  "updated_at": "2026-09-12T06:25:22.640881+00:00",
+  "assets": {
+    "GOLD": {
+      "status": "INCUBATOR",
+      "is_locked": true,
+      "strategy": "GoldInversionBot",
+      "target_cycles": 30,
+      "target_win_rate": 0.65,
+      "completed_cycles": 0,
+      "wins": 0,
+      "losses": 0,
+      "current_win_rate": 0.0,
+      "net_pnl": 0.0,
+      "certified_at": null,
+      "lock_reason": "Quarantined in Lane 2 Incubator under Council Testing (17.1% historical WR failure)",
+      "quarantined_at": "2026-09-12T09:15:00Z"
+    },
+    "DOGE": {
+      "status": "INCUBATOR",
+      "is_locked": true,
+      "strategy": "DogeInversionBot",
+      "target_cycles": 30,
+      "target_win_rate": 0.65,
+      "completed_cycles": 0,
+      "wins": 0,
+      "losses": 0,
+      "current_win_rate": 0.0,
+      "net_pnl": 0.0,
+      "certified_at": null,
+      "lock_reason": "Quarantined in Lane 2 Incubator under Council Testing (14.3% historical WR failure, illiquid spread dump)",
+      "quarantined_at": "2026-09-12T09:42:00Z"
+    }
+  }
+}

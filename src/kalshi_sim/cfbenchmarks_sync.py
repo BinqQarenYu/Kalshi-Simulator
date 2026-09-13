@@ -43,6 +43,7 @@ DEFAULT_CF_INDICES: list[str] = [
     "ETHUSD_RTI",
     "SOLUSD_RTI",
     "DOGEUSD_RTI",
+    "HYPEUSD_RTI",
 ]
 
 INDEX_TO_ASSET: dict[str, CryptoAsset] = {
@@ -50,6 +51,11 @@ INDEX_TO_ASSET: dict[str, CryptoAsset] = {
     "ETHUSD_RTI": CryptoAsset.ETH,
     "SOLUSD_RTI": CryptoAsset.SOL,
     "DOGEUSD_RTI": CryptoAsset.DOGE,
+    "XAUUSD": CryptoAsset.GOLD,
+    "GOLD": CryptoAsset.GOLD,
+    "HYPEUSD_RTI": CryptoAsset.HYPER,
+    "HYPE": CryptoAsset.HYPER,
+    "HYPER": CryptoAsset.HYPER,
 }
 
 COINBASE_FALLBACK_PAIRS: dict[CryptoAsset, str] = {
@@ -57,6 +63,8 @@ COINBASE_FALLBACK_PAIRS: dict[CryptoAsset, str] = {
     CryptoAsset.ETH: "ETH-USD",
     CryptoAsset.SOL: "SOL-USD",
     CryptoAsset.DOGE: "DOGE-USD",
+    CryptoAsset.GOLD: "PAXG-USD",
+    CryptoAsset.HYPER: "HYPE-USD",
 }
 
 

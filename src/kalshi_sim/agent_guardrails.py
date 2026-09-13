@@ -6,13 +6,15 @@ Enforces pre-trade execution guardrails, anti-kamikaze bankroll protection,
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time as dt_time
 from decimal import Decimal
 import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("kalshi_sim.guardrails")
+ET_ZONE = ZoneInfo("America/New_York")
 
 
 class AgentGuardrails:
@@ -91,6 +93,86 @@ class AgentGuardrails:
     # 1. Pre-Trade Intent Validation
     # -------------------------------------------------------------------------
 
+    def check_macro_news_blackout(
+        self,
+        ticker_or_asset: str,
+        now_dt: Optional[datetime] = None,
+    ) -> Tuple[bool, str]:
+        """Verify whether high-impact US macroeconomic release embargo is active.
+
+        Embargos:
+          1. 08:25:00 - 08:38:00 Eastern Time (US CPI, PPI, NFP, GDP, Retail Sales).
+          2. 13:55:00 - 14:10:00 Eastern Time (FOMC Rate Decisions & Statements).
+
+        Applies to physical macro assets: GOLD (KXGOLD15M).
+        """
+        asset_str = ticker_or_asset.upper()
+        if "GOLD" not in asset_str and "XAU" not in asset_str:
+            return False, ""
+
+        if now_dt is None:
+            now_dt = datetime.now(timezone.utc)
+        elif now_dt.tzinfo is None:
+            now_dt = now_dt.replace(tzinfo=timezone.utc)
+
+        et_now = now_dt.astimezone(ET_ZONE)
+        t_time = et_now.time()
+
+        # Window 1: Morning 8:25 AM - 8:38 AM ET
+        w1_start = dt_time(8, 25, 0)
+        w1_end = dt_time(8, 38, 0)
+        if w1_start <= t_time <= w1_end:
+            msg = (
+                f"[GUARDRAIL VETO] MACRO EVENT BLACKOUT: Current time {et_now.strftime('%H:%M:%S ET')} "
+                f"is inside the US Economic Data Release window (08:25-08:38 ET). Trading for {ticker_or_asset} embargoed."
+            )
+            return True, msg
+
+        # Window 2: Afternoon 1:55 PM - 2:10 PM ET
+        w2_start = dt_time(13, 55, 0)
+        w2_end = dt_time(14, 10, 0)
+        if w2_start <= t_time <= w2_end:
+            msg = (
+                f"[GUARDRAIL VETO] MACRO EVENT BLACKOUT: Current time {et_now.strftime('%H:%M:%S ET')} "
+                f"is inside the FOMC Release window (13:55-14:10 ET). Trading for {ticker_or_asset} embargoed."
+            )
+            return True, msg
+
+        return False, ""
+
+    def verify_macro_event_embargo(
+        self,
+        ticker_or_asset: str,
+        now_dt: Optional[datetime] = None,
+    ) -> Tuple[bool, str]:
+        """Alias for check_macro_news_blackout."""
+        return self.check_macro_news_blackout(ticker_or_asset, now_dt)
+
+    def verify_incubator_lock(
+        self,
+        ticker_or_asset: str,
+        is_live: bool = True,
+    ) -> Tuple[bool, str]:
+        """Verify whether an asset is quarantined in Lane 2 Incubator and locked from Live trading."""
+        if not is_live:
+            return False, ""
+        from kalshi_sim.incubator_manager import get_incubator_manager
+
+        inc_mgr = get_incubator_manager()
+        asset_str = ticker_or_asset.upper()
+
+        for key in inc_mgr.get_status().keys():
+            if key in asset_str:
+                if inc_mgr.is_locked(key):
+                    reason = inc_mgr.get_lock_reason(key)
+                    return True, f"[INCUBATOR LOCK VETO] {key} is quarantined in Lane 2 Incubator: {reason}"
+
+        if inc_mgr.is_locked(asset_str):
+            reason = inc_mgr.get_lock_reason(asset_str)
+            return True, f"[INCUBATOR LOCK VETO] {asset_str} is quarantined in Lane 2 Incubator: {reason}"
+
+        return False, ""
+
     def validate_pre_trade_intent(
         self,
         ticker: str,
@@ -131,6 +213,19 @@ class AgentGuardrails:
             )
             self._record_rejection("5m_live_prohibited", msg, ticker, now_utc)
             return False, msg, 0, {"veto": "5m_live_prohibited", "ticker": ticker, "is_live": True}
+
+        # 0b. Macro Event News Blackout Veto (e.g. GOLD during high-impact US economic releases)
+        is_macro_blackout, macro_reason = self.check_macro_news_blackout(ticker)
+        if is_macro_blackout:
+            self._record_rejection("macro_event_blackout", macro_reason, ticker, now_utc)
+            return False, macro_reason, 0, {"veto": "macro_event_blackout", "ticker": ticker}
+
+        # 0c. Lane 2 Incubator Live Lock Veto
+        if is_live:
+            is_locked, lock_reason = self.verify_incubator_lock(ticker, is_live=True)
+            if is_locked:
+                self._record_rejection("incubator_locked", lock_reason, ticker, now_utc)
+                return False, lock_reason, 0, {"veto": "incubator_locked", "ticker": ticker}
 
         # Update peak equity
         if self._peak_equity is None or total_equity > self._peak_equity:

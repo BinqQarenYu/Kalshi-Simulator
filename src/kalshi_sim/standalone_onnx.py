@@ -768,12 +768,13 @@ class StandaloneONNXEngine:
 
             # 3. Execution Dispatch (Live vs Lane 2 Shadow)
             if self.execution_mode == "LIVE" and self.order_client:
-                # 3a. Cross-Bot CFTC Anti-Wash Trading Coordinator Check
+                # 3a. Cross-Bot CFTC Anti-Wash Trading Coordinator & Seal Gate Check
                 is_permitted, coord_reason = self.coordinator.check_trade_permission(
                     ticker=target_ticker,
                     proposed_side=rec_side,
                     bot_id="the_onnx_strategy",
                     requested_contracts=approved_size,
+                    is_live=(self.execution_mode == "LIVE"),
                 )
                 if not is_permitted:
                     logger.warning("🛡️ [COORDINATOR VETO] %s on %s: %s", rec_side.upper(), target_ticker, coord_reason)

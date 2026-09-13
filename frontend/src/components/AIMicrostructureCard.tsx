@@ -83,8 +83,8 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   const isDualOnnx = activeStrategy === 'dual_onnx' || activeStrategy === 'dual_onnx_bot' || activeStrategy === 'dual_onnx_arbitrage';
   const isMacroOnnx = !isDualOnnx && (activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion');
   const isMacroTrend = !isDualOnnx && !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend');
-  const isDominion2 = activeStrategy === 'dominion_2_bot';
   const is3StepBot = activeStrategy === '3_step_domination_bot';
+  const isDominion2 = false; // Deprecated and unregistered
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';
 
   // Close dropdown on outside click
@@ -318,37 +318,6 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 {isMacroTrend && <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-1" />}
               </button>
 
-              {/* Bot 0: Dominion 2 Bot (Anti-Pin Scalper) */}
-              <button
-                type="button"
-                role="option"
-                aria-selected={isDominion2}
-                onClick={() => handleStrategyChange('dominion_2_bot')}
-                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
-                  isDominion2
-                    ? 'bg-emerald-500/15 border border-emerald-500/40'
-                    : 'hover:bg-[#21262d] border border-transparent'
-                }`}
-              >
-                <div className="flex items-start gap-2.5">
-                  <div className="h-7 w-7 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0 mt-0.5">
-                    <Crown className="h-4 w-4 text-emerald-400" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <span>Dominion 2 Bot</span>
-                      <span className="px-1.5 py-0.2 text-[9px] font-mono bg-emerald-500/20 text-emerald-300 rounded-full font-bold">
-                        Anti-Pin Scalper
-                      </span>
-                    </div>
-                    <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
-                      Entry Ceiling ≤$0.55 • Discount Hunting • Tie Edge • Pin Defense
-                    </p>
-                  </div>
-                </div>
-                {isDominion2 && <Check className="h-4 w-4 text-emerald-400 shrink-0 mt-1" />}
-              </button>
-
               {/* Bot 1: 3-Step Domination Bot */}
               <button
                 type="button"
@@ -427,7 +396,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             </button>
           )}
           <span className="text-[10px] font-mono text-gray-500 hidden sm:inline">
-            {isMacroOnnx ? 'nano_microscope_overhauled.onnx' : isMacroTrend ? 'macro_trend_dominion.py' : isDominion2 ? 'dominion_2_bot.py' : is3StepBot ? '3_step_domination.py' : 'nano_microscope.onnx'}
+            {isMacroOnnx ? 'nano_microscope_overhauled.onnx' : isMacroTrend ? 'macro_trend_dominion.py' : is3StepBot ? '3_step_domination.py' : 'nano_microscope.onnx'}
           </span>
         </div>
       </div>
@@ -792,6 +761,32 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               </>
             )}
           </span>
+        </div>
+      </div>
+
+      {/* Institutional Seal of Excellence Indicator */}
+      <div className={`flex items-center justify-between p-2 rounded-xl text-xs border ${
+        is3StepBot
+          ? 'bg-amber-500/10 border-amber-500/30'
+          : 'bg-purple-500/10 border-purple-500/30'
+      }`}>
+        <div className="flex items-center gap-1.5">
+          <Award className={`h-3.5 w-3.5 ${is3StepBot ? 'text-amber-400' : 'text-purple-400'}`} />
+          <span className={`font-bold text-[11px] ${is3StepBot ? 'text-amber-300' : 'text-purple-300'}`}>
+            Seal of Excellence
+          </span>
+          <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold ${
+            is3StepBot ? 'bg-amber-500/20 text-amber-300' : 'bg-purple-500/20 text-purple-300'
+          }`}>
+            {is3StepBot ? '5/5 PILLARS' : 'IN INCUBATION'}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 font-mono text-[10px] font-extrabold">
+          {is3StepBot ? (
+            <span className="text-amber-400">🏆 LIVE AUTHORIZED</span>
+          ) : (
+            <span className="text-purple-300">⏳ LANE 2 SHADOW</span>
+          )}
         </div>
       </div>
 

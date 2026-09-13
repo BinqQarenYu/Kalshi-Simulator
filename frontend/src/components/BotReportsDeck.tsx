@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { WinLossEventReport, BotPerformanceSummary } from '../types';
 import {
   TrendingUp,
@@ -43,34 +43,22 @@ const BOT_DISPLAY_NAMES: Record<string, { name: string; tag: string; icon: strin
     color: 'text-purple-400 border-purple-500/30 bg-purple-500/10',
   },
   'dual_onnx': {
-    name: 'The ONNX Strategy (Dual-Brain)',
+    name: 'The ONNX Strategy (Bot 2 Dual-Brain)',
     tag: 'Dual-Brain Alpha',
     icon: '🧠',
     color: 'text-purple-400 border-purple-500/30 bg-purple-500/10',
   },
   'macro_onnx': {
-    name: 'The ONNX Strategy (Dual-Brain)',
+    name: 'The ONNX Strategy (Bot 2 Dual-Brain)',
     tag: 'Dual-Brain Alpha',
     icon: '🧠',
     color: 'text-purple-400 border-purple-500/30 bg-purple-500/10',
   },
-  'dominion_2_bot': {
-    name: 'Dominion 2 (Anti-Pin Scalper)',
-    tag: 'Value Hunter',
-    icon: '👑',
-    color: 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10',
-  },
   'macro_trend_dominion': {
-    name: 'Macro Trend Dominion',
+    name: 'Macro Trend Dominion (Bot 3)',
     tag: '1-Hour Macro Trend',
     icon: '📈',
     color: 'text-cyan-400 border-cyan-500/30 bg-cyan-500/10',
-  },
-  'ofi_sprint_scalper': {
-    name: 'OFI Sprint Scalper',
-    tag: '5M Velocity Scalp',
-    icon: '⚡',
-    color: 'text-blue-400 border-blue-500/30 bg-blue-500/10',
   },
 };
 

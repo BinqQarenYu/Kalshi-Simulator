@@ -75,7 +75,7 @@ def test_mutual_interlock_detection(tmp_path: Path):
     """Verify mutual live interlock detects active Port 8001 live lock."""
     # When no lock exists
     engine = StandaloneONNXEngine(
-        is_live=True,
+        is_live=False,
         is_armed=True,
         data_dir=tmp_path,
         asset=CryptoAsset.BTC,

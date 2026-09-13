@@ -55,12 +55,22 @@ class LiveCoordinator:
         bot_id: str,
         requested_contracts: int = 1,
         max_combined_contracts: int = 2,
+        is_live: bool = True,
     ) -> Tuple[bool, str]:
         """Validate if a proposed live order can be submitted without violating wash-trading or exposure caps.
 
         Returns:
             (is_permitted, rationale)
         """
+        # 0. Seal of Excellence Pre-Flight Live Authorization Gate
+        if is_live:
+            from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
+            auth_ok, auth_msg = BotDeploymentAuditor.check_live_authorization_on_disk(bot_id)
+            if not auth_ok:
+                veto_msg = f"SEAL OF EXCELLENCE VETO: {auth_msg}"
+                logger.warning("🛡️ [SEAL OF EXCELLENCE VETO] %s rejected: %s", bot_id, veto_msg)
+                return False, veto_msg
+
         state = self._read_state()
         if not state:
             return True, "PERMITTED_FIRST_MOVER: No active trades in flight."

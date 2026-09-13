@@ -49,6 +49,9 @@ export interface MarketState {
     source_ts_ms?: number;
     updated_at?: number;
   }>;
+  twap_60s_price?: number | null;
+  is_twap_active?: boolean;
+  twap_60s_str?: string;
 }
 
 export interface ChartPoint {
@@ -356,6 +359,31 @@ export interface SystemResourceMetrics {
   timestamp: string;
 }
 
+export interface SealOfExcellenceRecord {
+  bot_id: string;
+  bot_name: string;
+  seal_status: 'SEALED_EXCELLENT' | 'IN_INCUBATION' | 'SEAL_DENIED';
+  seal_token: string;
+  live_trading_authorized: boolean;
+  granted_at: string;
+  council_signoff?: string | null;
+  settled_cycles_verified: number;
+  graduation_threshold: number;
+  empirical_win_rate: number;
+  profit_factor: number;
+  pillars_passed: number;
+  pillars_total: number;
+  quarantine_lane: string;
+  details?: Record<string, any>;
+}
+
+export interface SealRegistry {
+  version: string;
+  last_updated: string;
+  active_live_strategy: string;
+  seals: Record<string, SealOfExcellenceRecord>;
+}
+
 export interface DashboardState {
   timestamp: string;
   market: MarketState;
@@ -371,6 +399,7 @@ export interface DashboardState {
   bot_audit_status?: {
     active_bot: string;
     is_certified: boolean;
+    is_sealed?: boolean;
     report?: {
       bot_id: string;
       bot_name: string;
@@ -384,14 +413,18 @@ export interface DashboardState {
         details?: Record<string, any>;
       }>;
       failure_reasons: string[];
+      seal?: SealOfExcellenceRecord;
     };
+    seal?: SealOfExcellenceRecord;
   };
+  seal_of_excellence?: SealRegistry;
   memory_profile?: MemoryProfileData;
   system_resources?: SystemResourceMetrics;
   settings: {
     ai_auto_trade: boolean;
     active_strategy_bot?: string;
     bot_certified?: boolean;
+    bot_sealed?: boolean;
     mode: 'mock' | 'live';
     timeframe: string;
     domination_discount_price?: number;
@@ -438,6 +471,11 @@ export interface MacroDominionTelemetry {
   pruned_deciles: number[];
   failure_counts: Record<string, number>;
   parameters?: Record<string, any>;
+  settled_cycles?: number;
+  today_wins?: number;
+  today_losses?: number;
+  today_win_rate?: number;
+  today_pnl?: number;
 }
 
 export interface DualONNXTelemetry {
@@ -453,6 +491,11 @@ export interface DualONNXTelemetry {
   recommended_contracts: number;
   rationale: string;
   active: boolean;
+  settled_cycles?: number;
+  today_wins?: number;
+  today_losses?: number;
+  today_win_rate?: number;
+  today_pnl?: number;
   // The 5 Strategy Execution Dials
   brain_priority_mode?: 'TREND_ALIGNED_SCALP' | 'CONTRADICTION_SNIPER' | 'UNANIMOUS_CONSENSUS' | string;
   contract_scaling_mode?: 'TIER_0_STRICT_1' | 'TIER_1_CONVICTION_2' | 'TIER_2_KELLY' | string;
@@ -492,6 +535,13 @@ export interface BotParameters {
   enable_reverse_take_profit_roi?: boolean;
   reverse_indicator_threshold?: number;
   min_take_profit_roi?: number;
+  enable_trailing_ratchet?: boolean;
+  trailing_ratchet_buffer?: number;
+  spot_delta_front_run_threshold?: number;
+  enable_dynamic_reversal_curve?: boolean;
+  twap_immutability_sniper_cents?: number;
+  max_queue_depth_ahead?: number;
+  max_clob_spread_cents?: number;
   [key: string]: any;
 }
 
@@ -561,6 +611,13 @@ export interface LivePortfolioState {
   updated_at: string;
   environment?: string;
   is_authenticated?: boolean;
+  today_pnl?: number;
+  settled_cycles?: number;
+  today_wins?: number;
+  today_losses?: number;
+  today_win_rate?: number;
+  consecutive_losses?: number;
+  max_consecutive_losses?: number;
 }
 
 export interface ReconciliationReport {
@@ -588,6 +645,24 @@ export interface OrderResponse {
   action_required?: string;
   live_balance?: number;
   execution_mode?: string;
+}
+
+export interface BotPreset {
+  preset_id: string;
+  preset_name: string;
+  version?: string;
+  created_at?: string;
+  author?: string;
+  description?: string;
+  is_council_certified?: boolean;
+  is_active?: boolean;
+  checksum?: string;
+}
+
+export interface PresetListResponse {
+  status: string;
+  presets: BotPreset[];
+  active_preset: BotPreset;
 }
 
 export interface IncubatorScorecard {

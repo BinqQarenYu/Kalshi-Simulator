@@ -1,0 +1,216 @@
+{
+  "archive_metadata": {
+    "archivist": "Agent QuoQuo (Institutional Librarian & Repository Archivist)",
+    "timestamp_utc": "2026-09-11T21:40:00Z",
+    "timestamp_local": "2026-09-12T00:40:00+03:00",
+    "version": "v2.4.0-domination-4pillar",
+    "primary_source_file": "data/bot_parameters_domination.json",
+    "source_code_references": [
+      "src/kalshi_sim/ml/domination_bot.py",
+      "src/kalshi_sim/standalone_bot.py",
+      "src/kalshi_sim/standalone_macro.py",
+      "src/kalshi_sim/ml/dataset_builder.py",
+      "frontend/src/components/BabyBotConsole.tsx"
+    ]
+  },
+  "invariants_and_armor": {
+    "math_precision": "decimal.Decimal / decimal.js (Zero Float Tolerance)",
+    "micro_bankroll_cap": "1 contract strictly enforced per asset for bankrolls < $75",
+    "anti_wash_trading": "Synchronous LiveCoordinator arbitration (CFTC Section 4c(a)(1) compliance)",
+    "intent_lock": "Synchronous reservation prior to async network I/O"
+  },
+  "asset_sweetspots": {
+    "BTC": {
+      "entry_sweetspots": {
+        "maker_resting_discount_limit": 0.51,
+        "entry_discount_depth": 0.46,
+        "momentum_max_price_tier1": 0.63,
+        "absolute_price_kill_ceiling": 0.72,
+        "min_confidence_pct": 81.0,
+        "min_edge_pct": 6.0,
+        "min_ev_dollars": 0.02,
+        "taker_cross_ev_threshold": 0.09,
+        "min_spot_diff_dead_zone_moat": 28.0,
+        "dynamic_moat_multiplier": 1.25,
+        "typical_1m_volatility": 14.0,
+        "volatility_floor": 12.0,
+        "volatility_ceiling": 48.0,
+        "vpin_toxic_threshold": 0.60,
+        "tape_confirmation_ticks": 3,
+        "entry_window_open_minutes": 13.5,
+        "entry_window_close_minutes": 3.5,
+        "brain_priority_mode": "TREND_ALIGNED_SCALP",
+        "contract_scaling_mode": "TIER_0_STRICT_1"
+      },
+      "exit_4pillar_sweetspots": {
+        "pillar_1_tp_ceiling_price": 0.92,
+        "pillar_1_require_reversal": false,
+        "pillar_2_dynamic_reversal_start_pct": 85.0,
+        "pillar_2_dynamic_reversal_end_pct": 50.0,
+        "pillar_2_min_roi_pct": 40.0,
+        "pillar_2_reverse_indicator_threshold": 83.0,
+        "pillar_3_trailing_ratchet_activation_peak": 0.88,
+        "pillar_3_trailing_buffer": 0.08,
+        "pillar_3_tightened_buffer_above_92": 0.06,
+        "pillar_3_deep_breakeven_armor_peak": 0.85,
+        "pillar_3_deep_breakeven_min_gain": 0.20,
+        "pillar_3_deep_breakeven_gapdown_buffer": 0.04,
+        "pillar_4_spot_velocity_frontrun_threshold_3s": 15.0
+      }
+    },
+    "GOLD": {
+      "entry_sweetspots": {
+        "maker_resting_discount_limit": 0.48,
+        "momentum_max_price_tier1": 0.55,
+        "min_confidence_pct": 86.0,
+        "min_edge_pct": 8.0,
+        "min_ev_dollars": 0.03,
+        "min_spot_diff_dead_zone_moat": 2.50,
+        "typical_1m_volatility": 0.75,
+        "vpin_toxic_threshold": 0.55,
+        "entry_window_open_minutes": 6.5,
+        "entry_window_close_minutes": 2.0
+      },
+      "exit_4pillar_sweetspots": {
+        "pillar_1_tp_ceiling_price": 0.90,
+        "pillar_1_require_reversal": true,
+        "pillar_2_min_roi_pct": 35.0,
+        "pillar_2_reverse_indicator_threshold": 52.0,
+        "pillar_3_trailing_ratchet_activation_peak": 0.88,
+        "pillar_3_trailing_buffer": 0.08,
+        "pillar_4_spot_velocity_frontrun_threshold_3s": 1.25
+      }
+    },
+    "DOGE": {
+      "entry_sweetspots": {
+        "maker_resting_discount_limit": 0.48,
+        "momentum_max_price_tier1": 0.55,
+        "min_confidence_pct": 84.0,
+        "min_edge_pct": 10.0,
+        "min_ev_dollars": 0.03,
+        "min_spot_diff_dead_zone_moat": 0.0005,
+        "typical_1m_volatility": 0.000045,
+        "vpin_toxic_threshold": 0.55,
+        "entry_window_open_minutes": 11.0,
+        "entry_window_close_minutes": 3.5
+      },
+      "exit_4pillar_sweetspots": {
+        "pillar_1_tp_ceiling_price": 0.90,
+        "pillar_1_require_reversal": false,
+        "pillar_2_min_roi_pct": 20.0,
+        "pillar_2_reverse_indicator_threshold": 85.0,
+        "pillar_3_trailing_ratchet_activation_peak": 0.88,
+        "pillar_3_trailing_buffer": 0.08,
+        "pillar_4_spot_velocity_frontrun_threshold_3s": 0.0004
+      }
+    },
+    "ETH": {
+      "entry_sweetspots": {
+        "maker_resting_discount_limit": 0.52,
+        "momentum_max_price_tier1": 0.62,
+        "min_confidence_pct": 80.0,
+        "min_edge_pct": 6.0,
+        "min_ev_dollars": 0.02,
+        "min_spot_diff_dead_zone_moat": 2.50,
+        "typical_1m_volatility": 0.60,
+        "vpin_toxic_threshold": 0.60,
+        "entry_window_open_minutes": 12.0,
+        "entry_window_close_minutes": 4.5
+      },
+      "exit_4pillar_sweetspots": {
+        "pillar_1_tp_ceiling_price": 0.95,
+        "pillar_1_require_reversal": true,
+        "pillar_2_min_roi_pct": 20.0,
+        "pillar_2_reverse_indicator_threshold": 85.0,
+        "pillar_3_trailing_ratchet_activation_peak": 0.88,
+        "pillar_3_trailing_buffer": 0.10,
+        "pillar_4_spot_velocity_frontrun_threshold_3s": 0.80
+      }
+    },
+    "SOL": {
+      "entry_sweetspots": {
+        "maker_resting_discount_limit": 0.52,
+        "momentum_max_price_tier1": 0.60,
+        "min_confidence_pct": 82.0,
+        "min_edge_pct": 7.0,
+        "min_ev_dollars": 0.02,
+        "min_spot_diff_dead_zone_moat": 0.50,
+        "typical_1m_volatility": 0.04,
+        "vpin_toxic_threshold": 0.60,
+        "entry_window_open_minutes": 11.0,
+        "entry_window_close_minutes": 3.5
+      },
+      "exit_4pillar_sweetspots": {
+        "pillar_1_tp_ceiling_price": 0.95,
+        "pillar_1_require_reversal": true,
+        "pillar_2_min_roi_pct": 20.0,
+        "pillar_2_reverse_indicator_threshold": 85.0,
+        "pillar_3_trailing_ratchet_activation_peak": 0.88,
+        "pillar_3_trailing_buffer": 0.10,
+        "pillar_4_spot_velocity_frontrun_threshold_3s": 0.25
+      }
+    },
+    "HYPER": {
+      "entry_sweetspots": {
+        "maker_resting_discount_limit": 0.48,
+        "momentum_max_price_tier1": 0.58,
+        "min_confidence_pct": 82.0,
+        "min_edge_pct": 8.0,
+        "min_ev_dollars": 0.02,
+        "min_spot_diff_dead_zone_moat": 0.33,
+        "typical_1m_volatility": 0.08,
+        "vpin_toxic_threshold": 0.60,
+        "entry_window_open_minutes": 12.0,
+        "entry_window_close_minutes": 4.5
+      },
+      "exit_4pillar_sweetspots": {
+        "pillar_1_tp_ceiling_price": 0.95,
+        "pillar_1_require_reversal": true,
+        "pillar_2_min_roi_pct": 20.0,
+        "pillar_2_reverse_indicator_threshold": 79.0,
+        "pillar_3_trailing_ratchet_activation_peak": 0.88,
+        "pillar_3_trailing_buffer": 0.10,
+        "pillar_4_spot_velocity_frontrun_threshold_3s": 0.20
+      }
+    }
+  },
+  "fleet_strategy_sweetspots": {
+    "bot_1_three_step_domination": {
+      "lane": "Lane 1 (Live Real Money, Port 8001)",
+      "target_assets": ["BTC", "GOLD", "DOGE"],
+      "maker_fee_advantage": "$0.00 Maker resting fee vs Kalshi taker fee drag",
+      "payout_asymmetry": "Entry at 48¢-51¢ yields +96% to +108% ROI on winning binary $1.00 payout",
+      "timing_profile": "Option C calibrated asymmetric countdown envelopes"
+    },
+    "bot_2_onnx_microscope": {
+      "lane": "Lane 2 (Shadow Incubator, Port 8002)",
+      "feature_dimension": 28,
+      "prediction_horizon_steps": 15,
+      "prediction_horizon_seconds": 20.0,
+      "micro_price_diff_threshold": 0.03,
+      "tape_confirmation_latency": "2 ticks (~300ms sweetspot)",
+      "dataset_batch_size": 32,
+      "learning_rate": 0.0002
+    },
+    "bot_3_macro_trend": {
+      "lane": "Lane 2 (Shadow Paper, Port 8003)",
+      "resting_limit_price": 0.52,
+      "min_consensus_confidence": 65.0,
+      "consensus_timeframes": ["15M", "30M", "1H"],
+      "strike_separation_distance": [25.0, 35.0],
+      "take_profit_target": [0.94, 0.96],
+      "volatility_cooloff": [0.15, 0.25]
+    }
+  },
+  "empirical_proof_archive": {
+    "simulation_window": "2026-09-04 to 2026-09-11",
+    "raw_exchange_ticks_analyzed": 124293498,
+    "historical_trade_count": 843,
+    "baseline_hold_to_settlement_wr": 55.0,
+    "baseline_hold_to_settlement_pnl": 26.87,
+    "calibrated_4pillar_sweetspot_wr": 60.6,
+    "calibrated_4pillar_sweetspot_pnl": 42.86,
+    "net_pnl_lift_pct": 59.5,
+    "salvaged_wipeouts": 48
+  }
+}
