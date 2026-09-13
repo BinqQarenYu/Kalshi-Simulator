@@ -102,8 +102,7 @@ class RemoteControlManager:
     def regenerate_token(self) -> str:
         """Generate a fresh 128-bit cryptographic pairing token and save to disk."""
         self.active_token = f"rc_{secrets.token_urlsafe(16)}"
-        if self.active_token not in self.authorized_tokens:
-            self.authorized_tokens.append(self.active_token)
+        self.authorized_tokens = [self.active_token]
         self.enabled = True
         self._save()
         logger.info("🔑 [REMOTE CONTROL] Generated fresh pairing token.")

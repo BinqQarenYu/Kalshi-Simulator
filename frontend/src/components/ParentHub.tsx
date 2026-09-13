@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { ONNXSettingsPanel } from './ONNXSettingsPanel';
+import { UniversalTerminalView } from './UniversalTerminalView';
 import { ResizableSplitPane } from './ResizableSplitPane';
 import {
   MarketState,
@@ -43,6 +44,9 @@ import {
   Award,
   Radio,
   Clock,
+  Globe,
+  Coins,
+  ArrowRightLeft,
   ArrowUpRight,
   ArrowDownRight,
   Scale,
@@ -82,7 +86,7 @@ import { ContinuousTrainingTelemetry, MacroDominionTelemetry, HMMMacroRegimeTele
 import { EngineRoomMatrix, EngineViewTab } from './EngineRoomMatrix';
 import { ClobTerminalView } from './ClobTerminalView';
 
-type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'engine' | 'clob_terminal' | 'settings';
+type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'engine' | 'clob_terminal' | 'omni' | 'settings';
 type ClobTerminalSubNav = 'terminal' | 'heatmap' | 'event_book' | 'spot_book' | 'pine_editor';
 type SettingsSubNav =
   | 'account'
@@ -598,6 +602,24 @@ export const ParentHub: React.FC<ParentHubProps> = ({
             <button
               onClick={() => {
                 soundFX.playClickSound();
+                setPrimaryNav('omni');
+              }}
+              className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
+                primaryNav === 'omni'
+                  ? 'bg-cyan-500/15 text-white border-l-2 border-cyan-400 font-bold'
+                  : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
+              }`}
+            >
+              <Globe className={`w-4 h-4 ${primaryNav === 'omni' ? 'text-cyan-400' : 'text-[#8c9ba5]'}`} />
+              <span>Omni Terminal</span>
+              <span className="ml-auto text-[8px] font-mono px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">
+                6 EX
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                soundFX.playClickSound();
                 setPrimaryNav('settings');
               }}
               className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
@@ -823,6 +845,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                   ? clobSubNav.toUpperCase()
                   : primaryNav === 'journal'
                   ? journalSubNav.toUpperCase()
+                  : primaryNav === 'omni'
+                  ? 'MULTI-EXCHANGE CAPITAL POOL & ARBITRAGE'
                   : analyticsSubNav.toUpperCase()}
               </b>
             </div>
@@ -835,6 +859,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               {primaryNav === 'clob_terminal' && 'CLOB TERMINAL / INSTITUTIONAL WEBCLOB & HEATMAP'}
               {primaryNav === 'journal' && "TRADE JOURNAL & TODAY'S TIMELINE"}
               {primaryNav === 'analytics' && 'LIVE WORKBENCH & MICROSTRUCTURE RADAR'}
+              {primaryNav === 'omni' && 'THE UNIVERSAL MULTI-EXCHANGE TERMINAL & CAPITAL POOL'}
             </h1>
           </div>
 
@@ -903,7 +928,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               ))}
             </div>
 
-            {/* Timeframe Selector */}
+            {/* Timeframe selector */}
             <div className="flex gap-1 bg-[#171c22] p-0.5 rounded-lg border border-[#262d35]">
               {['5m', '15m'].map((tf) => (
                 <button
@@ -922,6 +947,9 @@ export const ParentHub: React.FC<ParentHubProps> = ({
 
         {/* DYNAMIC VIEW BODY */}
         <div className="p-6 space-y-6">
+          {/* 0. OMNI UNIVERSAL TERMINAL VIEW */}
+          {primaryNav === 'omni' && <UniversalTerminalView />}
+
           {/* 1. SETTINGS VIEW (From HTML Proposal) */}
           {primaryNav === 'settings' && (
             <div className="space-y-6 max-w-4xl">

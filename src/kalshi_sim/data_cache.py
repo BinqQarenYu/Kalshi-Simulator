@@ -59,14 +59,21 @@ class MarketDataCache:
             except Exception as e:
                 logger.debug("Could not read settlements from db: %s", e)
 
-        for f in self.data_dir.glob("stream_*.jsonl"):
+        raw_files = list(self.data_dir.glob("stream_*.jsonl")) + list(self.data_dir.glob("stream_*.jsonl.gz"))
+        for f in raw_files:
             try:
                 sz = f.stat().st_size
-                # Only index non-empty streams (> 1 KB)
-                if sz < 1024:
+                # Only index non-empty streams (> 32 bytes for gz, > 512 bytes for jsonl)
+                min_sz = 32 if f.name.endswith(".gz") else 512
+                if sz < min_sz:
                     continue
                 
-                ticker = f.stem.replace("stream_", "")
+                name = f.name
+                if name.endswith(".gz"):
+                    name = name[:-3]
+                if name.endswith(".jsonl"):
+                    name = name[:-6]
+                ticker = name.replace("stream_", "")
                 mtime = datetime.fromtimestamp(f.stat().st_mtime, tz=timezone.utc).isoformat()
                 
                 # Derive asset from ticker prefix
@@ -82,14 +89,26 @@ class MarketDataCache:
                 elif "HYPE" in ticker:
                     asset = "HYPER"
 
-                self._cache_index[ticker] = CachedContractInfo(
-                    ticker=ticker,
-                    asset=asset,
-                    file_path=f,
-                    file_size_bytes=sz,
-                    last_modified_utc=mtime,
-                    is_settled=(ticker in settled_tickers),
-                )
+                # Prefer gzip if both exist, or most recent
+                if ticker in self._cache_index:
+                    if f.name.endswith(".gz") or f.stat().st_mtime > Path(self._cache_index[ticker].file_path).stat().st_mtime:
+                        self._cache_index[ticker] = CachedContractInfo(
+                            ticker=ticker,
+                            asset=asset,
+                            file_path=f,
+                            file_size_bytes=sz,
+                            last_modified_utc=mtime,
+                            is_settled=(ticker in settled_tickers),
+                        )
+                else:
+                    self._cache_index[ticker] = CachedContractInfo(
+                        ticker=ticker,
+                        asset=asset,
+                        file_path=f,
+                        file_size_bytes=sz,
+                        last_modified_utc=mtime,
+                        is_settled=(ticker in settled_tickers),
+                    )
             except OSError:
                 continue
 
@@ -103,12 +122,16 @@ class MarketDataCache:
         if safe_ticker in self._cache_index:
             return True
         # Check disk directly in case newly written
-        p = self.data_dir / f"stream_{safe_ticker}.jsonl"
-        return p.exists() and p.stat().st_size >= 1024
+        p_raw = self.data_dir / f"stream_{safe_ticker}.jsonl"
+        p_gz = self.data_dir / f"stream_{safe_ticker}.jsonl.gz"
+        return (p_raw.exists() and p_raw.stat().st_size >= 512) or (p_gz.exists() and p_gz.stat().st_size >= 32)
 
     def get_canonical_path(self, ticker: str) -> Path:
-        """Returns the single canonical path for a contract (stream_<ticker>.jsonl)."""
+        """Returns the single canonical path for a contract (stream_<ticker>.jsonl or .jsonl.gz)."""
         safe_ticker = ticker.replace("/", "_").replace(":", "_")
+        p_gz = self.data_dir / f"stream_{safe_ticker}.jsonl.gz"
+        if p_gz.exists():
+            return p_gz
         return self.data_dir / f"stream_{safe_ticker}.jsonl"
 
     def get_stream(

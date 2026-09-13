@@ -157,3 +157,46 @@ async def test_memory_manager_lru_ticker_eviction():
         await mgr.stop()
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+@pytest.mark.anyio
+async def test_memory_manager_compressed_offload():
+    """Verify compress_offload=True writes .jsonl.gz files with valid gzip content."""
+    import gzip
+    import json
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    try:
+        mgr = MarketDataMemoryManager(
+            data_dir=tmp_dir,
+            max_hot_ticks_per_ticker=2,
+            batch_flush_size=2,
+            flush_interval_seconds=0.1,
+            compress_offload=True,
+        )
+        await mgr.start()
+
+        # Ingest 6 ticks (4 should be evicted to disk queue)
+        for i in range(6):
+            mgr.record_tick("KXBTC-GZ-TEST", {"tick_idx": i, "val": 100 * i})
+
+        # Wait for disk drain
+        await asyncio.sleep(0.25)
+        await mgr.stop()
+
+        # Check that gzip file was written (not plain .jsonl)
+        gz_files = list(tmp_dir.glob("stream_*.jsonl.gz"))
+        plain_files = list(tmp_dir.glob("stream_*.jsonl"))
+        assert len(gz_files) == 1, f"Expected 1 .gz file, found {len(gz_files)}"
+        assert len(plain_files) == 0, f"Expected 0 plain .jsonl files, found {len(plain_files)}"
+
+        # Verify gzip content is valid JSON lines
+        with gzip.open(gz_files[0], "rt", encoding="utf-8") as f:
+            lines = f.readlines()
+        assert len(lines) == 4  # 4 evicted items persisted
+        for line in lines:
+            record = json.loads(line)
+            assert "tick_idx" in record
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+

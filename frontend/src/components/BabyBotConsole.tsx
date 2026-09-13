@@ -2611,6 +2611,60 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   </div>
                 </div>
 
+                {/* Moneyness Moat Multiplier */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
+                    Moat Multiplier (x)
+                    <div className="group relative cursor-help">
+                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
+                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
+                        <b>The Beginner Translation:</b> <i>"Dynamic Volatility Moat."</i><br />
+                        <b>How it works:</b> Multiplies baseline volatility to calculate safe distance from strike.<br />
+                        <b>Why it matters:</b> Keeps the bot out of the danger zone during high volatility.
+                      </div>
+                    </div>
+                  </label>
+                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
+                    <span className="text-slate-500 mr-1">x</span>
+                    <input
+                      type="number"
+                      step="0.05"
+                      min="0"
+                      max="10"
+                      value={botParams.moneyness_moat_multiplier ?? 1.25}
+                      onChange={(e) => setBotParams({ ...botParams, moneyness_moat_multiplier: parseFloat(e.target.value) })}
+                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Opening Quarantine */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
+                    Quarantine (s)
+                    <div className="group relative cursor-help">
+                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
+                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
+                        <b>The Beginner Translation:</b> <i>"Opening Wait Time."</i><br />
+                        <b>How it works:</b> Disables trading for the first N seconds of a cycle.<br />
+                        <b>Why it matters:</b> Prevents getting caught in initial cycle volatility.
+                      </div>
+                    </div>
+                  </label>
+                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
+                    <span className="text-slate-500 mr-1">⏱️</span>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      max="300"
+                      value={botParams.opening_quarantine_seconds ?? 60.0}
+                      onChange={(e) => setBotParams({ ...botParams, opening_quarantine_seconds: parseFloat(e.target.value) })}
+                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                    />
+                  </div>
+                </div>
+
                 {/* Take Profit Ceiling */}
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">

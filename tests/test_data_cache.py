@@ -69,3 +69,19 @@ def test_cache_miss_fetches_once(tmp_path: Path):
     p2 = cache.get_stream("KXSOL15M-NEW", fetch_if_missing=mock_fetcher)
     assert p2 == p
     assert not called, "Second call must hit local cache without redownloading!"
+
+
+def test_cache_gzip_support(tmp_path: Path):
+    import gzip
+
+    cache = MarketDataCache(data_dir=tmp_path)
+    gz_f = tmp_path / "stream_KXDOGE15M-GZTEST.jsonl.gz"
+    with gzip.open(gz_f, "wt", encoding="utf-8") as f:
+        f.write("{\"price\": 0.10, \"delta\": 500}\n" * 40)
+
+    cache.refresh_index()
+    assert cache.is_cached("KXDOGE15M-GZTEST")
+    p = cache.get_stream("KXDOGE15M-GZTEST")
+    assert p == gz_f
+    assert cache.get_canonical_path("KXDOGE15M-GZTEST") == gz_f
+

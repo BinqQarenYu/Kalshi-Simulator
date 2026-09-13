@@ -8,6 +8,7 @@ KalshiOrderflowFeatureExtractor, and labels future directional returns (UP=0, DO
 from __future__ import annotations
 
 import bisect
+import gzip
 import json
 import logging
 from dataclasses import dataclass
@@ -81,11 +82,16 @@ class DatasetBuilder:
         )
 
         frames: List[TickFrame] = []
-        default_tkr = file_path.stem.replace("stream_", "") if "stream_" in file_path.stem else "KXBTC15M"
+        stem_clean = file_path.stem
+        if stem_clean.endswith(".jsonl"):
+            stem_clean = stem_clean[:-6]
+        default_tkr = stem_clean.replace("stream_", "") if "stream_" in stem_clean else "KXBTC15M"
         current_ticker = default_tkr
 
         tick_idx = 0
-        with open(file_path, "rb") as f:
+        is_gz = file_path.suffix == ".gz" or str(file_path).endswith(".gz")
+        open_fn = gzip.open if is_gz else open
+        with open_fn(file_path, "rb") as f:
             for line in f:
                 tick_idx += 1
                 line = line.strip()
@@ -345,10 +351,23 @@ class DatasetBuilder:
         all_x: List[np.ndarray] = []
         all_y: List[np.ndarray] = []
 
-        files = sorted(list(data_dir.glob(file_pattern)))
+        matched = list(data_dir.glob(file_pattern))
+        if file_pattern.endswith(".jsonl"):
+            matched.extend(data_dir.glob(file_pattern + ".gz"))
+        elif file_pattern.endswith(".jsonl.gz"):
+            matched.extend(data_dir.glob(file_pattern[:-3]))
+
+        # Deduplicate by base contract name, picking the most recently modified file
+        seen: dict[str, Path] = {}
+        for f in matched:
+            base_key = f.name[:-3] if f.name.endswith(".gz") else f.name
+            if base_key not in seen or f.stat().st_mtime > seen[base_key].stat().st_mtime:
+                seen[base_key] = f
+
+        files = sorted(list(seen.values()), key=lambda p: (p.stat().st_mtime, p.name))
         if max_files and len(files) > max_files:
             files = files[-max_files:]  # Take the most recent files
-        logger.info("Found %d tick files matching %s in %s", len(files), file_pattern, data_dir)
+        logger.info("Found %d tick files matching %s (incl .gz) in %s", len(files), file_pattern, data_dir)
 
         for file_path in files:
             frames = self.parse_tick_file(file_path)
