@@ -43,3 +43,7 @@
 ## 2026-09-01 - Zero-Copy Ring Buffer C-Level Range Slicing
 **Learning:** In `ZeroCopyRingBuffer`, computing `to_list()` and `get_tail(n)` using Python `for i in range(...)` loops with modulo arithmetic per item introduced significant interpreter loop and index computation overhead under high-frequency stream querying.
 **Action:** Replace element-by-element range loops with C-level list range slicing (`self._buffer[head:] + self._buffer[:head]` and single/double range slices `self._buffer[start_idx:end_idx]`). Reduced `get_tail(100)` latency from ~23.8 µs down to ~1.16 µs per call (~20.6x speedup) and `to_list()` latency from ~50.6 µs down to ~5.78 µs per call (~8.75x speedup).
+
+## 2026-09-02 - Redundant Per-Tick State Recalculation Elimination
+**Learning:** Re-computing trade size entropy inside `extract_features_from_book` created duplicate deque iteration, list allocation, and logarithmic math overhead on every tick, even though trade entropy was already calculated on trade event arrival in `process_trade()` and cached in `self._cached_entropy`.
+**Action:** Audit stateful feature extractors for dead local computations. Ensure metrics computed in event handlers (`process_trade`) are consumed directly from cached fields rather than recalculated during feature vector assembly. Reduced feature extraction latency from ~35.8 µs to ~20.2 µs per call (~43% execution time reduction).
