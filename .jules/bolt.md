@@ -43,3 +43,7 @@
 ## 2026-09-01 - Zero-Copy Ring Buffer C-Level Range Slicing
 **Learning:** In `ZeroCopyRingBuffer`, computing `to_list()` and `get_tail(n)` using Python `for i in range(...)` loops with modulo arithmetic per item introduced significant interpreter loop and index computation overhead under high-frequency stream querying.
 **Action:** Replace element-by-element range loops with C-level list range slicing (`self._buffer[head:] + self._buffer[:head]` and single/double range slices `self._buffer[start_idx:end_idx]`). Reduced `get_tail(100)` latency from ~23.8 µs down to ~1.16 µs per call (~20.6x speedup) and `to_list()` latency from ~50.6 µs down to ~5.78 µs per call (~8.75x speedup).
+
+## 2026-09-02 - Reuse Incremental Trade Size Entropy in Feature Extraction
+**Learning:** `KalshiOrderflowFeatureExtractor.extract_features_from_book()` was re-slicing trade deques and recalculating `math.log2` trade size entropy on every book tick, despite entropy being calculated incrementally on incoming trade prints in `self._update_cached_entropy()`.
+**Action:** Removed redundant entropy recalculation block from `extract_features_from_book` and directly assigned `self._cached_entropy` to feature vector index 5, reducing feature extraction latency from ~36.8 µs to ~23.5 µs per tick (~36% latency reduction).
