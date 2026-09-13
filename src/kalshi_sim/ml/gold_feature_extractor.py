@@ -1,75 +1,83 @@
-"""Orderflow Feature Extractor for Kalshi L2 CLOB & Microstructure Tensors.
+"""Gold Orderflow & Spacetime Physics Feature Extractor (32-Dimensional Tensor).
 
-Builds a 28-dimensional feature vector matching the QuoLas Nano Microscope architecture:
-- 13 Toxic Microstructure Parameters (Spread BPS, OFI L1/5/15, CVD, Entropy, VPIN PBC, Spoofing, Absorption, Whale TX, Layering)
-- 15 Spatial Imbalance Parameters (Exponential spatial decay with alpha=0.425 across 15 L2 book layers)
+Constructs the 3rd-generation 32-dimensional feature vector (D* = 32) tailored for
+Gold (XAU / PAXG) orderflow and digital contract spacetime dynamics:
+
+- 13 Toxic Microstructure Features (Spread BPS, OFI L1/5/15, CVD, Entropy, VPIN PBC, Spoofing, Layering, Whales, Absorption)
+- 15 Spatial Imbalance Features (Exponential spatial decay with alpha=0.425 across 15 L2 book levels)
+- 4 Spacetime & Contract Physics Features:
+    f[28] = Normalized Moneyness: z_t = (S_t - K) / (sigma * sqrt(tau / 60))
+    f[29] = Time-to-Expiry Normalized Fraction: tau / 900.0
+    f[30] = OFI Acceleration: Delta OFI_L5 = OFI_t - OFI_{t-3}
+    f[31] = Settlement TWAP Delta: (S_t - TWAP_60s) / sigma
 """
 
 from __future__ import annotations
 
-import math
-import time
 from collections import deque
 from decimal import Decimal
 import itertools
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from kalshi_sim.schemas import L2BookState, OrderBookLevel, TradeEvent
+from kalshi_sim.schemas import L2BookState, TradeEvent
 
 
-class KalshiOrderflowFeatureExtractor:
-    """Transforms Kalshi L2 order book states and public trades into 28-feature ML tensors."""
+class GoldOrderflowFeatureExtractor:
+    """Extracts 32-dimensional orderflow + spacetime physics tensors for Gold (XAU / PAXG)."""
 
-    def __init__(self, target_depth: int = 15, spatial_alpha: float = 0.425) -> None:
+    FEATURE_DIM: int = 32
+
+    def __init__(
+        self,
+        target_depth: int = 15,
+        spatial_alpha: float = 0.425,
+        default_gold_volatility: float = 2.50,  # $2.50/oz typical 1-min Gold spot standard deviation
+    ) -> None:
         self.target_depth = target_depth
         self.spatial_alpha = spatial_alpha
+        self.default_gold_volatility = default_gold_volatility
 
-        # Performance optimization: Precompute spatial depth exponential decay tuple e^(-alpha * i)
-        # to avoid recalculating math.exp on every tick (~40% latency reduction in feature extraction).
+        # Precompute exponential decay weights: e^(-alpha * i)
         self._decay_weights: Tuple[float, ...] = tuple(
             math.exp(-self.spatial_alpha * i) for i in range(self.target_depth)
         )
 
-        # State tracking for rolling metrics
-        # Performance optimization: Use deque(maxlen=100) to eliminate O(N) pop(0) array shifts
+        # Rolling state tracking
         self.rolling_trades: deque[Dict[str, Any]] = deque(maxlen=100)
-        self.max_trade_history = 100
-
-        # Volume baseline tracking (rolling median)
         self.rolling_volumes: deque[float] = deque(maxlen=100)
+        self.ofi_l5_history: deque[float] = deque(maxlen=10)
 
         # Cumulative Volume Delta (5-minute rolling window)
         self.cvd_window: deque[Tuple[float, float]] = deque()
-        # Performance optimization: Track running CVD total in O(1) time to eliminate per-tick sum() loops
-        self._running_cvd = 0.0
-        self.CVD_WINDOW_SECONDS = 300.0
-        self._cvd_sum = 0.0
+        self._running_cvd: float = 0.0
+        self.CVD_WINDOW_SECONDS: float = 300.0
 
-        # VPIN Probabilistic Bulk Classification (PBC) state
-        self.vpin_bucket_vol = 0.0
-        self.vpin_bucket_size = 2.0  # Constant volume bucket size
+        # VPIN Probabilistic Bulk Classification
+        self.vpin_bucket_vol: float = 0.0
+        self.vpin_bucket_size: float = 1.5  # Constant volume bucket size for Gold
         self.vpin_bucket_start_price: Optional[float] = None
         self.vpin_bucket_price_changes: deque[float] = deque(maxlen=50)
         self.vpin_imbalances: deque[float] = deque(maxlen=50)
-        self.vpin_score = 0.5
+        self.vpin_score: float = 0.5
 
-        # Whale transaction tracking with per-tick exponential decay
-        self.whale_tx_count = 0.0
-        self.whale_threshold = 5.0
-        self.WHALE_DECAY = 0.995
+        # Whale transaction tracking
+        self.whale_tx_count: float = 0.0
+        self.whale_threshold: float = 5.0
+        self.WHALE_DECAY: float = 0.995
 
-        # Absorption tracking with decay
+        # Absorption tracking
         self.prev_best_bid: float = 0.0
         self.prev_best_ask: float = 0.0
-        self.bid_absorption = 0.0
-        self.ask_absorption = 0.0
-        self.ABSORPTION_DECAY = 0.995
+        self.bid_absorption: float = 0.0
+        self.ask_absorption: float = 0.0
+        self.ABSORPTION_DECAY: float = 0.995
 
-        # Cached entropy & pre-allocated feature buffer
-        self._cached_entropy = 0.0
-        self._feature_buffer = np.zeros(28, dtype=np.float32)
+        # Cached entropy & pre-allocated 32-element feature buffer
+        self._cached_entropy: float = 0.0
+        self._feature_buffer: np.ndarray = np.zeros(self.FEATURE_DIM, dtype=np.float32)
 
     def _update_cached_entropy(self) -> None:
         """Recalculate trade size entropy whenever trade history updates."""
@@ -77,8 +85,6 @@ class KalshiOrderflowFeatureExtractor:
             self._cached_entropy = 0.0
             return
 
-        # Fix: deque objects do not support slice indexing directly.
-        # Use itertools.islice to lazily pull the 20 most recent trades without allocating a full list copy.
         start_idx = max(0, len(self.rolling_trades) - 20)
         recent_sizes = [float(t["q"]) for t in itertools.islice(self.rolling_trades, start_idx, None)]
         total_vol = sum(recent_sizes) + 1e-9
@@ -89,7 +95,7 @@ class KalshiOrderflowFeatureExtractor:
             self._cached_entropy = 0.0
 
     def process_trade(self, trade_event: TradeEvent) -> None:
-        """Update trade-dependent state (CVD, VPIN, Whale prints, Absorption)."""
+        """Update trade-dependent state (CVD, VPIN, Whales, Absorption)."""
         qty = float(trade_event.count)
         price = float(trade_event.price if getattr(trade_event, "price", None) is not None else trade_event.yes_price)
         taker_side = str(trade_event.taker_side).lower()
@@ -102,7 +108,6 @@ class KalshiOrderflowFeatureExtractor:
             "ts": trade_event.timestamp.timestamp(),
         }
         self.rolling_trades.append(trade_dict)
-
         self._update_cached_entropy()
 
         now = trade_event.timestamp.timestamp()
@@ -110,27 +115,26 @@ class KalshiOrderflowFeatureExtractor:
         self.cvd_window.append((now, signed_qty))
         self._running_cvd += signed_qty
 
-        # Evict stale entries beyond 5-minute window and update running CVD in O(1)
+        # Evict stale entries beyond 5-minute window in O(1)
         cutoff = now - self.CVD_WINDOW_SECONDS
         while self.cvd_window and self.cvd_window[0][0] < cutoff:
             _, evicted_signed = self.cvd_window.popleft()
             self._running_cvd -= evicted_signed
 
         # Dynamic Whale print detection
-        # Performance optimization: Fast list sorting for median calculation avoids NumPy allocation overhead
         if len(self.rolling_trades) >= 10:
             recent_sizes = [t["q"] for t in self.rolling_trades]
             recent_sizes.sort()
             n_q = len(recent_sizes)
             med_q = recent_sizes[n_q // 2] if n_q % 2 == 1 else (recent_sizes[n_q // 2 - 1] + recent_sizes[n_q // 2]) * 0.5
-            dyn_threshold = 5.0 * med_q
+            dyn_threshold = 4.0 * med_q
         else:
             dyn_threshold = self.whale_threshold
 
         if qty >= dyn_threshold:
             self.whale_tx_count += 1.0
 
-        # VPIN PBC (Probabilistic Bulk Classification)
+        # VPIN Probabilistic Bulk Classification
         if self.vpin_bucket_start_price is None:
             self.vpin_bucket_start_price = price
 
@@ -140,7 +144,6 @@ class KalshiOrderflowFeatureExtractor:
             self.vpin_bucket_price_changes.append(delta_p)
 
             if len(self.vpin_bucket_price_changes) >= 5:
-                # Performance optimization: Fast pure-Python standard deviation on small deque
                 pcs = list(self.vpin_bucket_price_changes)
                 mean_pc = sum(pcs) / len(pcs)
                 variance = sum((x - mean_pc) ** 2 for x in pcs) / len(pcs)
@@ -160,34 +163,37 @@ class KalshiOrderflowFeatureExtractor:
             self.vpin_imbalances.append(imbalance)
 
             if self.vpin_imbalances:
-                # Performance optimization: Fast sum() / len() instead of np.mean()
                 self.vpin_score = (sum(self.vpin_imbalances) / len(self.vpin_imbalances)) / self.vpin_bucket_size
 
             self.vpin_bucket_vol = 0.0
             self.vpin_bucket_start_price = price
 
-        # Absorption: trade occurred at touch without price advancement
+        # Absorption tracking
         if trade_dir == -1.0 and abs(price - self.prev_best_bid) < 1e-6:
             self.bid_absorption += qty
         elif trade_dir == 1.0 and abs(price - self.prev_best_ask) < 1e-6:
             self.ask_absorption += qty
 
-    def extract_features_from_book(
+    def extract_features(
         self,
         book: L2BookState,
         latest_trades: Optional[List[TradeEvent]] = None,
+        target_strike: Optional[Decimal] = None,
+        current_spot: Optional[Decimal] = None,
+        time_to_expiry_s: Optional[float] = None,
+        twap_60s: Optional[Decimal] = None,
+        spot_volatility: Optional[float] = None,
     ) -> np.ndarray:
-        """Construct the full 28-feature numpy tensor from an L2BookState."""
+        """Construct the full 32-feature numpy tensor from an L2BookState and spacetime parameters."""
         if latest_trades:
             for t in latest_trades:
                 self.process_trade(t)
 
-        # Performance optimization: Fast-path raw tuple extraction using get_depth_tuples
-        # to avoid instantiating ~30 Pydantic OrderBookLevel wrapper objects per tick call.
+        # 1. Book Depth Extraction
         if hasattr(book, "get_depth_tuples"):
             top_yes, top_no = book.get_depth_tuples(self.target_depth)
             if not top_yes or not top_no:
-                return np.zeros(28, dtype=np.float32)
+                return np.zeros(self.FEATURE_DIM, dtype=np.float32)
 
             best_bid = float(top_yes[0][0])
             is_spot = getattr(book, "is_spot", False) or best_bid > 10.0
@@ -211,7 +217,7 @@ class KalshiOrderflowFeatureExtractor:
         else:
             bids, asks = book.get_depth(self.target_depth)
             if not bids or not asks:
-                return np.zeros(28, dtype=np.float32)
+                return np.zeros(self.FEATURE_DIM, dtype=np.float32)
 
             best_bid = float(bids[0].price)
             is_spot = getattr(book, "is_spot", False) or best_bid > 10.0
@@ -233,14 +239,13 @@ class KalshiOrderflowFeatureExtractor:
             bid_sizes = [float(lv.quantity) for lv in bids]
             ask_sizes = [float(lv.quantity) for lv in asks]
 
-        # 2. Spatial Volumes
+        # 2. Spatial Volumes & Normalization
         len_bids = len(bid_sizes)
         len_asks = len(ask_sizes)
         target_depth = self.target_depth
 
         if len_bids < target_depth:
             bid_sizes.extend([0.0] * (target_depth - len_bids))
-
         if len_asks < target_depth:
             ask_sizes.extend([0.0] * (target_depth - len_asks))
 
@@ -249,33 +254,27 @@ class KalshiOrderflowFeatureExtractor:
         total_visible_volume = sum_bids + sum_asks + 1e-9
 
         self.rolling_volumes.append(total_visible_volume)
-
-        # Performance optimization: Fast list median on small deque (max 100 floats) avoids
-        # NumPy array instantiation overhead on every tick.
         vols = list(self.rolling_volumes)
         vols.sort()
         n_v = len(vols)
         median_volume = vols[n_v // 2] if n_v % 2 == 1 else (vols[n_v // 2 - 1] + vols[n_v // 2]) * 0.5
         baseline_volume = max(median_volume, 1e-9)
-
-        # Precompute reciprocal multiplier to replace division with fast floating-point multiplication
         inv_baseline = 1.0 / baseline_volume
 
         # 3. Order Flow Imbalance (OFI)
         b0, a0 = bid_sizes[0], ask_sizes[0]
         ofi_l1 = (b0 - a0) / (b0 + a0 + 1e-9)
 
-        vol_b5 = bid_sizes[0] + bid_sizes[1] + bid_sizes[2] + bid_sizes[3] + bid_sizes[4]
-        vol_a5 = ask_sizes[0] + ask_sizes[1] + ask_sizes[2] + ask_sizes[3] + ask_sizes[4]
+        vol_b5 = sum(bid_sizes[:5])
+        vol_a5 = sum(ask_sizes[:5])
         ofi_l5 = (vol_b5 - vol_a5) / (vol_b5 + vol_a5 + 1e-9)
+        self.ofi_l5_history.append(ofi_l5)
 
-        # Reuse pre-calculated sums for full-depth volume
-        ofi_l15 = (sum_bids - sum_asks) / (total_visible_volume)
+        ofi_l15 = (sum_bids - sum_asks) / total_visible_volume
 
-        # 4. Spoofing & Layering Metrics (Derived from full depth sums to avoid extra slicing & list allocations)
+        # 4. Spoofing & Layering Metrics
         vol_b_tail = sum_bids - vol_b5
         vol_a_tail = sum_asks - vol_a5
-
         spoof_mag_bid = (vol_b_tail * inv_baseline) * 0.15
         spoof_mag_ask = (vol_a_tail * inv_baseline) * 0.15
         layering_index = (vol_b_tail + vol_a_tail) / (vol_b5 + vol_a5 + 1e-9)
@@ -285,17 +284,45 @@ class KalshiOrderflowFeatureExtractor:
         self.ask_absorption *= self.ABSORPTION_DECAY
         self.whale_tx_count *= self.WHALE_DECAY
 
-        # Performance optimization: Use O(1) running CVD value instead of linear sum() loop
-        cvd = self._running_cvd
-        cvd_norm = cvd * inv_baseline
+        cvd_norm = self._running_cvd * inv_baseline
         bid_absorption_norm = self.bid_absorption * inv_baseline
         ask_absorption_norm = self.ask_absorption * inv_baseline
 
         self.prev_best_bid = best_bid
         self.prev_best_ask = best_ask
 
-        # 6. Spatial Imbalance Vector & Buffer Assembly
-        # Populate pre-allocated numpy array buffer directly to avoid Python list allocations.
+        # 6. Spacetime & Contract Physics Features
+        tau = float(time_to_expiry_s) if time_to_expiry_s is not None else 450.0
+        tau = max(1.0, min(900.0, tau))
+        tau_norm = tau / 900.0
+
+        sigma = spot_volatility or self.default_gold_volatility
+        sigma = max(0.10, sigma)
+
+        # Feature 28: Moneyness Z-score
+        if current_spot is not None and target_strike is not None and target_strike > 0:
+            diff = float(current_spot - target_strike)
+            time_scale = math.sqrt(tau / 60.0)  # minutes remaining sqrt scale
+            denom = sigma * max(0.2, time_scale)
+            z_score = max(-5.0, min(5.0, diff / denom))
+        else:
+            z_score = 0.0
+
+        # Feature 30: OFI Acceleration
+        if len(self.ofi_l5_history) >= 4:
+            ofi_accel = ofi_l5 - self.ofi_l5_history[-4]
+        else:
+            ofi_accel = 0.0
+        ofi_accel = max(-2.0, min(2.0, ofi_accel))
+
+        # Feature 31: Settlement TWAP Delta
+        if current_spot is not None and twap_60s is not None:
+            twap_diff = float(current_spot - twap_60s)
+            twap_delta = max(-3.0, min(3.0, twap_diff / sigma))
+        else:
+            twap_delta = 0.0
+
+        # 7. Buffer Assembly (32 Dimensions)
         decays = self._decay_weights
         buf = self._feature_buffer
         buf[0] = spread_bps
@@ -312,14 +339,14 @@ class KalshiOrderflowFeatureExtractor:
         buf[11] = self.whale_tx_count
         buf[12] = layering_index
 
-        # Performance optimization: Use vector slice assignment instead of per-element indexing loop.
-        # Assigning a list slice to numpy buffer buf[13:13+target_depth] runs in optimized C vector operations,
-        # reducing feature vector buffer assembly latency by ~10-12%.
+        # 15 Spatial decay layers
         end_depth_idx = 13 + target_depth
         buf[13:end_depth_idx] = [decays[i] * (bid_sizes[i] - ask_sizes[i]) * inv_baseline for i in range(target_depth)]
 
-        return buf.copy()
+        # 4 Spacetime & Contract Physics features
+        buf[28] = z_score
+        buf[29] = tau_norm
+        buf[30] = ofi_accel
+        buf[31] = twap_delta
 
-    def calculate_vpin(self) -> float:
-        """Return the current VPIN toxicity score."""
-        return float(self.vpin_score)
+        return buf.copy()
