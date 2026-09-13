@@ -199,6 +199,26 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   const [journalDateScope, setJournalDateScope] = useState<'all' | 'today'>('all');
   const [trainerActionLoading, setTrainerActionLoading] = useState(false);
 
+
+  const handleActivateBot = async (botId: string) => {
+    if (window.confirm("This will launch the bot on Port 8001. If another bot is currently active, it will be terminated. Proceed?")) {
+      try {
+        const res = await fetch('http://127.0.0.1:8000/api/bots/spawn', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ bot_id: botId })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          window.location.href = data.url;
+        }
+      } catch (err) {
+        console.error("Failed to spawn bot:", err);
+        alert("Failed to activate bot.");
+      }
+    }
+  };
+
   const handleToggleTrainer = async () => {
     setTrainerActionLoading(true);
     try {
@@ -1204,17 +1224,13 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                               </span>
                             </td>
                             <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                              {m.canPromote ? (
-                                <button
-                                  onClick={() => setIsPromoteModalOpen(true)}
-                                  className="px-2.5 py-1 rounded bg-[#00bda5] text-black font-bold hover:bg-[#2dd4bf] transition-all shadow-sm cursor-pointer"
-                                >
-                                  Promote 🚀
-                                </button>
-                              ) : (
-                                <span className="text-[10px] text-[#8c9ba5]">&mdash;</span>
-                              )}
-                            </td>
+                                  <button
+                                    onClick={() => handleActivateBot(m.id)}
+                                    className="px-2.5 py-1 rounded bg-[#00bda5] text-black font-bold hover:bg-[#2dd4bf] transition-all shadow-sm cursor-pointer text-[10px] uppercase tracking-wider"
+                                  >
+                                    Activate →
+                                  </button>
+                              </td>
                           </tr>
                         );
                       })}

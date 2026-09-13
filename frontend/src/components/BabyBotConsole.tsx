@@ -487,6 +487,24 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   };
 
   // Save parameters to backend
+  
+  const handlePromoteToLive = async () => {
+    try {
+      soundFX.playClickSound();
+      const res = await fetch('/api/bot/promote', { method: 'POST' });
+      if (res.ok) {
+        soundFX.playWinSound();
+        setSaveSuccessMsg('? Promoted to Live 8001');
+        setTimeout(() => setSaveSuccessMsg(null), 2500);
+      } else {
+        setSaveSuccessMsg('?? Failed to promote');
+      }
+    } catch (err) {
+      console.error('Error promoting:', err);
+      setSaveSuccessMsg('?? Network error');
+    }
+  };
+
   const handleSaveParameters = async () => {
     setIsSavingParams(true);
     setSaveSuccessMsg(null);
@@ -2587,7 +2605,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                 {/* Min Spot Distance */}
                 <div className="space-y-1">
                   <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    Spot Moat ($)
+                    min_spot_diff
                     <div className="group relative cursor-help">
                       <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
                       <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
@@ -2614,7 +2632,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                 {/* Moneyness Moat Multiplier */}
                 <div className="space-y-1">
                   <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    Moat Multiplier (x)
+                    moneyness_moat_multiplier
                     <div className="group relative cursor-help">
                       <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
                       <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
@@ -2641,7 +2659,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                 {/* Opening Quarantine */}
                 <div className="space-y-1">
                   <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    Quarantine (s)
+                    opening_quarantine_seconds
                     <div className="group relative cursor-help">
                       <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
                       <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
@@ -3042,6 +3060,14 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                 >
                   {isSavingParams ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                   <span>{activeProfile.telemetryType === 'macro_dominion' || activeProfile.telemetryType === 'onnx' ? 'Apply Strategy Dials' : 'Apply & Save as Default'}</span>
+                </button>
+
+                <button
+                  onClick={handlePromoteToLive}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-red-600 text-white font-bold text-xs hover:bg-red-500 transition-all shadow cursor-pointer"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  <span>PROMOTE TO LIVE</span>
                 </button>
               </div>
             </div>

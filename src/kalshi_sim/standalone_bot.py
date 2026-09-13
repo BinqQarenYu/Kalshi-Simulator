@@ -2854,6 +2854,8 @@ class ParametersUpdateRequest(BaseModel):
     tape_confirmation_ticks: Optional[int] = Field(default=None, ge=1, le=10, description="Number of consecutive orderflow tape ticks required for entry confirmation")
     taker_cross_ev_threshold: Optional[float] = Field(default=None, ge=0.01, le=0.30, description="Minimum EV required to pay taker spread/fee")
     dynamic_moat_multiplier: Optional[float] = Field(default=None, ge=0.5, le=3.0, description="Dynamic moat volatility multiplier")
+    moneyness_moat_multiplier: Optional[float] = Field(default=None, ge=0.5, le=10.0, description="Moneyness Moat multiplier")
+    opening_quarantine_seconds: Optional[float] = Field(default=None, ge=0.0, le=300.0, description="Opening quarantine in seconds")
     max_temporal_skew_ms: Optional[float] = Field(default=None, ge=100.0, le=10000.0, description="Max cross-brain temporal skew in milliseconds")
     gamma_cliff_seconds: Optional[float] = Field(default=None, ge=10.0, le=300.0, description="Gamma cliff late-cycle cutoff in seconds")
     auto_cancel_on_veto: Optional[bool] = Field(default=None, description="Automatically cancel resting orders on veto/cutoff")

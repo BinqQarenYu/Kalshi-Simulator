@@ -3832,22 +3832,53 @@ async def get_bot_parameters() -> dict[str, Any]:
     return res
 
 
+
+@app.post("/api/bot/promote")
+async def promote_to_live() -> dict[str, Any]:
+    """Manually push paper/sandbox parameters across the air-gap to the Live Engine."""
+    holder = get_active_lock_holder()
+    if not (holder and holder[0] == "standalone_bot" and holder[1] != os.getpid()):
+        raise HTTPException(status_code=400, detail="No Live Engine detected on Port 8001. Start it first.")
+    
+    # Get current saved parameters from sandbox
+    pm = get_preset_manager()
+    # Read the JSON file directly to get exactly what's on disk
+    params_file = pm.data_dir / "bot_parameters_domination.json"
+    import json
+    if not params_file.exists():
+        raise HTTPException(status_code=404, detail="No saved parameters found in sandbox.")
+        
+    try:
+        current_params = json.loads(params_file.read_text(encoding="utf-8"))
+        # Strip internal keys
+        for k in ["active_assets", "assets", "is_armed", "updated_at"]:
+            current_params.pop(k, None)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read sandbox params: {e}")
+        
+    try:
+        connector = create_aiohttp_connector()
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.post("http://127.0.0.1:8001/api/bot/parameters", json=current_params, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
+                if resp.status == 200:
+                    return {"status": "SUCCESS", "message": "Parameters successfully promoted across the air-gap to Live Engine!"}
+                else:
+                    err = await resp.text()
+                    raise HTTPException(status_code=resp.status, detail=f"Live Engine rejected promotion: {err}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed crossing the air-gap to Live Engine: {str(e)}")
+
+
 @app.post("/api/bot/parameters")
 @app.patch("/api/bot/parameters")
 async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
     """Dynamically update strategy parameters (forwarded to Standalone Bot if active)."""
     payload = req.model_dump(exclude_none=True)
     res: dict[str, Any] = {}
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post("http://127.0.0.1:8001/api/bot/parameters", json=payload, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        res = await resp.json()
-        except Exception as e:
-            logger.warning("Failed updating parameters on standalone bot: %s", e)
+    # Air-Gapped Sandbox: Parameter updates here are strictly for Paper/Simulation.
+    # We deliberately DO NOT auto-forward tweaks to the Standalone Engine (Port 8001).
+    # To change live parameters, the user must explicitly hit the 'PROMOTE' bridge.
+
 
     # Always keep dual_onnx_bot updated with strategy dials
     if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
@@ -3925,16 +3956,6 @@ class ImportPresetRequest(BaseModel):
 @app.get("/api/bot/presets")
 async def get_bot_presets_endpoint() -> dict[str, Any]:
     """List all presets in the vault and return active preset metadata."""
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get("http://127.0.0.1:8001/api/bot/presets", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-        except Exception as e:
-            logger.debug("Failed fetching presets from standalone bot: %s", e)
 
     pm = get_preset_manager()
     return {
@@ -3947,16 +3968,6 @@ async def get_bot_presets_endpoint() -> dict[str, Any]:
 @app.post("/api/bot/presets/save")
 async def save_bot_preset_endpoint(req: SavePresetRequest) -> dict[str, Any]:
     """Snapshot current parameters into a new preset."""
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post("http://127.0.0.1:8001/api/bot/presets/save", json=req.model_dump(), timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-        except Exception as e:
-            logger.warning("Failed forwarding preset save to standalone bot: %s", e)
 
     pm = get_preset_manager()
     success, msg, data = pm.save_preset(
@@ -3973,16 +3984,6 @@ async def save_bot_preset_endpoint(req: SavePresetRequest) -> dict[str, Any]:
 @app.post("/api/bot/presets/load")
 async def load_bot_preset_endpoint(req: LoadPresetRequest) -> dict[str, Any]:
     """Atomically load and hot-swap parameters from a preset into the engine."""
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post("http://127.0.0.1:8001/api/bot/presets/load", json=req.model_dump(), timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-        except Exception as e:
-            logger.warning("Failed forwarding preset load to standalone bot: %s", e)
 
     pm = get_preset_manager()
     success, msg, data = pm.load_preset(req.preset_id)
@@ -3995,16 +3996,6 @@ async def load_bot_preset_endpoint(req: LoadPresetRequest) -> dict[str, Any]:
 @app.post("/api/bot/presets/unload")
 async def unload_bot_preset_endpoint() -> dict[str, Any]:
     """Revert configuration back to the Council Certified Baseline."""
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post("http://127.0.0.1:8001/api/bot/presets/unload", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-        except Exception as e:
-            logger.warning("Failed forwarding preset unload to standalone bot: %s", e)
 
     pm = get_preset_manager()
     success, msg, data = pm.unload_preset()
@@ -4017,16 +4008,6 @@ async def unload_bot_preset_endpoint() -> dict[str, Any]:
 @app.post("/api/bot/presets/upload")
 async def upload_bot_preset_endpoint(req: ImportPresetRequest) -> dict[str, Any]:
     """Validate and import an uploaded preset JSON into the vault."""
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post("http://127.0.0.1:8001/api/bot/presets/upload", json=req.model_dump(), timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-        except Exception as e:
-            logger.warning("Failed forwarding preset upload to standalone bot: %s", e)
 
     pm = get_preset_manager()
     raw_json = req.preset_json
@@ -4064,16 +4045,6 @@ async def export_bot_preset_endpoint(preset_id: str) -> Response:
 @app.delete("/api/bot/presets/{preset_id}")
 async def delete_bot_preset_endpoint(preset_id: str) -> dict[str, Any]:
     """Delete a custom preset from the vault."""
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.delete(f"http://127.0.0.1:8001/api/bot/presets/{preset_id}", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-        except Exception as e:
-            logger.warning("Failed forwarding preset delete to standalone bot: %s", e)
 
     pm = get_preset_manager()
     success, msg = pm.delete_preset(preset_id)
@@ -6612,6 +6583,54 @@ async def broadcast_loop() -> None:
         await asyncio.sleep(0.08)
 
 
+
+
+@app.post("/api/bots/spawn")
+async def spawn_bot(request: Request):
+    data = await request.json()
+    bot_id = data.get("bot_id", "")
+    
+    import subprocess
+    import sys
+    try:
+        import psutil
+    except ImportError:
+        pass
+    from kalshi_sim.process_lock import get_active_lock_holder
+    
+    active = get_active_lock_holder()
+    if active:
+        owner, pid = active
+        try:
+            if 'psutil' in sys.modules:
+                p = psutil.Process(pid)
+                p.terminate()
+                p.wait(timeout=3)
+            else:
+                if sys.platform == "win32":
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)])
+                else:
+                    import os, signal
+                    os.kill(pid, signal.SIGTERM)
+        except Exception as e:
+            logger.error("Error killing active bot: %s", e)
+            
+    bot_script_map = {
+        "3_step_domination_bot": "run_standalone_bot.bat",
+        "macro_onnx": "run_standalone_onnx.bat",
+        "dual_onnx_arbitrage_bot": "run_standalone_onnx.bat",
+        "macro_trend_dominion": "run_standalone_macro.bat",
+        "the_onnx_strategy": "run_standalone_onnx.bat"
+    }
+    script = bot_script_map.get(bot_id, "run_standalone_bot.bat")
+    
+    if sys.platform == "win32":
+        CREATE_NEW_CONSOLE = 0x00000010
+        subprocess.Popen(["cmd.exe", "/c", script], creationflags=CREATE_NEW_CONSOLE)
+    else:
+        subprocess.Popen(["bash", script])
+        
+    return {"status": "success", "url": "http://localhost:8001"}
 
 # ---------------------------------------------------------------------------
 # Frontend Static Mount (if built)
