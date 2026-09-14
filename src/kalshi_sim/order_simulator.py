@@ -6,6 +6,7 @@ timeframe-specific slippage multipliers. No live orders are ever placed.
 
 from __future__ import annotations
 
+from functools import lru_cache
 import logging
 import operator
 import uuid
@@ -308,8 +309,9 @@ class OrderSimulator:
         return filled
 
     @staticmethod
+    @lru_cache(maxsize=128)
     def get_adverse_velocity_threshold(asset_or_ticker: str) -> float:
-        """Get spot velocity adverse threshold for specific asset."""
+        """Get spot velocity adverse threshold for specific asset (memoized)."""
         key = asset_or_ticker.upper()
         for ast, thresh in _SPOT_VELOCITY_ITEMS:
             if ast in key:
@@ -554,11 +556,12 @@ class OrderSimulator:
             Tuple of (vwap_price, total_filled, total_slippage).
         """
         # Performance optimization:
-        # 1. Direct tuple sorting (`sorted(book_side.items(), reverse=True)`) eliminates key=lambda function lookup overhead.
-        #    Price keys in book dict are unique Decimal objects, so Python tuple comparison compares prices directly.
+        # 1. Using pre-allocated C-extension `_PRICE_GETTER = operator.itemgetter(0)` key speeds up level sorting
+        #    by extracting price keys directly without full tuple comparison or Python lambda frame allocation.
         # 2. Both YES and NO orders sort book levels in descending order; branch eliminated.
-        # 3. Pre-allocated _DEC_0_0001 module constant avoids creating new Decimal objects on quantize calls.
-        sorted_levels = sorted(book_side.items(), reverse=True)
+        # 3. Guard adverse velocity check with `spot_velocity != 0.0` and `@lru_cache` threshold lookup.
+        # 4. Pre-allocated _DEC_0_0001 module constant avoids creating new Decimal objects on quantize calls.
+        sorted_levels = sorted(book_side.items(), key=_PRICE_GETTER, reverse=True)
 
         remaining = size
         total_cost = _DEC_0_00
@@ -601,12 +604,13 @@ class OrderSimulator:
         # Realistic adverse selection / latency price drift:
         # If market momentum is running strongly in trade direction,
         # by the time the order arrives (75-150ms), price has drifted adversely
-        vel_threshold = self.get_adverse_velocity_threshold(asset_or_ticker)
         adverse_penalty = _DEC_0_00
-        if order_side == OrderSide.YES and spot_velocity > vel_threshold:
-            adverse_penalty = _DEC_0_01
-        elif order_side == OrderSide.NO and spot_velocity < -vel_threshold:
-            adverse_penalty = _DEC_0_01
+        if spot_velocity != 0.0:
+            vel_threshold = self.get_adverse_velocity_threshold(asset_or_ticker)
+            if order_side == OrderSide.YES and spot_velocity > vel_threshold:
+                adverse_penalty = _DEC_0_01
+            elif order_side == OrderSide.NO and spot_velocity < -vel_threshold:
+                adverse_penalty = _DEC_0_01
 
         final_vwap = (vwap + adjusted_slippage + adverse_penalty).quantize(
             _DEC_0_0001, rounding=ROUND_HALF_UP
