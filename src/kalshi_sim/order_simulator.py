@@ -353,11 +353,9 @@ class OrderSimulator:
             # Buying Yes: we hit the ask side, which is derived from No bids
             # Best yes ask = 1 - best_no_bid. Walk No book from highest to lowest.
             consume_book = book.no_book
-            price_transform = lambda no_price: Decimal("1") - no_price
         else:
             # Buying No: we hit the Yes book directly
             consume_book = book.yes_book
-            price_transform = lambda yes_price: Decimal("1") - yes_price
 
         if not consume_book:
             logger.warning(
