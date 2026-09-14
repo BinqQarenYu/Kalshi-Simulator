@@ -123,3 +123,14 @@ def test_port_8003_dial_sync_bridge() -> None:
     assert post_resp.status_code == 200
     post_data = post_resp.json()
     assert post_data.get("limit_price_cents") == 51 or post_data.get("status") == "UPDATED"
+
+
+def test_clock_sync_web_now_parity() -> None:
+    """Verify web_now() matches local machine UTC time for 1:1 Kalshi web countdown timer parity."""
+    cs = KalshiClockSync()
+    cs._drift_seconds = 10.5  # Simulate arbitrary exchange drift
+    t_sys = datetime.now(timezone.utc)
+    t_web = cs.web_now()
+    assert abs((t_web - t_sys).total_seconds()) < 0.05
+    # Confirm web_now is NOT skewed by _drift_seconds
+    assert abs((t_web - (t_sys + timedelta(seconds=10.5))).total_seconds()) > 5.0

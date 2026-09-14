@@ -1430,7 +1430,7 @@ class StandaloneBotEngine:
                 target_dt = datetime.fromisoformat(target_dt.replace("Z", "+00:00"))
             except Exception:
                 return 0.0
-        now_utc = clock_sync.kalshi_now()
+        now_utc = clock_sync.web_now()
         
         if target_dt.tzinfo is None:
             target_dt = target_dt.replace(tzinfo=timezone.utc)

@@ -1461,13 +1461,9 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
 
 
 def resolve_active_market(now_utc: datetime | None = None) -> tuple[Any | None, int, Decimal, str, str]:
-    """Resolve the currently active open market, remaining seconds, target strike, target time str, and window str (Kalshi calibrated)."""
+    """Resolve the currently active open market, remaining seconds, target strike, target time str, and window str (Kalshi web calibrated)."""
     if now_utc is None:
-        now_utc = clock_sync.kalshi_now()
-    else:
-        drift = clock_sync.get_drift_seconds()
-        if abs(drift) > 0.05:
-            now_utc = now_utc + timedelta(seconds=drift)
+        now_utc = clock_sync.web_now()
     # 0. Single Source of Truth: When 24/7 Standalone Bot is active, inherit its exact live market truth
     now_mono = time.monotonic()
     if hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 5.0):

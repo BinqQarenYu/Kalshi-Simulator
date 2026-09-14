@@ -299,8 +299,8 @@ class StandaloneMacroEngine:
             self.interlock_msg = "Exclusive Authority Active (Lane 2 Incubator)"
 
     def get_time_to_expiry(self) -> float:
-        """Calculate exact remaining seconds until active contract expiration boundary (Kalshi clock calibrated)."""
-        now_utc = clock_sync.kalshi_now()
+        """Calculate exact remaining seconds until active contract expiration boundary (Kalshi web calibrated)."""
+        now_utc = clock_sync.web_now()
         
         if getattr(self, "active_market_close_dt", None):
             delta = (self.active_market_close_dt - now_utc).total_seconds()
@@ -462,7 +462,7 @@ class StandaloneMacroEngine:
         async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
             while self._running:
                 try:
-                    now_utc = clock_sync.kalshi_now()
+                    now_utc = clock_sync.web_now()
                     synced_from_mother = False
 
                     # 1. Primary Sync: Inherit 100% unified market truth from Mother Dash (Port 8000)

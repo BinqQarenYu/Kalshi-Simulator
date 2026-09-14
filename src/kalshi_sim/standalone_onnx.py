@@ -311,8 +311,8 @@ class StandaloneONNXEngine:
             self.execution_mode = "LIVE" if self.is_live else "SHADOW"
 
     def get_time_to_expiry(self) -> float:
-        """Calculate exact remaining seconds until active contract expiration boundary (Kalshi calibrated)."""
-        now_utc = clock_sync.kalshi_now()
+        """Calculate exact remaining seconds until active contract expiration boundary (Kalshi web calibrated)."""
+        now_utc = clock_sync.web_now()
         
         if getattr(self, "active_market_close_dt", None):
             delta = (self.active_market_close_dt - now_utc).total_seconds()
@@ -606,7 +606,7 @@ class StandaloneONNXEngine:
     async def _discover_active_market(self, session: aiohttp.ClientSession) -> None:
         """Discover current open 15M BTC contract, or upcoming initialized contract during maintenance."""
         try:
-            now_utc = clock_sync.kalshi_now()
+            now_utc = clock_sync.web_now()
 
             # 0. Primary Sync: Inherit unified market truth from Mother Dash (Port 8000)
             try:

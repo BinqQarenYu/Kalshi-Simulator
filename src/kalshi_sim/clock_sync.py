@@ -49,6 +49,10 @@ class KalshiClockSync:
         """Return current UTC datetime calibrated to Kalshi's exchange server clock."""
         return datetime.now(timezone.utc) + timedelta(seconds=self._drift_seconds)
 
+    def web_now(self) -> datetime:
+        """Return unskewed UTC datetime calibrated 1:1 with local browser Date.now() for exact Kalshi web timer parity."""
+        return datetime.now(timezone.utc)
+
     def sync(self) -> float:
         """Synchronously perform HTTP round-trip to calculate exchange drift."""
         t0 = time.time()
