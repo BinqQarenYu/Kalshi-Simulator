@@ -60,3 +60,7 @@
 ## 2026-09-16 - Quick Action Trade Pill Buttons Accessibility
 **Learning:** Compact quick-action pill buttons in banner toolbars (e.g., "Up 4.6¢" / "Down 95.4¢") often omit `type="button"`, explicit `aria-label`, and `title` tooltip attributes, causing screen readers to announce abbreviated text without market contract context during quick trading interactions.
 **Action:** Always supply explicit `type="button"`, descriptive `aria-label` (e.g. `aria-label="Quick trade UP contract at 4.6¢"`), and matching `title` tooltips on quick action pill buttons.
+
+## 2026-09-20 - Quantitative Strategy Dropdown Menu & Real-Time Telemetry Accessibility
+**Learning:** Custom strategy selection dropdown menus require explicit keyboard `Escape` dismissal handlers, `aria-controls` container linking, `type="button"` and `aria-label` attributes on option items, and `font-mono tabular-nums` for real-time probability/EV metrics to prevent layout thrashing and preserve screen reader accessibility during high-frequency telemetry updates.
+**Action:** Always wire `Escape` key handlers on custom dropdown menus, link dropdown buttons with `aria-controls`, add explicit `aria-label` text to options, and format live numeric readouts with `font-mono tabular-nums`.
