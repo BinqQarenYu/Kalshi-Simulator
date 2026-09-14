@@ -429,7 +429,8 @@ class StandaloneMacroEngine:
     async def _binance_feed_loop(self) -> None:
         """Stream Binance spot price to feed Brain 1 tensor builder."""
         url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-        async with aiohttp.ClientSession() as session:
+        connector = create_aiohttp_connector()
+        async with aiohttp.ClientSession(connector=connector) as session:
             while self._running:
                 try:
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:

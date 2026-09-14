@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-09-14T20:27:07.274069+00:00",
+  "last_updated": "2026-09-14T20:29:05.628620+00:00",
   "active_live_strategy": "3_step_domination_bot",
   "seals": {
     "3_step_domination_bot": {
@@ -82,9 +82,9 @@
       "bot_id": "macro_trend_dominion",
       "bot_name": "Macro Trend Dominion",
       "seal_status": "SEALED_EXCELLENT",
-      "seal_token": "SEAL-MACR-D2290526A3EC",
+      "seal_token": "SEAL-MACR-06320C82E13B",
       "live_trading_authorized": true,
-      "granted_at": "2026-09-14T20:27:07.273924+00:00",
+      "granted_at": "2026-09-14T20:29:05.628416+00:00",
       "council_signoff": "COUNCIL-SANCTIONED-BASELINE-V3.2",
       "settled_cycles_verified": 137,
       "graduation_threshold": 30,
