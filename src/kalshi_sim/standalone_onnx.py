@@ -606,7 +606,34 @@ class StandaloneONNXEngine:
     async def _discover_active_market(self, session: aiohttp.ClientSession) -> None:
         """Discover current open 15M BTC contract, or upcoming initialized contract during maintenance."""
         try:
-            now_utc = datetime.now(timezone.utc)
+            now_utc = clock_sync.kalshi_now()
+
+            # 0. Primary Sync: Inherit unified market truth from Mother Dash (Port 8000)
+            try:
+                async with session.get("http://127.0.0.1:8000/api/state", timeout=aiohttp.ClientTimeout(total=0.5)) as resp0:
+                    if resp0.status == 200:
+                        m_data = await resp0.json()
+                        market = m_data.get("market", {})
+                        if market and market.get("ticker"):
+                            new_ticker = market["ticker"]
+                            if self.active_ticker and new_ticker != self.active_ticker:
+                                logger.info("🔄 [CYCLE ROLLOVER] %s -> %s. Sweeping resting orders...", self.active_ticker, new_ticker)
+                                asyncio.create_task(self._cancel_resting_orders())
+                            self.active_ticker = new_ticker
+                            if market.get("target_strike") is not None:
+                                self.target_strike = Decimal(str(market["target_strike"]))
+                            if market.get("current_btc_price") is not None:
+                                self.current_btc_spot = Decimal(str(market["current_btc_price"]))
+                                self.brti_connected = True
+                            t_rem = market.get("expiry_countdown_seconds")
+                            if t_rem is not None:
+                                self.active_market_close_dt = now_utc + timedelta(seconds=int(t_rem))
+                            self.target_time_str = market.get("target_time_str", "")
+                            self.time_window_str = market.get("time_window_str", "")
+                            return
+            except Exception:
+                pass
+
             valid_markets = []
 
             # 1. Primary: open markets
