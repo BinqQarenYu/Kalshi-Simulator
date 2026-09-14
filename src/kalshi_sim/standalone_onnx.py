@@ -48,6 +48,7 @@ from kalshi_sim.auth import (
 )
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
 from kalshi_sim.cfbenchmarks_sync import CFBenchmarksSync
+from kalshi_sim.clock_sync import clock_sync
 from kalshi_sim.db import get_db, get_db_writer, DatabaseWriter
 from kalshi_sim.live_coordinator import LiveCoordinator
 from kalshi_sim.ml.dual_onnx_gateway import DualONNXGateway
@@ -310,10 +311,8 @@ class StandaloneONNXEngine:
             self.execution_mode = "LIVE" if self.is_live else "SHADOW"
 
     def get_time_to_expiry(self) -> float:
-        """Calculate exact remaining seconds until active contract expiration boundary."""
-        now_utc = datetime.now(timezone.utc)
-        drift = getattr(self, "_clock_drift_seconds", 0.0)
-        now_utc += __import__("datetime").timedelta(seconds=drift)
+        """Calculate exact remaining seconds until active contract expiration boundary (Kalshi calibrated)."""
+        now_utc = clock_sync.kalshi_now()
         
         if getattr(self, "active_market_close_dt", None):
             delta = (self.active_market_close_dt - now_utc).total_seconds()
@@ -334,8 +333,8 @@ class StandaloneONNXEngine:
         return params
 
     def update_parameters(self, **kwargs) -> Dict[str, Any]:
-        """Dynamically update strategy parameters and guardrail caps."""
-        max_contracts = kwargs.pop("max_contracts", None)
+        """Update ONNX Strategy dials dynamically."""
+        max_contracts = kwargs.get("max_contracts")
         if max_contracts is not None:
             clamped_size = max(1, min(1, int(max_contracts)))
             self.guardrails.max_micro_bankroll_contracts = clamped_size
@@ -350,35 +349,19 @@ class StandaloneONNXEngine:
     def _sync_kalshi_clock(self) -> None:
         """Perform HTTP round-trip to calculate Kalshi server time drift vs local OS clock."""
         try:
-            import requests
-            import time
-            from datetime import datetime, timezone
-            
-            t0 = time.time()
-            resp = requests.get("https://api.elections.kalshi.com/trade-api/v2/exchange/status", timeout=5)
-            t1 = time.time()
-            
-            if resp.status_code == 200:
-                date_str = resp.headers.get("Date")
-                if date_str:
-                    server_dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
-                    rtt = t1 - t0
-                    estimated_server_time = server_dt.timestamp() + (rtt / 2.0)
-                    local_time = t1
-                    
-                    self._clock_drift_seconds = estimated_server_time - local_time
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.info(f"⌚ [NTP SYNC] Kalshi Clock Drift Computed: {self._clock_drift_seconds:+.3f} seconds (RTT {rtt*1000:.1f}ms)")
-                    return
+            drift = clock_sync.sync()
+            self._clock_drift_seconds = drift
         except Exception as e:
-            pass
-        self._clock_drift_seconds = 0.0
+            logger.warning("[NTP SYNC] Clock sync warning on Port 8002: %s", e)
+            self._clock_drift_seconds = getattr(self, "_clock_drift_seconds", 0.0)
 
     async def start(self) -> None:
         """Start all background loops for Port 8002."""
         self._running = True
         prevent_windows_sleep()
+
+        # Synchronize NTP time drift with Kalshi API
+        self._sync_kalshi_clock()
 
         # Start database persistence writer
         await self.db_writer.start()

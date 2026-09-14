@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 import time
+from unittest.mock import patch
 import pytest
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
@@ -489,41 +490,43 @@ def test_onnx_strategy_promoted_live_authorization() -> None:
 
 
 def test_macro_trend_dominion_paper_authorization_and_live_blocking() -> None:
-    """Verify Lane 2 isolation: Macro Trend Dominion is authorized in paper mode, but strictly blocked in live mode."""
+    """Verify Lane 2 isolation: Macro Trend Dominion is authorized in paper mode, but strictly blocked in live mode when unsealed."""
     guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
     cycle = "KXBTC15M-26SEP101800-00"
 
-    for macro_alias in ("macro_trend_dominion", "macro_onnx", "macro_trend"):
-        # 1. In Paper Mode (is_live=False): Authorized and capped to 1 contract
-        ok_paper, reason_paper, size_paper, _ = guardrails.validate_pre_trade_intent(
-            ticker=f"{cycle}-{macro_alias}-paper",
-            side="yes",
-            requested_size=5,
-            est_price=Decimal("0.48"),
-            total_equity=Decimal("25.00"),
-            vpin=0.10,
-            is_bot=True,
-            bot_type=macro_alias,
-            is_live=False,
-        )
-        assert ok_paper is True, f"Failed for {macro_alias} in paper mode: {reason_paper}"
-        assert size_paper == 1
+    # Simulate unsealed state on disk
+    with patch("kalshi_sim.bot_deployment_auditor.BotDeploymentAuditor.check_live_authorization_on_disk", return_value=(False, "UNSEALED")):
+        for macro_alias in ("macro_trend_dominion", "macro_onnx", "macro_trend"):
+            # 1. In Paper Mode (is_live=False): Authorized and capped to 1 contract
+            ok_paper, reason_paper, size_paper, _ = guardrails.validate_pre_trade_intent(
+                ticker=f"{cycle}-{macro_alias}-paper",
+                side="yes",
+                requested_size=5,
+                est_price=Decimal("0.48"),
+                total_equity=Decimal("25.00"),
+                vpin=0.10,
+                is_bot=True,
+                bot_type=macro_alias,
+                is_live=False,
+            )
+            assert ok_paper is True, f"Failed for {macro_alias} in paper mode: {reason_paper}"
+            assert size_paper == 1
 
-        # 2. In Live Mode (is_live=True): Prohibited without explicit promotion
-        ok_live, reason_live, size_live, _ = guardrails.validate_pre_trade_intent(
-            ticker=f"{cycle}-{macro_alias}-live",
-            side="yes",
-            requested_size=1,
-            est_price=Decimal("0.48"),
-            total_equity=Decimal("25.00"),
-            vpin=0.10,
-            is_bot=True,
-            bot_type=macro_alias,
-            is_live=True,
-        )
-        assert ok_live is False, f"Expected {macro_alias} to be blocked in live mode!"
-        assert "LIVE BOT TRADING PROHIBITED" in reason_live
-        assert size_live == 0
+            # 2. In Live Mode (is_live=True): Prohibited without explicit promotion or seal
+            ok_live, reason_live, size_live, _ = guardrails.validate_pre_trade_intent(
+                ticker=f"{cycle}-{macro_alias}-live",
+                side="yes",
+                requested_size=1,
+                est_price=Decimal("0.48"),
+                total_equity=Decimal("25.00"),
+                vpin=0.10,
+                is_bot=True,
+                bot_type=macro_alias,
+                is_live=True,
+            )
+            assert ok_live is False, f"Expected {macro_alias} to be blocked in live mode when unsealed!"
+            assert "LIVE BOT TRADING PROHIBITED" in reason_live
+            assert size_live == 0
 
 
 def test_macro_trend_dominion_promoted_live_authorization() -> None:

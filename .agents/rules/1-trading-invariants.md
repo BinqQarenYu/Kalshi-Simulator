@@ -10,9 +10,9 @@ description: Core quantitative trading invariants, capital preservation rules, a
 - **NEVER** use IEEE-754 floating-point math (`float` in Python / native `number` in JS) for financial calculations (balances, order amounts, prices, PnL, fees, strike differences).
 - All monetary arithmetic must use Python `decimal.Decimal` and TypeScript `decimal.js` / string-wrapped allocations.
 
-## 2. Micro-Bankroll Sizing Armor
+## 2. Micro-Bankroll Sizing Armor & Live Authorization
 - For bankrolls under $75, sizing is strictly hard-capped to **1 contract per trade** for each asset (`BTC`, `ETH`, `SOL`, `DOGE`).
-- Sole Live Strategy: Only the certified active strategy (default `ThreeStepDominationBot`) is authorized to route live orders.
+- **Sealed Live Strategies**: Any bot possessing a verified SHA-256 Seal of Excellence on disk (currently **Bot 1 `3_step_domination_bot`** and **Bot 3 `macro_trend_dominion`**) is fully authorized to route live real-money trades.
 
 ## 3. 1-Trade-Per-Cycle & In-Flight Intent Lock
 - Once an automated bot submits an order for the active 15M/5M cycle, **no further orders or additions may be submitted for that ticker/cycle**.
@@ -22,17 +22,19 @@ description: Core quantitative trading invariants, capital preservation rules, a
 - In Live Mode (`Lane 1`), 100% of resources are dedicated exclusively to live execution.
 - Paper trades, virtual books, and simulated routines MUST NEVER contaminate live balances, real positions, or live win/loss records.
 
-## 5. Single-Process Execution Authority
-- Exactly **ONE** process holds the live execution token via `trading_engine.lock` on port `8001` (`StandaloneBotEngine`).
-- The Mother Server on port `8000` is strictly restricted to read-only monitoring and simulation when the standalone lock is active.
+## 5. Mother Dash & Docked Console Live Trading Authority
+- **Mother Dash Live Execution**: Mother Dash (`server.py` on Port 8000) and the docked Baby Bot console (right corner) are fully authorized to execute live real-money trades for any bot holding an active **Seal of Excellence** on disk (**Bot 1** and **Bot 3**).
+- When a bot holds the Seal of Excellence, live trading is enabled across Mother Dash, docked console, and standalone engines.
+- Candidate bots without a verified Seal of Excellence remain strictly locked in Lane 2 Incubator (Shadow / Paper) mode.
 
 ## 6. Zero Git-Branching for Bots
 - Never create git branches or worktrees to run different bots. All bots exist as modular Python classes in `strategies/`.
 
-## 7. Mandatory Live Promotion Lifecycle & 4-Pillar Certification
-- **Zero Direct Live Deployment**: No bot may ever be deployed directly to Live Trading (`Lane 1`).
-- **4-Stage Promotion Lifecycle**: Every strategy must graduate sequentially: `COOK` (isolated module) $\to$ `BACKTEST` (historical cycles & unit tests) $\to$ `SHADOW` (Lane 2 incubator on live ticks, zero capital risk) $\to$ `PROMOTE` (Live Lane 1).
-- **Mandatory 4-Pillar Pre-Flight Audit**: A bot MUST achieve 100% PASS on all 4 pillars of `BotDeploymentAuditor` (Invariant Compliance, Micro-Bankroll Sizing, Guardrail Wiring, and Decimal Math) before it can be authorized for live order routing.
+## 7. Mandatory Seal of Excellence & On-Demand Certification
+- **No bot may route live capital without an automated SHA-256 Seal of Excellence on disk. Bypasses and manual exemptions are strictly prohibited.**
+- **Sealed Roster**: Bots holding certified disk seals (**Bot 1** and **Bot 3**) are authorized for live execution across all platforms: Mother Dash, Docked Baby Bot Console, and Standalone Engines.
+- **On-Demand User Trigger**: Only run or activate the Seal of Excellence test gauntlet when the user explicitly asks to *"check bot if it's time to test for excellence"*.
+- **Sequential Promotion**: Strategies must mature in Lane 2 Incubator (live ticks, zero capital risk) before testing for excellence. Direct live deployment is prohibited.
 
 ## 8. Multi-Bot Anti-Cannibalism & Directional Coherence
 - **Zero Opposing Position Cannibalism**: Multiple bots operating on the same account/ticker must **NEVER** take opposing positions (e.g. Bot 1 BUY YES while Bot 3 BUY NO) on the same 15M contract cycle.

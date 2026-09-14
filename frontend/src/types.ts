@@ -110,6 +110,8 @@ export interface AISignals {
   kalshi_signal?: string;
   kalshi_confidence?: number;
   dual_onnx_regime?: 'MOMENTUM_SCALP' | 'CONTRADICTION_ARBITRAGE' | 'CHOP_WAIT' | 'TOXIC_VETO' | string;
+  is_sealed?: boolean;
+  bot_sealed?: boolean;
 }
 
 export interface BtcOrderflowSummary {

@@ -50,6 +50,7 @@ from kalshi_sim.auth import (
 )
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
 from kalshi_sim.cfbenchmarks_sync import CFBenchmarksSync
+from kalshi_sim.clock_sync import clock_sync
 from kalshi_sim.db import get_db, get_db_writer, DatabaseWriter
 from kalshi_sim.live_coordinator import LiveCoordinator
 from kalshi_sim.ml.dual_onnx_gateway import DualONNXGateway
@@ -297,10 +298,8 @@ class StandaloneMacroEngine:
             self.interlock_msg = "Exclusive Authority Active (Lane 2 Incubator)"
 
     def get_time_to_expiry(self) -> float:
-        """Calculate exact remaining seconds until active contract expiration boundary."""
-        now_utc = datetime.now(timezone.utc)
-        drift = getattr(self, "_clock_drift_seconds", 0.0)
-        now_utc += __import__("datetime").timedelta(seconds=drift)
+        """Calculate exact remaining seconds until active contract expiration boundary (Kalshi clock calibrated)."""
+        now_utc = clock_sync.kalshi_now()
         
         if getattr(self, "active_market_close_dt", None):
             delta = (self.active_market_close_dt - now_utc).total_seconds()
@@ -326,37 +325,21 @@ class StandaloneMacroEngine:
         return self.get_parameters()
 
     def _sync_kalshi_clock(self) -> None:
-        """Perform HTTP round-trip to calculate Kalshi server time drift vs local OS clock."""
+        """Calculate Kalshi server time drift vs local OS clock via universal clock_sync."""
         try:
-            import requests
-            import time
-            from datetime import datetime, timezone
-            
-            t0 = time.time()
-            resp = requests.get("https://api.elections.kalshi.com/trade-api/v2/exchange/status", timeout=5)
-            t1 = time.time()
-            
-            if resp.status_code == 200:
-                date_str = resp.headers.get("Date")
-                if date_str:
-                    server_dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
-                    rtt = t1 - t0
-                    estimated_server_time = server_dt.timestamp() + (rtt / 2.0)
-                    local_time = t1
-                    
-                    self._clock_drift_seconds = estimated_server_time - local_time
-                    import logging
-                    logger = logging.getLogger(__name__)
-                    logger.info(f"⌚ [NTP SYNC] Kalshi Clock Drift Computed: {self._clock_drift_seconds:+.3f} seconds (RTT {rtt*1000:.1f}ms)")
-                    return
+            drift = clock_sync.sync()
+            self._clock_drift_seconds = drift
         except Exception as e:
-            pass
-        self._clock_drift_seconds = 0.0
+            logger.warning("[NTP SYNC] Clock sync warning on Port 8003: %s", e)
+            self._clock_drift_seconds = getattr(self, "_clock_drift_seconds", 0.0)
 
     async def start(self) -> None:
         """Start all background loops for Port 8003."""
         self._running = True
         prevent_windows_sleep()
+
+        # Synchronize NTP time drift with Kalshi API
+        self._sync_kalshi_clock()
 
         await self.db_writer.start()
 
@@ -472,7 +455,7 @@ class StandaloneMacroEngine:
         """Poll active Kalshi 15M market and update inside quotes."""
         while self._running:
             try:
-                now_dt = datetime.now(timezone.utc) + __import__("datetime").timedelta(seconds=getattr(self, "_clock_drift_seconds", 0.0))
+                now_dt = clock_sync.kalshi_now()
                 cur_min = now_dt.minute
                 boundary_min = 15 * (cur_min // 15 + 1)
                 if boundary_min == 60:

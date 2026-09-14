@@ -53,6 +53,7 @@ from kalshi_sim.auth import (
 )
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
 from kalshi_sim.cfbenchmarks_sync import CFBenchmarksSync
+from kalshi_sim.clock_sync import clock_sync
 from kalshi_sim.db import get_db, get_db_writer, DatabaseWriter
 from kalshi_sim.incubator_manager import get_incubator_manager, IncubatorManager
 from kalshi_sim.live_coordinator import LiveCoordinator
@@ -807,28 +808,11 @@ class StandaloneBotEngine:
     def _sync_kalshi_clock(self) -> None:
         """Perform HTTP round-trip to calculate Kalshi server time drift vs local OS clock."""
         try:
-            import requests
-            import time
-            from datetime import datetime, timezone
-            
-            t0 = time.time()
-            resp = requests.get("https://api.elections.kalshi.com/trade-api/v2/exchange/status", timeout=5)
-            t1 = time.time()
-            
-            if resp.status_code == 200:
-                date_str = resp.headers.get("Date")
-                if date_str:
-                    server_dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
-                    rtt = t1 - t0
-                    estimated_server_time = server_dt.timestamp() + (rtt / 2.0)
-                    local_time = t1
-                    
-                    self._clock_drift_seconds = estimated_server_time - local_time
-                    logger.info(f"⌚ [NTP SYNC] Kalshi Clock Drift Computed: {self._clock_drift_seconds:+.3f} seconds (RTT {rtt*1000:.1f}ms)")
-                    return
+            drift = clock_sync.sync()
+            self._clock_drift_seconds = drift
         except Exception as e:
-            logger.warning(f"Failed to sync Kalshi clock: {e}")
-        self._clock_drift_seconds = 0.0
+            logger.warning("Failed to sync Kalshi clock: %s", e)
+            self._clock_drift_seconds = getattr(self, "_clock_drift_seconds", 0.0)
 
     async def start(self) -> None:
         """Start all background loops."""
@@ -1437,7 +1421,7 @@ class StandaloneBotEngine:
                 await asyncio.sleep(0.5)
 
     def get_time_to_expiry(self, close_dt: Optional[Union[datetime, str]] = None) -> float:
-        """Return time to contract expiry in seconds."""
+        """Return time to contract expiry in seconds (calibrated to Kalshi exchange clock)."""
         target_dt = close_dt or self.active_market_close_dt
         if not target_dt:
             return 0.0
@@ -1446,11 +1430,7 @@ class StandaloneBotEngine:
                 target_dt = datetime.fromisoformat(target_dt.replace("Z", "+00:00"))
             except Exception:
                 return 0.0
-        now_utc = datetime.now(timezone.utc)
-        
-        # Apply Kalshi server clock drift offset if initialized
-        drift = getattr(self, "_clock_drift_seconds", 0.0)
-        now_utc += __import__("datetime").timedelta(seconds=drift)
+        now_utc = clock_sync.kalshi_now()
         
         if target_dt.tzinfo is None:
             target_dt = target_dt.replace(tzinfo=timezone.utc)

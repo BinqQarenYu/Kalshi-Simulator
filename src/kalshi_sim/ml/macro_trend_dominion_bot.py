@@ -896,6 +896,7 @@ class MacroTrendDominionBot:
         time_to_expiry_s: float,
         spot_price: float = 0.0,
         target_strike: float = 0.0,
+        **kwargs: Any,
     ) -> MacroTrendExitDecision:
         """Evaluate open position against Take-Profit and Cut-Loss Salvage rules."""
         if not book or size <= 0:

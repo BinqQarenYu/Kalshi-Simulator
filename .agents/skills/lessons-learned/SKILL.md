@@ -26,7 +26,8 @@ This document is the authoritative institutional repository of all quantitative 
 - [Lesson 11: Zero Static Mock Data & Anti-Hallucination Dashboard Invariant (Single Source of Truth)](#lesson-11-zero-static-mock-data--anti-hallucination-dashboard-invariant-single-source-of-truth)
 - [Lesson 12: Live Bot Promotion & Execution Engine API Coupling](#lesson-12-live-bot-promotion--execution-engine-api-coupling)
 - [Lesson 13: The NTP Clock Drift Vulnerability & Sync-to-Source Invariant](#lesson-13-the-ntp-clock-drift-vulnerability--sync-to-source-invariant)
-- [Lesson 14: Decoupled State Desynchronization (The Dashboard Mirage)](#lesson-14-decoupled-state-desynchronization-the-dashboard-mirage) Local Clock Drift & Kalshi Server Time Synchronization (NTP)](#lesson-13-local-clock-drift--kalshi-server-time-synchronization-ntp)
+- [Lesson 14: Decoupled State Desynchronization (The Dashboard Mirage)](#lesson-14-decoupled-state-desynchronization-the-dashboard-mirage)
+- [Lesson 15: The 6-Stage Seal of Excellence Gauntlet & Zero-Exemption Interlock](#lesson-15-the-6-stage-seal-of-excellence-gauntlet--zero-exemption-interlock)
 
 ---
 
@@ -201,7 +202,25 @@ $$\begin{aligned}
 ## Lesson 14: Decoupled State Desynchronization (The Dashboard Mirage)
 **Context**: The user identified a critical UI-to-Execution mismatch where the Mother Dashboard (Port 8000) reported 3_step_domination_bot as the active live strategy, while the Live Execution Engine (Port 8001) was actively trading macro_trend_dominion_bot.
 **Root Cause**: The ecosystem utilizes a multi-port decoupled architecture. However, the Mother Server (server.py) initialized its ServerState.active_strategy_bot with a *hardcoded string literal* on startup, rather than pulling the single source of truth from seal_of_excellence.json or querying the live executor. When the backend code was swapped to promote a new bot, the UI remained statically hardcoded.
-**Why It\'s Dangerous**: UI/Execution desynchronization is catastrophic in quantitative trading. If a trader or risk manager looks at the Mother Dash and sees the wrong bot, they are managing imaginary risk while real capital is deployed by an invisible engine. It creates a 'Dashboard Mirage'.
+**Why It's Dangerous**: UI/Execution desynchronization is catastrophic in quantitative trading. If a trader or risk manager looks at the Mother Dash and sees the wrong bot, they are managing imaginary risk while real capital is deployed by an invisible engine. It creates a 'Dashboard Mirage'.
 **The Invariant Fix**: 
 1. **Zero Hardcoded State**: Monitoring servers must never hardcode the active strategy identifier. The active strategy must always be resolved dynamically from the execution layer or the unified seal_of_excellence.json database.
 2. **Absolute Source of Truth**: The active live bot must hold the single source of truth across all ports. If Port 8001 is trading it, Port 8000 must reflect it.
+
+---
+
+### Lesson 15: The 6-Stage Seal of Excellence Gauntlet & Zero-Exemption Interlock
+
+#### The Context & Incident
+* **Symptom**: Strategy promotion historically relied on manual JSON edits or verbal "Council Exemptions" (`COUNCIL-SANCTIONED-BASELINE-V3.2`). In reality, backtested bots with 88% win rates in optimistic simulation failed on live ticks due to fee drag, queue priority, and instantaneous spot vs. 60s TWAP mismatches.
+* **The Hardened Invariant**:
+  1. **Zero Live Orders Without Verified Seal**: No bot may route real capital without an automated SHA-256 Seal of Excellence token on disk (`data/seal_of_excellence.json`).
+  2. **On-Demand User Trigger**: The gauntlet is only activated when the user explicitly requests to *"check bot if it's time to test for excellence"*.
+  3. **The 6-Stage Gauntlet**:
+     - *Stage 1 (AST Integrity)*: Strict Decimal typing, zero native floats, `evaluate(**kwargs)` interface.
+     - *Stage 2 (Adversarial SimSim)*: 100 historical cycles, CME CF 60s TWAP settlement parity, 250ms latency, Net $EV \ge +\$0.0400$/ct after fees.
+     - *Stage 3 (Anti-Kamikaze & Harakiri)*: 1-contract clamp, max 2 shares/cycle, 3-loss streak auto-disarm in $<100$ms, panic sweep in $<300$ms.
+     - *Stage 4 (Multi-Regime Incubator)*: $\ge 30$ settled cycles in Lane 2 Shadow (15 Low-Vol $\sigma \le \$80$ + 15 High-Vol $\sigma > \$200$), Win Rate $\ge 55\%$, PF $\ge 1.25$, Drawdown $\le 12\%$. Dead-zone trades ($|S_t - K| < \$25$) invalidated.
+     - *Stage 5 (5-Pillar Audit)*: 100% automated PASS across Guardrail, Math, Truths, Law, and Statistical Edge pillars.
+     - *Stage 6 (Cryptographic Minting)*: SHA-256 token generated and written to disk; Port 8001 engine lock interlocked.
+

@@ -51,6 +51,8 @@ class AgentGuardrails:
         self._consecutive_losses: int = 0
         self._peak_equity: Optional[Decimal] = None
         self._circuit_breaker_tripped: bool = False
+        self.is_bot_armed: bool = True
+        self.harakiri_loss_limit: int = 3
 
         # Certified Live Strategies
         self.authorized_live_bots: set[str] = {
@@ -227,6 +229,12 @@ class AgentGuardrails:
                 self._record_rejection("incubator_locked", lock_reason, ticker, now_utc)
                 return False, lock_reason, 0, {"veto": "incubator_locked", "ticker": ticker}
 
+        # 0d. Harakiri Streak Breaker Veto (Auto-Disarm after consecutive losses)
+        if is_bot and not self.is_bot_armed:
+            msg = f"HARAKIRI STREAK BREAKER VETO: Bot is DISARMED after reaching {self._consecutive_losses} consecutive losses. Manual re-arming required."
+            self._record_rejection("bot_disarmed", msg, ticker, now_utc)
+            return False, msg, 0, {"veto": "harakiri_disarmed", "consecutive_losses": self._consecutive_losses}
+
         # Update peak equity
         if self._peak_equity is None or total_equity > self._peak_equity:
             self._peak_equity = total_equity
@@ -309,6 +317,15 @@ class AgentGuardrails:
             bot_type in self.authorized_live_bots
             or bot_type is None
         )
+        # Automatic promotion: any bot with an active Seal of Excellence on disk is authorized for live
+        if is_bot and is_live and not is_authorized_live_bot and bot_type:
+            from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
+            res = BotDeploymentAuditor.check_live_authorization_on_disk(bot_type)
+            auth_ok = res[0] if isinstance(res, (tuple, list)) else bool(res)
+            if auth_ok:
+                self.authorized_live_bots.add(bot_type)
+                is_authorized_live_bot = True
+
         is_authorized_paper_bot = (
             is_authorized_live_bot
             or bot_type in (
@@ -510,6 +527,12 @@ class AgentGuardrails:
         if outcome.lower() == "loss":
             self._consecutive_losses += 1
             logger.info("🛡️ [GUARDRAIL SETTLEMENT] Loss recorded. Consecutive losses = %d", self._consecutive_losses)
+            if self._consecutive_losses >= self.harakiri_loss_limit:
+                self.is_bot_armed = False
+                logger.warning(
+                    "🚨 [GUARDRAIL HARAKIRI] Consecutive losses (%d) reached limit (%d)! Bot automatically DISARMED.",
+                    self._consecutive_losses, self.harakiri_loss_limit
+                )
         elif outcome.lower() == "win":
             self._consecutive_losses = 0
             logger.info("🛡️ [GUARDRAIL SETTLEMENT] Win recorded. Consecutive losses reset to 0.")
@@ -526,6 +549,30 @@ class AgentGuardrails:
                 "🚨 [GUARDRAIL EMERGENCY] Circuit breaker tripped on settlement! Drawdown %.1f%% >= %.0f%%",
                 float(drawdown_pct * 100), float(self.emergency_drawdown_limit * 100)
             )
+
+    def record_trade_settlement(
+        self,
+        ticker: str,
+        pnl: Decimal,
+        was_win: bool,
+        balance_after: Optional[Decimal] = None,
+        cycle_id: Optional[str] = None,
+    ) -> None:
+        """Convenience method to record trade settlement with boolean outcome."""
+        outcome = "win" if was_win else "loss"
+        curr_balance = balance_after if balance_after is not None else (self._peak_equity or Decimal("100.00")) + pnl
+        self.record_cycle_settlement(ticker, outcome=outcome, pnl=pnl, balance_after=curr_balance, cycle_id=cycle_id)
+
+    def arm_bot(self) -> None:
+        """Manually re-arm the bot and reset consecutive loss streak."""
+        self.is_bot_armed = True
+        self._consecutive_losses = 0
+        logger.info("🛡️ [GUARDRAIL ARM] Bot manually RE-ARMED. Consecutive loss counter reset.")
+
+    def disarm_bot(self) -> None:
+        """Manually disarm the bot (emergency manual shutdown)."""
+        self.is_bot_armed = False
+        logger.warning("🛡️ [GUARDRAIL DISARM] Bot manually DISARMED.")
 
     def unlock_cycle(self, cycle_key: str) -> None:
         """Manually unlock a cycle if needed."""

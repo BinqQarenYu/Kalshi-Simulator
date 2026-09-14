@@ -37,9 +37,9 @@ Zero TypeScript compilation errors and a clean build in `frontend/dist/`.
 2. **Execution Mode Isolation**:
    - `MOCK_SIMULATION`: Uses realistic Level-2 synthetic book walks, partial fills, and jump-diffusion spot paths.
    - `LIVE_TRADING`: 100% to real exchange execution via Kalshi API. Never paper trade during live mode.
-3. **Micro-Bankroll Sizing & Sole Authorization**:
-   - Only 3-Step Dominion is authorized to trade; all other paper/simulation bots are prohibited from trading.
-   - Sizing is strictly hard-capped to **1 contract for each asset** (`BTC`, `ETH`, `SOL`, `DOGE`).
+3. **Micro-Bankroll Sizing & Live Trading Authorization**:
+   - Any bot possessing an automated SHA-256 **Seal of Excellence** on disk (currently **Bot 1 `3_step_domination_bot`** and **Bot 3 `macro_trend_dominion`**) is authorized to execute live real-money trades directly from **Mother Dash**, the **docked Baby Bot console (right corner)**, or Standalone engines.
+   - Sizing is strictly hard-capped to **1 contract for each asset** (`BTC`, `ETH`, `SOL`, `DOGE`). All unsealed bots remain in Lane 2 Incubator (paper mode).
 4. **Kalshi Taker Fees**:
    - Taker fee: `ceil(0.07 * C * P * (1 - P))` with $0.01 floor and $0.02 cap per contract. Maker resting orders receive $0.00 fee.
 5. **Adverse Selection Guard & Dynamic Spot Velocity Front-Run ($\Delta^*$)**:

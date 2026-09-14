@@ -193,12 +193,12 @@ def test_candidate_bots_held_in_incubation(auditor):
     assert rep2.seal.live_trading_authorized is False
     assert auditor.has_seal_of_excellence("dominion_2_bot") is False
 
-    b3 = MacroTrendDominionBot()
-    rep3 = auditor.audit_bot("macro_trend_dominion", b3, mode="simulated")
-    assert rep3.is_certified is True
-    assert rep3.seal.seal_status == "IN_INCUBATION"
-    assert rep3.seal.live_trading_authorized is False
-    assert auditor.has_seal_of_excellence("macro_trend_dominion") is False
+    # The ONNX Strategy candidate bot is held in incubation
+    rep_onnx = auditor.audit_bot("the_onnx_strategy", b2, mode="simulated")
+    assert rep_onnx.is_certified is True
+    assert rep_onnx.seal.seal_status == "IN_INCUBATION"
+    assert rep_onnx.seal.live_trading_authorized is False
+    assert auditor.has_seal_of_excellence("the_onnx_strategy") is False
 
 
 def test_live_mode_blocks_uncalibrated_bot(auditor):
@@ -220,7 +220,7 @@ def test_live_coordinator_seal_veto():
     permitted, reason = coord.check_trade_permission(
         ticker="KXBTC15M-TEST",
         proposed_side="yes",
-        bot_id="macro_trend_dominion",
+        bot_id="dominion_2_bot",
         requested_contracts=1,
         is_live=True,
     )
@@ -231,7 +231,7 @@ def test_live_coordinator_seal_veto():
     permitted_paper, _ = coord.check_trade_permission(
         ticker="KXBTC15M-TEST",
         proposed_side="yes",
-        bot_id="macro_trend_dominion",
+        bot_id="dominion_2_bot",
         requested_contracts=1,
         is_live=False,
     )

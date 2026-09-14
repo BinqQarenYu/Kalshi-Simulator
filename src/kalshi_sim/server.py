@@ -54,6 +54,7 @@ from kalshi_sim.mock_feed import MockKalshiFeed
 
 
 from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
+from kalshi_sim.clock_sync import clock_sync
 from kalshi_sim.ml.ai_worker import AIWorker
 from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
@@ -1459,8 +1460,14 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
         return []
 
 
-def resolve_active_market(now_utc: datetime) -> tuple[Any | None, int, Decimal, str, str]:
-    """Resolve the currently active open market, remaining seconds, target strike, target time str, and window str."""
+def resolve_active_market(now_utc: datetime | None = None) -> tuple[Any | None, int, Decimal, str, str]:
+    """Resolve the currently active open market, remaining seconds, target strike, target time str, and window str (Kalshi calibrated)."""
+    if now_utc is None:
+        now_utc = clock_sync.kalshi_now()
+    else:
+        drift = clock_sync.get_drift_seconds()
+        if abs(drift) > 0.05:
+            now_utc = now_utc + timedelta(seconds=drift)
     # 0. Single Source of Truth: When 24/7 Standalone Bot is active, inherit its exact live market truth
     now_mono = time.monotonic()
     if hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 5.0):
@@ -2047,6 +2054,8 @@ async def start_background_simulation() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     prevent_windows_sleep()
+    await clock_sync.async_sync()
+    await clock_sync.start_periodic_sync()
     await get_db_writer().start()
     await state.memory_manager.start()
     await start_background_simulation()
@@ -3297,11 +3306,14 @@ async def close_position_endpoint(req: ClosePositionRequest) -> dict[str, Any]:
 @app.post("/api/settings")
 async def update_settings(req: SettingsRequest) -> dict[str, Any]:
     if req.ai_auto_trade is not None:
+        strat = state.active_strategy_bot or "3_step_domination_bot"
+        auth_on_disk, _ = BotDeploymentAuditor.check_live_authorization_on_disk(strat)
         is_live_request = (
             state.mode == "live"
             and (
                 getattr(state.sim_agent, "execution_mode", "simulated") == "live"
-                or state.active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination")
+                or auth_on_disk
+                or strat in ("3_step_domination_bot", "domination_bot", "domination", "macro_trend_dominion", "macro_trend")
             )
         )
         if req.ai_auto_trade and is_live_request:
@@ -3811,24 +3823,32 @@ async def get_bot_parameters() -> dict[str, Any]:
                 res[k] = onnx_params.get(k)
 
     # Merge macro_trend_dominion strategy dials so client consoles always receive current dials
-    macro_inst = resolve_bot_instance("macro_trend_dominion")
-    if macro_inst and hasattr(macro_inst, "get_parameters"):
-        macro_params = macro_inst.get_parameters()
-        for k in (
-            "limit_price_cents",
-            "min_confidence_pct",
-            "volatility_moat_dollars",
-            "hmm_risk_off_veto",
-            "macro_trend_window",
-            "take_profit_harvest_cents",
-            "adaptive_learning_rate",
-            "rolling_brier_score",
-            "brier_shrinkage_factor",
-            "active_price_cap",
-            "decile_pruning_table",
-        ):
-            if k not in res and k in macro_params:
-                res[k] = macro_params.get(k)
+    now_mono = time.monotonic()
+    has_macro = bool(hasattr(state, "_standalone_macro_data") and state._standalone_macro_data and (now_mono - getattr(state, "_last_standalone_macro_sync", 0.0) < 5.0))
+    if has_macro and "parameters" in state._standalone_macro_data:
+        macro_params = state._standalone_macro_data["parameters"]
+        for k, v in macro_params.items():
+            if v is not None and k not in res:
+                res[k] = v
+    else:
+        macro_inst = resolve_bot_instance("macro_trend_dominion")
+        if macro_inst and hasattr(macro_inst, "get_parameters"):
+            macro_params = macro_inst.get_parameters()
+            for k in (
+                "limit_price_cents",
+                "min_confidence_pct",
+                "volatility_moat_dollars",
+                "hmm_risk_off_veto",
+                "macro_trend_window",
+                "take_profit_harvest_cents",
+                "adaptive_learning_rate",
+                "rolling_brier_score",
+                "brier_shrinkage_factor",
+                "active_price_cap",
+                "decile_pruning_table",
+            ):
+                if k not in res and k in macro_params:
+                    res[k] = macro_params.get(k)
     return res
 
 
@@ -3893,10 +3913,62 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
             "take_profit_harvest_cents", "adaptive_learning_rate",
         }
         if any(k in payload for k in macro_keys):
-            macro_inst.update_parameters(**payload)
+            m_res = macro_inst.update_parameters(**payload)
+            if payload.get("bot_id") == "macro_trend_dominion" or state.active_strategy_bot == "macro_trend_dominion":
+                res.update(m_res)
+
+    # Bridge: Forward dials to Port 8003 (Macro Trend Dominion Standalone)
+    macro_keys = {
+        "limit_price_cents", "min_confidence_pct", "min_ev_dollars",
+        "volatility_moat_dollars", "hmm_risk_off_veto", "macro_trend_window",
+        "take_profit_harvest_cents", "adaptive_learning_rate", "max_contracts",
+    }
+    macro_forward = {k: payload[k] for k in macro_keys if k in payload}
+    if macro_forward:
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post(
+                    "http://127.0.0.1:8003/api/bot/parameters",
+                    json=macro_forward,
+                    timeout=aiohttp.ClientTimeout(total=1.5),
+                ) as m_resp:
+                    if m_resp.status == 200:
+                        m_data = await m_resp.json()
+                        logger.info("📡 [PORT 8003 DIAL BRIDGE] Successfully synced dials to Port 8003: %s", macro_forward)
+                        if "parameters" in m_data:
+                            res.update(m_data["parameters"])
+        except Exception as err:
+            logger.debug("[PORT 8003 DIAL BRIDGE] Standby on Port 8003: %s", err)
+
+    # Bridge: Forward dials to Port 8002 (ONNX Standalone)
+    onnx_keys = {
+        "brain_priority_mode", "contract_scaling_mode", "volatility_floor",
+        "volatility_ceiling", "entry_discount_depth", "tape_confirmation_ticks",
+        "taker_cross_ev_threshold", "dynamic_moat_multiplier", "max_temporal_skew_ms",
+        "gamma_cliff_seconds", "auto_cancel_on_veto", "dynamic_volatility_mode",
+        "min_confidence", "vpin_toxic_threshold", "max_contracts",
+    }
+    onnx_forward = {k: payload[k] for k in onnx_keys if k in payload}
+    if onnx_forward:
+        try:
+            connector = create_aiohttp_connector()
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.post(
+                    "http://127.0.0.1:8002/api/bot/parameters",
+                    json=onnx_forward,
+                    timeout=aiohttp.ClientTimeout(total=1.5),
+                ) as o_resp:
+                    if o_resp.status == 200:
+                        o_data = await o_resp.json()
+                        if "parameters" in o_data:
+                            res.update(o_data["parameters"])
+        except Exception as err:
+            logger.debug("[PORT 8002 DIAL BRIDGE] Standby on Port 8002: %s", err)
 
     if not res:
-        inst = resolve_bot_instance(state.active_strategy_bot)
+        target_bot = payload.get("bot_id") or state.active_strategy_bot
+        inst = resolve_bot_instance(target_bot)
         if inst and hasattr(inst, "update_parameters"):
             res = inst.update_parameters(**payload)
         else:

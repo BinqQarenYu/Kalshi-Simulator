@@ -86,6 +86,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   const is3StepBot = activeStrategy === '3_step_domination_bot';
   const isDominion2 = false; // Deprecated and unregistered
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';
+  const isSealed = is3StepBot || isMacroTrend || Boolean(signals?.is_sealed || signals?.bot_sealed);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -766,24 +767,31 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
       {/* Institutional Seal of Excellence Indicator */}
       <div className={`flex items-center justify-between p-2 rounded-xl text-xs border ${
-        is3StepBot
-          ? 'bg-amber-500/10 border-amber-500/30'
-          : 'bg-purple-500/10 border-purple-500/30'
+        isSealed
+          ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 shadow-sm'
+          : 'bg-purple-500/10 border-purple-500/30 text-purple-300'
       }`}>
         <div className="flex items-center gap-1.5">
-          <Award className={`h-3.5 w-3.5 ${is3StepBot ? 'text-amber-400' : 'text-purple-400'}`} />
-          <span className={`font-bold text-[11px] ${is3StepBot ? 'text-amber-300' : 'text-purple-300'}`}>
+          <Award className={`h-3.5 w-3.5 ${isSealed ? 'text-amber-400' : 'text-purple-400'}`} />
+          <span className={`font-bold text-[11px] ${isSealed ? 'text-amber-300' : 'text-purple-300'}`}>
             Seal of Excellence
           </span>
           <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold ${
-            is3StepBot ? 'bg-amber-500/20 text-amber-300' : 'bg-purple-500/20 text-purple-300'
+            isSealed ? 'bg-amber-500/20 text-amber-300' : 'bg-purple-500/20 text-purple-300'
           }`}>
-            {is3StepBot ? '5/5 PILLARS' : 'IN INCUBATION'}
+            {isSealed ? '5/5 PILLARS' : 'IN INCUBATION'}
           </span>
+          {isSealed && (
+            <span className="text-[9px] font-mono text-amber-400/90 truncate max-w-[140px] hidden sm:inline">
+              {is3StepBot ? 'SEAL-DOM1-D07ADE18D284' : 'SEAL-MACR-56F23C64A13B'}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1 font-mono text-[10px] font-extrabold">
-          {is3StepBot ? (
-            <span className="text-amber-400">🏆 LIVE AUTHORIZED</span>
+          {isSealed ? (
+            <span className="text-emerald-400 bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30">
+              🏆 LIVE AUTHORIZED (LANE 1)
+            </span>
           ) : (
             <span className="text-purple-300">⏳ LANE 2 SHADOW</span>
           )}

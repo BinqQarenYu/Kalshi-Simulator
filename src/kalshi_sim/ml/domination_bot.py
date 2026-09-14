@@ -411,6 +411,7 @@ class ThreeStepDominationBot:
         max_position_size: int = 1,
         estimated_vpin: float = 0.15,
         twap_60s: Optional[float] = None,
+        **kwargs: Any,
     ) -> DominationDecision:
         """Execute 3-step cycle analysis and determine optimal playbook execution."""
         if not book or (not book.yes_book and not book.no_book) or spot_price <= 0 or target_strike <= 0:
@@ -1259,6 +1260,7 @@ class ThreeStepDominationBot:
         spot_velocity_3s: float = 0.0,
         twap_60s: Optional[float] = None,
         rolling_vol_1m: Optional[float] = None,
+        **kwargs: Any,
     ) -> DominationExitDecision:
         """Evaluate open position against quantitative Take-Profit and Early Liquidation rules."""
         if not book or size <= 0:
