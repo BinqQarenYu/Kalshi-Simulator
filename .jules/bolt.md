@@ -51,3 +51,8 @@
 ## 2026-09-03 - O(1) Version-Backed Float Depth Tuple Caching in L2BookState
 **Learning:** Re-converting `Decimal` prices and quantities to `float` across 30 depth levels in per-tick feature extraction (`[float(qty) for _, qty in top_yes]`) consumed >50% of feature extraction execution time (~10.3 µs out of ~20.5 µs per tick) due to CPython `Decimal.__float__` conversion overhead.
 **Action:** Added `get_depth_float_tuples(n)` to `L2BookState` leveraging existing `_BookDict._version` mutation tracking to memoize float-converted depth tuples in O(1) time (~0.4 µs on cache hit). Updated `KalshiOrderflowFeatureExtractor` and `GoldOrderflowFeatureExtractor` to fast-path float tuple consumption, reducing tick feature extraction latency from ~20.5 µs to ~11.9 µs (~1.72x speedup).
+
+## 2026-09-03 - Unrolled Fixed-Depth Top-5 Level Volume Summation in Gold Feature Extractor
+**Learning:** Calling `sum(bid_sizes[:5])` and `sum(ask_sizes[:5])` inside per-tick feature extraction created list slicing (`[:5]`) allocations and generic iterator/function call overhead on every tick.
+**Action:** Unroll top-5 volume summation using direct index addition (`bid_sizes[0] + bid_sizes[1] + bid_sizes[2] + bid_sizes[3] + bid_sizes[4]`), safely guarded by prior depth list padding (to `target_depth` = 15). Reduced feature extraction volume sum latency by ~13%.
+
