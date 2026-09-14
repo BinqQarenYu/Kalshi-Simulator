@@ -24,7 +24,7 @@ from kalshi_sim.schemas import (
 
 logger = logging.getLogger(__name__)
 
-# Pre-allocated Decimal constants for high-frequency order fee calculations
+# Pre-allocated Decimal constants for high-frequency order fee calculations and book walking
 _DEC_0_00 = Decimal("0.00")
 _DEC_0_01 = Decimal("0.01")
 _DEC_0_02 = Decimal("0.02")
@@ -33,6 +33,7 @@ _DEC_1 = Decimal("1")
 _DEC_1_00 = Decimal("1.00")
 _DEC_7_0 = Decimal("7.0")
 _DEC_100 = Decimal("100")
+_DEC_0_0001 = Decimal("0.0001")
 
 # Timeframe-specific slippage multipliers
 SLIPPAGE_MULTIPLIER: dict[Timeframe, Decimal] = {
@@ -545,13 +546,12 @@ class OrderSimulator:
         Returns:
             Tuple of (vwap_price, total_filled, total_slippage).
         """
-        # Sort levels: for consuming, we want best price first
-        if order_side == OrderSide.YES:
-            # Consuming No book: highest No bid first (= cheapest Yes ask)
-            sorted_levels = sorted(book_side.items(), key=lambda x: x[0], reverse=True)
-        else:
-            # Consuming Yes book: highest Yes bid first (= cheapest No ask)
-            sorted_levels = sorted(book_side.items(), key=lambda x: x[0], reverse=True)
+        # Performance optimization:
+        # 1. Direct tuple sorting (`sorted(book_side.items(), reverse=True)`) eliminates key=lambda function lookup overhead.
+        #    Price keys in book dict are unique Decimal objects, so Python tuple comparison compares prices directly.
+        # 2. Both YES and NO orders sort book levels in descending order; branch eliminated.
+        # 3. Pre-allocated _DEC_0_0001 module constant avoids creating new Decimal objects on quantize calls.
+        sorted_levels = sorted(book_side.items(), reverse=True)
 
         remaining = size
         total_cost = Decimal("0")
@@ -562,11 +562,8 @@ class OrderSimulator:
             if remaining <= 0:
                 break
 
-            # Convert to the buyer's price
-            if order_side == OrderSide.YES:
-                fill_price = Decimal("1") - raw_price  # yes price = 1 - no_bid
-            else:
-                fill_price = Decimal("1") - raw_price  # no price = 1 - yes_bid
+            # Convert to the buyer's price (Yes price = 1 - no_bid, No price = 1 - yes_bid)
+            fill_price = _DEC_1 - raw_price
 
             if first_price is None:
                 first_price = fill_price
@@ -583,14 +580,14 @@ class OrderSimulator:
 
         # Compute VWAP
         vwap = (total_cost / total_filled).quantize(
-            Decimal("0.0001"), rounding=ROUND_HALF_UP
+            _DEC_0_0001, rounding=ROUND_HALF_UP
         )
 
         # Apply timeframe-specific slippage
         multiplier = SLIPPAGE_MULTIPLIER.get(timeframe, Decimal("1.0"))
         raw_slippage = abs(vwap - first_price) if first_price else Decimal("0")
         adjusted_slippage = (raw_slippage * multiplier).quantize(
-            Decimal("0.0001"), rounding=ROUND_HALF_UP
+            _DEC_0_0001, rounding=ROUND_HALF_UP
         )
 
         # Realistic adverse selection / latency price drift:
@@ -604,7 +601,7 @@ class OrderSimulator:
             adverse_penalty = Decimal("0.01")
 
         final_vwap = (vwap + adjusted_slippage + adverse_penalty).quantize(
-            Decimal("0.0001"), rounding=ROUND_HALF_UP
+            _DEC_0_0001, rounding=ROUND_HALF_UP
         )
 
         # Bound strictly between $0.01 and $0.99 for binary options
