@@ -311,13 +311,16 @@ class StandaloneONNXEngine:
 
     def get_time_to_expiry(self) -> float:
         """Calculate exact remaining seconds until active contract expiration boundary."""
-        if self.active_market_close_dt:
-            now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(timezone.utc)
+        drift = getattr(self, "_clock_drift_seconds", 0.0)
+        now_utc += __import__("datetime").timedelta(seconds=drift)
+        
+        if getattr(self, "active_market_close_dt", None):
             delta = (self.active_market_close_dt - now_utc).total_seconds()
             return max(0.0, delta)
-        now_dt = datetime.now(timezone.utc)
-        cur_min = now_dt.minute
-        cur_sec = now_dt.second + now_dt.microsecond / 1_000_000.0
+            
+        cur_min = now_utc.minute
+        cur_sec = now_utc.second + now_utc.microsecond / 1_000_000.0
         boundary_min = 15 * (cur_min // 15 + 1)
         secs_left = (boundary_min - cur_min) * 60.0 - cur_sec
         return max(0.0, secs_left)
@@ -343,6 +346,34 @@ class StandaloneONNXEngine:
             self.guardrails.vpin_toxic_threshold = float(vpin_thresh)
         self.bot.update_parameters(**kwargs)
         return self.get_parameters()
+
+    def _sync_kalshi_clock(self) -> None:
+        """Perform HTTP round-trip to calculate Kalshi server time drift vs local OS clock."""
+        try:
+            import requests
+            import time
+            from datetime import datetime, timezone
+            
+            t0 = time.time()
+            resp = requests.get("https://api.elections.kalshi.com/trade-api/v2/exchange/status", timeout=5)
+            t1 = time.time()
+            
+            if resp.status_code == 200:
+                date_str = resp.headers.get("Date")
+                if date_str:
+                    server_dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
+                    rtt = t1 - t0
+                    estimated_server_time = server_dt.timestamp() + (rtt / 2.0)
+                    local_time = t1
+                    
+                    self._clock_drift_seconds = estimated_server_time - local_time
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"⌚ [NTP SYNC] Kalshi Clock Drift Computed: {self._clock_drift_seconds:+.3f} seconds (RTT {rtt*1000:.1f}ms)")
+                    return
+        except Exception as e:
+            pass
+        self._clock_drift_seconds = 0.0
 
     async def start(self) -> None:
         """Start all background loops for Port 8002."""

@@ -168,14 +168,14 @@ class ThreeStepDominationBot:
         self.min_spot_diff = float(cfg.min_spot_diff)
         self.typical_1m_volatility = float(cfg.typical_1m_volatility)
         self.default_btc_1m_volatility = self.typical_1m_volatility
-        logger.info("[DOMINATION BOT] Calibrated for %s: min_spot_diff=%.6f, 1m_vol=%.6f", cfg.name, self.min_spot_diff, self.typical_1m_volatility)
+        logger.debug("[DOMINATION BOT] Calibrated for %s: min_spot_diff=%.6f, 1m_vol=%.6f", cfg.name, self.min_spot_diff, self.typical_1m_volatility)
 
     def set_discount_limit_price(self, new_price: Decimal | float | str) -> None:
         """Dynamically update the maker discount limit price ceiling."""
         dec_price = Decimal(str(new_price))
         clamped = max(Decimal("0.10"), min(Decimal("0.65"), dec_price))
         self.discount_limit_price = clamped
-        logger.info("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
+        logger.debug("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
 
     def get_parameters(self) -> Dict[str, Any]:
         """Return current live strategy parameters."""
@@ -327,7 +327,7 @@ class ThreeStepDominationBot:
             self.max_queue_depth_ahead = max(10, min(2000, int(max_queue_depth_ahead)))
         if max_clob_spread_cents is not None:
             self.max_clob_spread_cents = max(0.01, min(0.25, float(max_clob_spread_cents)))
-        logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
+        logger.debug("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
     def get_dynamic_proximity_threshold(

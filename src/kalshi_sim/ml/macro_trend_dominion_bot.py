@@ -90,6 +90,9 @@ class MacroTrendDominionBot:
 
     def __init__(
         self,
+        asset: str = "BTC",
+        opening_quarantine_seconds: float = 90.0,
+        onnx_engine=None,
         strategy_id: str = "macro_onnx",
         strategy_name: str = "Macro ONNX Bot",
         min_edge_pct: float = 0.06,  # 6.0% minimum statistical edge
@@ -145,6 +148,28 @@ class MacroTrendDominionBot:
             vpin_safe_threshold=vpin_safe_threshold,
             vpin_toxic_threshold=vpin_toxic_threshold,
         )
+
+        self.asset = asset
+        self.opening_quarantine_seconds = opening_quarantine_seconds
+        self.onnx_engine = onnx_engine
+        self.discount_limit_price = __import__('decimal').Decimal('0.52')
+        self.enable_take_profit_ceiling = True
+        self.enable_reverse_take_profit_roi = True
+        self.require_reversal_for_tp_ceiling = True
+        self.reverse_indicator_threshold = 0.85
+        self.spot_delta_front_run_threshold = 28.0
+        self.reverse_indicator_threshold = 0.85
+        self.enable_reverse_take_profit_roi = True
+        self.require_reversal_for_tp_ceiling = True
+        self.enable_take_profit_ceiling = True
+
+    def set_asset(self, asset) -> None:
+        self.asset = asset
+
+    def update_parameters(self, **kwargs) -> None:
+        for k, v in kwargs.items():
+            if hasattr(self, k):
+                setattr(self, k, type(getattr(self, k))(v))
 
     def record_spot_tick(self, timestamp: float, price: float) -> None:
         """Append a spot price tick to the internal rolling buffer."""
@@ -221,8 +246,10 @@ class MacroTrendDominionBot:
         max_position_size: int = 1,
         estimated_vpin: float = 0.15,
         current_time: Optional[float] = None,
+        twap_60s: Optional[float] = None,
         spot_history: Optional[List[Tuple[float, float]]] = None,
         onnx_result: Optional[Dict[str, Any]] = None,
+        **kwargs
     ) -> MacroTrendDecision:
         """Evaluate market and order book against Macro Trend Dominion quantitative pillars."""
         spot_diff = spot_price - target_strike
@@ -254,7 +281,7 @@ class MacroTrendDominionBot:
             external_spot_history=spot_history,
         )
 
-        effective_max_size = 1 if total_equity < Decimal("50.00") else min(max_position_size, 2)
+        effective_max_size = 1 if total_equity < Decimal("75.00") else max_position_size
 
         # Book Validity Check
         if not book or not book.yes_book or not book.no_book:
@@ -976,3 +1003,4 @@ class MacroTrendDominionBot:
             unrealized_pnl=round(total_net_pnl, 4),
             rationale=f"Holding position: Bid ${best_bid:.2f} (ROI: {roi*100:+.1f}%, PnL: {pnl_prefix}${abs(total_net_pnl):.2f}).",
         )
+

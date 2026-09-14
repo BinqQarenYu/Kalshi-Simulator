@@ -24,6 +24,9 @@ This document is the authoritative institutional repository of all quantitative 
 - [Lesson 9: Multi-Asset Context Switching Isolation](#lesson-9-multi-asset-context-switching-isolation)
 - [Lesson 10: Multi-Asset Order Sweep & Take-Profit Fill Isolation (The 12-Order Auto-Cancel Loop)](#lesson-10-multi-asset-order-sweep--take-profit-fill-isolation-the-12-order-auto-cancel-loop)
 - [Lesson 11: Zero Static Mock Data & Anti-Hallucination Dashboard Invariant (Single Source of Truth)](#lesson-11-zero-static-mock-data--anti-hallucination-dashboard-invariant-single-source-of-truth)
+- [Lesson 12: Live Bot Promotion & Execution Engine API Coupling](#lesson-12-live-bot-promotion--execution-engine-api-coupling)
+- [Lesson 13: The NTP Clock Drift Vulnerability & Sync-to-Source Invariant](#lesson-13-the-ntp-clock-drift-vulnerability--sync-to-source-invariant)
+- [Lesson 14: Decoupled State Desynchronization (The Dashboard Mirage)](#lesson-14-decoupled-state-desynchronization-the-dashboard-mirage) Local Clock Drift & Kalshi Server Time Synchronization (NTP)](#lesson-13-local-clock-drift--kalshi-server-time-synchronization-ntp)
 
 ---
 
@@ -180,3 +183,25 @@ $$\begin{aligned}
   1. **Strict Zero Mock Data in Production UI**: No static placeholder percentages, simulated event counts, or mock trade records are ever permitted in trading dashboards.
   2. **Multi-Port Telemetry Aggregator**: Mother server (`server.py` on Port 8000) continuously synchronizes with all active bot daemons (Port 8001 Live, Port 8002 Dual ONNX Shadow, Port 8003 Macro Dominion Shadow) via `standalone_sync_loop` and broadcasts live empirical statistics (`settled_cycles`, `today_wins`, `today_losses`, `today_win_rate`, `today_pnl`) down the WebSocket.
   3. **Honest Empty State (`—` / `AWAITING TELEMETRY`)**: If a bot daemon is starting up or has zero settled cycles, the UI must render `—` (dash) or `AWAITING TELEMETRY`, never a fabricated percentage.
+---
+
+### Lesson 12: Live Bot Promotion & Execution Engine API Coupling
+
+#### The Incident (2026-09-14)
+* **Symptom**: Promoting a heavily backtested strategy (`MacroTrendDominionBot`) to Live execution (Lane 1) caused an immediate background crash during the `BotDeploymentAuditor` pre-flight check, followed by continuous `AttributeError` and `TypeError` exceptions within `evaluate()` and `evaluate_exit()`.
+* **Forensic Root Cause**:
+  1. **Strict Zero-Float Math Rule Violation**: The new strategy's `__init__` hardcoded `self.discount_limit_price = 0.52` as a native float. The `BotDeploymentAuditor` immediately aborted the process due to non-Decimal monetary representation.
+  2. **Seal of Excellence Bypass**: The new bot had 0 recorded live settled cycles in `seal_of_excellence.json` and failed the "Statistical Edge" pillar (which requires >= 30 verified cycles).
+  3. **Tightly-Coupled Execution API**: The Standalone execution engine (`standalone_bot.py`) expects the loaded strategy to expose specific configuration flags (e.g., `enable_take_profit_ceiling`, `reverse_indicator_threshold`) for frontend UI telemetry, and passes specific advanced kwargs (like `twap_60s`) into `evaluate()`. The new bot was written in isolation and did not implement these expected fields.
+* **Hardened Architecture & Invariants**:
+  1. **Consistent Strategy Interface**: All new strategy classes must inherit from a unified base interface or unconditionally accept `**kwargs` in both `evaluate()` and `evaluate_exit()` to gracefully swallow unexpected runtime arguments passed by the engine.
+  2. **Zero-Float Pre-Flight Scrub**: All monetary parameters (e.g., limit prices, ceilings, edge offsets) must be strictly typed as `Decimal("...")` inside the strategy constructor.
+  3. **Formal Graduation Mechanics**: A backtested bot cannot be forced into live execution solely by changing the imported class. It must be granted a verified entry in `data/seal_of_excellence.json` (via the Council-Sanctioned Override or by fulfilling the 30-cycle minimum hurdle in Lane 2 Incubator) so it survives the `BotDeploymentAuditor` runtime gate.
+
+## Lesson 14: Decoupled State Desynchronization (The Dashboard Mirage)
+**Context**: The user identified a critical UI-to-Execution mismatch where the Mother Dashboard (Port 8000) reported 3_step_domination_bot as the active live strategy, while the Live Execution Engine (Port 8001) was actively trading macro_trend_dominion_bot.
+**Root Cause**: The ecosystem utilizes a multi-port decoupled architecture. However, the Mother Server (server.py) initialized its ServerState.active_strategy_bot with a *hardcoded string literal* on startup, rather than pulling the single source of truth from seal_of_excellence.json or querying the live executor. When the backend code was swapped to promote a new bot, the UI remained statically hardcoded.
+**Why It\'s Dangerous**: UI/Execution desynchronization is catastrophic in quantitative trading. If a trader or risk manager looks at the Mother Dash and sees the wrong bot, they are managing imaginary risk while real capital is deployed by an invisible engine. It creates a 'Dashboard Mirage'.
+**The Invariant Fix**: 
+1. **Zero Hardcoded State**: Monitoring servers must never hardcode the active strategy identifier. The active strategy must always be resolved dynamically from the execution layer or the unified seal_of_excellence.json database.
+2. **Absolute Source of Truth**: The active live bot must hold the single source of truth across all ports. If Port 8001 is trading it, Port 8000 must reflect it.

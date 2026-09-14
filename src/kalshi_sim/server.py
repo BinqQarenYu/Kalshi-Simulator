@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import orjson
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 
@@ -4111,7 +4111,7 @@ async def get_bot_strategies() -> dict[str, Any]:
                 "id": "macro_trend_dominion",
                 "name": "Macro Trend Dominion",
                 "description": "Multi-Scale Macro Trend Following Engine (1-Hour Trend Alignment, Anti-Countertrend Veto, 1-Ct Bankroll Sizing, Late Gamma Sniper)",
-                "active": state.active_strategy_bot == "macro_trend_dominion",
+                "active": state.active_strategy_bot in ("macro_trend_dominion", "macro_trend_dominion_bot"),
                 "badge": "Institutional Trend Following",
                 "icon": "TrendingUp",
                 "features": [
@@ -6210,6 +6210,7 @@ def _build_full_state_payload() -> dict[str, Any]:
                 "vpin_is_safe": bool(sd.get("vpin_is_safe", True)),
             }
 
+        if "balance" in sd or "today_pnl" in sd:
             portfolio_data["balance"] = float(sd.get("balance", 0.0))
             portfolio_data["equity"] = float(sd.get("balance", 0.0))
             portfolio_data["realized_pnl"] = float(sd.get("today_pnl", 0.0))
@@ -6585,10 +6586,13 @@ async def broadcast_loop() -> None:
 
 
 
+class BotSpawnRequest(BaseModel):
+    bot_id: str
+
+
 @app.post("/api/bots/spawn")
-async def spawn_bot(request: Request):
-    data = await request.json()
-    bot_id = data.get("bot_id", "")
+async def spawn_bot(req: BotSpawnRequest) -> dict[str, Any]:
+    bot_id = req.bot_id.strip()
     
     import subprocess
     import sys
@@ -6598,39 +6602,90 @@ async def spawn_bot(request: Request):
         pass
     from kalshi_sim.process_lock import get_active_lock_holder
     
-    active = get_active_lock_holder()
-    if active:
-        owner, pid = active
-        try:
-            if 'psutil' in sys.modules:
-                p = psutil.Process(pid)
-                p.terminate()
-                p.wait(timeout=3)
-            else:
-                if sys.platform == "win32":
-                    subprocess.run(["taskkill", "/F", "/PID", str(pid)])
-                else:
-                    import os, signal
-                    os.kill(pid, signal.SIGTERM)
-        except Exception as e:
-            logger.error("Error killing active bot: %s", e)
-            
     bot_script_map = {
         "3_step_domination_bot": "run_standalone_bot.bat",
         "macro_onnx": "run_standalone_onnx.bat",
         "dual_onnx_arbitrage_bot": "run_standalone_onnx.bat",
         "macro_trend_dominion": "run_standalone_macro.bat",
-        "the_onnx_strategy": "run_standalone_onnx.bat"
+        "the_onnx_strategy": "run_standalone_onnx.bat",
+        "dominion_2_bot": "run_standalone_bot.bat",
     }
     script = bot_script_map.get(bot_id, "run_standalone_bot.bat")
     
+    bot_url_map = {
+        "3_step_domination_bot": "http://localhost:8001",
+        "macro_onnx": "http://localhost:8002",
+        "dual_onnx_arbitrage_bot": "http://localhost:8002",
+        "macro_trend_dominion": "http://localhost:8003",
+        "the_onnx_strategy": "http://localhost:8002",
+        "dominion_2_bot": "http://localhost:8001",
+    }
+    target_url = bot_url_map.get(bot_id, "http://localhost:8001")
+
+    # Terminate prior instance of this specific bot if active
+    bot_lock_map = {
+        "3_step_domination_bot": Path("data") / "trading_engine.lock",
+        "macro_onnx": Path("data") / "trading_engine_onnx.lock",
+        "dual_onnx_arbitrage_bot": Path("data") / "trading_engine_onnx.lock",
+        "the_onnx_strategy": Path("data") / "trading_engine_onnx.lock",
+        "macro_trend_dominion": Path("data") / "trading_engine_macro.lock",
+    }
+    target_lock = bot_lock_map.get(bot_id)
+    if target_lock:
+        active = get_active_lock_holder(target_lock)
+        if active:
+            owner, pid = active
+            if pid != os.getpid():
+                try:
+                    if 'psutil' in sys.modules:
+                        import psutil
+                        p = psutil.Process(pid)
+                        p.terminate()
+                        p.wait(timeout=2)
+                    else:
+                        if sys.platform == "win32":
+                            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
+                        else:
+                            import signal
+                            os.kill(pid, signal.SIGTERM)
+                except Exception as e:
+                    logger.debug("Prior bot instance cleanup: %s", e)
+
+    # Synchronize active strategy bot on Mother Server
+    canonical_strat = bot_id
+    if bot_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "onnx_macro_v2"):
+        canonical_strat = "dual_onnx"
+    elif bot_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
+        canonical_strat = "macro_onnx"
+    elif bot_id in ("macro_trend", "macro_trend_dominion", "macro_trend_dominion_bot"):
+        canonical_strat = "macro_trend_dominion"
+    elif bot_id in ("dominion2", "dominion_v2", "dominion_2_bot"):
+        canonical_strat = "dominion_2_bot"
+    elif bot_id in ("3_step_domination_bot", "domination_bot", "domination"):
+        canonical_strat = "3_step_domination_bot"
+
+    state.active_strategy_bot = canonical_strat
+    if state.ai_worker:
+        state.ai_worker.set_active_strategy(canonical_strat)
+    state.is_dirty = True
+    asyncio.create_task(trigger_instant_broadcast())
+
+    repo_root = Path(__file__).resolve().parent.parent.parent
     if sys.platform == "win32":
         CREATE_NEW_CONSOLE = 0x00000010
-        subprocess.Popen(["cmd.exe", "/c", script], creationflags=CREATE_NEW_CONSOLE)
+        subprocess.Popen(["cmd.exe", "/c", script], cwd=str(repo_root), creationflags=CREATE_NEW_CONSOLE)
     else:
-        subprocess.Popen(["bash", script])
+        subprocess.Popen(["bash", script], cwd=str(repo_root))
         
-    return {"status": "success", "url": "http://localhost:8001"}
+    logger.info("🚀 [BOT SPAWNED] Activated '%s' (Canonical: '%s') via script '%s' targeting %s", bot_id, canonical_strat, script, target_url)
+    return {
+        "status": "success",
+        "bot_id": bot_id,
+        "strategy": canonical_strat,
+        "script": script,
+        "url": target_url,
+        "message": f"Bot '{bot_id}' activated successfully on {target_url}",
+    }
 
 # ---------------------------------------------------------------------------
 # Frontend Static Mount (if built)

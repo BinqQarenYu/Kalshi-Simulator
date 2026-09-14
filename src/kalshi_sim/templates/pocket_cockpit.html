@@ -750,12 +750,17 @@
       <span id="drawerToggleText">Show Institutional Telemetry & Parameters</span>
     </div>
 
-    <!-- 5 Primary KPI Cards (Full Kalshi Parity) -->
+    <!-- KPI Cards (Full Parity) -->
     <div class="kpi-grid expandable">
       <div class="kpi-card">
         <div class="kpi-label">Kalshi Live Balance</div>
         <div id="balVal" class="kpi-val text-green">$0.00</div>
         <div id="balSub" class="kpi-sub">Portfolio Shard 2: $0.00</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Polymarket USDC</div>
+        <div id="polyBalVal" class="kpi-val text-blue">$0.00</div>
+        <div class="kpi-sub">Polygon Network</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Today's Realized PnL</div>
@@ -791,6 +796,9 @@
         <span style="color:var(--muted)">Waiting for telemetry...</span>
       </div>
     </div>
+
+      
+      </div>
 
     <!-- Strategy & Microstructure Telemetry -->
     <div class="panel expandable">
@@ -1989,6 +1997,7 @@
         if (data.shard2_balance !== undefined) {
           document.getElementById('balSub').textContent = `Shard 2: $${parseFloat(data.shard2_balance).toFixed(2)} Available`;
         }
+        document.getElementById('polyBalVal').textContent = `$${parseFloat(data.polymarket_balance || 0).toFixed(2)}`;
         
         // 2. Realized PnL
         const pnl = parseFloat(data.today_pnl || 0);
@@ -2051,6 +2060,31 @@
         const nBid = data.best_no_bid !== null && data.best_no_bid !== undefined ? (data.best_no_bid * 100).toFixed(0) + '¢' : '--';
         const nAsk = data.best_no_ask !== null && data.best_no_ask !== undefined ? (data.best_no_ask * 100).toFixed(0) + '¢' : '--';
         document.getElementById('touchVal').textContent = `YES: ${yBid} / ${yAsk} | NO: ${nBid} / ${nAsk}`;
+
+        // Cross-Exchange Arbitrage Radar
+        if (data.arbitrage_radar) {
+            const radarEl = document.getElementById('arbRadarContent');
+            const badgeEl = document.getElementById('arbStatusBadge');
+            if (data.arbitrage_radar.opportunities && data.arbitrage_radar.opportunities.length > 0) {
+                badgeEl.textContent = 'MISPRICING DETECTED';
+                badgeEl.style.color = 'var(--green)';
+                let outHtml = '';
+                data.arbitrage_radar.opportunities.forEach(opp => {
+                    outHtml += `<div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                      <span>${opp.type}</span>
+                      <span class="text-green">Profit: ${parseFloat(opp.net_profit).toFixed(4)}¢</span>
+                    </div>
+                    <div style="font-size:0.8rem; color:var(--muted); margin-bottom:8px;">
+                      [Leg 1] Kalshi YES: ${opp.kalshi_leg} | [Leg 2] PM NO: ${opp.pm_leg} | Total: ${opp.total_cost}
+                    </div>`;
+                });
+                radarEl.innerHTML = outHtml;
+            } else {
+                badgeEl.textContent = 'SCANNING (NO ARB)';
+                badgeEl.style.color = 'var(--amber)';
+                radarEl.innerHTML = `<div style="color:var(--muted)">Tracking ${data.arbitrage_radar.markets_tracked || 0} markets across Kalshi, Polymarket, and Binance (Awaiting Option Parity Match).</div>`;
+            }
+        }
 
         // 8. Spot & Strike & Moneyness Diff (Microstructure Telemetry)
         document.getElementById('playbookBadge').textContent = `PLAYBOOK: ${(data.playbook || 'NONE').toUpperCase()}`;

@@ -57,6 +57,7 @@ from kalshi_sim.db import get_db, get_db_writer, DatabaseWriter
 from kalshi_sim.incubator_manager import get_incubator_manager, IncubatorManager
 from kalshi_sim.live_coordinator import LiveCoordinator
 from kalshi_sim.ml.domination_bot import DominationDecision, ThreeStepDominationBot
+from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
 from kalshi_sim.orderbook import OrderBookManager
@@ -332,11 +333,20 @@ class StandaloneBotEngine:
             logger.warning("⚠️ [BRAIN 1 ONNX] ONNX engine fallback: %s", onnx_err)
             self.onnx_engine = None
 
-        self.bot = ThreeStepDominationBot(
-            asset=default_asset,
-            opening_quarantine_seconds=90.0,
-            onnx_engine=self.onnx_engine,
-        )
+        if is_live:
+            self.bot_id = "macro_trend_dominion"
+            self.bot = MacroTrendDominionBot(
+                asset=default_asset,
+                opening_quarantine_seconds=90.0,
+                onnx_engine=self.onnx_engine,
+            )
+        else:
+            self.bot_id = "3_step_domination_bot"
+            self.bot = ThreeStepDominationBot(
+                asset=default_asset,
+                opening_quarantine_seconds=90.0,
+                onnx_engine=self.onnx_engine,
+            )
         self.guardrails = AgentGuardrails(
             min_order_interval_seconds=45.0,
             max_micro_bankroll_contracts=1,
@@ -364,12 +374,12 @@ class StandaloneBotEngine:
 
         # 2. Run Pre-Flight Certification Audit & Seal of Excellence Gate
         mode_str = "live" if is_live else "simulated"
-        audit_rep = self.auditor.audit_bot("3_step_domination_bot", self.bot, mode=mode_str)
+        audit_rep = self.auditor.audit_bot(self.bot_id, self.bot, mode=mode_str)
         if not audit_rep.is_certified:
             err_msgs = [f"{p.pillar_name}: {p.message}" for p in audit_rep.pillars if p.status == "FAIL"]
-            raise RuntimeError(f"Strategy 3_step_domination_bot FAILED pre-flight audit: {'; '.join(err_msgs)}")
-        if is_live and not self.auditor.has_seal_of_excellence("3_step_domination_bot"):
-            raise RuntimeError("Strategy 3_step_domination_bot does not hold an active Seal of Excellence for live order routing.")
+            raise RuntimeError(f"Strategy {self.bot_id} FAILED pre-flight audit: {'; '.join(err_msgs)}")
+        if is_live and not self.auditor.has_seal_of_excellence(self.bot_id):
+            raise RuntimeError("Strategy {self.bot_id} does not hold an active Seal of Excellence for live order routing.")
         seal_tok = audit_rep.seal.seal_token if audit_rep.seal else "PENDING"
         logger.info("✅ [AUDIT CERTIFIED] 3-Step Domination Bot passed all 5 pillars for %s trading. Seal: %s", mode_str.upper(), seal_tok)
 
@@ -411,6 +421,7 @@ class StandaloneBotEngine:
         self.total_balance_dollars: Decimal = Decimal("0.00")
         self.shard2_balance_dollars: Decimal = Decimal("0.00")
         self.balance_dollars: Decimal = Decimal("0.00")
+        self.polymarket_balance_dollars: float = 0.0
 
         # Settlement & PnL Tracking
         self.today_pnl: Decimal = Decimal("0.00")
@@ -419,6 +430,10 @@ class StandaloneBotEngine:
         self.today_losses: int = 0
         self.today_win_rate: float = 0.0
         self.recent_reports: List[Dict[str, Any]] = []
+
+        # Cross-Exchange Arbitrage Scanner (Phase 1/2)
+        from kalshi_sim.arbitrage_scanner import CrossExchangeScanner
+        self.arb_scanner = CrossExchangeScanner(self)
 
         # Consecutive Loss Streak Breaker (Multi-Asset Basket calibrated: 7 consecutive losses)
         self.consecutive_losses: int = 0
@@ -789,10 +804,39 @@ class StandaloneBotEngine:
             self._persist_parameters()
         return self.get_parameters(asset=target_asset)
 
+    def _sync_kalshi_clock(self) -> None:
+        """Perform HTTP round-trip to calculate Kalshi server time drift vs local OS clock."""
+        try:
+            import requests
+            import time
+            from datetime import datetime, timezone
+            
+            t0 = time.time()
+            resp = requests.get("https://api.elections.kalshi.com/trade-api/v2/exchange/status", timeout=5)
+            t1 = time.time()
+            
+            if resp.status_code == 200:
+                date_str = resp.headers.get("Date")
+                if date_str:
+                    server_dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
+                    rtt = t1 - t0
+                    estimated_server_time = server_dt.timestamp() + (rtt / 2.0)
+                    local_time = t1
+                    
+                    self._clock_drift_seconds = estimated_server_time - local_time
+                    logger.info(f"⌚ [NTP SYNC] Kalshi Clock Drift Computed: {self._clock_drift_seconds:+.3f} seconds (RTT {rtt*1000:.1f}ms)")
+                    return
+        except Exception as e:
+            logger.warning(f"Failed to sync Kalshi clock: {e}")
+        self._clock_drift_seconds = 0.0
+
     async def start(self) -> None:
         """Start all background loops."""
         self._running = True
         prevent_windows_sleep()
+
+        # Sync NTP drift with Kalshi API
+        self._sync_kalshi_clock()
 
         # Start database persistence writer
         await self.db_writer.start()
@@ -807,6 +851,9 @@ class StandaloneBotEngine:
         self.tasks.append(asyncio.create_task(self._balance_polling_loop(), name="balance_poll"))
         self.tasks.append(asyncio.create_task(self._resting_order_watchdog_loop(), name="resting_watchdog"))
         self.tasks.append(asyncio.create_task(self._settlement_reconciliation_loop(), name="settlement_sync"))
+
+        # Start Arbitrage Scanner Shadow Mode
+        self.arb_scanner.start()
         logger.info("🚀 [STANDALONE BOT ACTIVE] Background loops spawned. Bot status: %s", "ARMED" if self.is_armed else "DISARMED")
 
     async def stop(self) -> None:
@@ -870,11 +917,18 @@ class StandaloneBotEngine:
             logger.debug("Error syncing PnL reports: %s", exc)
 
     async def sync_balance(self) -> None:
-        """Sync live account balance from Kalshi portfolio.
-
+        """Sync live account balance from Kalshi portfolio and Polymarket.
+        
         When budget partitioning is active (--budget flag), balance_dollars is
         clamped to min(real_balance, budget_cap).
         """
+        try:
+            self.polymarket_balance_dollars = await asyncio.wait_for(
+                asyncio.to_thread(pm_client.get_usdc_balance), timeout=3.0
+            )
+        except Exception as e:
+            logger.debug("Polymarket balance sync error: %s", e)
+
         if self.order_client:
             try:
                 data = await self.order_client.get_balance()
@@ -977,7 +1031,7 @@ class StandaloneBotEngine:
             "settlement_price": exit_price,
             "timestamp_utc": now_iso,
             "execution_mode": "live" if self.order_client else "paper",
-            "bot_type": "3_step_domination_bot",
+            "bot_type": self.bot_id,
             "exit_reason": exit_reason,
         }
         all_reports.insert(0, report)
@@ -1003,7 +1057,7 @@ class StandaloneBotEngine:
             fees=float(self.bot.fee_per_contract * Decimal(str(pos["size"]))),
             vpin=0.15,
             timeframe=self.get_current_timeframe(),
-            bot_type="3_step_domination_bot",
+            bot_type=self.bot_id,
             execution_mode="live" if (self.is_live and self.order_client) else "paper",
             status="take_profit_exit",
         )
@@ -1393,6 +1447,11 @@ class StandaloneBotEngine:
             except Exception:
                 return 0.0
         now_utc = datetime.now(timezone.utc)
+        
+        # Apply Kalshi server clock drift offset if initialized
+        drift = getattr(self, "_clock_drift_seconds", 0.0)
+        now_utc += __import__("datetime").timedelta(seconds=drift)
+        
         if target_dt.tzinfo is None:
             target_dt = target_dt.replace(tzinfo=timezone.utc)
         return max(0.0, (target_dt - now_utc).total_seconds())
@@ -1660,7 +1719,7 @@ class StandaloneBotEngine:
                     vpin=decision.vpin,
                     cycle_id=target_ticker,
                     is_bot=True,
-                    bot_type="3_step_domination_bot",
+                    bot_type=self.bot_id,
                 )
 
                 if not is_allowed or approved_size <= 0:
@@ -1681,14 +1740,14 @@ class StandaloneBotEngine:
                                 size=approved_size,
                                 price=est_price,
                                 cycle_id=target_ticker,
-                                bot_type="3_step_domination_bot",
+                                bot_type=self.bot_id,
                             )
                             continue
                     except Exception as e:
                         logger.debug("Failed open order anti-burst check: %s", e)
 
                     # Seal of Excellence Pre-Flight Live Authorization Gate
-                    if not self.auditor.has_seal_of_excellence("3_step_domination_bot"):
+                    if not self.auditor.has_seal_of_excellence(self.bot_id):
                         logger.error("🛡️ [SEAL OF EXCELLENCE VETO] 3-Step Dominion lacks active live seal authorization.")
                         self.guardrails.release_in_flight_intent(target_ticker)
                         continue
@@ -1697,7 +1756,7 @@ class StandaloneBotEngine:
                     is_permitted, coord_reason = self.coordinator.check_trade_permission(
                         ticker=target_ticker,
                         proposed_side=rec_side,
-                        bot_id="3_step_domination_bot",
+                        bot_id=self.bot_id,
                         requested_contracts=approved_size,
                         is_live=self.is_live,
                     )
@@ -1736,7 +1795,7 @@ class StandaloneBotEngine:
                             size=approved_size,
                             price=est_price,
                             cycle_id=target_ticker,
-                            bot_type="3_step_domination_bot",
+                            bot_type=self.bot_id,
                         )
                         fill_cnt = 0
                         try:
@@ -1773,7 +1832,7 @@ class StandaloneBotEngine:
                             side=rec_side,
                             contracts=approved_size,
                             price=float(est_price),
-                            bot_id="3_step_domination_bot",
+                            bot_id=self.bot_id,
                             expiry_ts=expiry_ts,
                         )
                         self.db_writer.enqueue_trade(
@@ -1786,7 +1845,7 @@ class StandaloneBotEngine:
                             fees=0.0,
                             vpin=decision.vpin,
                             timeframe=self.get_current_timeframe(),
-                            bot_type="3_step_domination_bot",
+                            bot_type=self.bot_id,
                             execution_mode="live",
                             status="resting",
                         )
@@ -1902,6 +1961,26 @@ class StandaloneBotEngine:
                                         )
                         except Exception as o_err:
                             logger.debug("Error querying open orders in watchdog: %s", o_err)
+
+                    # 1.2 Velocity Panic-Cancel (Non-Live Only)
+                    if not self.is_live and self.active_resting_orders:
+                        try:
+                            vel_3s = self.get_spot_velocity_3s(self.active_asset)
+                            thresh = getattr(self.bot, 'spot_delta_front_run_threshold', 28.0)
+                            if abs(vel_3s) >= thresh:
+                                for oid, o_info in list(self.active_resting_orders.items()):
+                                    if o_info.get("action") == "buy":  # Only cancel entry limit orders
+                                        try:
+                                            await self.order_client.cancel_order(oid, ticker=self.active_ticker)
+                                            self.active_resting_orders.pop(oid, None)
+                                            logger.warning(
+                                                "⚠️ [VELOCITY PANIC-CANCEL] Auto-cancelled resting %s entry order %s. Spot Velocity (%.2f $/3s) exceeded threshold (%.2f).",
+                                                o_info.get("side"), oid, vel_3s, thresh
+                                            )
+                                        except Exception as c_err:
+                                            logger.debug("Error cancelling order on velocity spike: %s", c_err)
+                        except Exception as vel_err:
+                            logger.debug("Error in velocity panic-cancel: %s", vel_err)
 
                     # 1.5 Detect fills on active resting orders
                     if self.active_resting_orders:
@@ -2071,7 +2150,7 @@ class StandaloneBotEngine:
                                             "price": Decimal(str(row[4])),
                                             "gross_value": Decimal(str(row[5])),
                                             "timestamp_utc": row[6],
-                                            "bot_type": row[7] or "3_step_domination_bot",
+                                            "bot_type": row[7] or self.bot_id,
                                         }
                         except Exception as db_exc:
                             logger.debug("Failed reading trades table in standalone settlement loop: %s", db_exc)
@@ -2105,7 +2184,7 @@ class StandaloneBotEngine:
                                 trade_side = market_result if raw_rev > 0 else ("no" if market_result == "yes" else "yes")
                                 entry_price = Decimal("0.50")
                                 cost = Decimal(str(size)) * entry_price
-                                bot_type = "3_step_domination_bot"
+                                bot_type = self.bot_id
 
                             won = (trade_side == market_result)
                             outcome = "win" if won else "loss"
@@ -2181,8 +2260,8 @@ class StandaloneBotEngine:
                                 "ev_edge": 0.10,
                                 "balance_after": float(balance_after),
                                 "bot_type": bot_type,
-                                "bot_id": "3_step_domination_bot",
-                                "strategy_id": "3_step_domination_bot",
+                                "bot_id": self.bot_id,
+                                "strategy_id": self.bot_id,
                                 "execution_mode": "live",
                                 "lane": "LANE 1 (LIVE)",
                                 "timestamp_utc": settled_ts,
@@ -2545,9 +2624,10 @@ async def get_state(asset: Optional[str] = None) -> Dict[str, Any]:
         ]
 
     return {
-        "armed": app_engine.is_armed,
+        "armed": app_engine.is_armed, "execution_mode": "LIVE" if app_engine.is_live else "PAPER",
         "balance": bal,
         "shard2_balance": shard2_bal,
+        "polymarket_balance": float(app_engine.polymarket_balance_dollars),
         "today_pnl": float(app_engine.today_pnl),
         "settled_cycles": app_engine.settled_cycles,
         "today_wins": app_engine.today_wins,
@@ -2559,6 +2639,7 @@ async def get_state(asset: Optional[str] = None) -> Dict[str, Any]:
         "active_asset_name": app_engine.active_cfg.name,
         "active_asset_symbol": app_engine.active_cfg.symbol,
         "view_asset": view_asset_enum.value,
+        "arbitrage_radar": app_engine.arb_scanner.latest_radar_scan if hasattr(app_engine, 'arb_scanner') else {},
         "view_asset_name": view_cfg.name,
         "view_asset_symbol": view_cfg.symbol,
         "series_ticker": view_cfg.series_ticker_15m,
@@ -2806,6 +2887,18 @@ async def arm_bot() -> Dict[str, Any]:
     app_engine._persist_parameters()
     logger.info("🟢 [BOT ARMED] Live order execution activated by user. Loss streak reset.")
     return {"status": "ARMED", "armed": True, "consecutive_losses": 0}
+
+
+@app.post("/api/arbitrage/toggle")
+async def toggle_arbitrage() -> Dict[str, Any]:
+    """Toggle the cross-exchange arbitrage scanner."""
+    if not app_engine or not hasattr(app_engine, 'arb_scanner'):
+        raise HTTPException(status_code=503, detail="Scanner not ready")
+    
+    app_engine.arb_scanner.is_active = not app_engine.arb_scanner.is_active
+    state_str = "ENABLED" if app_engine.arb_scanner.is_active else "PAUSED"
+    logger.info(f"⚡ [ARBITRAGE RADAR] Scanner has been {state_str} by user.")
+    return {"status": "SUCCESS", "active": app_engine.arb_scanner.is_active}
 
 
 @app.post("/api/bot/disarm")

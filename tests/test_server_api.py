@@ -674,3 +674,37 @@ def test_bot_parameters_onnx_dials_endpoint() -> None:
         assert "entry_discount_depth" in tele
         assert "tape_confirmation_ticks" in tele
 
+
+def test_spawn_bot_endpoint(client: TestClient) -> None:
+    """Verify POST /api/bots/spawn launches requested bot script and updates strategy for all 3 bots."""
+    from unittest.mock import patch
+    with patch("subprocess.Popen") as mock_popen:
+        # Test Bot 1 (3-Step Dominion)
+        resp1 = client.post("/api/bots/spawn", json={"bot_id": "3_step_domination_bot"})
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["status"] == "success"
+        assert data1["bot_id"] == "3_step_domination_bot"
+        assert data1["url"] == "http://localhost:8001"
+        assert data1["script"] == "run_standalone_bot.bat"
+        mock_popen.assert_called()
+
+        # Test Bot 2 (Macro ONNX)
+        resp2 = client.post("/api/bots/spawn", json={"bot_id": "macro_onnx"})
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2["status"] == "success"
+        assert data2["bot_id"] == "macro_onnx"
+        assert data2["url"] == "http://localhost:8002"
+        assert data2["script"] == "run_standalone_onnx.bat"
+
+        # Test Bot 3 (Macro Trend Dominion)
+        resp3 = client.post("/api/bots/spawn", json={"bot_id": "macro_trend_dominion"})
+        assert resp3.status_code == 200
+        data3 = resp3.json()
+        assert data3["status"] == "success"
+        assert data3["bot_id"] == "macro_trend_dominion"
+        assert data3["url"] == "http://localhost:8003"
+        assert data3["script"] == "run_standalone_macro.bat"
+
+

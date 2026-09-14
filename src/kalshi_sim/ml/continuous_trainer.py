@@ -30,12 +30,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except (ImportError, OSError):
-    torch = None
-    TORCH_AVAILABLE = False
+# try:
+#     import torch
+#     TORCH_AVAILABLE = True
+# except (ImportError, OSError):
+torch = None
+TORCH_AVAILABLE = False
 
 try:
     import psutil
@@ -49,9 +49,10 @@ try:
 except ImportError:
     ORT_AVAILABLE = False
 
-from kalshi_sim.ml.dataset_builder import DatasetBuilder
-from kalshi_sim.ml.model import ExportableQuoLasNet, QuoLasMicroscopeNet
-from kalshi_sim.ml.train_model import ModelTrainer
+# Removed top-level imports that depend on torch
+# from kalshi_sim.ml.dataset_builder import DatasetBuilder
+# from kalshi_sim.ml.model import ExportableQuoLasNet, QuoLasMicroscopeNet
+# from kalshi_sim.ml.train_model import ModelTrainer
 
 logger = logging.getLogger("kalshi_sim.continuous_trainer")
 

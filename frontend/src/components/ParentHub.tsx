@@ -85,8 +85,9 @@ import { soundFX } from '../utils/audioFX';
 import { ContinuousTrainingTelemetry, MacroDominionTelemetry, HMMMacroRegimeTelemetry } from '../types';
 import { EngineRoomMatrix, EngineViewTab } from './EngineRoomMatrix';
 import { ClobTerminalView } from './ClobTerminalView';
+import { ArbitrageRadarView } from './ArbitrageRadarView';
 
-type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'engine' | 'clob_terminal' | 'omni' | 'settings';
+type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'engine' | 'clob_terminal' | 'omni' | 'arbitrage' | 'settings';
 type ClobTerminalSubNav = 'terminal' | 'heatmap' | 'event_book' | 'spot_book' | 'pine_editor';
 type SettingsSubNav =
   | 'account'
@@ -198,24 +199,54 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   const [journalBotFilter, setJournalBotFilter] = useState<TraderCategory>('all');
   const [journalDateScope, setJournalDateScope] = useState<'all' | 'today'>('all');
   const [trainerActionLoading, setTrainerActionLoading] = useState(false);
+  const [activatingBotId, setActivatingBotId] = useState<string | null>(null);
+  const [matrixNotification, setMatrixNotification] = useState<{ text: string; url?: string; type: 'success' | 'error' } | null>(null);
 
 
   const handleActivateBot = async (botId: string) => {
-    if (window.confirm("This will launch the bot on Port 8001. If another bot is currently active, it will be terminated. Proceed?")) {
-      try {
-        const res = await fetch('http://127.0.0.1:8000/api/bots/spawn', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bot_id: botId })
+    soundFX.playClickSound();
+    setActivatingBotId(botId);
+    handleSelectBot(botId);
+    setMatrixNotification({
+      text: `Launching ${formatBotDisplayName(botId)} engine in background...`,
+      type: 'success',
+    });
+
+    try {
+      const res = await fetch('/api/bots/spawn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_id: botId }),
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        soundFX.playOrderFillSound();
+        setMatrixNotification({
+          text: `⚡ ${formatBotDisplayName(botId)} ACTIVE! Pocket Cockpit launched.`,
+          url: data.url,
+          type: 'success',
         });
-        const data = await res.json();
-        if (data.status === 'success') {
-          window.location.href = data.url;
+        if (data.url) {
+          setTimeout(() => {
+            window.open(data.url, '_blank');
+          }, 1000);
         }
-      } catch (err) {
-        console.error("Failed to spawn bot:", err);
-        alert("Failed to activate bot.");
+      } else {
+        soundFX.playLossSound();
+        setMatrixNotification({
+          text: `Failed to activate bot: ${data.detail || data.message || 'Unknown error'}`,
+          type: 'error',
+        });
       }
+    } catch (err) {
+      console.error('Failed to spawn bot:', err);
+      soundFX.playLossSound();
+      setMatrixNotification({
+        text: 'Failed to communicate with server to activate bot.',
+        type: 'error',
+      });
+    } finally {
+      setActivatingBotId(null);
     }
   };
 
@@ -640,6 +671,21 @@ export const ParentHub: React.FC<ParentHubProps> = ({
             <button
               onClick={() => {
                 soundFX.playClickSound();
+                setPrimaryNav('arbitrage');
+              }}
+              className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
+                primaryNav === 'arbitrage'
+                  ? 'bg-amber-500/15 text-white border-l-2 border-amber-400 font-bold'
+                  : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={primaryNav === 'arbitrage' ? 'text-amber-400' : 'text-[#8c9ba5]'}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+              <span>Arbitrage Scanner</span>
+            </button>
+
+            <button
+              onClick={() => {
+                soundFX.playClickSound();
                 setPrimaryNav('settings');
               }}
               className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
@@ -970,6 +1016,9 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           {/* 0. OMNI UNIVERSAL TERMINAL VIEW */}
           {primaryNav === 'omni' && <UniversalTerminalView />}
 
+          {/* ARBITRAGE RADAR VIEW */}
+          {primaryNav === 'arbitrage' && <ArbitrageRadarView />}
+
           {/* 1. SETTINGS VIEW (From HTML Proposal) */}
           {primaryNav === 'settings' && (
             <div className="space-y-6 max-w-4xl">
@@ -1148,6 +1197,36 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                   <span className="text-xs font-mono text-emerald-400">Stream: 5Hz BRTI Synchronized</span>
                 </div>
 
+                {matrixNotification && (
+                  <div
+                    className={`p-3 rounded-lg border flex items-center justify-between text-xs font-mono transition-all ${
+                      matrixNotification.type === 'success'
+                        ? 'bg-[#10b981]/15 border-[#10b981]/40 text-[#34d399]'
+                        : 'bg-red-500/15 border-red-500/40 text-red-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span>{matrixNotification.text}</span>
+                      {matrixNotification.url && (
+                        <a
+                          href={matrixNotification.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline font-bold text-white hover:text-cyan-300 flex items-center gap-1 ml-2"
+                        >
+                          Open Cockpit ({matrixNotification.url}) ↗
+                        </a>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setMatrixNotification(null)}
+                      className="text-[#8c9ba5] hover:text-white px-1 font-bold cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
                 {/* Benchmarking Table */}
                 <div className="overflow-x-auto rounded-lg border border-[#262d35]">
                   <table className="w-full text-left text-xs font-mono">
@@ -1170,6 +1249,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                         const isSelected =
                           selectedBotId === m.id ||
                           (m.id === 'macro_onnx' && (selectedBotId === 'onnx_microstructure_bot' || selectedBotId === 'macro_onnx'));
+                        const isActivating = activatingBotId === m.id;
                         return (
                           <tr
                             key={idx}
@@ -1224,13 +1304,25 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                               </span>
                             </td>
                             <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                  <button
-                                    onClick={() => handleActivateBot(m.id)}
-                                    className="px-2.5 py-1 rounded bg-[#00bda5] text-black font-bold hover:bg-[#2dd4bf] transition-all shadow-sm cursor-pointer text-[10px] uppercase tracking-wider"
-                                  >
-                                    Activate →
-                                  </button>
-                              </td>
+                              {isActivating ? (
+                                <button
+                                  disabled
+                                  className="px-2.5 py-1 rounded bg-[#00bda5]/60 text-black font-bold flex items-center justify-end gap-1.5 text-[10px] uppercase tracking-wider ml-auto cursor-wait"
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full bg-black animate-ping shrink-0" />
+                                  <span>Activating...</span>
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleActivateBot(m.id)}
+                                  className="px-2.5 py-1 rounded bg-[#00bda5] text-black font-bold hover:bg-[#2dd4bf] hover:shadow-[0_0_12px_rgba(0,189,165,0.4)] transition-all shadow-sm cursor-pointer text-[10px] uppercase tracking-wider flex items-center gap-1.5 ml-auto"
+                                  title={`Activate ${m.name}`}
+                                >
+                                  <span>ACTIVATE</span>
+                                  <span className="text-[11px]">⚡</span>
+                                </button>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}

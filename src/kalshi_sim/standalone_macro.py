@@ -298,13 +298,16 @@ class StandaloneMacroEngine:
 
     def get_time_to_expiry(self) -> float:
         """Calculate exact remaining seconds until active contract expiration boundary."""
-        if self.active_market_close_dt:
-            now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(timezone.utc)
+        drift = getattr(self, "_clock_drift_seconds", 0.0)
+        now_utc += __import__("datetime").timedelta(seconds=drift)
+        
+        if getattr(self, "active_market_close_dt", None):
             delta = (self.active_market_close_dt - now_utc).total_seconds()
             return max(0.0, delta)
-        now_dt = datetime.now(timezone.utc)
-        cur_min = now_dt.minute
-        cur_sec = now_dt.second + now_dt.microsecond / 1_000_000.0
+            
+        cur_min = now_utc.minute
+        cur_sec = now_utc.second + now_utc.microsecond / 1_000_000.0
         boundary_min = 15 * (cur_min // 15 + 1)
         secs_left = (boundary_min - cur_min) * 60.0 - cur_sec
         return max(0.0, secs_left)
@@ -321,6 +324,34 @@ class StandaloneMacroEngine:
         """Dynamically update strategy parameters with validation."""
         self.bot.update_parameters(**kwargs)
         return self.get_parameters()
+
+    def _sync_kalshi_clock(self) -> None:
+        """Perform HTTP round-trip to calculate Kalshi server time drift vs local OS clock."""
+        try:
+            import requests
+            import time
+            from datetime import datetime, timezone
+            
+            t0 = time.time()
+            resp = requests.get("https://api.elections.kalshi.com/trade-api/v2/exchange/status", timeout=5)
+            t1 = time.time()
+            
+            if resp.status_code == 200:
+                date_str = resp.headers.get("Date")
+                if date_str:
+                    server_dt = datetime.strptime(date_str, "%a, %d %b %Y %H:%M:%S GMT").replace(tzinfo=timezone.utc)
+                    rtt = t1 - t0
+                    estimated_server_time = server_dt.timestamp() + (rtt / 2.0)
+                    local_time = t1
+                    
+                    self._clock_drift_seconds = estimated_server_time - local_time
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"⌚ [NTP SYNC] Kalshi Clock Drift Computed: {self._clock_drift_seconds:+.3f} seconds (RTT {rtt*1000:.1f}ms)")
+                    return
+        except Exception as e:
+            pass
+        self._clock_drift_seconds = 0.0
 
     async def start(self) -> None:
         """Start all background loops for Port 8003."""
@@ -441,7 +472,7 @@ class StandaloneMacroEngine:
         """Poll active Kalshi 15M market and update inside quotes."""
         while self._running:
             try:
-                now_dt = datetime.now(timezone.utc)
+                now_dt = datetime.now(timezone.utc) + __import__("datetime").timedelta(seconds=getattr(self, "_clock_drift_seconds", 0.0))
                 cur_min = now_dt.minute
                 boundary_min = 15 * (cur_min // 15 + 1)
                 if boundary_min == 60:
@@ -1039,7 +1070,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Kalshi Macro Trend Dominion Standalone Bot")
     parser.add_argument("--port", type=int, default=8003, help="HTTP Cockpit port (default: 8003)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="HTTP Cockpit host (default: 0.0.0.0)")
-    parser.add_argument("--paper", action="store_true", default=True, help="Enable paper execution (Lane 2 Incubator)")
+    parser.add_argument("--paper", action="store_true", default=False, help="Enable paper execution (Lane 2 Incubator)")
     parser.add_argument("--live", action="store_true", default=False, help="Enable live execution mode")
     parser.add_argument("--force", action="store_true", default=False, help="Force lock acquisition if stale")
     parser.add_argument("--no-browser", action="store_true", default=False, help="Do not open browser automatically")
