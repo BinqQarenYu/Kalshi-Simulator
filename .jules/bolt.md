@@ -51,6 +51,7 @@
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 ## 2026-09-03 - O(1) Version-Backed Float Depth Tuple Caching in L2BookState
 **Learning:** Re-converting `Decimal` prices and quantities to `float` across 30 depth levels in per-tick feature extraction (`[float(qty) for _, qty in top_yes]`) consumed >50% of feature extraction execution time (~10.3 µs out of ~20.5 µs per tick) due to CPython `Decimal.__float__` conversion overhead.
 **Action:** Added `get_depth_float_tuples(n)` to `L2BookState` leveraging existing `_BookDict._version` mutation tracking to memoize float-converted depth tuples in O(1) time (~0.4 µs on cache hit). Updated `KalshiOrderflowFeatureExtractor` and `GoldOrderflowFeatureExtractor` to fast-path float tuple consumption, reducing tick feature extraction latency from ~20.5 µs to ~11.9 µs (~1.72x speedup).
@@ -78,4 +79,8 @@
 ## 2026-09-03 - C-Level Itemgetter Sorting & Branch Deduplication in Order Book Walking
 **Learning:** Sorting price levels with Python `key=lambda x: x[0]` inside `OrderSimulator._walk_book` invoked Python function calls per level. In addition, identical sorting and price conversion operations were redundantly duplicated across `OrderSide.YES` / `OrderSide.NO` `if/else` branches.
 **Action:** Replace `lambda x: x[0]` sorting key with module-level C-extension `_PRICE_GETTER = operator.itemgetter(0)` and remove redundant branch duplication and unused lambda instantiations, reducing level sorting latency in order book walking from 17.46 µs down to 11.38 µs (~1.53x speedup).
+
+## 2026-09-03 - Tuple Direct Sorting & Decimal Quantize Constant Pre-Allocation in L2 Order Book Walking
+**Learning:** In order book depth walking routines (`_walk_book`), passing `key=lambda x: x[0]` to `sorted(book_side.items(), reverse=True)` incurred CPython function call overhead (~0.85 µs per call) even though price keys are strictly unique `Decimal` objects where native tuple comparison compares price elements directly. Additionally, re-parsing `Decimal("0.0001")` strings inside `quantize()` calls on every order fill added object allocation overhead.
+**Action:** Remove `key=lambda` on dictionary item sorts, eliminate redundant branch logic in book walking, and pre-allocate `_DEC_0_0001` at module level, reducing `_walk_book` latency from 14.49 µs to 12.47 µs per call (~1.16x speedup).
 

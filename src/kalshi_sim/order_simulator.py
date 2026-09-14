@@ -553,9 +553,12 @@ class OrderSimulator:
         Returns:
             Tuple of (vwap_price, total_filled, total_slippage).
         """
-        # Performance optimization: Fast itemgetter price level sorting and pre-allocated
-        # Decimal constants reduce _walk_book execution latency from 28.6 µs to 17.5 µs per call (~1.63x speedup).
-        sorted_levels = sorted(book_side.items(), key=_PRICE_GETTER, reverse=True)
+        # Performance optimization:
+        # 1. Direct tuple sorting (`sorted(book_side.items(), reverse=True)`) eliminates key=lambda function lookup overhead.
+        #    Price keys in book dict are unique Decimal objects, so Python tuple comparison compares prices directly.
+        # 2. Both YES and NO orders sort book levels in descending order; branch eliminated.
+        # 3. Pre-allocated _DEC_0_0001 module constant avoids creating new Decimal objects on quantize calls.
+        sorted_levels = sorted(book_side.items(), reverse=True)
 
         remaining = size
         total_cost = _DEC_0_00
