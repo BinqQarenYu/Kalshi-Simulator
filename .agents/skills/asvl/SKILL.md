@@ -20,8 +20,13 @@ Before declaring any code complete, configure and run automated verification too
   - Frontend typecheck: `npm --prefix frontend run typecheck` (`tsc --noEmit`)
   - Frontend production build: `npm --prefix frontend run build` (`vite build`)
 - **Dual-Tier Continuous Evaluation Loop**:
-  1. *Micro-Step Loop (Per Task)*: `BUILD ──> TARGET VERIFY ──> FIX` on each Codeflow atomic step.
-  2. *Final Regression Loop*: `FULL TEST BATTERY ──> BUILD CHECK ──> COMPLETE GATE`.
+  1. *Micro-Step Loop (Per Task)*: `BUILD ──> TARGET VERIFY ──> FIX` on each Codeflow atomic step. Always use quiet mode (`pytest tests/<target>.py -q`) to keep terminal logs under 15 lines.
+  2. *Final Regression Loop*: `FULL TEST BATTERY ──> BUILD CHECK ──> COMPLETE GATE` executed only once at task completion.
+- **Token & Log Conservation Invariants**:
+  - Never run the full 296+ test suite on intermediate micro-steps.
+  - Never poll background tasks in a loop; yield execution and await reactive system notifications.
+  - Never re-read a file immediately after editing it; rely on the replacement diff.
+  - Never parrot artifact contents in text replies; point the user to the artifact.
 - **Zero Human Verification Request**: Never ask the user to test or confirm if code works; execute empirical verification autonomously using shell and diagnostic tools.
 
 ## 3. Antigravity-Native Autonomy Rules

@@ -262,14 +262,21 @@ def prevent_windows_sleep() -> None:
     """Keep Windows execution state active 24/7 with monitor off."""
     if sys.platform == "win32":
         try:
+            try:
+                import psutil
+                proc = psutil.Process()
+                if proc.nice() != psutil.ABOVE_NORMAL_PRIORITY_CLASS:
+                    proc.nice(psutil.ABOVE_NORMAL_PRIORITY_CLASS)
+            except Exception:
+                pass
+
             ES_CONTINUOUS = 0x80000000
             ES_SYSTEM_REQUIRED = 0x00000001
-            ES_AWAYMODE_REQUIRED = 0x00000040
             res = ctypes.windll.kernel32.SetThreadExecutionState(
-                ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED
             )
             if res != 0:
-                logger.info("🛡️ [POWER MANAGEMENT] Windows Sleep Prevention & Away Mode ACTIVE.")
+                logger.info("🛡️ [POWER MANAGEMENT] Windows Sleep Prevention ACTIVE. System running 24/7 with external display & clamshell support.")
             else:
                 logger.warning("⚠️ [POWER MANAGEMENT] SetThreadExecutionState returned 0.")
         except Exception as exc:
@@ -807,7 +814,19 @@ class StandaloneBotEngine:
         self.tasks.append(asyncio.create_task(self._balance_polling_loop(), name="balance_poll"))
         self.tasks.append(asyncio.create_task(self._resting_order_watchdog_loop(), name="resting_watchdog"))
         self.tasks.append(asyncio.create_task(self._settlement_reconciliation_loop(), name="settlement_sync"))
+        self.tasks.append(asyncio.create_task(self._windows_keep_alive_loop(), name="keep_alive"))
         logger.info("🚀 [STANDALONE BOT ACTIVE] Background loops spawned. Bot status: %s", "ARMED" if self.is_armed else "DISARMED")
+
+    async def _windows_keep_alive_loop(self) -> None:
+        """Periodically refresh Win32 execution state every 60s to prevent laptop sleep on lid close or monitor flip."""
+        while self._running:
+            try:
+                await asyncio.sleep(60.0)
+                prevent_windows_sleep()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.debug("Windows keep-alive loop error: %s", exc)
 
     async def stop(self) -> None:
         """Gracefully stop engine and close HTTP sessions."""

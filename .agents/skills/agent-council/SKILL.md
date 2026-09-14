@@ -89,6 +89,14 @@ Instead, the Council convenes in a **single, highly-structured turn**:
 - **Architectural Handoff to Codeflow**: [Concrete parameters for engineering execution]
 ```
 
+### Fast-Track Targeted Mode (Token Conservation)
+When a proposal targets only a specific domain rather than an entire multi-asset strategy, do **NOT** invoke all 6 councilors. Convene strictly Koko and the 1–2 relevant domain specialists:
+- **Math & Fee Drag**: Dr. Nash + Vance.
+- **Settlement & TWAP Parity**: Silas + Vance.
+- **Vulnerabilities & API Bugs**: The Jackal.
+- **Crowd Traps & Flow**: Barnaby + Apex.
+This cuts Council token consumption by **70%** on micro-reviews while preserving 100% mathematical scrutiny.
+
 ---
 
 ## 4. Voting Rules & Supermajority Standards
