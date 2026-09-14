@@ -150,7 +150,7 @@ class POEFlightRecorder:
                         continue
                     data = json.loads(line)
                     record_type = data.get("_type", "decision")
-                    if record_type == "decision":
+                    if record_type in ("decision", "settlement_link"):
                         data.pop("_type", None)
                         rec = POEDecisionRecord(**data)
                         self._records[rec.cycle_id] = rec
@@ -247,8 +247,29 @@ class POEFlightRecorder:
         """Link Cluster 3 Settlement Vector and resolve 4-Quadrant Classification."""
         rec = self._records.get(cycle_id)
         if not rec:
-            logger.warning("[POE FLIGHT RECORDER] Settlement received for untracked cycle: %s", cycle_id)
-            return None
+            if realized_pnl is not None:
+                # Traded cycle settled from exchange history but decision wasn't captured in current runtime memory
+                bot_side = contract_winning_side.upper() if realized_pnl > _DEC_0_00 else ("NO" if contract_winning_side.upper() == "YES" else "YES")
+                rec = POEDecisionRecord(
+                    cycle_id=cycle_id,
+                    timestamp_utc=datetime.now(timezone.utc).isoformat(),
+                    tau_seconds_remaining=0.0,
+                    spot_price=settlement_spot,
+                    target_strike=settlement_spot,
+                    moneyness_diff=0.0,
+                    spot_velocity_10s=0.0,
+                    vpin_score=0.15,
+                    ai_predicted_side=bot_side,
+                    ai_confidence=0.85,
+                    ev_gross=str(Decimal("0.02")),
+                    ev_net=str(Decimal("0.01")),
+                    decision="TRADE",
+                )
+                self._records[cycle_id] = rec
+                self._persist_record("decision", asdict(rec))
+            else:
+                logger.warning("[POE FLIGHT RECORDER] Settlement received for untracked cycle: %s", cycle_id)
+                return None
 
         rec.settlement_spot = settlement_spot
         rec.contract_winning_side = contract_winning_side.upper()
@@ -279,6 +300,10 @@ class POEFlightRecorder:
 
         self._persist_record("settlement_link", asdict(rec))
         return rec
+
+    def get_unsettled_records(self) -> List[POEDecisionRecord]:
+        """Return list of decision records that haven't been resolved to a quadrant yet."""
+        return [r for r in self._records.values() if r.quadrant is None]
 
     def _persist_record(self, record_type: str, data: Dict[str, Any]) -> None:
         """Append record to JSONL ledger."""

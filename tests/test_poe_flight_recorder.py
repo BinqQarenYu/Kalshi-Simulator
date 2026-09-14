@@ -165,3 +165,104 @@ def test_audit_codebase_parameters():
     assert audit["active_in_code"] > 0
     assert isinstance(audit["dead_parameters"], list)
 
+
+def test_poe_flight_recorder_settlement_link_persistence_and_reload():
+    """Verify that JSONL ledger correctly reloads settlement_link records and quadrants."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ledger_path = Path(tmpdir) / "reloaded_ledger.jsonl"
+        recorder = POEFlightRecorder(ledger_path=ledger_path)
+
+        recorder.record_decision(
+            cycle_id="CYCLE_PERSIST_001",
+            tau_seconds_remaining=300.0,
+            spot_price=85000.0,
+            target_strike=84900.0,
+            moneyness_diff=100.0,
+            spot_velocity_10s=12.0,
+            vpin_score=0.18,
+            ai_predicted_side="YES",
+            ai_confidence=0.88,
+            ev_gross=Decimal("0.08"),
+            ev_net=Decimal("0.06"),
+            decision="TRADE",
+        )
+        recorder.record_fill(
+            cycle_id="CYCLE_PERSIST_001",
+            order_side="YES",
+            order_type="LIMIT",
+            order_price=Decimal("0.52"),
+            fill_price=Decimal("0.52"),
+            fill_slippage=Decimal("0.00"),
+            queue_depth_ahead=15,
+            taker_fee_paid=Decimal("0.00"),
+        )
+        recorder.record_settlement(
+            cycle_id="CYCLE_PERSIST_001",
+            settlement_spot=85100.0,
+            contract_winning_side="YES",
+            settled_payout=Decimal("1.00"),
+            realized_pnl=Decimal("0.48"),
+        )
+
+        # Re-instantiate recorder from the same ledger file
+        recorder2 = POEFlightRecorder(ledger_path=ledger_path)
+        assert "CYCLE_PERSIST_001" in recorder2._records
+        rec = recorder2._records["CYCLE_PERSIST_001"]
+        assert rec.quadrant == "Q1_TRUE_ALPHA"
+        assert rec.settled_payout == "1.00"
+        assert rec.realized_pnl == "0.48"
+
+        # Verify fills reloaded
+        assert "CYCLE_PERSIST_001" in recorder2._fills
+        assert len(recorder2._fills["CYCLE_PERSIST_001"]) == 1
+        assert recorder2._fills["CYCLE_PERSIST_001"][0].order_price == "0.52"
+
+
+def test_poe_flight_recorder_unsettled_records_and_synthesis():
+    """Verify un-settled records tracking and graceful synthesis of historical trade settlements."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ledger_path = Path(tmpdir) / "unsettled_ledger.jsonl"
+        recorder = POEFlightRecorder(ledger_path=ledger_path)
+
+        recorder.record_decision(
+            cycle_id="CYCLE_UNSETTLED_001",
+            tau_seconds_remaining=500.0,
+            spot_price=80000.0,
+            target_strike=80000.0,
+            moneyness_diff=0.0,
+            spot_velocity_10s=0.0,
+            vpin_score=0.15,
+            ai_predicted_side="NO",
+            ai_confidence=0.72,
+            ev_gross=Decimal("0.05"),
+            ev_net=Decimal("0.03"),
+            decision="VETO",
+            primary_blocking_parameter="AI_CONVICTION_FLOOR",
+        )
+
+        unsettled = recorder.get_unsettled_records()
+        assert len(unsettled) == 1
+        assert unsettled[0].cycle_id == "CYCLE_UNSETTLED_001"
+
+        # Settle it as winning NO (Shielded Capital)
+        recorder.record_settlement(
+            cycle_id="CYCLE_UNSETTLED_001",
+            settlement_spot=79950.0,
+            contract_winning_side="NO",
+            settled_payout=Decimal("1.00"),
+        )
+        assert len(recorder.get_unsettled_records()) == 0
+
+        # Settle an untracked cycle with realized PnL -> Auto-synthesizes TRADE record
+        synth_rec = recorder.record_settlement(
+            cycle_id="CYCLE_SYNTH_002",
+            settlement_spot=80500.0,
+            contract_winning_side="YES",
+            settled_payout=Decimal("1.00"),
+            realized_pnl=Decimal("0.48"),
+        )
+        assert synth_rec is not None
+        assert synth_rec.cycle_id == "CYCLE_SYNTH_002"
+        assert synth_rec.quadrant == "Q1_TRUE_ALPHA"
+
+
