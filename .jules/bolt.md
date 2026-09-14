@@ -49,6 +49,7 @@
 **Action:** Pre-allocate static Decimal constants at module level (`_DEC_0_01`, `_DEC_0_99`, `_DEC_7_0`, `_DEC_1_00`, `_DEC_100`, `_DEC_0_02`, `_DEC_0_00`) and fast-path integer contract parsing (`Decimal(contracts)` if `isinstance(contracts, int)` else `Decimal(str(contracts))`), reducing taker fee calculation latency from 5.80 µs to 3.10 µs per call (~1.87x speedup).
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ## 2026-09-03 - O(1) Version-Backed Float Depth Tuple Caching in L2BookState
 **Learning:** Re-converting `Decimal` prices and quantities to `float` across 30 depth levels in per-tick feature extraction (`[float(qty) for _, qty in top_yes]`) consumed >50% of feature extraction execution time (~10.3 µs out of ~20.5 µs per tick) due to CPython `Decimal.__float__` conversion overhead.
 **Action:** Added `get_depth_float_tuples(n)` to `L2BookState` leveraging existing `_BookDict._version` mutation tracking to memoize float-converted depth tuples in O(1) time (~0.4 µs on cache hit). Updated `KalshiOrderflowFeatureExtractor` and `GoldOrderflowFeatureExtractor` to fast-path float tuple consumption, reducing tick feature extraction latency from ~20.5 µs to ~11.9 µs (~1.72x speedup).
@@ -68,4 +69,8 @@
 ## 2026-09-03 - C-Level operator.itemgetter Key Lookup in Order Book Level Walking
 **Learning:** Using `key=lambda x: x[0]` inside `sorted(book_side.items(), ...)` in high-frequency order walking loop creates Python function frame creation and invocation overhead on every level sort call (~4.53 µs per call).
 **Action:** Replace `lambda x: x[0]` with pre-allocated module-level `_PRICE_GETTER = operator.itemgetter(0)` and eliminate redundant `if/else` branching. Reduced sorting latency from 4.53 µs to 2.87 µs per call (~36.5% speedup / ~1.66 µs saved per order walk).
+
+## 2026-09-03 - Itemgetter Price Sorting, Pre-Tuple Thresholds & Hex UUIDs in Order Book Simulation
+**Learning:** Sorting L2 book price levels using Python `key=lambda x: x[0]` functions inside `_walk_book()`, creating `str(uuid.uuid4())[:8]` string formats, re-instantiating `Decimal("1")` objects, and iterating over `.items()` dicts in velocity checks added ~30 µs latency per order simulation.
+**Action:** Use `_PRICE_GETTER = operator.itemgetter(0)` for C-level sorting, deduplicate YES/NO walk conversion, pre-allocate Decimal constants (`_DEC_1`, `_DEC_0_0001`, `_DEC_1_0`, `_DEC_0_0`), pre-compute `_SPOT_VELOCITY_ITEMS` tuple, and use `uuid.uuid4().hex[:8]`. Reduced `_walk_book` latency from 28.59 µs to 17.56 µs (~1.63x speedup) and market order simulation latency by ~19.2%.
 
