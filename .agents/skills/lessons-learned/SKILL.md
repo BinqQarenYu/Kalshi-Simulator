@@ -180,8 +180,3 @@ $$\begin{aligned}
   1. **Strict Zero Mock Data in Production UI**: No static placeholder percentages, simulated event counts, or mock trade records are ever permitted in trading dashboards.
   2. **Multi-Port Telemetry Aggregator**: Mother server (`server.py` on Port 8000) continuously synchronizes with all active bot daemons (Port 8001 Live, Port 8002 Dual ONNX Shadow, Port 8003 Macro Dominion Shadow) via `standalone_sync_loop` and broadcasts live empirical statistics (`settled_cycles`, `today_wins`, `today_losses`, `today_win_rate`, `today_pnl`) down the WebSocket.
   3. **Honest Empty State (`—` / `AWAITING TELEMETRY`)**: If a bot daemon is starting up or has zero settled cycles, the UI must render `—` (dash) or `AWAITING TELEMETRY`, never a fabricated percentage.
-
-## 5. UI/UX Architectural Invariant (The Air-Gapped Sandbox)
-- **Mother Dashboard (Port 8000)** is the pure Paper Trading & Parameter Sandbox.
-- **Standalone Bot (Port 8001)** is the pure Live Execution Engine with a **Read-Only** HUD.
-- **Invariant**: The Mother Dashboard must NEVER automatically forward parameter modifications to the Live Engine. The live engine's configuration can ONLY be changed when the user intentionally clicks the `PROMOTE TO LIVE` button on Port 8000. This physically pushes the parameters across the air gap.

@@ -41,6 +41,12 @@ You do **NOT** write broad feature implementations or unrequested refactors. You
      - 1-trade-per-cycle lock and in-flight intent locks.
      - Single-process execution authority (`trading_engine.lock` on port 8001 vs 8000).
 
+4. **Token & Context Window Hygiene (Zero-Bloat Contracts)**:
+   - Keep Task Contracts under 45 lines. Never dump proposed full code implementations inside the plan; specify line ranges and targeted changes.
+   - Batch independent grep/view tool calls into single turns.
+   - Never re-read files immediately after editing them.
+   - Trust tool step confirmations.
+
 ---
 
 ## 3. Output Format: Granular Task Contract
