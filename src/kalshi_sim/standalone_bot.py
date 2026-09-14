@@ -60,6 +60,7 @@ from kalshi_sim.ml.domination_bot import DominationDecision, ThreeStepDomination
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
 from kalshi_sim.orderbook import OrderBookManager
+from kalshi_sim.poe_flight_recorder import POEFlightRecorder, POEDecisionRecord
 from kalshi_sim.rate_limiter import kalshi_rate_limiter
 from kalshi_sim.schemas import (
     CRYPTO_ASSETS,
@@ -448,6 +449,10 @@ class StandaloneBotEngine:
         self.active_position: Optional[Dict[str, Any]] = None
         self.coinbase_connected: bool = False
         self.binance_connected: bool = False
+
+        # Agent POE Empirical Flight Recorder (Ground Truth Ledger)
+        self.poe_recorder = POEFlightRecorder(ledger_path=self.data_dir / "poe_flight_ledger.jsonl")
+        self._cycle_veto_candidates: Dict[str, Dict[str, Any]] = {}
 
         # CF Benchmarks Multi-Asset Index & Health
         self.cf_sync: Optional[CFBenchmarksSync] = None
@@ -1284,6 +1289,7 @@ class StandaloneBotEngine:
                                                 old_ticker = cached_m.get("ticker")
                                                 if old_ticker and new_ticker != old_ticker:
                                                     logger.info("🔄 [CYCLE ROLLOVER - %s] %s -> %s. Sweeping resting orders...", ast_key, old_ticker, new_ticker)
+                                                    self._flush_cycle_veto(old_ticker)
                                                     asyncio.create_task(self.sweep_old_orders(keep_ticker=new_ticker))
 
                                                 floor = active_m.get("floor_strike")
@@ -1415,6 +1421,13 @@ class StandaloneBotEngine:
         if target_dt.tzinfo is None:
             target_dt = target_dt.replace(tzinfo=timezone.utc)
         return max(0.0, (target_dt - now_utc).total_seconds())
+
+    def _flush_cycle_veto(self, ticker: str) -> None:
+        """Flush un-traded cycle veto candidate to POE flight recorder ledger."""
+        cand = self._cycle_veto_candidates.pop(ticker, None)
+        if cand and ticker not in self.poe_recorder._records:
+            self.poe_recorder.record_decision(**cand)
+            logger.info("📋 [POE VETO RECORDED] %s vetoed by %s", ticker, cand.get("primary_blocking_parameter"))
 
     async def evaluate_and_execute(self) -> None:
         """Evaluate 3-step domination logic and route live orders through guardrails."""
@@ -1660,8 +1673,47 @@ class StandaloneBotEngine:
                 if not self.is_armed:
                     continue
 
+                spot_vel_3s, _, _ = self.get_spot_velocity_stats(cand_asset)
+
                 # Check Signal Recommendation
                 if decision.recommended_side not in ("yes", "no") or decision.recommended_contracts <= 0:
+                    # Strategy Veto: determine primary blocking parameter from rationale
+                    veto_param = "EV_EDGE_FLOOR"
+                    if "AI Conviction Veto" in decision.rationale:
+                        veto_param = "AI_CONVICTION_FLOOR"
+                    elif "Toxic Queue Depth Veto" in decision.rationale:
+                        veto_param = "QUEUE_DEPTH_SHIELD"
+                    elif "TWAP Sniper Cap Veto" in decision.rationale:
+                        veto_param = "TWAP_SNIPER_CEILING"
+                    elif "Price Cap Veto" in decision.rationale:
+                        veto_param = "PRICE_CAP_CEILING"
+                    elif "Momentum Alignment Veto" in decision.rationale:
+                        veto_param = "MOMENTUM_ALIGNMENT_FILTER"
+                    elif "Marginal Zone Veto" in decision.rationale:
+                        veto_param = "MARGINAL_ZONE_BOOST"
+                    elif "Awaiting Cycle Window" in decision.rationale:
+                        veto_param = "TIMING_ENVELOPE"
+
+                    p_side = "YES" if decision.p_up >= decision.p_down else "NO"
+                    ev_val = Decimal(str(decision.ev_yes if p_side == "YES" else decision.ev_no))
+                    self._cycle_veto_candidates[cand_ticker] = {
+                        "cycle_id": cand_ticker,
+                        "tau_seconds_remaining": t_rem,
+                        "spot_price": float(cand_spot),
+                        "target_strike": float(cand_strike),
+                        "moneyness_diff": float(cand_spot - cand_strike),
+                        "spot_velocity_10s": float(spot_vel_3s),
+                        "vpin_score": float(decision.vpin),
+                        "ai_predicted_side": p_side,
+                        "ai_confidence": float(max(decision.p_up, decision.p_down)),
+                        "ev_gross": ev_val,
+                        "ev_net": ev_val,
+                        "decision": "VETO",
+                        "primary_blocking_parameter": veto_param,
+                        "param_actual": None,
+                        "param_threshold": None,
+                        "co_veto_matrix": {"strategy_rationale": decision.rationale[:60]},
+                    }
                     continue
 
                 # Institutional Pre-Trade Guardrail Check
@@ -1684,6 +1736,29 @@ class StandaloneBotEngine:
 
                 if not is_allowed or approved_size <= 0:
                     logger.info("🛡️ [GUARDRAIL BLOCK] %s on %s (%s): %s", rec_side.upper(), target_ticker, ast_key, g_reason)
+                    g_param = "GUARDRAIL_VPIN_TOXIC" if "vpin" in g_reason.lower() else (
+                        "GUARDRAIL_COOLDOWN" if "cooldown" in g_reason.lower() else (
+                            "GUARDRAIL_CYCLE_LOCK" if "cycle" in g_reason.lower() else "GUARDRAIL_PRE_TRADE_VETO"
+                        )
+                    )
+                    self._cycle_veto_candidates[target_ticker] = {
+                        "cycle_id": target_ticker,
+                        "tau_seconds_remaining": t_rem,
+                        "spot_price": float(cand_spot),
+                        "target_strike": float(cand_strike),
+                        "moneyness_diff": float(cand_spot - cand_strike),
+                        "spot_velocity_10s": float(spot_vel_3s),
+                        "vpin_score": float(decision.vpin),
+                        "ai_predicted_side": rec_side.upper(),
+                        "ai_confidence": float(max(decision.p_up, decision.p_down)),
+                        "ev_gross": Decimal(str(decision.ev_yes if rec_side == "yes" else decision.ev_no)),
+                        "ev_net": Decimal(str(decision.ev_yes if rec_side == "yes" else decision.ev_no)),
+                        "decision": "VETO",
+                        "primary_blocking_parameter": g_param,
+                        "param_actual": float(decision.vpin) if "vpin" in g_reason.lower() else None,
+                        "param_threshold": 0.60 if "vpin" in g_reason.lower() else None,
+                        "co_veto_matrix": {"guardrails": "FAIL", "reason": g_reason[:60]},
+                    }
                     continue
 
                 # Anti-Burst Pre-Flight Check on Kalshi Open Orders
@@ -1722,6 +1797,22 @@ class StandaloneBotEngine:
                     )
                     if not is_permitted:
                         logger.warning("🛡️ [COORDINATOR VETO] %s on %s: %s", rec_side.upper(), target_ticker, coord_reason)
+                        self._cycle_veto_candidates[target_ticker] = {
+                            "cycle_id": target_ticker,
+                            "tau_seconds_remaining": t_rem,
+                            "spot_price": float(cand_spot),
+                            "target_strike": float(cand_strike),
+                            "moneyness_diff": float(cand_spot - cand_strike),
+                            "spot_velocity_10s": float(spot_vel_3s),
+                            "vpin_score": float(decision.vpin),
+                            "ai_predicted_side": rec_side.upper(),
+                            "ai_confidence": float(max(decision.p_up, decision.p_down)),
+                            "ev_gross": Decimal(str(decision.ev_yes if rec_side == "yes" else decision.ev_no)),
+                            "ev_net": Decimal(str(decision.ev_yes if rec_side == "yes" else decision.ev_no)),
+                            "decision": "VETO",
+                            "primary_blocking_parameter": "COORDINATOR_ANTI_WASH",
+                            "co_veto_matrix": {"coordinator": "FAIL", "reason": coord_reason[:60]},
+                        }
                         self.guardrails.release_in_flight_intent(target_ticker)
                         continue
 
@@ -1748,6 +1839,29 @@ class StandaloneBotEngine:
                     if order_res:
                         order_id = order_res.get("order_id", "live_ord")
                         logger.info("✅ [ORDER PLACED] Order ID: %s", order_id)
+
+                        # POE Flight Recorder: Record live TRADE decision immediately
+                        ev_val = Decimal(str(decision.ev_yes if rec_side == "yes" else decision.ev_no))
+                        self.poe_recorder.record_decision(
+                            cycle_id=target_ticker,
+                            tau_seconds_remaining=t_rem,
+                            spot_price=float(cand_spot),
+                            target_strike=float(cand_strike),
+                            moneyness_diff=float(cand_spot - cand_strike),
+                            spot_velocity_10s=float(spot_vel_3s),
+                            vpin_score=float(decision.vpin),
+                            ai_predicted_side=rec_side.upper(),
+                            ai_confidence=float(max(decision.p_up, decision.p_down)),
+                            ev_gross=ev_val,
+                            ev_net=ev_val,
+                            decision="TRADE",
+                            primary_blocking_parameter=None,
+                            param_actual=None,
+                            param_threshold=None,
+                            co_veto_matrix={"strategy": "PASS", "guardrails": "PASS", "coordinator": "PASS"},
+                        )
+                        self._cycle_veto_candidates.pop(target_ticker, None)
+
                         self.guardrails.record_resting_order(
                             order_id=order_id,
                             ticker=target_ticker,
@@ -1763,6 +1877,17 @@ class StandaloneBotEngine:
                         except Exception:
                             fill_cnt = 0
                         if fill_cnt > 0 or str(order_res.get("status", "")).lower() in ("executed", "filled"):
+                            # Record immediate fill in POE
+                            self.poe_recorder.record_fill(
+                                cycle_id=target_ticker,
+                                order_side=rec_side,
+                                order_type="LIMIT",
+                                order_price=est_price,
+                                fill_price=est_price,
+                                fill_slippage=Decimal("0.00"),
+                                queue_depth_ahead=0,
+                                taker_fee_paid=Decimal("0.00"),
+                            )
                             pos_item = {
                                 "ticker": target_ticker,
                                 "side": rec_side,
@@ -1883,6 +2008,11 @@ class StandaloneBotEngine:
                         cancelled += 1
                         logger.warning("🧹 [EXPIRED ORDER SWEEP] Cleared virtual resting order %s on finished event %s", oid, t)
 
+        # Flush any expired or non-active cycle veto candidates to POE ledger
+        for cand_tkr in list(self._cycle_veto_candidates.keys()):
+            if not keep_set or cand_tkr not in keep_set:
+                self._flush_cycle_veto(cand_tkr)
+
         logger.info("🧹 [SWEEP SUMMARY] Cancelled %d resting order(s). Active keep_set: %s", cancelled, list(keep_set))
         return cancelled
 
@@ -1961,6 +2091,17 @@ class StandaloneBotEngine:
                                         }
                                         if t_tkr:
                                             self.active_positions[t_tkr] = pos_dict
+                                            p_price = o_info.get("price", Decimal("0.52"))
+                                            self.poe_recorder.record_fill(
+                                                cycle_id=t_tkr,
+                                                order_side=o_info.get("side", "yes"),
+                                                order_type="LIMIT",
+                                                order_price=p_price,
+                                                fill_price=p_price,
+                                                fill_slippage=Decimal("0.00"),
+                                                queue_depth_ahead=0,
+                                                taker_fee_paid=Decimal("0.00"),
+                                            )
                                         if t_tkr == self.active_ticker:
                                             self.active_position = pos_dict
                                         self.active_resting_orders.pop(oid, None)
@@ -2236,6 +2377,15 @@ class StandaloneBotEngine:
                                 cycle_id=ticker,
                             )
 
+                            # POE Flight Recorder: Link live settlement (Cluster 3)
+                            self.poe_recorder.record_settlement(
+                                cycle_id=ticker,
+                                settlement_spot=float(settlement_spot_price),
+                                contract_winning_side="YES" if market_result == "yes" else "NO",
+                                settled_payout=Decimal("1.00") if won else Decimal("0.00"),
+                                realized_pnl=pnl,
+                            )
+
                             # Consecutive Loss Streak Breaker — auto-disarm after N consecutive losses
                             # Only evaluate for new live settlements that occurred during this running session.
                             if not is_historical:
@@ -2271,6 +2421,37 @@ class StandaloneBotEngine:
 
                             self.sync_pnl_reports()
                             await self.sync_balance()
+
+                    # Reconcile un-settled vetoed cycles via Kalshi market outcome API
+                    unsettled_records = self.poe_recorder.get_unsettled_records()
+                    if unsettled_records and self.order_client:
+                        connector = create_aiohttp_connector()
+                        headers = {
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                            "Accept": "application/json",
+                        }
+                        async with aiohttp.ClientSession(connector=connector, headers=headers) as u_session:
+                            for u_rec in unsettled_records:
+                                u_ticker = u_rec.cycle_id
+                                try:
+                                    url = f"{self.rest_base}/markets/{u_ticker}"
+                                    async with u_session.get(url, timeout=aiohttp.ClientTimeout(total=2.5)) as m_resp:
+                                        if m_resp.status == 200:
+                                            m_data = await m_resp.json()
+                                            mkt = m_data.get("market", {})
+                                            m_status = str(mkt.get("status", "")).lower()
+                                            m_res = str(mkt.get("result", "")).lower()
+                                            if m_status in ("finalized", "closed", "settled") and m_res in ("yes", "no"):
+                                                self.poe_recorder.record_settlement(
+                                                    cycle_id=u_ticker,
+                                                    settlement_spot=float(u_rec.target_strike),
+                                                    contract_winning_side=m_res.upper(),
+                                                    settled_payout=Decimal("1.00") if m_res == "yes" else Decimal("0.00"),
+                                                    realized_pnl=None,
+                                                )
+                                                logger.info("📋 [POE VETO SETTLED] %s settled %s -> %s", u_ticker, m_res.upper(), u_rec.quadrant)
+                                except Exception as u_err:
+                                    logger.debug("Failed querying settlement for vetoed cycle %s: %s", u_ticker, u_err)
 
             except asyncio.CancelledError:
                 break
@@ -2689,6 +2870,50 @@ async def get_supported_assets() -> Dict[str, Any]:
         "max_concurrent_positions": app_engine.max_concurrent_positions,
         "open_positions_count": len(app_engine.active_positions),
         "assets": assets_list,
+    }
+
+
+@app.get("/api/poe/scorecards")
+async def get_poe_scorecards() -> Dict[str, Any]:
+    """Agent POE: Return empirical parameter scorecards across all evaluated and settled cycles."""
+    if not app_engine:
+        raise HTTPException(status_code=503, detail="Engine not ready")
+    scorecards = app_engine.poe_recorder.compute_parameter_scorecards()
+    cards_dict = {}
+    for name, sc in scorecards.items():
+        cards_dict[name] = {
+            "parameter_name": sc.parameter_name,
+            "current_threshold": sc.current_threshold,
+            "total_evaluations": sc.total_evaluations,
+            "veto_count": sc.veto_count,
+            "quadrant_3_starved": sc.quadrant_3_starved,
+            "quadrant_4_shielded": sc.quadrant_4_shielded,
+            "vps_score_pct": sc.vps_score_pct,
+            "asr_score_pct": sc.asr_score_pct,
+            "dollar_contribution": float(sc.dollar_contribution),
+            "fisher_p_value": sc.fisher_p_value,
+            "status": sc.status,
+            "evidence_summary": sc.evidence_summary,
+        }
+    settled = [r for r in app_engine.poe_recorder._records.values() if r.quadrant is not None]
+    return {
+        "status": "SUCCESS",
+        "total_records": len(app_engine.poe_recorder._records),
+        "settled_records": len(settled),
+        "unsettled_records": len(app_engine.poe_recorder.get_unsettled_records()),
+        "scorecards": cards_dict,
+    }
+
+
+@app.get("/api/poe/report")
+async def get_poe_report() -> Dict[str, Any]:
+    """Agent POE: Generate complete unvarnished empirical ground truth audit report."""
+    if not app_engine:
+        raise HTTPException(status_code=503, detail="Engine not ready")
+    report_md = app_engine.poe_recorder.generate_poe_audit_report()
+    return {
+        "status": "SUCCESS",
+        "report_markdown": report_md,
     }
 
 
