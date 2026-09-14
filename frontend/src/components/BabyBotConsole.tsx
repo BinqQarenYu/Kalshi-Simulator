@@ -995,7 +995,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           <div className="text-right">
             <div className="text-[10px] uppercase font-mono tracking-wider text-[#8c9ba5]">SPOT DIFF</div>
             <div className={`text-sm font-bold font-mono tracking-tight ${diffColor}`}>
-              {isDiffPositive ? '▲' : '▼'} {market.diff_str || `+$${Math.abs(diffVal).toFixed(2)}`}
+              {isDiffPositive ? '▲' : '▼'} {market.diff_str ? market.diff_str.split(' ')[0] : `${isDiffPositive ? '+' : ''}$${Math.abs(diffVal).toFixed(2)}`}
             </div>
             <span className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border mt-0.5 ${diffBg}`}>
               {isDiffPositive ? '+' : ''}
