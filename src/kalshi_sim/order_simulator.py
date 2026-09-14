@@ -7,6 +7,7 @@ timeframe-specific slippage multipliers. No live orders are ever placed.
 from __future__ import annotations
 
 import logging
+import operator
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP, ROUND_UP
@@ -561,7 +562,7 @@ class OrderSimulator:
             if remaining <= 0:
                 break
 
-            # Convert to the buyer's price (yes price = 1 - no_bid, no price = 1 - yes_bid)
+            # Convert to buyer's price (yes price = 1 - no_bid, no price = 1 - yes_bid)
             fill_price = _DEC_1 - raw_price
 
             if first_price is None:
