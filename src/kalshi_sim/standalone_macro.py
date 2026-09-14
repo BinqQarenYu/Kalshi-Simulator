@@ -393,6 +393,8 @@ class StandaloneMacroEngine:
                 def _on_cf_asset_update(asset: CryptoAsset, price: Decimal, twap: Optional[Decimal], source: str) -> None:
                     if asset == self.active_asset:
                         self.current_btc_spot = price
+                        if twap is not None:
+                            self.twap_60s = twap
                         self.brti_connected = True
 
                 self.cf_sync = CFBenchmarksSync(
@@ -941,8 +943,7 @@ async def get_state() -> Dict[str, Any]:
         diff_pct_dec = Decimal("0.00")
 
     is_up = diff_dec >= Decimal("0.00")
-    diff_sign = "+" if is_up else "-"
-    diff_str = f"{diff_sign}{cfg.format_price(abs(diff_dec))}"
+    diff_str = cfg.format_diff(diff_dec, diff_pct_dec)
 
     dec = app_engine.last_decision
     diag = app_engine.bot.learning_engine.get_diagnostics()

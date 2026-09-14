@@ -881,20 +881,22 @@ async def live_btc_spot_sync_loop() -> None:
     async with aiohttp.ClientSession(connector=connector) as session:
         while True:
             try:
-                async with session.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        amt_str = data.get("data", {}).get("amount")
-                        if amt_str:
-                            state.current_btc_price = Decimal(str(amt_str))
+                if not (state.cf_sync and state.cf_sync.is_connected):
+                    async with session.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            amt_str = data.get("data", {}).get("amount")
+                            if amt_str:
+                                state.current_btc_price = Decimal(str(amt_str))
             except Exception as exc:
                 logger.debug("[SPOT SYNC] Coinbase REST sync error: %s", exc)
                 try:
-                    async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
-                        if resp2.status == 200:
-                            data2 = await resp2.json()
-                            if "price" in data2:
-                                state.current_btc_price = Decimal(str(data2["price"]))
+                    if not (state.cf_sync and state.cf_sync.is_connected):
+                        async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
+                            if resp2.status == 200:
+                                data2 = await resp2.json()
+                                if "price" in data2:
+                                    state.current_btc_price = Decimal(str(data2["price"]))
                 except Exception as exc2:
                     logger.debug("[SPOT SYNC] Binance REST fallback sync error: %s", exc2)
             await asyncio.sleep(0.5)
@@ -2029,9 +2031,11 @@ async def start_background_simulation() -> None:
     # Start real-time institutional Bitcoin orderflow feed
     await state.btc_orderflow_feed.start()
     def _on_btc_feed_tick(price: Decimal) -> None:
-        if price != state.current_btc_price:
-            state.current_btc_price = price
-            state.is_dirty = True
+        # Only use Binance orderflow tick as spot price fallback if official CF Benchmarks is not connected
+        if not (state.cf_sync and state.cf_sync.is_connected):
+            if price != state.current_btc_price:
+                state.current_btc_price = price
+                state.is_dirty = True
     state.btc_orderflow_feed.register_on_tick(_on_btc_feed_tick)
 
     state.ticker_timer_task = asyncio.create_task(live_ticker_and_timer_loop(), name="ticker_timer")
@@ -6234,7 +6238,15 @@ def _build_full_state_payload() -> dict[str, Any]:
         portfolio_data["resting_orders"] = orders_list
         portfolio_data["open_orders"] = orders_list
 
-    # Calculate BTC spot delta from strike
+    # Calculate BTC spot delta from strike (Prioritizing official CF Benchmarks)
+    if state.cf_sync and state.cf_sync.is_connected:
+        cf_p = state.cf_sync.get_price(state.active_asset)
+        if cf_p > Decimal("0.00"):
+            state.current_btc_price = cf_p
+            cf_twap = state.cf_sync.get_twap(state.active_asset)
+            if cf_twap:
+                state.twap_60s_price = cf_twap
+
     btc_spot = float(state.current_btc_price)
     s_flt = float(strike_dec)
     diff = btc_spot - s_flt
@@ -6248,10 +6260,11 @@ def _build_full_state_payload() -> dict[str, Any]:
         target_time_str = sd.get("target_time_str", target_time_str)
         time_window_str = sd.get("time_window_str", time_window_str)
         remaining_secs = int(sd.get("expiry_countdown_seconds", remaining_secs))
-        btc_spot = float(sd.get("spot_price", btc_spot))
-        strike_dec = Decimal(str(sd.get("target_strike", strike_dec)))
-        diff = float(sd.get("spot_diff", diff))
-        diff_pct = float(sd.get("spot_diff_pct", diff_pct))
+        if not (state.cf_sync and state.cf_sync.is_connected):
+            btc_spot = float(sd.get("spot_price", btc_spot))
+            strike_dec = Decimal(str(sd.get("target_strike", strike_dec)))
+            diff = float(sd.get("spot_diff", diff))
+            diff_pct = float(sd.get("spot_diff_pct", diff_pct))
         best_yes_ask = float(sd.get("best_yes_ask") or best_yes_ask)
         best_yes_bid = float(sd.get("best_yes_bid") or best_yes_bid)
         best_no_ask = float(sd.get("best_no_ask") or best_no_ask)
