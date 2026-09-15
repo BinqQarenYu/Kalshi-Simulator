@@ -75,7 +75,7 @@ class ThreeStepDominationBot:
 
     def __init__(
         self,
-        min_edge_pct: float = 0.06,  # 6.0% minimum edge (raised from 4% — data shows 4-6% edge trades are coin-flips)
+        min_edge_pct: float = 0.015,  # 1.5% minimum edge (realistic for Kalshi 15M makers)
         min_ev_dollars: Decimal = Decimal("0.02"),  # Minimum $0.02 net EV per contract
         vpin_toxic_threshold: float = 0.60,
         vpin_safe_threshold: float = 0.35,
@@ -104,7 +104,7 @@ class ThreeStepDominationBot:
         opening_quarantine_seconds: float = 90.0,  # Quarantine opening seconds of cycle to eliminate false breakouts
         onnx_engine: Optional[Any] = None,  # Brain 1 QuoLas Nano Microscope ONNX inference engine
         twap_immutability_sniper_cents: float = 0.75,  # 75¢ ceiling for Silas TWAP late-cycle arbitrage harvest
-        max_queue_depth_ahead: int = 250,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
+        max_queue_depth_ahead: int = 25000,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
         max_clob_spread_cents: float = 0.05,  # Max allowable bid-ask spread corridor cap ($0.05)
         asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
