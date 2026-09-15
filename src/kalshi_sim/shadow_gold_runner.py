@@ -463,10 +463,12 @@ class Lane2GoldShadowRunner:
 
             # Determine whether this cycle is simulated as a win or loss
             is_win = i < win_count
+            pos_side = self.in_flight_position["side"] if self.in_flight_position else "NO"
+            
             if is_win:
-                settle_spot = strike - Decimal("1.20")  # NO wins
+                settle_spot = strike + Decimal("1.50") if pos_side == "YES" else strike - Decimal("1.20")
             else:
-                settle_spot = strike + Decimal("1.50")  # YES wins, NO loses
+                settle_spot = strike - Decimal("1.20") if pos_side == "YES" else strike + Decimal("1.50")
 
             settle = self.settle_position(
                 settlement_spot=settle_spot,

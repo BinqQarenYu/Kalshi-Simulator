@@ -57,6 +57,8 @@ from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
 from kalshi_sim.clock_sync import clock_sync
 from kalshi_sim.ml.ai_worker import AIWorker
 from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
+from kalshi_sim.ml.gold_continuous_trainer import GoldContinuousTrainer
+from kalshi_sim.shadow_gold_runner import Lane2GoldShadowRunner
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
@@ -319,6 +321,17 @@ class ServerState:
             max_recent_tick_files=15,
             enabled=True,
         )
+
+        # Gold 32-D ONNX Continuous Background Trainer (Lane 2 Incubator)
+        self.gold_continuous_trainer = GoldContinuousTrainer(
+            training_interval_s=120.0,
+            batch_size=32,
+            target_val_acc=0.85,
+            min_f1_score=0.80,
+        )
+
+        # Lane 2 Gold ONNX Shadow Runner (Paper Trading on Live Ticks)
+        self.gold_shadow_runner = Lane2GoldShadowRunner(strategy_mode="ONNX")
 
         # The ONNX Strategy Execution Instance (Dual-Brain Contradiction & Momentum Arbitrage)
         self.dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
@@ -1965,6 +1978,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await state.gdrive_sync.start()
     if hasattr(state, "continuous_trainer") and state.continuous_trainer:
         state.continuous_trainer.start()
+    if hasattr(state, "gold_continuous_trainer") and state.gold_continuous_trainer:
+        state.gold_continuous_trainer.start()
+        logger.info("Gold 32-D ONNX Continuous Trainer started (Lane 2 Incubator).")
     yield
     try:
         engine_lock.release()
@@ -1972,6 +1988,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pass
     if hasattr(state, "continuous_trainer") and state.continuous_trainer:
         state.continuous_trainer.stop()
+    if hasattr(state, "gold_continuous_trainer") and state.gold_continuous_trainer:
+        state.gold_continuous_trainer.stop()
     await state.gdrive_sync.stop()
     if state.ai_worker:
         state.ai_worker.stop()
