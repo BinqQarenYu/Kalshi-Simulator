@@ -1922,7 +1922,7 @@ async def start_background_simulation() -> None:
         now_utc = datetime.now(timezone.utc)
         _, remaining_secs, strike_dec, _, _ = resolve_active_market(now_utc)
         return {
-            "spot_price": float(state.current_btc_price),
+            "spot_price": float(state.twap_60s_price) if state.twap_60s_price is not None else float(state.current_btc_price),
             "target_strike": float(strike_dec),
             "time_to_expiry_s": float(remaining_secs),
             "strategy_bot": state.active_strategy_bot,
@@ -6017,7 +6017,8 @@ def _build_full_state_payload() -> dict[str, Any]:
             if cf_twap:
                 state.twap_60s_price = cf_twap
 
-    btc_spot = float(state.current_btc_price)
+    # Use TWAP for settlement parity diff calculation if available
+    btc_spot = float(state.twap_60s_price) if state.twap_60s_price is not None else float(state.current_btc_price)
     s_flt = float(strike_dec)
     diff = btc_spot - s_flt
     diff_pct = (diff / s_flt) * 100.0 if s_flt > 0.0 else 0.0
