@@ -48,42 +48,6 @@
 **Learning:** Re-instantiating `Decimal("0.01")`, `Decimal("0.99")`, `Decimal("7.0")`, `Decimal("1.00")`, `Decimal("100")`, `Decimal("0.02")` from strings and calling `Decimal(str(contracts))` for integer contract counts inside `calculate_kalshi_taker_fee()` created string parsing and allocation overhead on every trade/order fill simulation (~5.80 µs per call).
 **Action:** Pre-allocate static Decimal constants at module level (`_DEC_0_01`, `_DEC_0_99`, `_DEC_7_0`, `_DEC_1_00`, `_DEC_100`, `_DEC_0_02`, `_DEC_0_00`) and fast-path integer contract parsing (`Decimal(contracts)` if `isinstance(contracts, int)` else `Decimal(str(contracts))`), reducing taker fee calculation latency from 5.80 µs to 3.10 µs per call (~1.87x speedup).
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-## 2026-09-03 - O(1) Version-Backed Float Depth Tuple Caching in L2BookState
-**Learning:** Re-converting `Decimal` prices and quantities to `float` across 30 depth levels in per-tick feature extraction (`[float(qty) for _, qty in top_yes]`) consumed >50% of feature extraction execution time (~10.3 µs out of ~20.5 µs per tick) due to CPython `Decimal.__float__` conversion overhead.
-**Action:** Added `get_depth_float_tuples(n)` to `L2BookState` leveraging existing `_BookDict._version` mutation tracking to memoize float-converted depth tuples in O(1) time (~0.4 µs on cache hit). Updated `KalshiOrderflowFeatureExtractor` and `GoldOrderflowFeatureExtractor` to fast-path float tuple consumption, reducing tick feature extraction latency from ~20.5 µs to ~11.9 µs (~1.72x speedup).
-
-## 2026-09-03 - Unrolled Fixed-Depth Top-5 Level Volume Summation in Gold Feature Extractor
-**Learning:** Calling `sum(bid_sizes[:5])` and `sum(ask_sizes[:5])` inside per-tick feature extraction created list slicing (`[:5]`) allocations and generic iterator/function call overhead on every tick.
-**Action:** Unroll top-5 volume summation using direct index addition (`bid_sizes[0] + bid_sizes[1] + bid_sizes[2] + bid_sizes[3] + bid_sizes[4]`), safely guarded by prior depth list padding (to `target_depth` = 15). Reduced feature extraction volume sum latency by ~13%.
-
-## 2026-09-14 - Decimal Constant Pre-Allocation & Float Fast-Pathing in Stage 2 EV Engine
-**Learning:** In `StatisticalEVEngine.compute_optimal_execution()`, instantiating temporary `Decimal` objects from string literals (`Decimal("0.50")`, `Decimal("0.00")`, `Decimal("1.00")`, etc.), evaluating gross EV for both YES and NO sides even when one side had negative edge, and performing redundant float-to-Decimal conversions added ~12.1 µs overhead per execution calculation tick.
-**Action:** Pre-allocated static `Decimal` constants at module level (`_DEC_0_00`, `_DEC_0_01`, `_DEC_0_06`, `_DEC_0_50`, `_DEC_0_90`, `_DEC_0_99`, `_DEC_1_00`), fast-pathed market ask `Decimal`/`float` handling, and evaluated directional edge in fast float space prior to Decimal payoff computation. Reduced `compute_optimal_execution` latency from ~30.2 µs to ~18.1 µs per call (~40% speedup).
-
-## 2026-09-03 - C-Level `itemgetter` Keying & Decimal Constant Pre-Allocation in L2 Orderbook Walking
-**Learning:** Using `lambda x: x[0]` as the sorting key in `sorted(book_side.items(), key=lambda x: x[0], reverse=True)` inside `OrderSimulator._walk_book` invoked Python function call overhead for every level in the L2 book during VWAP fill simulation. Additionally, re-instantiating `Decimal("0.0001")`, `Decimal("0.0")`, and `Decimal("1.0")` inside the loop added repeated object allocation cost (~35.1 µs per call).
-**Action:** Use pre-allocated C-level `_PRICE_GETTER = operator.itemgetter(0)` and module-level static Decimal constants (`_DEC_0_0001`, `_DEC_0_00`, `_DEC_1_00`), reducing `_walk_book` latency from ~35.1 µs to ~21.5 µs per call (~1.63x speedup).
-
-## 2026-09-03 - C-Level operator.itemgetter Key Lookup in Order Book Level Walking
-**Learning:** Using `key=lambda x: x[0]` inside `sorted(book_side.items(), ...)` in high-frequency order walking loop creates Python function frame creation and invocation overhead on every level sort call (~4.53 µs per call).
-**Action:** Replace `lambda x: x[0]` with pre-allocated module-level `_PRICE_GETTER = operator.itemgetter(0)` and eliminate redundant `if/else` branching. Reduced sorting latency from 4.53 µs to 2.87 µs per call (~36.5% speedup / ~1.66 µs saved per order walk).
-
-## 2026-09-03 - Itemgetter Price Sorting, Pre-Tuple Thresholds & Hex UUIDs in Order Book Simulation
-**Learning:** Sorting L2 book price levels using Python `key=lambda x: x[0]` functions inside `_walk_book()`, creating `str(uuid.uuid4())[:8]` string formats, re-instantiating `Decimal("1")` objects, and iterating over `.items()` dicts in velocity checks added ~30 µs latency per order simulation.
-**Action:** Use `_PRICE_GETTER = operator.itemgetter(0)` for C-level sorting, deduplicate YES/NO walk conversion, pre-allocate Decimal constants (`_DEC_1`, `_DEC_0_0001`, `_DEC_1_0`, `_DEC_0_0`), pre-compute `_SPOT_VELOCITY_ITEMS` tuple, and use `uuid.uuid4().hex[:8]`. Reduced `_walk_book` latency from 28.59 µs to 17.56 µs (~1.63x speedup) and market order simulation latency by ~19.2%.
-
-## 2026-09-03 - C-Level Itemgetter Sorting & Branch Deduplication in Order Book Walking
-**Learning:** Sorting price levels with Python `key=lambda x: x[0]` inside `OrderSimulator._walk_book` invoked Python function calls per level. In addition, identical sorting and price conversion operations were redundantly duplicated across `OrderSide.YES` / `OrderSide.NO` `if/else` branches.
-**Action:** Replace `lambda x: x[0]` sorting key with module-level C-extension `_PRICE_GETTER = operator.itemgetter(0)` and remove redundant branch duplication and unused lambda instantiations, reducing level sorting latency in order book walking from 17.46 µs down to 11.38 µs (~1.53x speedup).
-
-## 2026-09-03 - Tuple Direct Sorting & Decimal Quantize Constant Pre-Allocation in L2 Order Book Walking
-**Learning:** In order book depth walking routines (`_walk_book`), passing `key=lambda x: x[0]` to `sorted(book_side.items(), reverse=True)` incurred CPython function call overhead (~0.85 µs per call) even though price keys are strictly unique `Decimal` objects where native tuple comparison compares price elements directly. Additionally, re-parsing `Decimal("0.0001")` strings inside `quantize()` calls on every order fill added object allocation overhead.
-**Action:** Remove `key=lambda` on dictionary item sorts, eliminate redundant branch logic in book walking, and pre-allocate `_DEC_0_0001` at module level, reducing `_walk_book` latency from 14.49 µs to 12.47 µs per call (~1.16x speedup).
-
-## 2026-09-04 - Dataclass Slots & Fast F-String Decimal Conversion in Stage 2 EV Engine
-**Learning:** Instantiating `ExpectedValueResult` frozen dataclasses without `slots=True` caused `__dict__` dictionary allocations on every evaluation tick. Furthermore, converting probabilities and Kelly fractions via `Decimal(str(round(val, N)))` incurred `round()` and `str()` Python function call overhead.
-**Action:** Add `slots=True` to `@dataclass(frozen=True)` on result classes and replace `Decimal(str(round(val, N)))` with `Decimal(f"{val:.Nf}")` f-string formatting, reducing `compute_optimal_execution` execution latency from ~22.7 µs to ~19.7 µs per call (~1.15x speedup / ~13% latency reduction).
+## 2026-09-15 - O(1) Version-Backed Micro-Price Caching in L2BookState
+**Learning:** Re-calculating volume-weighted micro-price `(bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty)` across high-frequency orderbook updates and ML feature extraction loops added ~2.84 µs overhead per call due to redundant dictionary access and Decimal arithmetic.
+**Action:** Memoize `micro_price` in `L2BookState` leveraging existing `_BookDict._version` mutation tracking on bid and ask books (`_yes_book` and `_no_book`). Reduced `micro_price` cache hit latency from ~2.84 µs to ~0.22 µs per call (~13x speedup).
