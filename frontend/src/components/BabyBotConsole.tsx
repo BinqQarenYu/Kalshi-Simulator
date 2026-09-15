@@ -297,19 +297,19 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     discount_limit_price: 0.48,
     entry_discount_depth: 0.48,
     momentum_max_price: 0.62,
-    min_confidence: 0.70,
+    min_confidence: 0.81,
     min_ev_dollars: 0.02,
     min_edge_pct: 6.0,
     min_spot_diff: 21.0,
     vpin_toxic_threshold: 0.60,
-    take_profit_price_threshold: 0.94,
+    take_profit_price_threshold: 0.92,
     enable_take_profit_ceiling: true,
     require_reversal_for_tp_ceiling: false,
     enable_reverse_take_profit_roi: true,
     reverse_indicator_threshold: 85.0,
-    min_take_profit_roi: 20.0,
+    min_take_profit_roi: 40.0,
     enable_trailing_ratchet: true,
-    trailing_ratchet_buffer: 0.10,
+    trailing_ratchet_buffer: 0.08,
     spot_delta_front_run_threshold: 28.0,
     enable_dynamic_reversal_curve: true,
     twap_immutability_sniper_cents: 0.75,
@@ -492,11 +492,11 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         taker_cross_ev_threshold: 0.08,
         dynamic_moat_multiplier: 1.15,
         momentum_max_price: 0.62,
-        min_confidence: 0.70,
+        min_confidence: 0.81,
         min_ev_dollars: 0.02,
         vpin_toxic_threshold: 0.60,
         min_spot_diff: assetMoat,
-        take_profit_price_threshold: 0.95,
+        take_profit_price_threshold: 0.92,
         enable_take_profit_ceiling: true,
         spot_delta_front_run_threshold: activeAssetKey === 'GOLD' ? 2.50 : activeAssetKey === 'DOGE' ? 0.0005 : activeAssetKey === 'ETH' ? 2.50 : activeAssetKey === 'SOL' ? 0.50 : activeAssetKey === 'HYPER' ? 0.33 : 28.0,
         twap_immutability_sniper_cents: activeAssetKey === 'DOGE' ? 0.70 : (activeAssetKey === 'SOL' || activeAssetKey === 'HYPER') ? 0.72 : 0.75,
@@ -511,19 +511,19 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         ...prev,
         discount_limit_price: 0.48,
         momentum_max_price: 0.62,
-        min_confidence: 0.70,
+        min_confidence: 0.81,
         min_edge_pct: 6.0,
         min_ev_dollars: 0.02,
         vpin_toxic_threshold: 0.60,
         min_spot_diff: assetMoat,
-        take_profit_price_threshold: activeAssetKey === 'GOLD' || activeAssetKey === 'DOGE' ? 0.90 : 0.94,
+        take_profit_price_threshold: activeAssetKey === 'GOLD' || activeAssetKey === 'DOGE' ? 0.90 : 0.92,
         enable_take_profit_ceiling: true,
         require_reversal_for_tp_ceiling: false,
         enable_reverse_take_profit_roi: true,
         reverse_indicator_threshold: activeAssetKey === 'GOLD' ? 52.0 : 83.0,
         min_take_profit_roi: activeAssetKey === 'GOLD' ? 35.0 : 40.0,
         enable_trailing_ratchet: true,
-        trailing_ratchet_buffer: 0.10,
+        trailing_ratchet_buffer: 0.08,
         spot_delta_front_run_threshold: activeAssetKey === 'GOLD' ? 2.50 : activeAssetKey === 'DOGE' ? 0.0005 : activeAssetKey === 'ETH' ? 2.50 : activeAssetKey === 'SOL' ? 0.50 : activeAssetKey === 'HYPER' ? 0.33 : 28.0,
         enable_dynamic_reversal_curve: true,
         twap_immutability_sniper_cents: activeAssetKey === 'DOGE' ? 0.70 : (activeAssetKey === 'SOL' || activeAssetKey === 'HYPER') ? 0.72 : 0.75,
@@ -581,9 +581,9 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         require_reversal_for_tp_ceiling: botParams.require_reversal_for_tp_ceiling ?? false,
         enable_reverse_take_profit_roi: botParams.enable_reverse_take_profit_roi ?? true,
         reverse_indicator_threshold: botParams.reverse_indicator_threshold ?? 85.0,
-        min_take_profit_roi: botParams.min_take_profit_roi ?? 20.0,
+        min_take_profit_roi: botParams.min_take_profit_roi ?? 40.0,
         enable_trailing_ratchet: botParams.enable_trailing_ratchet ?? true,
-        trailing_ratchet_buffer: botParams.trailing_ratchet_buffer ?? 0.10,
+        trailing_ratchet_buffer: botParams.trailing_ratchet_buffer ?? 0.08,
         spot_delta_front_run_threshold: botParams.spot_delta_front_run_threshold,
         enable_dynamic_reversal_curve: botParams.enable_dynamic_reversal_curve ?? true,
         twap_immutability_sniper_cents: botParams.twap_immutability_sniper_cents,
@@ -666,7 +666,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const onnxProbShort = Math.round((aiSignals?.onnx_prob_short ?? aiSignals?.p_down ?? 0.162) * 100);
   const onnxProbWait = Math.max(0, 100 - onnxProbLong - onnxProbShort);
   const onnxConfidence = (aiSignals?.onnx_confidence ?? onnxProbLong / 100).toFixed(2);
-  const isConfidencePassing = parseFloat(onnxConfidence) >= (botParams.min_confidence || 0.70);
+  const isConfidencePassing = parseFloat(onnxConfidence) >= (botParams.min_confidence || 0.81);
 
   // Dual-ONNX Specific Telemetry (QuoLas Spot + Built-in Kalshi Microstructure)
   const quolasSignal = (dualOnnxTelemetry?.quolas_signal || aiSignals?.quolas_signal || (isDiffPositive ? 'UP' : 'DOWN')).toUpperCase();
@@ -688,7 +688,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const dualRationale = useMemo(() => {
     if (dualOnnxTelemetry?.rationale) return dualOnnxTelemetry.rationale;
     if (dualRegime === 'TOXIC_VETO') {
-      return `VPIN toxicity (${vpin.toFixed(2)} ≥ ${(botParams.vpin_toxic_threshold || 0.70).toFixed(2)}). Heavy institutional toxic flow detected; adverse selection veto active.`;
+      return `VPIN toxicity (${vpin.toFixed(2)} ≥ ${(botParams.vpin_toxic_threshold || 0.81).toFixed(2)}). Heavy institutional toxic flow detected; adverse selection veto active.`;
     }
     if (dualRegime === 'CONTRADICTION_ARBITRAGE') {
       return `QuoLas Spot broke ${quolasSignal} (${quolasConfidence}%), while Kalshi Binary CLOB is lagging! Sniping resting maker order at $${botParams.discount_limit_price?.toFixed(2) || '0.48'} ($0.00 fee).`;
@@ -696,7 +696,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     if (dualRegime === 'MOMENTUM_SCALP') {
       return `Dual consensus confirmed: QuoLas Spot (${quolasSignal} ${quolasConfidence}%) & Kalshi CLOB (${kalshiSignal} ${kalshiConfidence}%) aligned. Scaling momentum entry ≤ $${botParams.momentum_max_price?.toFixed(2) || '0.62'}.`;
     }
-    return `Awaiting high-confidence orderflow impulse. Both models filtering noise below ${((botParams.min_confidence || 0.70) * 100).toFixed(0)}% threshold.`;
+    return `Awaiting high-confidence orderflow impulse. Both models filtering noise below ${((botParams.min_confidence || 0.81) * 100).toFixed(0)}% threshold.`;
   }, [dualOnnxTelemetry?.rationale, dualRegime, vpin, botParams, quolasSignal, quolasConfidence, kalshiSignal, kalshiConfidence]);
 
   // Macro Trend Dominion (Bot 3) Telemetry
@@ -2556,7 +2556,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                           step="0.01"
                           min="0.50"
                           max="0.99"
-                          value={botParams.min_confidence ?? 0.70}
+                          value={botParams.min_confidence ?? 0.81}
                           onChange={(e) => setBotParams({ ...botParams, min_confidence: parseFloat(e.target.value) })}
                           className="w-full bg-transparent text-white font-mono outline-none text-[11px]"
                         />
@@ -2606,7 +2606,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                           step="0.01"
                           min="0.50"
                           max="0.99"
-                          value={botParams.take_profit_price_threshold ?? 0.95}
+                          value={botParams.take_profit_price_threshold ?? 0.92}
                           onChange={(e) => setBotParams({ ...botParams, take_profit_price_threshold: parseFloat(e.target.value) })}
                           className="w-full bg-transparent text-white font-mono outline-none text-[11px]"
                         />
@@ -2645,32 +2645,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   </div>
                 </div>
 
-                {/* Min Edge % */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    Min Edge %
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"How rigged must the game be before you play?"</i><br />
-                        <b>How it works:</b> Demands a mathematical advantage over market price.<br />
-                        <b>Why it matters:</b> 6% edge filters out thin-edge noise bets.
-                      </div>
-                    </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
-                    <input
-                      type="number"
-                      step="0.5"
-                      min="1.0"
-                      max="50.0"
-                      value={botParams.min_edge_pct ?? 6.0}
-                      onChange={(e) => setBotParams({ ...botParams, min_edge_pct: parseFloat(e.target.value) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
-                    />
-                    <span className="text-slate-500 ml-1">%</span>
-                  </div>
-                </div>
+
 
                 {/* Min Net EV ($/ct) */}
                 <div className="space-y-1">
@@ -2752,32 +2727,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   </div>
                 </div>
 
-                {/* Moneyness Moat Multiplier */}
-                <div className="space-y-1">
-                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
-                    moneyness_moat_multiplier
-                    <div className="group relative cursor-help">
-                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
-                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>The Beginner Translation:</b> <i>"Dynamic Volatility Moat."</i><br />
-                        <b>How it works:</b> Multiplies baseline volatility to calculate safe distance from strike.<br />
-                        <b>Why it matters:</b> Keeps the bot out of the danger zone during high volatility.
-                      </div>
-                    </div>
-                  </label>
-                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
-                    <span className="text-slate-500 mr-1">x</span>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="0"
-                      max="10"
-                      value={botParams.moneyness_moat_multiplier ?? 1.25}
-                      onChange={(e) => setBotParams({ ...botParams, moneyness_moat_multiplier: parseFloat(e.target.value) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
-                    />
-                  </div>
-                </div>
+
 
                 {/* Opening Quarantine */}
                 <div className="space-y-1">
@@ -2853,7 +2803,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                       step="0.01"
                       min="0.50"
                       max="0.99"
-                      value={botParams.take_profit_price_threshold ?? 0.94}
+                      value={botParams.take_profit_price_threshold ?? 0.92}
                       onChange={(e) => setBotParams({ ...botParams, take_profit_price_threshold: parseFloat(e.target.value) })}
                       className="w-full bg-transparent text-white font-mono outline-none text-xs"
                     />
@@ -2893,7 +2843,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                       step="0.01"
                       min="0.02"
                       max="0.25"
-                      value={botParams.trailing_ratchet_buffer ?? 0.10}
+                      value={botParams.trailing_ratchet_buffer ?? 0.08}
                       onChange={(e) => setBotParams({ ...botParams, trailing_ratchet_buffer: parseFloat(e.target.value) })}
                       className="w-full bg-transparent text-white font-mono outline-none text-xs"
                     />
@@ -2968,38 +2918,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   </div>
                 </div>
 
-                {/* Frontier 2: Vance Anti-Toxic Queue Depth Shield */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1.5">
-                      Max Queue Ahead
-                      <span className="text-[8px] px-1.5 py-0.2 rounded bg-purple-500/15 text-purple-400 border border-purple-500/30 font-mono font-semibold">
-                        🛡️ WHALE SWEEP ARMOR
-                      </span>
-                      <div className="group relative cursor-help">
-                        <span className="w-3.5 h-3.5 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center hover:bg-slate-600 transition-colors">i</span>
-                        <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-80 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded border border-slate-700 z-50 shadow-2xl leading-relaxed backdrop-blur-md">
-                          <b className="text-purple-300">Vance Anti-Toxic Queue Depth Shield:</b><br />
-                          <span className="text-slate-300"><b>Concept:</b> Monitors FIFO queue position for resting maker limit bids (e.g. 52¢ discount sniper).</span><br />
-                          <span className="text-slate-300"><b>Whale Hazard:</b> If 300+ contracts sit ahead, your order only fills when a massive whale market sell dumps and sweeps the entire book.</span><br />
-                          <span className="text-emerald-400 font-semibold mt-1 block">★ Winning Sweetspot: 250 contracts (BTC), 200 (ETH/HYPER), 150 (SOL/GOLD), 300 (DOGE). Eliminates adverse selection on maker executions.</span>
-                        </div>
-                      </div>
-                    </label>
-                  </div>
-                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
-                    <input
-                      type="number"
-                      step="25"
-                      min="10"
-                      max="5000"
-                      value={botParams.max_queue_depth_ahead ?? (activeAssetKey === 'DOGE' ? 300 : activeAssetKey === 'ETH' ? 200 : (activeAssetKey === 'SOL' || activeAssetKey === 'GOLD') ? 150 : 250)}
-                      onChange={(e) => setBotParams({ ...botParams, max_queue_depth_ahead: parseInt(e.target.value, 10) })}
-                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
-                    />
-                    <span className="text-slate-500 ml-1">cts</span>
-                  </div>
-                </div>
+
 
                 {/* Frontier 3: Vance Max CLOB Spread Corridor Cap */}
                 <div className="space-y-1">
@@ -3066,7 +2985,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                       step="5"
                       min="5"
                       max="100"
-                      value={botParams.min_take_profit_roi ?? 20.0}
+                      value={botParams.min_take_profit_roi ?? 40.0}
                       onChange={(e) => setBotParams({ ...botParams, min_take_profit_roi: parseFloat(e.target.value) })}
                       className="w-full bg-transparent text-white font-mono outline-none text-xs"
                     />
@@ -3140,13 +3059,13 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                     <div className="group relative cursor-help">
                       <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
                       <div className="absolute bottom-full right-0 mb-1 hidden group-hover:block w-64 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
-                        <b>4-Pillar Harvest Engine:</b> Takes profit at ${(botParams.take_profit_price_threshold ?? 0.94).toFixed(2)}, trails high-water mark, and front-runs spot velocity air pockets.
+                        <b>4-Pillar Harvest Engine:</b> Takes profit at ${(botParams.take_profit_price_threshold ?? 0.92).toFixed(2)}, trails high-water mark, and front-runs spot velocity air pockets.
                       </div>
                     </div>
                   </label>
                   <div className="flex items-center justify-center bg-emerald-500/10 border border-emerald-500/30 rounded px-2 py-1">
                     <span className="text-[10px] font-mono font-bold text-emerald-400">
-                      {!(botParams.require_reversal_for_tp_ceiling ?? false) ? `ZERO-DELAY ≥$${(botParams.take_profit_price_threshold ?? 0.94).toFixed(2)}` : 'RUN TO $1.00 (REV GATE)'}
+                      {!(botParams.require_reversal_for_tp_ceiling ?? false) ? `ZERO-DELAY ≥$${(botParams.take_profit_price_threshold ?? 0.92).toFixed(2)}` : 'RUN TO $1.00 (REV GATE)'}
                     </span>
                   </div>
                 </div>
