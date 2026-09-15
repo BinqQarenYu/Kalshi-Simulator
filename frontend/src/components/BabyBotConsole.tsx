@@ -2700,6 +2700,32 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   </div>
                 </div>
 
+                {/* Min Conviction (min_confidence) */}
+                <div className="space-y-1">
+                  <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
+                    Min Conviction
+                    <div className="group relative cursor-help">
+                      <span className="w-3 h-3 rounded-full bg-slate-700 text-white text-[9px] flex items-center justify-center">i</span>
+                      <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-52 p-2 bg-slate-800 text-slate-200 text-[10px] rounded border border-slate-600 z-50 shadow-xl leading-snug">
+                        <b>The Beginner Translation:</b> <i>"Win Probability Hurdle."</i><br />
+                        <b>How it works:</b> Required ONNX model confidence to enter a trade.<br />
+                        <b>Why it matters:</b> Keeps the bot from taking low-probability setups.
+                      </div>
+                    </div>
+                  </label>
+                  <div className="flex items-center bg-[#07080c] border border-[#262d35] rounded px-2 py-1">
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.50"
+                      max="0.99"
+                      value={botParams.min_confidence ?? 0.81}
+                      onChange={(e) => setBotParams({ ...botParams, min_confidence: parseFloat(e.target.value) })}
+                      className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                    />
+                  </div>
+                </div>
+
                 {/* Min Spot Distance */}
                 <div className="space-y-1">
                   <label className="text-[10px] text-[#8c9ba5] font-semibold flex items-center gap-1">
