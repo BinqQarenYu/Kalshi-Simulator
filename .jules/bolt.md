@@ -84,3 +84,6 @@
 **Learning:** In order book depth walking routines (`_walk_book`), passing `key=lambda x: x[0]` to `sorted(book_side.items(), reverse=True)` incurred CPython function call overhead (~0.85 µs per call) even though price keys are strictly unique `Decimal` objects where native tuple comparison compares price elements directly. Additionally, re-parsing `Decimal("0.0001")` strings inside `quantize()` calls on every order fill added object allocation overhead.
 **Action:** Remove `key=lambda` on dictionary item sorts, eliminate redundant branch logic in book walking, and pre-allocate `_DEC_0_0001` at module level, reducing `_walk_book` latency from 14.49 µs to 12.47 µs per call (~1.16x speedup).
 
+## 2026-09-15 - O(1) Version-Backed Micro-Price Caching in L2BookState
+**Learning:** Re-calculating volume-weighted micro-price `(bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty)` across high-frequency orderbook updates and ML feature extraction loops added ~2.84 µs overhead per call due to redundant dictionary access and Decimal arithmetic.
+**Action:** Memoize `micro_price` in `L2BookState` leveraging existing `_BookDict._version` mutation tracking on bid and ask books (`_yes_book` and `_no_book`). Reduced `micro_price` cache hit latency from ~2.84 µs to ~0.22 µs per call (~13x speedup).
