@@ -97,7 +97,13 @@ class ThreeStepDominationBot:
         spot_delta_front_run_threshold: float = 28.0,  # $28.0 rolling 3s spot velocity base threshold (2.0σ winning sweetspot)
         enable_dynamic_spot_velocity: bool = True,  # 4-Regime Fading Mathematics dynamic front-runner
         velocity_z_score_threshold: float = 2.50,  # 2.50 sigma statistical anomaly threshold
-        moneyness_moat_multiplier: float = 2.0,  # 2.0x sigma*sqrt(t) deep ITM protection moat
+        
+        # [FROZEN] The following 3 parameters were historically paralyzing the bot.
+        # FROZEN_OLD_min_edge_pct = 0.06 (6.0%) -> Now 0.015 (1.5%)
+        # FROZEN_OLD_max_queue_depth_ahead = 250 -> Now 25000
+        # FROZEN_OLD_moneyness_moat_multiplier = 2.0 -> Now 1.36
+        moneyness_moat_multiplier: float = 1.36,  # 1.36x sigma*sqrt(t) deep ITM protection moat (sweet spot)
+        
         twap_fading_quarantine_seconds: float = 15.0,  # 15s expiration quarantine (strict hold to $1.00)
         twap_fading_window_seconds: float = 60.0,  # 60s Silas TWAP fading evaluation window
         enable_dynamic_reversal_curve: bool = True,  # Time-adaptive reversal curve (decays 85% -> 50% as tau -> 0)
@@ -986,7 +992,8 @@ class ThreeStepDominationBot:
             # Require 12% minimum edge to filter noise trades that don't survive reversals.
             razor_tight_threshold = self.get_dynamic_proximity_threshold(time_to_expiry_s, cycle_duration_s=cycle_duration_s)
             marginal_zone_upper = razor_tight_threshold * 1.5
-            marginal_min_edge = 12.0  # 12% minimum edge in marginal territory
+            # [FROZEN] OLD_marginal_min_edge = 12.0 (12%). Paralyzing hurdle in marginal territory.
+            marginal_min_edge = 2.0  # 2.0% minimum edge in marginal territory (matches new 1.5% base edge)
             if abs(spot_diff) < marginal_zone_upper and edge_pct < marginal_min_edge:
                 diff_str = cfg.format_diff(spot_diff)
                 return self._build_wait_decision(
