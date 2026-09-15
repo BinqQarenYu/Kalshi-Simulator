@@ -480,92 +480,37 @@ def test_bot_arm_disarm_panic_endpoints(client: TestClient) -> None:
         assert resp_panic.json()["armed"] is False
 
 
-def test_mother_standalone_single_source_of_truth_sync(client: TestClient) -> None:
-    """Verify that Mother server synchronizes 100% of its market, timer, and balance state from Standalone Bot."""
-    import time
-    from unittest.mock import patch
+def test_mother_server_monolithic_source_of_truth(client: TestClient) -> None:
+    """Verify that Mother server provides 100% of market, timer, and balance state directly as monolithic engine."""
+    from decimal import Decimal
     from kalshi_sim.server import state, _build_full_state_payload
+    from kalshi_sim.schemas import CryptoAsset
 
-    # Simulate Standalone Bot running with active lock
-    with patch("kalshi_sim.server.get_active_lock_holder", return_value=("standalone_bot", 99999)):
-        # Inject mock standalone telemetry into state
-        state._standalone_data = {
-            "active_ticker": "KXETH15M-TRUTH-15",
-            "active_asset": "ETH",
-            "active_asset_name": "Ethereum",
-            "target_strike": 2150.00,
-            "target_strike_str": "$2,150.00",
-            "spot_price": 2162.50,
-            "spot_price_str": "$2,162.50",
-            "spot_diff": 12.50,
-            "spot_diff_pct": 0.581,
-            "moneyness_diff_str": "+$12.50 (+0.581%)",
-            "expiry_countdown_seconds": 385,
-            "time_remaining_str": "06:25",
-            "target_time_str": "09:00am ET",
-            "time_window_str": "September 07, 08:45 - 09:00 AM ET",
-            "balance": 24.6462,
-            "today_pnl": 3.56,
-            "settled_cycles": 10,
-            "today_wins": 5,
-            "today_losses": 5,
-            "today_win_rate": 50.0,
-            "best_yes_ask": 0.58,
-            "best_yes_bid": 0.57,
-            "best_no_ask": 0.43,
-            "best_no_bid": 0.42,
-            "armed": True,
-            "playbook": "Playbook 2: OFI Drift",
-            "edge_pct": 14.5,
-            "ev": 0.04,
-            "vpin": 0.18,
-            "vpin_is_safe": True,
-            "rationale": "High conviction drift detected",
-            "orderbook_ladder": [
-                {"side": "yes", "price_cents": "57.0¢", "price_raw": 0.57, "contracts": 10, "total": "$6", "depth_pct": 80}
-            ],
-        }
-        state._last_standalone_sync = time.monotonic()
+    state.active_ticker = "KXETH15M-TRUTH-15"
+    state.active_asset = CryptoAsset.ETH
+    state.target_strike = Decimal("2160.00")
+    state.current_btc_price = Decimal("2162.50")
+    state.mode = "mock"
 
-        payload = _build_full_state_payload()
-        m = payload["market"]
-        p = payload["portfolio"]
-        s = payload["settings"]
-        ai = payload["ai_signals"]
+    payload = _build_full_state_payload()
+    m = payload["market"]
+    p = payload["portfolio"]
+    s = payload["settings"]
+    ai = payload["ai_signals"]
 
-        # 1. Market parity
-        assert m["ticker"] == "KXETH15M-TRUTH-15"
-        assert m["target_strike"] == 2150.00
-        assert m["target_strike_str"] == "$2,150.00"
-        assert m["current_btc_price"] == 2162.50
-        assert m["current_btc_price_str"] == "$2,162.50"
-        assert m["diff"] == 12.50
-        assert m["expiry_countdown_seconds"] == 385
-        assert m["expiry_countdown_str"] == "06:25"
-        assert m["target_time_str"] == "09:00am ET"
+    # 1. Market parity
+    assert m["ticker"].startswith("KXETH15M")
+    assert m["target_strike"] == 2160.00
+    assert m["target_strike_str"] == "$2,160.00"
+    assert m["current_btc_price"] == 2162.50
+    assert m["current_btc_price_str"] == "$2,162.50"
+    assert m["diff"] == 2.50
 
-        # 2. Portfolio & PnL parity
-        assert p["balance"] == 24.6462
-        assert p["realized_pnl"] == 3.56
-        assert p["total_trades"] == 10
-        assert p["wins"] == 5
-        assert p["losses"] == 5
-        assert p["win_rate"] == 50.0
-
-        # 3. AI signal parity
-        assert ai["active_playbook"] == "Playbook 2: OFI Drift"
-        assert ai["statistical_edge"] == 14.5
-        assert ai["expected_value"] == 0.04
-        assert ai["p_up"] == 0.50
-
-        # 4. Settings & lock indicator
-        assert s["standalone_lock_active"] is True
-        assert s["standalone_sync_active"] is True
-        assert s["lock_holder"] == "standalone_bot"
-
-        # Clean up
-        state._standalone_data = None
-        state._last_standalone_sync = 0.0
+    # 2. Portfolio & settings
+    assert p["balance"] is not None
+    assert s["standalone_lock_active"] is False
+    assert s["standalone_sync_active"] is False
+    assert s["lock_holder"] is None
 
 
 def test_sweep_orders_endpoint(client: TestClient) -> None:
@@ -676,35 +621,37 @@ def test_bot_parameters_onnx_dials_endpoint() -> None:
 
 
 def test_spawn_bot_endpoint(client: TestClient) -> None:
-    """Verify POST /api/bots/spawn launches requested bot script and updates strategy for all 3 bots."""
-    from unittest.mock import patch
-    with patch("subprocess.Popen") as mock_popen:
-        # Test Bot 1 (3-Step Dominion)
-        resp1 = client.post("/api/bots/spawn", json={"bot_id": "3_step_domination_bot"})
-        assert resp1.status_code == 200
-        data1 = resp1.json()
-        assert data1["status"] == "success"
-        assert data1["bot_id"] == "3_step_domination_bot"
-        assert data1["url"] == "http://localhost:8001"
-        assert data1["script"] == "run_standalone_bot.bat"
-        mock_popen.assert_called()
+    """Verify POST /api/bots/spawn activates requested bot in-engine on Port 8000."""
+    from kalshi_sim.server import state
 
-        # Test Bot 2 (Macro ONNX)
-        resp2 = client.post("/api/bots/spawn", json={"bot_id": "macro_onnx"})
-        assert resp2.status_code == 200
-        data2 = resp2.json()
-        assert data2["status"] == "success"
-        assert data2["bot_id"] == "macro_onnx"
-        assert data2["url"] == "http://localhost:8002"
-        assert data2["script"] == "run_standalone_onnx.bat"
+    # Test Bot 1 (3-Step Dominion)
+    resp1 = client.post("/api/bots/spawn", json={"bot_id": "3_step_domination_bot"})
+    assert resp1.status_code == 200
+    data1 = resp1.json()
+    assert data1["status"] == "success"
+    assert data1["bot_id"] == "3_step_domination_bot"
+    assert data1["url"] == "http://localhost:8000"
+    assert data1["strategy"] == "3_step_domination_bot"
+    assert state.active_strategy_bot == "3_step_domination_bot"
 
-        # Test Bot 3 (Macro Trend Dominion)
-        resp3 = client.post("/api/bots/spawn", json={"bot_id": "macro_trend_dominion"})
-        assert resp3.status_code == 200
-        data3 = resp3.json()
-        assert data3["status"] == "success"
-        assert data3["bot_id"] == "macro_trend_dominion"
-        assert data3["url"] == "http://localhost:8003"
-        assert data3["script"] == "run_standalone_macro.bat"
+    # Test Bot 2 (Macro ONNX)
+    resp2 = client.post("/api/bots/spawn", json={"bot_id": "macro_onnx"})
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    assert data2["status"] == "success"
+    assert data2["bot_id"] == "macro_onnx"
+    assert data2["url"] == "http://localhost:8000"
+    assert data2["strategy"] == "macro_onnx"
+    assert state.active_strategy_bot == "macro_onnx"
+
+    # Test Bot 3 (Macro Trend Dominion)
+    resp3 = client.post("/api/bots/spawn", json={"bot_id": "macro_trend_dominion"})
+    assert resp3.status_code == 200
+    data3 = resp3.json()
+    assert data3["status"] == "success"
+    assert data3["bot_id"] == "macro_trend_dominion"
+    assert data3["url"] == "http://localhost:8000"
+    assert data3["strategy"] == "macro_trend_dominion"
+    assert state.active_strategy_bot == "macro_trend_dominion"
 
 

@@ -7,7 +7,7 @@ export const ArbitrageRadarView: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await fetch('http://localhost:8001/api/state');
+        const res = await fetch('/api/state');
         if (res.ok) {
           const data = await res.json();
           setRadarData(data.arbitrage_radar);
@@ -24,7 +24,7 @@ export const ArbitrageRadarView: React.FC = () => {
 
   const toggleArbitrage = async () => {
     try {
-      await fetch('http://localhost:8001/api/arbitrage/toggle', { method: 'POST' });
+      await fetch('/api/arbitrage/toggle', { method: 'POST' });
     } catch (err) {
       console.error('Failed to toggle:', err);
     }

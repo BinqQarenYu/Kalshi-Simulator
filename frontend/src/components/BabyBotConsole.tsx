@@ -544,14 +544,14 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       const res = await fetch('/api/bot/promote', { method: 'POST' });
       if (res.ok) {
         soundFX.playWinSound();
-        setSaveSuccessMsg('? Promoted to Live 8001');
+        setSaveSuccessMsg('✓ Promoted to Live Engine');
         setTimeout(() => setSaveSuccessMsg(null), 2500);
       } else {
-        setSaveSuccessMsg('?? Failed to promote');
+        setSaveSuccessMsg('❌ Failed to promote');
       }
     } catch (err) {
       console.error('Error promoting:', err);
-      setSaveSuccessMsg('?? Network error');
+      setSaveSuccessMsg('⚠️ Network error');
     }
   };
 

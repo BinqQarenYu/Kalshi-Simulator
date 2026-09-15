@@ -553,5 +553,52 @@ def test_macro_trend_dominion_promoted_live_authorization() -> None:
         assert size_live == 1
 
 
+def test_guardrail_in_flight_lock_15s_ttl_expiration() -> None:
+    """Verify that an in-flight reservation automatically expires after 15.0 seconds TTL."""
+    import time
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    cycle = "KXBTC15M-TTL-TEST-00"
 
+    # Step 1: Request intent, which acquires the in-flight lock
+    ok1, reason1, size1, _ = guardrails.validate_pre_trade_intent(
+        ticker=cycle,
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.52"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="3_step_domination_bot",
+    )
+    assert ok1 is True
+    assert cycle in guardrails._in_flight_locks
 
+    # Step 2: Immediate concurrent attempt within 15s is blocked
+    ok2, reason2, size2, _ = guardrails.validate_pre_trade_intent(
+        ticker=cycle,
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.52"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="3_step_domination_bot",
+    )
+    assert ok2 is False
+    assert "IN-FLIGHT ORDER LOCKOUT" in reason2
+
+    # Step 3: Simulate 15.1 seconds passing
+    guardrails._in_flight_lock_ts[cycle] = time.monotonic() - 15.1
+
+    # Step 4: Validate intent again - TTL should auto-release the expired lock and permit entry!
+    ok3, reason3, size3, _ = guardrails.validate_pre_trade_intent(
+        ticker=cycle,
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.52"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="3_step_domination_bot",
+    )
+    assert ok3 is True, f"Expected lock to auto-release after 15s TTL, but got rejection: {reason3}"

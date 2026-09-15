@@ -80,27 +80,15 @@ def test_global_clock_sync_instance() -> None:
     assert now_k.tzinfo == timezone.utc
 
 
-def test_port_8003_dial_sync_bridge() -> None:
-    """Verify Mother Server GET and POST /api/bot/parameters bridges with Port 8003."""
+def test_unified_macro_trend_parameters() -> None:
+    """Verify Mother Server GET and POST /api/bot/parameters updates Macro Trend Dominion directly in unified engine."""
     from fastapi.testclient import TestClient
-    from kalshi_sim.server import app, state
+    from kalshi_sim.server import app, state, resolve_bot_instance
 
     client = TestClient(app)
-
-    # 1. Test GET /api/bot/parameters merges live Port 8003 data
-    mock_macro_data = {
-        "parameters": {
-            "limit_price_cents": 54,
-            "min_confidence_pct": 68.0,
-            "volatility_moat_dollars": 32.0,
-            "hmm_risk_off_veto": True,
-            "macro_trend_window": "15m+30m",
-            "take_profit_harvest_cents": 96,
-            "adaptive_learning_rate": 0.25,
-        }
-    }
-    state._standalone_macro_data = mock_macro_data
-    state._last_standalone_macro_sync = time.monotonic()
+    macro_inst = resolve_bot_instance("macro_trend_dominion")
+    if macro_inst and hasattr(macro_inst, "update_parameters"):
+        macro_inst.update_parameters(limit_price_cents=54, min_confidence_pct=68.0, volatility_moat_dollars=32.0)
 
     resp = client.get("/api/bot/parameters")
     assert resp.status_code == 200
@@ -108,11 +96,6 @@ def test_port_8003_dial_sync_bridge() -> None:
     assert data["limit_price_cents"] == 54
     assert data["min_confidence_pct"] == 68.0
     assert data["volatility_moat_dollars"] == 32.0
-
-    # 2. Test POST /api/bot/parameters forwards dials to Port 8003
-    mock_m_resp = MagicMock()
-    mock_m_resp.status = 200
-    mock_m_resp.json = MagicMock(return_value={"status": "SUCCESS", "parameters": {"limit_price_cents": 51, "min_confidence_pct": 70.0}})
 
     post_resp = client.post("/api/bot/parameters", json={
         "bot_id": "macro_trend_dominion",

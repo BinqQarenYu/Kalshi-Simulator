@@ -48,6 +48,11 @@ class HMMBrain:
 
         self._load_model()
 
+    @property
+    def is_trained(self) -> bool:
+        """Return True if the underlying GaussianHMM model is initialized and trained."""
+        return self.model is not None
+
     def train(self, data_bundle: Dict[str, List[Dict]]) -> bool:
         """Train HMM on a bundle of asset candles (e.g., BTCUSDT)."""
         try:

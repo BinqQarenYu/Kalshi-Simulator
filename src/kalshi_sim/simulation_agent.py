@@ -365,16 +365,16 @@ class SimulationAgent:
             return
 
         # ===================================================================
-        # BOT: Macro ONNX & Macro Trend Dominion (DISABLED: Only 3-Step Dominion allowed to trade)
+        # BOT 3: Macro ONNX & Macro Trend Dominion (Sealed & Live Authorized)
         # ===================================================================
-        if False and (not is_live or self.active_strategy_bot in (
+        if self.active_strategy_bot in (
             "macro_onnx",
             "macro_onnx_bot",
             "macro_trend_onnx_fusion",
             "macro_trend_dominion",
             "macro_trend",
             "macro_trend_dominion_bot",
-        )):
+        ):
             if (
                 not self._portfolio_macro_trend.circuit_breaker_tripped
                 and len(self._portfolio_macro_trend.open_positions) < MAX_CONCURRENT_POSITIONS
@@ -451,25 +451,28 @@ class SimulationAgent:
                                 macro_dec.trend_1h_pct,
                                 macro_dec.edge_pct,
                                 f"${max(macro_dec.ev_yes, macro_dec.ev_no):.2f}",
-                                macro_dec.recommended_contracts,
+                                1,
                             )
+                            lim_p = Decimal(str(getattr(macro_dec, "limit_price", "0.52") or "0.52"))
                             await self._place_virtual_order(
                                 book=book,
                                 ticker=ticker,
                                 side=m_side,
-                                max_size=macro_dec.recommended_contracts,
+                                max_size=1,
                                 timeframe=timeframe,
                                 reasoning=macro_dec.rationale,
                                 portfolio=self._portfolio_macro_trend,
                                 bot_type=bot_tag,
+                                order_type="limit",
+                                limit_price=lim_p,
                             )
                     except Exception as exc:
                         logger.debug("Macro ONNX / Trend bot evaluation error: %s", exc)
 
         # ===================================================================
-        # BOT 0: Dominion 2 Bot (DISABLED: Only 3-Step Dominion allowed to trade)
+        # BOT 0: Dominion 2 Bot
         # ===================================================================
-        if False and (not is_live or self.active_strategy_bot in ("dominion_2_bot", "dominion2", "dominion_v2")):
+        if self.active_strategy_bot in ("dominion_2_bot", "dominion2", "dominion_v2"):
             if (
                 not self._portfolio_dominion2.circuit_breaker_tripped
                 and len(self._portfolio_dominion2.open_positions) < MAX_CONCURRENT_POSITIONS

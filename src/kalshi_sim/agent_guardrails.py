@@ -47,6 +47,7 @@ class AgentGuardrails:
         self._last_order_ts_by_ticker: dict[str, float] = {}
         self._cycle_locks: dict[str, str] = {}  # cycle_key -> trade_id
         self._in_flight_locks: set[str] = set()  # In-flight order dispatch locks (anti-burst)
+        self._in_flight_lock_ts: dict[str, float] = {}  # cycle_key -> monotonic lock reservation timestamp
         self._cycle_contracts_count: dict[str, int] = {}  # cycle_key -> total contracts placed (hard cap: 2)
         self._consecutive_losses: int = 0
         self._peak_equity: Optional[Decimal] = None
@@ -256,11 +257,20 @@ class AgentGuardrails:
             self._record_rejection("vpin_toxicity", msg, ticker, now_utc)
             return False, msg, 0, {"vpin": vpin}
 
-        # 2b. In-Flight Order Lockout (Anti-Burst Concurrency Protection)
+        # 2b. In-Flight Order Lockout (Anti-Burst Concurrency Protection with 15s Invariant TTL)
         if is_bot and cycle_key in self._in_flight_locks:
-            msg = f"IN-FLIGHT ORDER LOCKOUT: Order dispatch currently in flight for cycle '{cycle_key}'. Concurrent order placement blocked."
-            self._record_rejection("order_in_flight", msg, ticker, now_utc)
-            return False, msg, 0, {"cycle_key": cycle_key}
+            lock_time = self._in_flight_lock_ts.get(cycle_key, 0.0)
+            if now_mono - lock_time >= 15.0:
+                logger.warning(
+                    "⏱️ [IN-FLIGHT TIMEOUT] Lock for cycle '%s' expired after %.1fs TTL (15s limit). Auto-releasing.",
+                    cycle_key, now_mono - lock_time
+                )
+                self._in_flight_locks.discard(cycle_key)
+                self._in_flight_lock_ts.pop(cycle_key, None)
+            else:
+                msg = f"IN-FLIGHT ORDER LOCKOUT: Order dispatch currently in flight for cycle '{cycle_key}'. Concurrent order placement blocked."
+                self._record_rejection("order_in_flight", msg, ticker, now_utc)
+                return False, msg, 0, {"cycle_key": cycle_key}
 
         # 3. 1-Trade-Per-Cycle & Max-2-Contracts Exposure Lockout Check (Automated bots only)
         already_allocated = self._cycle_contracts_count.get(cycle_key, 0)
@@ -376,6 +386,7 @@ class AgentGuardrails:
         # to prevent any concurrent ticks/coroutines from firing another order before this one finishes.
         if is_bot:
             self._in_flight_locks.add(cycle_key)
+            self._in_flight_lock_ts[cycle_key] = now_mono
             self._last_order_ts = now_mono
             self._last_order_ts_by_ticker[ticker] = now_mono
 
@@ -499,6 +510,7 @@ class AgentGuardrails:
     def release_in_flight_intent(self, cycle_key: str) -> None:
         """Release in-flight reservation if order placement failed, was rejected, or was cancelled."""
         self._in_flight_locks.discard(cycle_key)
+        self._in_flight_lock_ts.pop(cycle_key, None)
 
     def record_order_attempt(self, ticker: str, cooldown_seconds: Optional[float] = None) -> None:
         """Record an order attempt (fill, 0-fill, or rejection) to enforce execution cooldown."""
@@ -523,6 +535,7 @@ class AgentGuardrails:
         self._cycle_locks.pop(cycle_key, None)
         self._cycle_contracts_count.pop(cycle_key, None)
         self._in_flight_locks.discard(cycle_key)
+        self._in_flight_lock_ts.pop(cycle_key, None)
 
         if outcome.lower() == "loss":
             self._consecutive_losses += 1

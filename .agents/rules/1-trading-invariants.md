@@ -40,3 +40,9 @@ description: Core quantitative trading invariants, capital preservation rules, a
 - **Zero Opposing Position Cannibalism**: Multiple bots operating on the same account/ticker must **NEVER** take opposing positions (e.g. Bot 1 BUY YES while Bot 3 BUY NO) on the same 15M contract cycle.
 - **Negative-Arbitrage Trap**: Holding opposing binary positions at or near 52¢ creates a guaranteed negative-payout loss ($1.00 payout on $1.04 cost = -$0.04 guaranteed loss) and destroys risk/reward asymmetry.
 - **Enforcement**: All trade intents must resolve synchronously through `LiveCoordinator` (`live_coordinator.py`). Any order proposal whose side opposes an existing active or resting position on that ticker is strictly vetoed with `CFTC ANTI-WASH TRADING VETO`.
+
+## 9. Unified Single-Port Architecture (Port 8000 Monolith)
+- All trading strategies (Bot 1 `3_step_domination_bot`, Bot 2 `dual_onnx`, Bot 3 `macro_trend_dominion`) execute within the unified Mother Server on Port 8000 (`server.py`).
+- Standalone multi-port servers (Ports 8001, 8002, 8003) and external `.bat` subprocess wrappers are permanently deprecated and retired.
+- Mother Server directly acquires the monolithic `TradingEngineLock(owner_name="mother_server")` on startup. All inter-port HTTP polling, localhost bridges, and proxy loops are strictly prohibited.
+

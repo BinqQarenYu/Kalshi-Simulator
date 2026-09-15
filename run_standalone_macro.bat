@@ -14,12 +14,10 @@ powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8003 -ErrorActio
 :: 2. Set PYTHONPATH
 set PYTHONPATH=src
 
-:: 3. Launch Standalone Macro Engine on Port 8003 in Lane 2 Incubator (Paper Mode)
-echo [INFO] Starting Standalone Macro Trend Dominion Bot on port 8003...
-echo [INFO] Macro Pocket Cockpit will open automatically at http://localhost:8003
-echo [INFO] Note: Mother Dashboard (8000), 3-Step Bot (8001), ONNX Bot (8002) remain untouched.
-echo.
-python -u -m kalshi_sim.standalone_macro --port 8003 --paper
+echo [INFO] Standalone multi-port engines have been consolidated into Mother Server (Port 8000).
+echo [INFO] Redirecting to unified engine...
+call "kalshi_Bitcoin Bot.bat"
+exit /b 0
 
 if %errorlevel% neq 0 (
     echo.

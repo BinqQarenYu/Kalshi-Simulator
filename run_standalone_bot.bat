@@ -14,12 +14,10 @@ powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8001 -ErrorActio
 :: 2. Set PYTHONPATH
 set PYTHONPATH=src
 
-:: 3. Launch Standalone Engine on Port 8001
-echo [INFO] Starting Standalone 3-Step Domination Bot on port 8001...
-echo [INFO] Pocket Cockpit will open automatically at http://localhost:8001
-echo [INFO] Note: Mother Dashboard remains on http://localhost:8000
-echo.
-python -u -m kalshi_sim.standalone_bot --port 8001 --live
+echo [INFO] Standalone multi-port engines have been consolidated into Mother Server (Port 8000).
+echo [INFO] Redirecting to unified engine...
+call "kalshi_Bitcoin Bot.bat"
+exit /b 0
 
 if %errorlevel% neq 0 (
     echo.

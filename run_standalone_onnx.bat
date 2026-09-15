@@ -14,12 +14,10 @@ powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8002 -ErrorActio
 :: 2. Set PYTHONPATH
 set PYTHONPATH=src
 
-:: 3. Launch Standalone ONNX Engine on Port 8002
-echo [INFO] Starting Standalone Dual-Brain ONNX Bot on port 8002...
-echo [INFO] ONNX Pocket Cockpit will open automatically at http://localhost:8002
-echo [INFO] Note: Mother Dashboard is on http://localhost:8000, 3-Step Bot is on http://localhost:8001
-echo.
-python -u -m kalshi_sim.standalone_onnx --port 8002 --live
+echo [INFO] Standalone multi-port engines have been consolidated into Mother Server (Port 8000).
+echo [INFO] Redirecting to unified engine...
+call "kalshi_Bitcoin Bot.bat"
+exit /b 0
 
 if %errorlevel% neq 0 (
     echo.

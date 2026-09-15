@@ -40,7 +40,7 @@ import uvicorn
 from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
 from kalshi_sim.incubator_agent import get_incubator_agent, IncubatorAgent
-from kalshi_sim.process_lock import get_active_lock_holder
+from kalshi_sim.process_lock import TradingEngineLock, get_active_lock_holder
 from kalshi_sim.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, async_validate_credentials, create_aiohttp_connector, load_private_key
 from kalshi_sim.data_memory_manager import MarketDataMemoryManager, MemoryProfile
 from kalshi_sim.db import HistoricalQueryService, get_db, get_db_writer
@@ -142,13 +142,19 @@ def resolve_bot_instance(bot_id: str) -> Any:
         if inst:
             return inst
     if bot_id == "3_step_domination_bot":
-        return ThreeStepDominationBot()
+        if not hasattr(state, "domination_bot") or state.domination_bot is None:
+            state.domination_bot = ThreeStepDominationBot()
+        return state.domination_bot
     elif bot_id in ("dominion_2_bot", "dominion2", "dominion_v2"):
-        return Dominion2Bot()
+        if not hasattr(state, "dominion2_bot") or state.dominion2_bot is None:
+            state.dominion2_bot = Dominion2Bot()
+        return state.dominion2_bot
     elif bot_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion", "macro_trend", "macro_trend_dominion", "macro_trend_dominion_bot"):
-        if hasattr(state, "sim_agent") and state.sim_agent and hasattr(state.sim_agent, "_macro_trend_bot"):
+        if hasattr(state, "sim_agent") and state.sim_agent and hasattr(state.sim_agent, "_macro_trend_bot") and state.sim_agent._macro_trend_bot:
             return state.sim_agent._macro_trend_bot
-        return MacroTrendDominionBot(strategy_id="macro_trend_dominion", strategy_name="Macro Trend Dominion", hmm_brain=getattr(state, "hmm_brain", None))
+        if not hasattr(state, "macro_trend_bot") or state.macro_trend_bot is None:
+            state.macro_trend_bot = MacroTrendDominionBot(strategy_id="macro_trend_dominion", strategy_name="Macro Trend Dominion", hmm_brain=getattr(state, "hmm_brain", None))
+        return state.macro_trend_bot
     elif bot_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "onnx_macro_v2"):
         if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
             return state.dual_onnx_bot
@@ -594,104 +600,8 @@ async def live_kalshi_public_sync_loop() -> None:
 
 
 async def standalone_sync_loop() -> None:
-    """Continuously synchronize Mother server with 24/7 Standalone Bot as the single source of truth."""
-    connector = create_aiohttp_connector()
-    async with aiohttp.ClientSession(connector=connector) as session:
-        while True:
-            try:
-                holder = get_active_lock_holder()
-                if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-                    async with session.get("http://127.0.0.1:8001/api/state", timeout=aiohttp.ClientTimeout(total=0.8)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            state._standalone_data = data
-                            state._last_standalone_sync = time.monotonic()
-
-                            # Synchronize core state variables
-                            act_asset_str = data.get("active_asset")
-                            if act_asset_str:
-                                try:
-                                    state.active_asset = CryptoAsset(act_asset_str.upper())
-                                except ValueError:
-                                    pass
-
-                            state.active_ticker = data.get("active_ticker", state.active_ticker)
-                            if data.get("target_strike") is not None:
-                                state.target_strike = Decimal(str(data["target_strike"]))
-                            if data.get("spot_price") is not None:
-                                state.current_btc_price = Decimal(str(data["spot_price"]))
-                            if data.get("twap_60s") is not None:
-                                state.twap_60s_price = Decimal(str(data["twap_60s"]))
-                            if "armed" in data and state.active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination"):
-                                state.ai_auto_trade = bool(data["armed"])
-
-                            bal = float(data.get("balance", 0.0))
-                            state.live_portfolio = {
-                                "balance": bal,
-                                "balance_dollars": bal,
-                                "available_margin": bal,
-                                "today_pnl": float(data.get("today_pnl", 0.0)),
-                                "settled_cycles": int(data.get("settled_cycles", 0)),
-                                "today_wins": int(data.get("today_wins", 0)),
-                                "today_losses": int(data.get("today_losses", 0)),
-                                "today_win_rate": float(data.get("today_win_rate", 0.0)),
-                                "consecutive_losses": int(data.get("consecutive_losses", 0)),
-                                "max_consecutive_losses": int(data.get("max_consecutive_losses", 3)),
-                                "positions": [],
-                                "payout_pending": 0.0,
-                            }
-
-                            # Ingest Standalone's orderbook into state.orderbook if ticker present
-                            if state.active_ticker and data.get("orderbook_ladder"):
-                                book = state.orderbook.get_book(state.active_ticker)
-                                if not book:
-                                    book = L2BookState(state.active_ticker)
-                                    state.orderbook.set_book(state.active_ticker, book)
-                                for item in data["orderbook_ladder"]:
-                                    p_dec = Decimal(str(item.get("price_raw", 0.5)))
-                                    q_dec = Decimal(str(item.get("contracts", 1)))
-                                    if item.get("side") == "yes":
-                                        book.yes_book[p_dec] = q_dec
-                                    elif item.get("side") == "no":
-                                        book.no_book[p_dec] = q_dec
-
-                            now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                            if not state.price_history or state.price_history[-1].get("time") != now_t:
-                                state.price_history.append({
-                                    "time": now_t,
-                                    "price": float(state.current_btc_price),
-                                    "target": float(state.target_strike),
-                                })
-
-                            state.is_dirty = True
-
-                # 2. Sync Bot 2 (Port 8002 - Dual-Brain ONNX Shadow)
-                try:
-                    async with session.get("http://127.0.0.1:8002/api/state", timeout=aiohttp.ClientTimeout(total=0.8)) as resp2:
-                        if resp2.status == 200:
-                            data2 = await resp2.json()
-                            state._standalone_onnx_data = data2
-                            state._last_standalone_onnx_sync = time.monotonic()
-                            state.is_dirty = True
-                except Exception as exc:
-                    logger.debug("[STANDALONE ONNX BOT 2 SYNC] Polling standby: %s", exc)
-
-                # 3. Sync Bot 3 (Port 8003 - Macro Trend Dominion Shadow)
-                try:
-                    async with session.get("http://127.0.0.1:8003/api/state", timeout=aiohttp.ClientTimeout(total=0.8)) as resp3:
-                        if resp3.status == 200:
-                            data3 = await resp3.json()
-                            state._standalone_macro_data = data3
-                            state._last_standalone_macro_sync = time.monotonic()
-                            state.is_dirty = True
-                except Exception as exc:
-                    logger.debug("[STANDALONE MACRO BOT 3 SYNC] Polling standby: %s", exc)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.debug("[STANDALONE SYNC] Polling standby: %s", exc)
-
-            await asyncio.sleep(0.25)
+    """Retired in Option C: Mother Server is the monolithic trading engine on Port 8000."""
+    return
 
 
 
@@ -1466,18 +1376,6 @@ def resolve_active_market(now_utc: datetime | None = None) -> tuple[Any | None, 
     """Resolve the currently active open market, remaining seconds, target strike, target time str, and window str (Kalshi web calibrated)."""
     if now_utc is None:
         now_utc = clock_sync.web_now()
-    # 0. Single Source of Truth: When 24/7 Standalone Bot is active, inherit its exact live market truth
-    now_mono = time.monotonic()
-    if hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 5.0):
-        sd = state._standalone_data
-        t_rem = int(sd.get("expiry_countdown_seconds", 0))
-        st_dec = Decimal(str(sd.get("target_strike", "0.00")))
-        t_str = sd.get("target_time_str", "")
-        w_str = sd.get("time_window_str", "")
-        state.active_ticker = sd.get("active_ticker", state.active_ticker)
-        state.target_strike = st_dec
-        state.market_expiry_seconds = t_rem
-        return None, t_rem, st_dec, t_str, w_str
 
     cfg = TIMEFRAME_CONFIGS.get(state.active_timeframe, {})
     tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
@@ -1510,7 +1408,7 @@ def resolve_active_market(now_utc: datetime | None = None) -> tuple[Any | None, 
             ):
                 matching.append(m)
 
-        if not matching and tf_val != "5m":
+        if is_btc and not matching and tf_val != "5m":
             matching = list(state.sim_agent._market_cache.values())
 
         if matching:
@@ -2044,7 +1942,7 @@ async def start_background_simulation() -> None:
     state.btc_spot_task = asyncio.create_task(live_btc_spot_sync_loop(), name="btc_spot_sync")
     state.integrity_task = asyncio.create_task(integrity_audit_loop(), name="integrity_audit")
     state.live_balance_task = asyncio.create_task(live_balance_sync_loop(), name="live_balance_sync")
-    state.standalone_sync_task = asyncio.create_task(standalone_sync_loop(), name="standalone_sync")
+    state.standalone_sync_task = None
     state.hmm_regime_task = asyncio.create_task(hmm_macro_regime_loop(), name="hmm_macro_regime")
     if state.mode == "live":
         asyncio.create_task(sync_live_settlements(), name="initial_settlement_sync")
@@ -2054,6 +1952,11 @@ async def start_background_simulation() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     prevent_windows_sleep()
+    engine_lock = TradingEngineLock(owner_name="mother_server")
+    try:
+        engine_lock.acquire(force=True)
+    except Exception as exc:
+        logger.warning("Could not claim engine lock: %s", exc)
     await clock_sync.async_sync()
     await clock_sync.start_periodic_sync()
     await get_db_writer().start()
@@ -2063,6 +1966,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if hasattr(state, "continuous_trainer") and state.continuous_trainer:
         state.continuous_trainer.start()
     yield
+    try:
+        engine_lock.release()
+    except Exception:
+        pass
     if hasattr(state, "continuous_trainer") and state.continuous_trainer:
         state.continuous_trainer.stop()
     await state.gdrive_sync.stop()
@@ -3552,22 +3459,6 @@ async def select_active_asset(req: AssetSelectRequest) -> dict[str, Any]:
         except Exception as e:
             logger.debug("Failed to quick-fetch market for %s: %s", new_asset.value, e)
 
-    # Forward asset switch to Standalone Bot if active
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post(
-                    "http://127.0.0.1:8001/api/assets/select",
-                    json={"asset": new_asset.value},
-                    timeout=aiohttp.ClientTimeout(total=2.0)
-                ) as fwd_resp:
-                    if fwd_resp.status == 200:
-                        logger.info("Forwarded asset switch to Standalone Bot: %s", new_asset.value)
-        except Exception as fwd_exc:
-            logger.warning("Failed forwarding asset switch to standalone bot: %s", fwd_exc)
-
     state.is_dirty = True
     logger.info("Switched active asset to %s (%s)", cfg.name, new_asset.value)
     if state.connected_websockets:
@@ -3583,24 +3474,10 @@ async def select_active_asset(req: AssetSelectRequest) -> dict[str, Any]:
 
 @app.post("/api/bot/arm")
 async def arm_bot() -> dict[str, Any]:
-    """Arm the bot for automated live/paper execution."""
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post("http://127.0.0.1:8001/api/bot/arm", timeout=aiohttp.ClientTimeout(total=2.0)) as fwd_resp:
-                    if fwd_resp.status == 200:
-                        res_data = await fwd_resp.json()
-                        state.ai_auto_trade = True
-                        state.is_dirty = True
-                        return res_data
-        except Exception as fwd_exc:
-            logger.warning("Failed forwarding arm to standalone bot: %s", fwd_exc)
-
+    """Arm the bot for automated live/paper execution directly within the unified engine."""
     state.ai_auto_trade = True
     state.is_dirty = True
-    logger.info("🟢 [BOT ARMED] Order execution activated by user.")
+    logger.info("🟢 [BOT ARMED] Order execution activated by user in unified engine.")
     if state.connected_websockets:
         asyncio.create_task(trigger_instant_broadcast())
     return {"status": "ARMED", "armed": True}
@@ -3608,24 +3485,10 @@ async def arm_bot() -> dict[str, Any]:
 
 @app.post("/api/bot/disarm")
 async def disarm_bot() -> dict[str, Any]:
-    """Disarm the bot into standby mode."""
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post("http://127.0.0.1:8001/api/bot/disarm", timeout=aiohttp.ClientTimeout(total=2.0)) as fwd_resp:
-                    if fwd_resp.status == 200:
-                        res_data = await fwd_resp.json()
-                        state.ai_auto_trade = False
-                        state.is_dirty = True
-                        return res_data
-        except Exception as fwd_exc:
-            logger.warning("Failed forwarding disarm to standalone bot: %s", fwd_exc)
-
+    """Disarm the bot into standby mode directly within the unified engine."""
     state.ai_auto_trade = False
     state.is_dirty = True
-    logger.info("⏸️ [BOT DISARMED] Standby mode activated by user.")
+    logger.info("⏸️ [BOT DISARMED] Standby mode activated by user in unified engine.")
     if state.connected_websockets:
         asyncio.create_task(trigger_instant_broadcast())
     return {"status": "DISARMED", "armed": False}
@@ -3633,21 +3496,7 @@ async def disarm_bot() -> dict[str, Any]:
 
 @app.post("/api/bot/panic")
 async def panic_halt() -> dict[str, Any]:
-    """Emergency halt: disarm bot and cancel all resting orders."""
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post("http://127.0.0.1:8001/api/bot/panic", timeout=aiohttp.ClientTimeout(total=2.0)) as fwd_resp:
-                    if fwd_resp.status == 200:
-                        res_data = await fwd_resp.json()
-                        state.ai_auto_trade = False
-                        state.is_dirty = True
-                        return res_data
-        except Exception as fwd_exc:
-            logger.warning("Failed forwarding panic to standalone bot: %s", fwd_exc)
-
+    """Emergency halt: disarm bot and cancel all resting orders directly within the unified engine."""
     res = await trigger_emergency_kill_switch()
     return {"status": "PANIC_EXECUTED", "cancelled_orders": res.get("cancelled_orders", 0), "armed": False}
 
@@ -3655,19 +3504,6 @@ async def panic_halt() -> dict[str, Any]:
 @app.post("/api/bot/sweep-orders")
 async def sweep_orders_endpoint(force: bool = False) -> dict[str, Any]:
     """Sweep and cancel resting orders on expired or finished events across live exchange and local simulators."""
-    # 1. If standalone bot is running as active lock holder, forward request to it
-    holder = get_active_lock_holder()
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                url = f"http://127.0.0.1:8001/api/bot/sweep-orders?force={str(force).lower()}"
-                async with session.post(url, timeout=aiohttp.ClientTimeout(total=3.0)) as fwd_resp:
-                    if fwd_resp.status == 200:
-                        return await fwd_resp.json()
-        except Exception as fwd_exc:
-            logger.warning("Failed forwarding sweep to standalone bot: %s", fwd_exc)
-
     cancelled = 0
     client = state.order_client
     if client is None and state.sim_agent and hasattr(state.sim_agent, "_order_client"):
@@ -3734,6 +3570,7 @@ async def sweep_orders_endpoint(force: bool = False) -> dict[str, Any]:
 
 
 class ParametersUpdateRequest(BaseModel):
+    bot_id: Optional[str] = Field(default=None, description="Target bot ID: '3_step_domination_bot', 'macro_trend_dominion', 'dual_onnx', 'dominion_2_bot'")
     discount_limit_price: Optional[float] = Field(default=None, ge=0.10, le=0.65, description="Maker discount limit price ceiling")
     max_contracts: Optional[int] = Field(default=None, ge=1, le=1, description="Max contracts per cycle trade (strictly 1)")
     min_edge_pct: Optional[float] = Field(default=None, ge=1.0, le=50.0, description="Minimum edge percentage")
@@ -3778,25 +3615,13 @@ class ParametersUpdateRequest(BaseModel):
 
 @app.get("/api/bot/parameters")
 async def get_bot_parameters() -> dict[str, Any]:
-    """Return live strategy parameters and guardrail thresholds (forwarded to Standalone Bot if active)."""
-    holder = get_active_lock_holder()
+    """Return live strategy parameters and guardrail thresholds directly from the unified engine."""
     res: dict[str, Any] = {}
-    if holder and holder[0] == "standalone_bot" and holder[1] != os.getpid():
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get("http://127.0.0.1:8001/api/bot/parameters", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                    if resp.status == 200:
-                        res = await resp.json()
-        except Exception as e:
-            logger.debug("Failed fetching parameters from standalone bot: %s", e)
-
-    if not res:
-        inst = resolve_bot_instance(state.active_strategy_bot)
-        if inst and hasattr(inst, "get_parameters"):
-            res = inst.get_parameters()
-        else:
-            res = {"status": "NO_PARAMETERS"}
+    inst = resolve_bot_instance(state.active_strategy_bot)
+    if inst and hasattr(inst, "get_parameters"):
+        res = inst.get_parameters()
+    else:
+        res = {"status": "NO_PARAMETERS"}
 
     # Merge dual_onnx strategy dials so client consoles always receive current dials
     if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
@@ -3823,82 +3648,53 @@ async def get_bot_parameters() -> dict[str, Any]:
                 res[k] = onnx_params.get(k)
 
     # Merge macro_trend_dominion strategy dials so client consoles always receive current dials
-    now_mono = time.monotonic()
-    has_macro = bool(hasattr(state, "_standalone_macro_data") and state._standalone_macro_data and (now_mono - getattr(state, "_last_standalone_macro_sync", 0.0) < 5.0))
-    if has_macro and "parameters" in state._standalone_macro_data:
-        macro_params = state._standalone_macro_data["parameters"]
-        for k, v in macro_params.items():
-            if v is not None and k not in res:
-                res[k] = v
-    else:
-        macro_inst = resolve_bot_instance("macro_trend_dominion")
-        if macro_inst and hasattr(macro_inst, "get_parameters"):
-            macro_params = macro_inst.get_parameters()
-            for k in (
-                "limit_price_cents",
-                "min_confidence_pct",
-                "volatility_moat_dollars",
-                "hmm_risk_off_veto",
-                "macro_trend_window",
-                "take_profit_harvest_cents",
-                "adaptive_learning_rate",
-                "rolling_brier_score",
-                "brier_shrinkage_factor",
-                "active_price_cap",
-                "decile_pruning_table",
-            ):
-                if k not in res and k in macro_params:
-                    res[k] = macro_params.get(k)
+    macro_inst = resolve_bot_instance("macro_trend_dominion")
+    if macro_inst and hasattr(macro_inst, "get_parameters"):
+        macro_params = macro_inst.get_parameters()
+        for k in (
+            "limit_price_cents",
+            "min_confidence_pct",
+            "volatility_moat_dollars",
+            "hmm_risk_off_veto",
+            "macro_trend_window",
+            "take_profit_harvest_cents",
+            "adaptive_learning_rate",
+            "rolling_brier_score",
+            "brier_shrinkage_factor",
+            "active_price_cap",
+            "decile_pruning_table",
+        ):
+            if k not in res and k in macro_params:
+                res[k] = macro_params.get(k)
     return res
 
 
 
 @app.post("/api/bot/promote")
 async def promote_to_live() -> dict[str, Any]:
-    """Manually push paper/sandbox parameters across the air-gap to the Live Engine."""
-    holder = get_active_lock_holder()
-    if not (holder and holder[0] == "standalone_bot" and holder[1] != os.getpid()):
-        raise HTTPException(status_code=400, detail="No Live Engine detected on Port 8001. Start it first.")
-    
-    # Get current saved parameters from sandbox
+    """Save sandbox parameters directly to disk and apply to the unified live trading engine."""
     pm = get_preset_manager()
-    # Read the JSON file directly to get exactly what's on disk
     params_file = pm.data_dir / "bot_parameters_domination.json"
-    import json
     if not params_file.exists():
-        raise HTTPException(status_code=404, detail="No saved parameters found in sandbox.")
-        
+        raise HTTPException(status_code=404, detail="No saved parameters found.")
     try:
         current_params = json.loads(params_file.read_text(encoding="utf-8"))
-        # Strip internal keys
-        for k in ["active_assets", "assets", "is_armed", "updated_at"]:
-            current_params.pop(k, None)
+        target_bot = state.active_strategy_bot
+        inst = resolve_bot_instance(target_bot)
+        if inst and hasattr(inst, "update_parameters"):
+            inst.update_parameters(**current_params)
+        logger.info("Parameters successfully applied to unified engine for bot: %s", target_bot)
+        return {"status": "SUCCESS", "message": f"Parameters successfully promoted to unified engine for {target_bot}!"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read sandbox params: {e}")
-        
-    try:
-        connector = create_aiohttp_connector()
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.post("http://127.0.0.1:8001/api/bot/parameters", json=current_params, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
-                if resp.status == 200:
-                    return {"status": "SUCCESS", "message": "Parameters successfully promoted across the air-gap to Live Engine!"}
-                else:
-                    err = await resp.text()
-                    raise HTTPException(status_code=resp.status, detail=f"Live Engine rejected promotion: {err}")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed crossing the air-gap to Live Engine: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed applying parameters: {str(e)}")
 
 
 @app.post("/api/bot/parameters")
 @app.patch("/api/bot/parameters")
 async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
-    """Dynamically update strategy parameters (forwarded to Standalone Bot if active)."""
+    """Dynamically update strategy parameters directly within the unified engine."""
     payload = req.model_dump(exclude_none=True)
     res: dict[str, Any] = {}
-    # Air-Gapped Sandbox: Parameter updates here are strictly for Paper/Simulation.
-    # We deliberately DO NOT auto-forward tweaks to the Standalone Engine (Port 8001).
-    # To change live parameters, the user must explicitly hit the 'PROMOTE' bridge.
-
 
     # Always keep dual_onnx_bot updated with strategy dials
     if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
@@ -3917,62 +3713,14 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
             if payload.get("bot_id") == "macro_trend_dominion" or state.active_strategy_bot == "macro_trend_dominion":
                 res.update(m_res)
 
-    # Bridge: Forward dials to Port 8003 (Macro Trend Dominion Standalone)
-    macro_keys = {
-        "limit_price_cents", "min_confidence_pct", "min_ev_dollars",
-        "volatility_moat_dollars", "hmm_risk_off_veto", "macro_trend_window",
-        "take_profit_harvest_cents", "adaptive_learning_rate", "max_contracts",
-    }
-    macro_forward = {k: payload[k] for k in macro_keys if k in payload}
-    if macro_forward:
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post(
-                    "http://127.0.0.1:8003/api/bot/parameters",
-                    json=macro_forward,
-                    timeout=aiohttp.ClientTimeout(total=1.5),
-                ) as m_resp:
-                    if m_resp.status == 200:
-                        m_data = await m_resp.json()
-                        logger.info("📡 [PORT 8003 DIAL BRIDGE] Successfully synced dials to Port 8003: %s", macro_forward)
-                        if "parameters" in m_data:
-                            res.update(m_data["parameters"])
-        except Exception as err:
-            logger.debug("[PORT 8003 DIAL BRIDGE] Standby on Port 8003: %s", err)
-
-    # Bridge: Forward dials to Port 8002 (ONNX Standalone)
-    onnx_keys = {
-        "brain_priority_mode", "contract_scaling_mode", "volatility_floor",
-        "volatility_ceiling", "entry_discount_depth", "tape_confirmation_ticks",
-        "taker_cross_ev_threshold", "dynamic_moat_multiplier", "max_temporal_skew_ms",
-        "gamma_cliff_seconds", "auto_cancel_on_veto", "dynamic_volatility_mode",
-        "min_confidence", "vpin_toxic_threshold", "max_contracts",
-    }
-    onnx_forward = {k: payload[k] for k in onnx_keys if k in payload}
-    if onnx_forward:
-        try:
-            connector = create_aiohttp_connector()
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.post(
-                    "http://127.0.0.1:8002/api/bot/parameters",
-                    json=onnx_forward,
-                    timeout=aiohttp.ClientTimeout(total=1.5),
-                ) as o_resp:
-                    if o_resp.status == 200:
-                        o_data = await o_resp.json()
-                        if "parameters" in o_data:
-                            res.update(o_data["parameters"])
-        except Exception as err:
-            logger.debug("[PORT 8002 DIAL BRIDGE] Standby on Port 8002: %s", err)
-
-    if not res:
-        target_bot = payload.get("bot_id") or state.active_strategy_bot
-        inst = resolve_bot_instance(target_bot)
-        if inst and hasattr(inst, "update_parameters"):
-            res = inst.update_parameters(**payload)
-        else:
-            res = {"status": "UPDATED", "parameters": payload}
+    target_bot = payload.get("bot_id") or state.active_strategy_bot
+    inst = resolve_bot_instance(target_bot)
+    if inst and hasattr(inst, "update_parameters"):
+        bot_res = inst.update_parameters(**payload)
+        if isinstance(bot_res, dict):
+            res.update(bot_res)
+    elif not res:
+        res = {"status": "UPDATED", "parameters": payload}
 
     # Ensure updated strategy dials are merged in response
     if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
@@ -6162,13 +5910,17 @@ def _build_full_state_payload() -> dict[str, Any]:
         lp = state.live_portfolio
         live_cash = float(lp.get("balance_dollars", 28.21))
         live_equity = round(live_cash + float(lp.get("payout_pending", 0.0)), 2)
-        portfolio_data["balance"] = live_cash
-        portfolio_data["equity"] = live_equity
-        portfolio_data["realized_pnl"] = 0.46
-        portfolio_data["win_rate"] = 60.0
-        portfolio_data["total_trades"] = 5
-        portfolio_data["wins"] = 3
-        portfolio_data["losses"] = 2
+        live_reports = [r for r in state.win_loss_reports if r.get("execution_mode") == "live" or r.get("mode") == "live"]
+        live_wins = sum(1 for r in live_reports if r.get("outcome") == "WIN")
+        live_losses = sum(1 for r in live_reports if r.get("outcome") == "LOSS")
+        live_trades = live_wins + live_losses
+        live_wr = (live_wins / live_trades * 100.0) if live_trades > 0 else 0.0
+        live_realized_pnl = sum(float(r.get("pnl", 0.0)) for r in live_reports)
+        portfolio_data["realized_pnl"] = round(live_realized_pnl, 2)
+        portfolio_data["win_rate"] = round(live_wr, 1)
+        portfolio_data["total_trades"] = live_trades
+        portfolio_data["wins"] = live_wins
+        portfolio_data["losses"] = live_losses
         portfolio_data["circuit_breaker_tripped"] = False
         portfolio_data["current_drawdown_pct"] = 0.0
         portfolio_data["positions"] = [
@@ -6251,61 +6003,6 @@ def _build_full_state_payload() -> dict[str, Any]:
     s_flt = float(strike_dec)
     diff = btc_spot - s_flt
     diff_pct = (diff / s_flt) * 100.0 if s_flt > 0.0 else 0.0
-
-    # Single Source of Truth: Merge Standalone ground truth if active
-    now_mono = time.monotonic()
-    has_standalone = bool(hasattr(state, "_standalone_data") and state._standalone_data and (now_mono - getattr(state, "_last_standalone_sync", 0.0) < 5.0))
-    if has_standalone:
-        sd = state._standalone_data
-        target_time_str = sd.get("target_time_str", target_time_str)
-        time_window_str = sd.get("time_window_str", time_window_str)
-        remaining_secs = int(sd.get("expiry_countdown_seconds", remaining_secs))
-        if not (state.cf_sync and state.cf_sync.is_connected):
-            btc_spot = float(sd.get("spot_price", btc_spot))
-            strike_dec = Decimal(str(sd.get("target_strike", strike_dec)))
-            diff = float(sd.get("spot_diff", diff))
-            diff_pct = float(sd.get("spot_diff_pct", diff_pct))
-        best_yes_ask = float(sd.get("best_yes_ask") or best_yes_ask)
-        best_yes_bid = float(sd.get("best_yes_bid") or best_yes_bid)
-        best_no_ask = float(sd.get("best_no_ask") or best_no_ask)
-        best_no_bid = float(sd.get("best_no_bid") or best_no_bid)
-        if sd.get("orderbook_ladder"):
-            ladder = sd["orderbook_ladder"]
-
-        if state.active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination"):
-            ai_data = {
-                "has_positive_edge": float(sd.get("edge_pct", 0.0)) > 0,
-                "recommended_side": "yes" if "BUY YES" in sd.get("rationale", "") else ("no" if "BUY NO" in sd.get("rationale", "") else "wait"),
-                "ai_prob": float(sd.get("best_yes_ask") or 0.5),
-                "p_up": float(sd.get("p_up", 0.50)),
-                "p_down": float(sd.get("p_down", 0.50)),
-                "p_wait": float(sd.get("p_wait", 0.00)),
-                "market_price": 0.48,
-                "expected_value": float(sd.get("ev", 0.0)),
-                "net_expected_value": float(sd.get("ev", 0.0)),
-                "statistical_edge": float(sd.get("edge_pct", 0.0)),
-                "recommended_contracts": 1 if "wait" not in sd.get("rationale", "").lower() else 0,
-                "active_playbook": sd.get("playbook", "3-Step Domination Bot"),
-                "rationale": sd.get("rationale", ""),
-                "vpin": float(sd.get("vpin", 0.15)),
-                "vpin_is_safe": bool(sd.get("vpin_is_safe", True)),
-            }
-
-        if "balance" in sd or "today_pnl" in sd:
-            portfolio_data["balance"] = float(sd.get("balance", 0.0))
-            portfolio_data["equity"] = float(sd.get("balance", 0.0))
-            portfolio_data["realized_pnl"] = float(sd.get("today_pnl", 0.0))
-            portfolio_data["total_trades"] = int(sd.get("settled_cycles", 0))
-            portfolio_data["wins"] = int(sd.get("today_wins", 0))
-            portfolio_data["losses"] = int(sd.get("today_losses", 0))
-            portfolio_data["win_rate"] = float(sd.get("today_win_rate", 0.0))
-
-        if sd.get("recent_reports"):
-            known_ids = {r.get("report_id") for r in state.win_loss_reports if r.get("report_id")}
-            for sr in sd["recent_reports"]:
-                if sr.get("report_id") and sr["report_id"] not in known_ids:
-                    state.win_loss_reports.append(sr)
-                    known_ids.add(sr["report_id"])
 
     cfg = TIMEFRAME_CONFIGS.get(state.active_timeframe, {})
     asset_cfg = get_asset_config(state.active_asset)
@@ -6449,67 +6146,6 @@ def _build_full_state_payload() -> dict[str, Any]:
         "parameters": macro_params,
     }
 
-    # Overlay live ground truth from Bot 2 (Port 8002 Dual ONNX)
-    has_onnx = bool(hasattr(state, "_standalone_onnx_data") and state._standalone_onnx_data and (now_mono - getattr(state, "_last_standalone_onnx_sync", 0.0) < 5.0))
-    if has_onnx:
-        sd_onnx = state._standalone_onnx_data
-        dec = sd_onnx.get("active_decision", {})
-        dual_telemetry.update({
-            "regime": dec.get("regime", sd_onnx.get("hmm_regime", "CHOP_WAIT")),
-            "action": dec.get("action", "HOLD"),
-            "side": dec.get("side"),
-            "quolas_signal": sd_onnx.get("brain_1_signal", "WAIT"),
-            "quolas_confidence": float(sd_onnx.get("brain_1_confidence", 50.0)) / 100.0,
-            "kalshi_signal": sd_onnx.get("brain_2_signal", "WAIT"),
-            "kalshi_confidence": float(sd_onnx.get("brain_2_confidence", 50.0)) / 100.0,
-            "recommended_limit_price": float(dec.get("recommended_limit_price", 0.48)),
-            "expected_value": float(dec.get("expected_value", 0.0)),
-            "recommended_contracts": int(dec.get("recommended_contracts", 0)),
-            "rationale": dec.get("rationale", ""),
-            "active": True,
-            "settled_cycles": int(sd_onnx.get("settled_cycles", 0)),
-            "today_wins": int(sd_onnx.get("today_wins", 0)),
-            "today_losses": int(sd_onnx.get("today_losses", 0)),
-            "today_win_rate": float(sd_onnx.get("today_win_rate", 0.0)),
-            "today_pnl": float(sd_onnx.get("today_pnl", 0.0)),
-        })
-
-    # Overlay live ground truth from Bot 3 (Port 8003 Macro Trend Dominion)
-    has_macro = bool(hasattr(state, "_standalone_macro_data") and state._standalone_macro_data and (now_mono - getattr(state, "_last_standalone_macro_sync", 0.0) < 5.0))
-    if has_macro:
-        sd_m = state._standalone_macro_data
-        m_dec = sd_m.get("decision", {})
-        m_learn = sd_m.get("learning_engine", {})
-        m_params = sd_m.get("parameters", {})
-        macro_telemetry.update({
-            "active": True,
-            "call": m_dec.get("call", "DONT"),
-            "side": m_dec.get("side"),
-            "confidence_pct": float(m_dec.get("confidence_pct", 50.0)),
-            "limit_price_cents": int(m_params.get("limit_price_cents", 52)),
-            "limit_price": float(m_params.get("limit_price_cents", 52)) / 100.0,
-            "expected_value": float(m_dec.get("expected_value", 0.0)),
-            "net_edge_pct": float(m_dec.get("net_edge_pct", 0.0)),
-            "recommended_contracts": int(m_dec.get("recommended_contracts", 0)),
-            "macro_trend": m_dec.get("macro_trend", "BEAR" if diff < 0 else "BULL"),
-            "hmm_regime": sd_m.get("three_brain_matrix", {}).get("hmm_regime", "VOL_EXPANSION"),
-            "spot_signal": sd_m.get("three_brain_matrix", {}).get("spot_signal", "WAIT"),
-            "spot_confidence": float(sd_m.get("three_brain_matrix", {}).get("spot_confidence", 50.0)) / 100.0,
-            "kalshi_signal": sd_m.get("three_brain_matrix", {}).get("kalshi_signal", "WAIT"),
-            "kalshi_confidence": float(sd_m.get("three_brain_matrix", {}).get("kalshi_confidence", 50.0)) / 100.0,
-            "rationale": m_dec.get("rationale", ""),
-            "brier_score": float(m_learn.get("brier_score", 0.25)),
-            "brier_shrinkage_factor": float(m_learn.get("shrinkage_factor", 1.0)),
-            "active_price_cap": float(m_learn.get("active_price_cap", 0.52)),
-            "pruned_deciles": m_learn.get("pruned_deciles", []),
-            "failure_counts": m_learn.get("mistakes_logged", {}),
-            "settled_cycles": int(sd_m.get("settled_cycles", 0)),
-            "today_wins": int(sd_m.get("today_wins", 0)),
-            "today_losses": int(sd_m.get("today_losses", 0)),
-            "today_win_rate": float(sd_m.get("today_win_rate", 0.0)),
-            "today_pnl": float(sd_m.get("today_pnl", 0.0)),
-        })
-
     payload = {
         "timestamp": now_utc.isoformat(),
         "market": {
@@ -6521,16 +6157,16 @@ def _build_full_state_payload() -> dict[str, Any]:
             "series": series,
             "ticker": state.active_ticker,
             "target_strike": float(strike_dec),
-            "target_strike_str": sd.get("target_strike_str", asset_cfg.format_price(strike_dec)) if has_standalone else asset_cfg.format_price(strike_dec),
+            "target_strike_str": asset_cfg.format_price(strike_dec),
             "target_time_str": target_time_str,
             "time_window_str": time_window_str,
             "current_btc_price": btc_spot,
-            "current_btc_price_str": sd.get("spot_price_str", asset_cfg.format_price(btc_spot)) if has_standalone else asset_cfg.format_price(btc_spot),
+            "current_btc_price_str": asset_cfg.format_price(btc_spot),
             "diff": round(diff, asset_cfg.price_decimals),
             "diff_pct": round(diff_pct, 3),
-            "diff_str": sd.get("moneyness_diff_str", asset_cfg.format_diff(diff, diff_pct)) if has_standalone else asset_cfg.format_diff(diff, diff_pct),
+            "diff_str": asset_cfg.format_diff(diff, diff_pct),
             "expiry_countdown_seconds": remaining_secs,
-            "expiry_countdown_str": sd.get("time_remaining_str", f"{remaining_secs // 60:02d}:{remaining_secs % 60:02d}") if has_standalone else f"{remaining_secs // 60:02d}:{remaining_secs % 60:02d}",
+            "expiry_countdown_str": f"{remaining_secs // 60:02d}:{remaining_secs % 60:02d}",
             "timeframe": state.active_timeframe.value,
             "market_chance_pct": market_chance_pct,
             "volume_24h_str": state.volume_24h_str,
@@ -6566,9 +6202,9 @@ def _build_full_state_payload() -> dict[str, Any]:
             "mode": state.mode,
             "timeframe": state.active_timeframe.value,
             "domination_discount_price": float(state.domination_discount_price),
-            "standalone_lock_active": bool(get_active_lock_holder() and get_active_lock_holder()[1] != os.getpid()),
-            "standalone_sync_active": has_standalone,
-            "lock_holder": get_active_lock_holder()[0] if (get_active_lock_holder() and get_active_lock_holder()[1] != os.getpid()) else None,
+            "standalone_lock_active": False,
+            "standalone_sync_active": False,
+            "lock_holder": None,
         },
         "bot_audit_status": {
             "active_bot": state.active_strategy_bot,
@@ -6673,64 +6309,8 @@ class BotSpawnRequest(BaseModel):
 
 @app.post("/api/bots/spawn")
 async def spawn_bot(req: BotSpawnRequest) -> dict[str, Any]:
+    """Activate strategy bot directly inside the unified single-port engine."""
     bot_id = req.bot_id.strip()
-    
-    import subprocess
-    import sys
-    try:
-        import psutil
-    except ImportError:
-        pass
-    from kalshi_sim.process_lock import get_active_lock_holder
-    
-    bot_script_map = {
-        "3_step_domination_bot": "run_standalone_bot.bat",
-        "macro_onnx": "run_standalone_onnx.bat",
-        "dual_onnx_arbitrage_bot": "run_standalone_onnx.bat",
-        "macro_trend_dominion": "run_standalone_macro.bat",
-        "the_onnx_strategy": "run_standalone_onnx.bat",
-        "dominion_2_bot": "run_standalone_bot.bat",
-    }
-    script = bot_script_map.get(bot_id, "run_standalone_bot.bat")
-    
-    bot_url_map = {
-        "3_step_domination_bot": "http://localhost:8001",
-        "macro_onnx": "http://localhost:8002",
-        "dual_onnx_arbitrage_bot": "http://localhost:8002",
-        "macro_trend_dominion": "http://localhost:8003",
-        "the_onnx_strategy": "http://localhost:8002",
-        "dominion_2_bot": "http://localhost:8001",
-    }
-    target_url = bot_url_map.get(bot_id, "http://localhost:8001")
-
-    # Terminate prior instance of this specific bot if active
-    bot_lock_map = {
-        "3_step_domination_bot": Path("data") / "trading_engine.lock",
-        "macro_onnx": Path("data") / "trading_engine_onnx.lock",
-        "dual_onnx_arbitrage_bot": Path("data") / "trading_engine_onnx.lock",
-        "the_onnx_strategy": Path("data") / "trading_engine_onnx.lock",
-        "macro_trend_dominion": Path("data") / "trading_engine_macro.lock",
-    }
-    target_lock = bot_lock_map.get(bot_id)
-    if target_lock:
-        active = get_active_lock_holder(target_lock)
-        if active:
-            owner, pid = active
-            if pid != os.getpid():
-                try:
-                    if 'psutil' in sys.modules:
-                        import psutil
-                        p = psutil.Process(pid)
-                        p.terminate()
-                        p.wait(timeout=2)
-                    else:
-                        if sys.platform == "win32":
-                            subprocess.run(["taskkill", "/F", "/PID", str(pid)], capture_output=True)
-                        else:
-                            import signal
-                            os.kill(pid, signal.SIGTERM)
-                except Exception as e:
-                    logger.debug("Prior bot instance cleanup: %s", e)
 
     # Synchronize active strategy bot on Mother Server
     canonical_strat = bot_id
@@ -6748,24 +6328,18 @@ async def spawn_bot(req: BotSpawnRequest) -> dict[str, Any]:
     state.active_strategy_bot = canonical_strat
     if state.ai_worker:
         state.ai_worker.set_active_strategy(canonical_strat)
+    if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):
+        state.sim_agent.set_active_strategy(canonical_strat)
     state.is_dirty = True
     asyncio.create_task(trigger_instant_broadcast())
 
-    repo_root = Path(__file__).resolve().parent.parent.parent
-    if sys.platform == "win32":
-        CREATE_NEW_CONSOLE = 0x00000010
-        subprocess.Popen(["cmd.exe", "/c", script], cwd=str(repo_root), creationflags=CREATE_NEW_CONSOLE)
-    else:
-        subprocess.Popen(["bash", script], cwd=str(repo_root))
-        
-    logger.info("🚀 [BOT SPAWNED] Activated '%s' (Canonical: '%s') via script '%s' targeting %s", bot_id, canonical_strat, script, target_url)
+    logger.info("🚀 [BOT ACTIVATED] Unified single-port engine activated '%s' (Canonical: '%s')", bot_id, canonical_strat)
     return {
         "status": "success",
         "bot_id": bot_id,
         "strategy": canonical_strat,
-        "script": script,
-        "url": target_url,
-        "message": f"Bot '{bot_id}' activated successfully on {target_url}",
+        "url": "http://localhost:8000",
+        "message": f"Bot '{bot_id}' activated in unified engine on Port 8000",
     }
 
 # ---------------------------------------------------------------------------
