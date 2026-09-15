@@ -80,20 +80,20 @@ class ThreeStepDominationBot:
         vpin_toxic_threshold: float = 0.60,
         vpin_safe_threshold: float = 0.35,
         default_btc_1m_volatility: float = 14.0,  # $14 typical 1-min BTC spot std dev
-        take_profit_price_threshold: Decimal = Decimal("0.95"),  # 95c tail risk ceiling
+        take_profit_price_threshold: Decimal = Decimal("0.92"),  # 92c tail risk ceiling (Historical best)
         enable_take_profit_ceiling: bool = True,  # Take profit price ceiling toggle
         require_reversal_for_tp_ceiling: bool = True,  # Only exit at ceiling if indicators >= 85% reverse; if not, continue to expiry
         enable_reverse_take_profit_roi: bool = True,  # Only take profit on min_take_profit_roi if indicators >= 85% reverse
         reverse_indicator_threshold: float = 0.85,  # 85% conviction in opposite direction required
-        min_take_profit_roi: float = 0.20,  # +20% minimum ROI for early exit
+        min_take_profit_roi: float = 0.40,  # +40% minimum ROI for early exit (Historical best)
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
         fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
         max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
         discount_limit_price: Decimal = Decimal("0.52"),  # Configurable discount sniper ceiling (48¢-52¢ sweetspot)
-        min_confidence: float = 0.70,  # 70% model conviction threshold
+        min_confidence: float = 0.81,  # 81% model conviction threshold (Historical best)
         enable_trailing_ratchet: bool = True,  # High-water mark trailing profit ratchet and breakeven armor
-        trailing_ratchet_buffer: Decimal = Decimal("0.10"),  # $0.10 pullback buffer below peak bid
+        trailing_ratchet_buffer: Decimal = Decimal("0.08"),  # $0.08 pullback buffer below peak bid (Historical best)
         spot_delta_front_run_threshold: float = 28.0,  # $28.0 rolling 3s spot velocity base threshold (2.0σ winning sweetspot)
         enable_dynamic_spot_velocity: bool = True,  # 4-Regime Fading Mathematics dynamic front-runner
         velocity_z_score_threshold: float = 2.50,  # 2.50 sigma statistical anomaly threshold
