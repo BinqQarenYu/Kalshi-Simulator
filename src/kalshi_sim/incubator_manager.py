@@ -186,6 +186,42 @@ class IncubatorManager:
             self._save_state()
             return promoted
 
+    def configure_asset(
+        self,
+        asset: Union[CryptoAsset, str],
+        target_cycles: Optional[int] = None,
+        target_win_rate: Optional[float] = None,
+        strategy: Optional[str] = None,
+    ) -> None:
+        """Update target thresholds or active strategy for an incubator asset."""
+        key = asset.value if hasattr(asset, "value") else str(asset).upper().strip()
+        with self._lock:
+            if key not in self._state:
+                self._state[key] = {
+                    "status": "INCUBATOR",
+                    "is_locked": True,
+                    "strategy": strategy or "QuoLasGoldONNXBot",
+                    "target_cycles": target_cycles or 30,
+                    "target_win_rate": target_win_rate or 0.85,
+                    "completed_cycles": 0,
+                    "wins": 0,
+                    "losses": 0,
+                    "current_win_rate": 0.0,
+                    "net_pnl": 0.0,
+                    "certified_at": None,
+                    "lock_reason": "Incubating in Lane 2",
+                    "quarantined_at": datetime.now(timezone.utc).isoformat(),
+                }
+            else:
+                info = self._state[key]
+                if target_cycles is not None:
+                    info["target_cycles"] = target_cycles
+                if target_win_rate is not None:
+                    info["target_win_rate"] = target_win_rate
+                if strategy is not None:
+                    info["strategy"] = strategy
+            self._save_state()
+
     def reset_incubator(self, asset: Union[CryptoAsset, str]) -> None:
         """Reset incubator progress for specified asset."""
         key = asset.value if hasattr(asset, "value") else str(asset).upper().strip()

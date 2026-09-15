@@ -1,13 +1,13 @@
 {
   "title": "Kalshi Desk Lane 2 Incubator Registry",
-  "updated_at": "2026-09-12T06:25:22.640881+00:00",
+  "updated_at": "2026-09-15T09:42:15.903824+00:00",
   "assets": {
     "GOLD": {
       "status": "INCUBATOR",
       "is_locked": true,
-      "strategy": "GoldInversionBot",
+      "strategy": "QuoLasGoldONNXBot",
       "target_cycles": 30,
-      "target_win_rate": 0.65,
+      "target_win_rate": 0.85,
       "completed_cycles": 0,
       "wins": 0,
       "losses": 0,
