@@ -26,7 +26,8 @@ _DEC_0_99 = Decimal("0.99")
 _DEC_1_00 = Decimal("1.00")
 
 
-@dataclass(frozen=True)
+# Performance optimization: Use slots=True to eliminate __dict__ allocation per EV result object
+@dataclass(frozen=True, slots=True)
 class ExpectedValueResult:
     """Quantitative decision output from the Stage 2 Mathematical EV Engine."""
     has_positive_edge: bool
@@ -285,7 +286,8 @@ class StatisticalEVEngine:
             chosen_ask_float = no_ask_float
 
         # 4. Compute Gross and Net EV for chosen side using Decimal constants
-        p_dec = Decimal(str(round(chosen_p, 4)))
+        # Performance optimization: Fast f-string formatting Decimal(f"{chosen_p:.4f}") avoids round() overhead
+        p_dec = Decimal(f"{chosen_p:.4f}")
         chosen_ev_gross = p_dec * (_DEC_1_00 - chosen_ask) - (_DEC_1_00 - p_dec) * chosen_ask
         chosen_ev_net = chosen_ev_gross - active_fee
 
@@ -357,7 +359,7 @@ class StatisticalEVEngine:
 
         # 10. Convert Kelly Fraction to Contract Sizing with Portfolio Guardrails
         max_capital_to_risk = total_equity * self.max_portfolio_risk_pct
-        kelly_capital = total_equity * Decimal(str(round(tapered_kelly, 6)))
+        kelly_capital = total_equity * Decimal(f"{tapered_kelly:.6f}")
         allocated_capital = min(max_capital_to_risk, kelly_capital)
 
         unit_cost = chosen_ask + active_fee
@@ -369,8 +371,10 @@ class StatisticalEVEngine:
         if vpin_taper < 1.0:
             taper_note = f" | VPIN_taper={vpin_taper:.0%} (VPIN={vpin:.3f})"
 
+        # Performance optimization: Direct string lookup avoids enum property getter overhead (.value.upper())
+        side_str = "YES" if chosen_side == OrderSide.YES else "NO"
         rationale = (
-            f"Stage 2 Optimal EV: {chosen_side.value.upper()} | "
+            f"Stage 2 Optimal EV: {side_str} | "
             f"AI_P={chosen_p:.1%} vs MktPrice=${chosen_ask:.2f} (Fee=${active_fee:.2f}) | "
             f"Net EV=+${chosen_ev_net:.3f}/ct | Net Edge=+{chosen_edge:.1%} | "
             f"Kelly={scaled_kelly:.1%}→{tapered_kelly:.1%}{taper_note}"
