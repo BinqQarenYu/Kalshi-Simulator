@@ -89,6 +89,8 @@ class CrossExchangeScanner:
 
     async def _fetch_pm_orderbook(self, token_id: str) -> Optional[Dict[str, Any]]:
         """Fetch Polymarket L2 Orderbook for a specific token."""
+        if not pm_client or not getattr(pm_client, "client", None):
+            return None
         try:
             loop = asyncio.get_event_loop()
             book = await loop.run_in_executor(
