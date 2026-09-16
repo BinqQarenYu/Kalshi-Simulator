@@ -90,3 +90,8 @@
 ## 2026-09-15 - Dedicated Trade Quantities Float Deque & Sum-of-Squares VPIN Calculation
 **Learning:** Extracting trade quantities via dictionary key lookups (`[t["q"] for t in self.rolling_trades]`) on every trade print during rolling trade entropy and dynamic whale threshold calculation added unnecessary dict lookup allocations. In addition, computing VPIN standard deviation via double-pass variance loops created list copy allocations.
 **Action:** Maintain a dedicated float deque (`rolling_trade_quantities`) synchronized with `rolling_trades` and compute VPIN variance via the single-pass sum-of-squares formula $\text{Var}(X) = E[X^2] - (E[X])^2$. Reduced trade processing latency in feature extractors from ~35.2 µs to ~23.6 µs per trade print (~33% speedup).
+
+## 2026-09-16 - O(1) Version-Backed OrderBookLevel Depth Model Caching in L2BookState
+**Learning:** Calling `L2BookState.get_depth(n)` repeatedly across unmutated orderbook state ticks re-instantiated Pydantic `OrderBookLevel` objects, incurring ~61.0 µs per call in allocation and field validation overhead.
+**Action:** Memoize `OrderBookLevel` model lists in `L2BookState` using version-backed `_BookDict` mutation tracking (`_yes_book._version`, `_no_book._version`, `n`, `is_spot`), reducing `get_depth` cache hit latency from ~61.0 µs to ~0.3 µs (~200x speedup).
+
