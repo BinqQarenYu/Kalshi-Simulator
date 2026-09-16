@@ -579,7 +579,8 @@ class OrderSimulator:
             if first_price is None:
                 first_price = fill_price
 
-            qty_int = int(qty)
+            # Fast-path quantity type check to avoid Decimal->int conversion overhead when already int
+            qty_int = qty if isinstance(qty, int) else int(qty)
             fill_qty = remaining if remaining <= qty_int else qty_int
             if fill_qty <= 0:
                 continue
