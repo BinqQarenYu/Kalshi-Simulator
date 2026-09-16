@@ -750,12 +750,17 @@
       <span id="drawerToggleText">Show Institutional Telemetry & Parameters</span>
     </div>
 
-    <!-- 5 Primary KPI Cards (Full Kalshi Parity) -->
+    <!-- KPI Cards (Full Parity) -->
     <div class="kpi-grid expandable">
       <div class="kpi-card">
         <div class="kpi-label">Kalshi Live Balance</div>
         <div id="balVal" class="kpi-val text-green">$0.00</div>
         <div id="balSub" class="kpi-sub">Portfolio Shard 2: $0.00</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Polymarket USDC</div>
+        <div id="polyBalVal" class="kpi-val text-blue">$0.00</div>
+        <div class="kpi-sub">Polygon Network</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Today's Realized PnL</div>
@@ -779,233 +784,21 @@
       </div>
     </div>
 
-    <!-- 3-Step Dominion Settings & Parameters Panel -->
-    <div class="panel expandable">
+    <!-- 3-Step Dominion Parameters (Read-Only Air-Gapped Telemetry) -->
+    <div class="panel">
       <div class="panel-title">
-        <span>⚙️ Strategy Parameters & Guardrails</span>
-        <div style="display: flex; align-items: center; gap: 8px;">
-          <button id="btnSweetspots" onclick="loadSweetspots()" class="btn-sweetspot-sm" title="Load Quant Benchmark Sweetspots ($0.52 Maker / $0.62 Mom / $0.95 TP / 1 Ct)">🎯 Sweetspots</button>
-          <button id="btnSaveParams" onclick="saveParameters()" class="btn-save-sm">💾 Apply & Save as Default</button>
-        </div>
+        <span>?? Air-Gapped Sandbox: Live Parameters HUD</span>
       </div>
-      <div class="param-asset-tabs">
-        <button id="paramTab-BTC" class="param-tab active" onclick="switchParamAssetTab('BTC')" type="button">₿ BTC</button>
-        <button id="paramTab-ETH" class="param-tab" onclick="switchParamAssetTab('ETH')" type="button">Ξ ETH</button>
-        <button id="paramTab-SOL" class="param-tab" onclick="switchParamAssetTab('SOL')" type="button">● SOL</button>
-        <button id="paramTab-DOGE" class="param-tab" onclick="switchParamAssetTab('DOGE')" type="button">Ð DOGE</button>
-        <button id="paramTab-GOLD" class="param-tab" onclick="switchParamAssetTab('GOLD')" type="button">🟡 GOLD</button>
-        <button id="paramTab-HYPER" class="param-tab" onclick="switchParamAssetTab('HYPER')" type="button">🌀 HYPER</button>
+      <div style="font-size: 0.8rem; color: var(--muted); padding: 8px 0; border-bottom: 1px solid var(--border); margin-bottom: 8px;">
+        All parameters are securely pushed from the Mother Hub (Port 8000). Direct modifications on the Live Engine are disabled.
       </div>
-      <div class="params-grid">
-        <div class="param-item">
-          <label class="param-label">Discount Limit Price (Maker Ceiling) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"What is the absolute maximum price you are willing to pay?"</i><br><b>How it works:</b> Places a 'lowball offer' below market value.<br><b>Why it matters:</b> Guarantees $0 Kalshi maker fees and captures discount entries.</div></div></label>
-          <div class="input-wrap">
-            <span class="prefix">$</span>
-            <input id="inputDiscountPrice" type="number" step="0.01" min="0.10" max="0.65" value="0.52" oninput="markUnsaved()" />
-          </div>
-          <span class="sweetspot-badge">★ Sweetspot: $0.48–$0.52 ($0 Maker fee)</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Momentum Entry Cap ($) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"How high will you chase when momentum accelerates?"</i><br><b>How it works:</b> Limits market-taking price during sudden directional breakouts.<br><b>Why it matters:</b> Prevents buying over-extended contracts where payout-to-risk ratio degrades.</div></div></label>
-          <div class="input-wrap">
-            <span class="prefix">$</span>
-            <input id="inputMomentumPrice" type="number" step="0.01" min="0.50" max="0.85" value="0.62" oninput="markUnsaved()" />
-          </div>
-          <span class="sweetspot-badge">★ Sweetspot: $0.62 max</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Min AI Confidence % <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The AI Conviction Bar."</i><br><b>How it works:</b> Softmax confidence threshold required before an order proposal is emitted.<br><b>Why it matters:</b> Eliminates low-conviction chop near 50/50.</div></div></label>
-          <div class="input-wrap">
-            <input id="inputMinConfidence" type="number" step="1" min="50" max="99" value="70" oninput="markUnsaved()" />
-            <span class="suffix">%</span>
-          </div>
-          <span class="sweetspot-badge">★ Sweetspot: 70% conviction</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Max Contracts (Strict Invariant) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"Your bet size limit."</i><br><b>How it works:</b> Hard-coded safety lock capping you at 1 contract per trade.<br><b>Why it matters:</b> Prevents blowing up your micro-bankroll during losing streaks.</div></div></label>
-          <div class="input-wrap">
-            <input id="inputMaxContracts" type="number" step="1" min="1" max="1" value="1" readonly title="Hard-capped to strictly 1 contract per asset" />
-            <span class="suffix">cts</span>
-          </div>
-          <span class="sweetspot-badge">🔒 Invariant: 1 contract (Locked)</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Min Edge % (Statistical Alpha) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"How rigged must the game be before you play?"</i><br><b>How it works:</b> Demands a mathematical advantage over the market price.<br><b>Why it matters:</b> A 6% edge means we only trade when we have a massive statistical advantage.</div></div></label>
-          <div class="input-wrap">
-            <input id="inputMinEdge" type="number" step="0.5" min="1.0" max="50.0" value="6.0" oninput="markUnsaved()" />
-            <span class="suffix">%</span>
-          </div>
-          <span class="sweetspot-badge">★ Sweetspot: 6.0%</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Min Net EV ($/Contract) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"Minimum expected profit per trade."</i><br><b>How it works:</b> The average profit if you played this setup 1,000 times.<br><b>Why it matters:</b> Ignores trades that only yield pennies. Demands structural profit.</div></div></label>
-          <div class="input-wrap">
-            <span class="prefix">$</span>
-            <input id="inputMinEv" type="number" step="0.01" min="0.01" max="0.50" value="0.02" oninput="markUnsaved()" />
-          </div>
-          <span class="sweetspot-badge">★ Sweetspot: $0.02 / contract</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Min Spot Distance (|Spot - Strike|) <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Moat / Buffer Zone."</i><br><b>How it works:</b> Refuses trades when Bitcoin is hovering right on the strike line.<br><b>Why it matters:</b> Keeps you out of 50/50 coin-flip noise.</div></div></label>
-          <div class="input-wrap">
-            <span class="prefix">$</span>
-            <input id="inputMinSpotDiff" type="number" step="1.0" min="0" max="200" value="21.00" oninput="markUnsaved()" />
-          </div>
-          <span id="minSpotDiffHint" class="sweetspot-badge">★ Sweetspot: $21.00 BTC</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">VPIN Toxicity Veto <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Shark Detector."</i><br><b>How it works:</b> Tracks if massive institutions are dumping/pumping Bitcoin right now.<br><b>Why it matters:</b> Instantly vetoes trades if a flash-crash is detected in the order flow.</div></div></label>
-          <div class="input-wrap">
-            <input id="inputVpinThreshold" type="number" step="0.05" min="0.10" max="0.95" value="0.60" oninput="markUnsaved()" />
-          </div>
-          <span class="sweetspot-badge">★ Sweetspot: 0.60 cutoff</span>
-        </div>
-
-        <div class="param-item">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-            <label class="param-label" style="margin-bottom: 0;">Take Profit Price Ceiling <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"The Early Eject Button."</i><br><b>How it works:</b> Automatically sells the contract early if you are winning big.<br><b>Philosophy:</b> Unconditional early profit lock without waiting for reversal.</div></div></label>
-            <div style="display: flex; align-items: center; gap: 4px;">
-              <button id="btnToggleTpCeilingReversal" type="button" onclick="toggleTpCeilingReversal()" title="Require adverse reversal detection to exit at ceiling" style="font-size: 0.62rem; font-weight: 700; padding: 2px 5px; border-radius: 4px; border: 1px solid #f59e0b; background: rgba(245,158,11,0.15); color: #fbbf24; cursor: pointer; transition: all 0.15s ease;">⚡ 0-DELAY</button>
-              <button id="btnToggleTpCeiling" type="button" onclick="toggleTpCeiling()" style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #10b981; background: rgba(16,185,129,0.15); color: #34d399; cursor: pointer; transition: all 0.15s ease;">🟢 ENABLED</button>
-            </div>
-          </div>
-          <div class="input-wrap">
-            <span class="prefix">$</span>
-            <input id="inputTakeProfitPrice" type="number" step="0.01" min="0.50" max="0.99" value="0.94" oninput="markUnsaved()" />
-          </div>
-          <span id="tpCeilingHint" class="sweetspot-badge">★ Sweetspot: $0.94 (Zero-Delay Profit Harvest)</span>
-        </div>
-
-        <div class="param-item">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-            <label class="param-label" style="margin-bottom: 0;">Trailing Ratchet ($ Buffer) <div class="info-icon">i<div class="tooltip"><b>Trailing Profit Ratchet & Breakeven Armor:</b><br>• Tier 1: Bid ≥ $0.68 locks breakeven floor.<br>• Tier 2: Bid ≥ $0.80 trails peak bid by this buffer.<br><b>Why it matters:</b> Secures big profits while allowing run toward ceiling.</div></div></label>
-            <button id="btnToggleTrailingRatchet" type="button" onclick="toggleTrailingRatchet()" style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #10b981; background: rgba(16,185,129,0.15); color: #34d399; cursor: pointer; transition: all 0.15s ease;">🟢 ENABLED</button>
-          </div>
-          <div class="input-wrap">
-            <span class="prefix">$</span>
-            <input id="inputTrailingBuffer" type="number" step="0.01" min="0.02" max="0.25" value="0.10" oninput="markUnsaved()" />
-          </div>
-          <span class="sweetspot-badge">★ Sweetspot: $0.10 trailing buffer (≥$0.80 peak)</span>
-        </div>
-
-        <div class="param-item">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-            <label class="param-label" style="margin-bottom: 0;">Spot Front-Run (Δ*) <div class="info-icon">i<div class="tooltip" style="width: 280px; line-height: 1.4;"><b>Dynamic Spot Velocity Front-Run & Fading Engine (Δ*):</b><br><b>1. Macro Drift (T &gt; 240s):</b> |Zv| ≥ 2.50σ with Moneyness Moat. Deep ITM never panic dumps.<br><b>2. Transition (60s &lt; T ≤ 240s):</b> Adaptive threshold Δ*(T).<br><b>3. Silas TWAP Gravity (15s &lt; T ≤ 60s):</b> Quadratic decay ~ (T/60)², vetoing false exits when spot wiggles cannot overturn settlement TWAP (v &lt; v_crit).<br><b>4. Expiration Quarantine (T ≤ 15s):</b> Strict hold for $1.00 settlement.<br><b style="color: #10b981;">★ Winning Option:</b> $28.0 (2.0σ) eliminates premature dumps into wide spreads (+166% net yield) while retaining flash crash defense.</div></div></label>
-            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #f59e0b; background: rgba(245,158,11,0.15); color: #fbbf24; font-family: monospace;">⚡ DYNAMIC</span>
-          </div>
-          <div class="input-wrap">
-            <span class="prefix">Δ*</span>
-            <input id="inputSpotDeltaFrontRun" type="number" step="0.01" min="0.0001" max="50.0" value="28.0" oninput="markUnsaved()" />
-          </div>
-          <span id="spotDeltaFrontRunHint" class="sweetspot-badge">★ Sweetspot: Δ-$28.00 (2.0σ Dynamic Fading)</span>
-        </div>
-
-        <div class="param-item">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-            <label class="param-label" style="margin-bottom: 0;">TWAP Sniper Ceiling <div class="info-icon">i<div class="tooltip" style="width: 280px; line-height: 1.4;"><b>Playbook 4: Silas TWAP Immutability Sniper:</b><br>In the late endgame window (T ∈ [15s, 45s]), trailing 60s TWAP mathematically locks settlement. Opportunistically snipes panicked retail limit asks up to this ceiling.<br><b style="color: #10b981;">★ Winning Sweetspot:</b> $0.75 (BTC/ETH/GOLD), $0.72 (SOL), $0.70 (DOGE) captures locked $1.00 payouts.</div></div></label>
-            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #06b6d4; background: rgba(6,182,212,0.15); color: #22d3ee; font-family: monospace;">⚡ LATE-CYCLE</span>
-          </div>
-          <div class="input-wrap">
-            <span class="prefix">$</span>
-            <input id="inputTwapSniperCents" type="number" step="0.01" min="0.50" max="0.95" value="0.75" oninput="markUnsaved()" />
-          </div>
-          <span id="twapSniperHint" class="sweetspot-badge">★ Sweetspot: $0.75 (Late-Cycle Harvest)</span>
-        </div>
-
-        <div class="param-item">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-            <label class="param-label" style="margin-bottom: 0;">Max Queue Ahead <div class="info-icon">i<div class="tooltip" style="width: 280px; line-height: 1.4;"><b>Vance Anti-Toxic Queue Depth Shield:</b><br>Monitors FIFO queue position for resting limit orders at discount price. Cancels or vetoes bids when resting wall ahead exceeds limit, preventing fills only on whale sweeps.<br><b style="color: #10b981;">★ Winning Sweetspot:</b> 250 contracts (BTC), 200 (ETH), 150 (SOL/GOLD), 300 (DOGE).</div></div></label>
-            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #a855f7; background: rgba(168,85,247,0.15); color: #c084fc; font-family: monospace;">🛡️ WHALE ARMOR</span>
-          </div>
-          <div class="input-wrap">
-            <input id="inputMaxQueueDepth" type="number" step="25" min="10" max="5000" value="250" oninput="markUnsaved()" />
-            <span class="suffix">cts</span>
-          </div>
-          <span id="maxQueueDepthHint" class="sweetspot-badge">★ Sweetspot: 250 contracts ahead</span>
-        </div>
-
-        <div class="param-item">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-            <label class="param-label" style="margin-bottom: 0;">Max Spread Corridor <div class="info-icon">i<div class="tooltip" style="width: 280px; line-height: 1.4;"><b>Vance Max CLOB Spread Corridor Cap:</b><br>Vetoes order routing if the active contract bid-ask spread exceeds this cap, preventing toxic executions during orderbook dislocations.<br><b style="color: #10b981;">★ Winning Sweetspot:</b> $0.05 (BTC/GOLD), $0.04 (ETH), $0.06 (SOL), $0.03 (DOGE).</div></div></label>
-            <span style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #10b981; background: rgba(16,185,129,0.15); color: #34d399; font-family: monospace;">📏 CORRIDOR</span>
-          </div>
-          <div class="input-wrap">
-            <span class="prefix">$</span>
-            <input id="inputMaxClobSpread" type="number" step="0.01" min="0.01" max="0.25" value="0.05" oninput="markUnsaved()" />
-          </div>
-          <span id="maxClobSpreadHint" class="sweetspot-badge">★ Sweetspot: $0.05 max CLOB spread</span>
-        </div>
-
-        <div class="param-item">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-            <label class="param-label" style="margin-bottom: 0;">Dynamic Reversal Decay <div class="info-icon">i<div class="tooltip"><b>Dynamic Curve:</b> R*(τ) = min(85%, 50% + 3.5% × τ_mins).<br>Relaxes reversal requirement as time to expiry nears, reflecting exponential gamma jump.</div></div></label>
-            <button id="btnToggleDynamicReversal" type="button" onclick="toggleDynamicReversal()" style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #0284c7; background: rgba(14,165,233,0.15); color: #38bdf8; cursor: pointer; transition: all 0.15s ease;">📈 DYNAMIC</button>
-          </div>
-          <div class="input-wrap" style="background: rgba(14,165,233,0.06); border-color: rgba(14,165,233,0.3);">
-            <span id="dynamicReversalBadge" style="font-size: 0.75rem; font-weight: 700; color: #38bdf8; font-family: monospace;">85% → 50% (τ DECAY)</span>
-          </div>
-          <span class="sweetspot-badge" style="color: #38bdf8;">★ τ-Adaptive Reversal Curve Active</span>
-        </div>
-
-        <div class="param-item">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-            <label class="param-label" style="margin-bottom: 0;">Min Take Profit ROI % <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"Target ROI Early Harvest."</i><br><b>How it works:</b> Harvests profits if at least this ROI is met AND indicators show an 85%+ adverse reversal.<br><b>Why it matters:</b> Let winners run to 100% payout unless the trade turns against you.</div></div></label>
-            <button id="btnToggleTpRoi" type="button" onclick="toggleTpRoi()" style="font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; border: 1px solid #10b981; background: rgba(16,185,129,0.15); color: #34d399; cursor: pointer; transition: all 0.15s ease;">🟢 ENABLED</button>
-          </div>
-          <div class="input-wrap">
-            <input id="inputTakeProfitRoi" type="number" step="5" min="5" max="100" value="20.0" oninput="markUnsaved()" />
-            <span class="suffix">%</span>
-          </div>
-          <span id="tpRoiHint" class="sweetspot-badge">★ Sweetspot: 20% (On ≥85% Reversal)</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Adverse Reversal Trigger % <div class="info-icon">i<div class="tooltip"><b>The Beginner Translation:</b> <i>"Reversal Conviction Sensor."</i><br><b>How it works:</b> Exit triggers only fire if indicators calculate this conviction in reverse direction.<br><b>Default:</b> 85% conviction required.</div></div></label>
-          <div class="input-wrap">
-            <input id="inputReverseThreshold" type="number" step="1" min="50" max="99" value="85" oninput="markUnsaved()" />
-            <span class="suffix">%</span>
-          </div>
-          <span class="sweetspot-badge">★ Sweetspot: 85% conviction</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Early Harvest Policy <div class="info-icon">i<div class="tooltip"><b>The Philosophy:</b> <i>"Let winners run to 100% payout ($1.00)."</i><br><b>How it works:</b> Never give up profit early unless the market turns against you by 85% or more.</div></div></label>
-          <div class="input-wrap" style="background: rgba(16,185,129,0.06); border-color: rgba(16,185,129,0.3);">
-            <span id="tpPolicyBadge" style="font-size: 0.78rem; font-weight: 700; color: #34d399; font-family: monospace;">RUN TO 100% ($1.00)</span>
-          </div>
-          <span id="tpPolicySub" class="sweetspot-badge" style="color: #60a5fa;">🛡️ Reversal Guard: ≥85% Gate Active</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Entry Window Open (Mins) <div class="info-icon">i<div class="tooltip"><b>The Timing Guard:</b> <i>"Earliest entry time allowed in 15M cycle."</i><br><b>How it works:</b> Blocks new trades while remaining cycle time is above this threshold (e.g. 12.0m for BTC, 7.0m for Gold).<br><b>Why it matters:</b> Eliminates early Brownian random-walk noise and coin-flip chop during contract open.</div></div></label>
-          <div class="input-wrap">
-            <input id="inputEntryWindowOpen" type="number" step="0.5" min="1.0" max="14.9" value="12.0" oninput="markUnsaved()" />
-            <span class="suffix">min</span>
-          </div>
-          <span id="entryWindowOpenHint" class="sweetspot-badge">★ Sweetspot: 12.0 min remaining</span>
-        </div>
-
-        <div class="param-item">
-          <label class="param-label">Entry Window Close / Sweep <div class="info-icon">i<div class="tooltip"><b>The Gamma Cliff Shield:</b> <i>"Latest entry cutoff & auto-sweep boundary."</i><br><b>How it works:</b> Halts all new entries below this time (e.g. 4.5m for BTC, 2.0m for Gold). If still flat, immediately cancels and wipes all resting maker limit orders.<br><b>Why it matters:</b> Prevents stale orders from sitting as toxic targets for takers during late-cycle volatility.</div></div></label>
-          <div class="input-wrap">
-            <input id="inputEntryWindowClose" type="number" step="0.5" min="0.5" max="14.0" value="4.5" oninput="markUnsaved()" />
-            <span class="suffix">min</span>
-          </div>
-          <span id="entryWindowCloseHint" class="sweetspot-badge">★ Sweetspot: 4.5 min remaining (Auto-Sweep)</span>
-        </div>
-      </div>
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border);">
-        <button onclick="sweepOrders()" class="btn-sweep-sm">🧹 Sweep Expired Event Orders</button>
-        <span id="paramStatusText" style="font-size: 0.75rem; color: var(--muted); font-family: monospace;">Saved defaults in sync</span>
+      <div class="params-grid" id="readOnlyParamsGrid">
+        <span style="color:var(--muted)">Waiting for telemetry...</span>
       </div>
     </div>
+
+      
+      </div>
 
     <!-- Strategy & Microstructure Telemetry -->
     <div class="panel expandable">
@@ -1118,7 +911,14 @@
           return res;
         });
       };
-    })();
+    
+    // Override the functions since the inputs are gone in the Air-Gapped Sandbox architecture
+    window.loadSweetspots = function() { console.log('Air gapped: Cannot load sweetspots on Live Node'); };
+    window.loadParameters = function() { console.log('Air gapped: Cannot load parameters on Live Node'); };
+    window.saveParameters = function() { console.log('Air gapped: Cannot save parameters on Live Node'); };
+    window.applyAssetInputConstraints = function() { };
+
+      })();
 
     function isLocalClient() {
       const h = window.location.hostname;
@@ -1842,6 +1642,8 @@
       document.getElementById('inputMinEdge').value = preset.edge;
       document.getElementById('inputMinEv').value = preset.ev;
       document.getElementById('inputMinSpotDiff').value = preset.diff;
+        if (document.getElementById('inputMoneynessMoatMultiplier')) document.getElementById('inputMoneynessMoatMultiplier').value = preset.moatMultiplier || '1.25';
+        if (document.getElementById('inputOpeningQuarantineSeconds')) document.getElementById('inputOpeningQuarantineSeconds').value = preset.quarantine || '60';
       document.getElementById('inputVpinThreshold').value = preset.vpin;
       document.getElementById('inputTakeProfitPrice').value = preset.tp;
       document.getElementById('inputTakeProfitRoi').value = preset.tpRoi;
@@ -1896,6 +1698,9 @@
           const spec = ASSET_SPECS[target] || ASSET_SPECS.BTC;
           document.getElementById('inputMinSpotDiff').value = p.min_spot_diff.toFixed(spec.decimals);
         }
+
+          if (p.moneyness_moat_multiplier !== undefined) document.getElementById('inputMoneynessMoatMultiplier').value = p.moneyness_moat_multiplier.toFixed(2);
+          if (p.opening_quarantine_seconds !== undefined) document.getElementById('inputOpeningQuarantineSeconds').value = p.opening_quarantine_seconds.toFixed(0);
         if (p.vpin_toxic_threshold !== undefined) document.getElementById('inputVpinThreshold').value = p.vpin_toxic_threshold.toFixed(2);
         if (p.take_profit_price_threshold !== undefined) document.getElementById('inputTakeProfitPrice').value = p.take_profit_price_threshold.toFixed(2);
         if (p.enable_take_profit_ceiling !== undefined) {
@@ -1984,6 +1789,8 @@
         min_edge_pct: parseFloat(document.getElementById('inputMinEdge').value) || 6.0,
         min_ev_dollars: parseFloat(document.getElementById('inputMinEv').value) || 0.02,
         min_spot_diff: parseFloat(document.getElementById('inputMinSpotDiff').value) || 21.0,
+          moneyness_moat_multiplier: parseFloat(document.getElementById('inputMoneynessMoatMultiplier')?.value) || 1.25,
+          opening_quarantine_seconds: parseFloat(document.getElementById('inputOpeningQuarantineSeconds')?.value) || 60.0,
         vpin_toxic_threshold: parseFloat(document.getElementById('inputVpinThreshold').value) || 0.60,
         take_profit_price_threshold: parseFloat(document.getElementById('inputTakeProfitPrice').value) || 0.94,
         enable_take_profit_ceiling: tpCeilingEnabled,
@@ -2190,6 +1997,7 @@
         if (data.shard2_balance !== undefined) {
           document.getElementById('balSub').textContent = `Shard 2: $${parseFloat(data.shard2_balance).toFixed(2)} Available`;
         }
+        document.getElementById('polyBalVal').textContent = `$${parseFloat(data.polymarket_balance || 0).toFixed(2)}`;
         
         // 2. Realized PnL
         const pnl = parseFloat(data.today_pnl || 0);
@@ -2252,6 +2060,31 @@
         const nBid = data.best_no_bid !== null && data.best_no_bid !== undefined ? (data.best_no_bid * 100).toFixed(0) + '¢' : '--';
         const nAsk = data.best_no_ask !== null && data.best_no_ask !== undefined ? (data.best_no_ask * 100).toFixed(0) + '¢' : '--';
         document.getElementById('touchVal').textContent = `YES: ${yBid} / ${yAsk} | NO: ${nBid} / ${nAsk}`;
+
+        // Cross-Exchange Arbitrage Radar
+        if (data.arbitrage_radar) {
+            const radarEl = document.getElementById('arbRadarContent');
+            const badgeEl = document.getElementById('arbStatusBadge');
+            if (data.arbitrage_radar.opportunities && data.arbitrage_radar.opportunities.length > 0) {
+                badgeEl.textContent = 'MISPRICING DETECTED';
+                badgeEl.style.color = 'var(--green)';
+                let outHtml = '';
+                data.arbitrage_radar.opportunities.forEach(opp => {
+                    outHtml += `<div style="display:flex; justify-content:space-between; margin-bottom: 4px;">
+                      <span>${opp.type}</span>
+                      <span class="text-green">Profit: ${parseFloat(opp.net_profit).toFixed(4)}¢</span>
+                    </div>
+                    <div style="font-size:0.8rem; color:var(--muted); margin-bottom:8px;">
+                      [Leg 1] Kalshi YES: ${opp.kalshi_leg} | [Leg 2] PM NO: ${opp.pm_leg} | Total: ${opp.total_cost}
+                    </div>`;
+                });
+                radarEl.innerHTML = outHtml;
+            } else {
+                badgeEl.textContent = 'SCANNING (NO ARB)';
+                badgeEl.style.color = 'var(--amber)';
+                radarEl.innerHTML = `<div style="color:var(--muted)">Tracking ${data.arbitrage_radar.markets_tracked || 0} markets across Kalshi, Polymarket, and Binance (Awaiting Option Parity Match).</div>`;
+            }
+        }
 
         // 8. Spot & Strike & Moneyness Diff (Microstructure Telemetry)
         document.getElementById('playbookBadge').textContent = `PLAYBOOK: ${(data.playbook || 'NONE').toUpperCase()}`;

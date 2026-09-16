@@ -147,8 +147,8 @@ class AIWorker:
                 target_strike = ctx.get("target_strike", 0.0)
                 time_to_expiry_s = ctx.get("time_to_expiry_s", 600.0)
 
-                if self._sim_agent and self._orderbook and ticker:
-                    book = self._orderbook.get_book(ticker)
+                if self._sim_agent and self.orderbook_manager and ticker:
+                    book = self.orderbook_manager.get_book(ticker)
                     if book and (book.yes_book or book.no_book):
                         best_yes_ask = float(book.best_yes_ask) if book.best_yes_ask else 0.51
                         best_no_ask = float(Decimal("1.0") - book.best_yes_bid) if book.best_yes_bid else 0.50
@@ -416,7 +416,7 @@ class AIWorker:
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.debug("AI Worker iteration error: %s", exc)
+                logger.error("AI Worker iteration error: %s", exc, exc_info=True)
 
             elapsed = asyncio.get_event_loop().time() - start_t
             sleep_time = max(0.01, self._refresh_interval_s - elapsed)

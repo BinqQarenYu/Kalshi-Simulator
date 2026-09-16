@@ -286,6 +286,17 @@ export const ONNXSettingsPanel: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (activeInfo) setActiveInfo(null);
+        if (selectedEngine) setSelectedEngine(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeInfo, selectedEngine]);
+
   const handleChange = (key: keyof StrategyParameters, value: any) => {
     if (!params) return;
     setParams({ ...params, [key]: value });
@@ -371,16 +382,20 @@ export const ONNXSettingsPanel: React.FC = () => {
 
         <div className="flex items-center gap-2 self-end sm:self-auto">
           <button
+            type="button"
+            aria-label="Reload parameters from live engine"
             onClick={fetchParams}
             title="Reload from Live Engine"
-            className="p-1.5 rounded-lg border border-[#262d35] bg-[#161b22] text-gray-400 hover:text-white transition-colors"
+            className="p-1.5 rounded-lg border border-[#262d35] bg-[#161b22] text-gray-400 hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 cursor-pointer"
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
           <button
+            type="button"
+            aria-label="Apply and save strategy dials to live engine"
             onClick={saveParams}
             disabled={saving}
-            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-[#12161a] bg-[#00bda5] hover:bg-[#2dd4bf] rounded-lg transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-[#12161a] bg-[#00bda5] hover:bg-[#2dd4bf] rounded-lg transition-all shadow-md active:scale-95 disabled:opacity-50 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
           >
             {saving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
             <span>{saving ? 'Syncing...' : 'Apply & Save Dials'}</span>
@@ -555,8 +570,9 @@ export const ONNXSettingsPanel: React.FC = () => {
                   </span>
                   <button
                     type="button"
+                    aria-label={`Inspect specification details for ${eng.name}`}
                     onClick={() => setSelectedEngine(eng)}
-                    className="flex items-center gap-1 text-[10px] font-bold text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer px-2 py-1 rounded hover:bg-cyan-500/10 border border-transparent hover:border-cyan-500/30"
+                    className="flex items-center gap-1 text-[10px] font-bold text-cyan-400 hover:text-cyan-300 transition-colors cursor-pointer px-2 py-1 rounded hover:bg-cyan-500/10 border border-transparent hover:border-cyan-500/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
                   >
                     <span>Inspect Specs</span>
                     <ChevronRight className="w-3 h-3" />
@@ -1046,34 +1062,38 @@ export const ONNXSettingsPanel: React.FC = () => {
           {/* Volatility Floor & Ceiling Dual Inputs */}
           <div className="grid grid-cols-2 gap-2 pt-1">
             <div className="space-y-1">
-              <label className="text-[9px] text-[#8c9ba5] font-semibold uppercase">Vol Floor ($/min)</label>
+              <label htmlFor="vol-floor-input" className="text-[9px] text-[#8c9ba5] font-semibold uppercase cursor-pointer">Vol Floor ($/min)</label>
               <div className="relative">
-                <span className="absolute left-2 top-2 text-gray-500 text-xs">$</span>
+                <span className="absolute left-2 top-2 text-gray-500 text-xs" aria-hidden="true">$</span>
                 <input
+                  id="vol-floor-input"
+                  aria-label="Volatility floor threshold in dollars per minute"
                   type="number"
                   step="1.0"
                   min="2.0"
                   max="30.0"
                   value={params.volatility_floor || 10.0}
                   onChange={(e) => handleChange('volatility_floor', parseFloat(e.target.value))}
-                  className="w-full bg-[#0a0c10] border border-[#262d35] rounded-lg p-2 pl-5 text-white text-xs focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-[#0a0c10] border border-[#262d35] rounded-lg p-2 pl-5 text-white text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                 />
               </div>
               <span className="text-[8px] text-gray-500 block">Dead Chop Veto</span>
             </div>
 
             <div className="space-y-1">
-              <label className="text-[9px] text-[#8c9ba5] font-semibold uppercase">Vol Ceiling ($/min)</label>
+              <label htmlFor="vol-ceiling-input" className="text-[9px] text-[#8c9ba5] font-semibold uppercase cursor-pointer">Vol Ceiling ($/min)</label>
               <div className="relative">
-                <span className="absolute left-2 top-2 text-gray-500 text-xs">$</span>
+                <span className="absolute left-2 top-2 text-gray-500 text-xs" aria-hidden="true">$</span>
                 <input
+                  id="vol-ceiling-input"
+                  aria-label="Volatility ceiling threshold in dollars per minute"
                   type="number"
                   step="1.0"
                   min="20.0"
                   max="200.0"
                   value={params.volatility_ceiling || 45.0}
                   onChange={(e) => handleChange('volatility_ceiling', parseFloat(e.target.value))}
-                  className="w-full bg-[#0a0c10] border border-[#262d35] rounded-lg p-2 pl-5 text-white text-xs focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-[#0a0c10] border border-[#262d35] rounded-lg p-2 pl-5 text-white text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                 />
               </div>
               <span className="text-[8px] text-gray-500 block">Chaos / News Veto</span>
@@ -1086,6 +1106,9 @@ export const ONNXSettingsPanel: React.FC = () => {
       {/* Deep (i) Parameter Inspection Modal */}
       {activeInfo && PARAM_DOCS[activeInfo] && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="param-doc-title"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in"
           onClick={() => setActiveInfo(null)}
         >
@@ -1095,14 +1118,16 @@ export const ONNXSettingsPanel: React.FC = () => {
           >
             <div className="flex items-center justify-between border-b border-[#262d35] pb-2.5">
               <div className="flex items-center gap-2">
-                <span className="font-bold text-white text-sm">{PARAM_DOCS[activeInfo].title}</span>
+                <span id="param-doc-title" className="font-bold text-white text-sm">{PARAM_DOCS[activeInfo].title}</span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                   {PARAM_DOCS[activeInfo].symbol}
                 </span>
               </div>
               <button
+                type="button"
+                aria-label="Close parameter guidance modal"
                 onClick={() => setActiveInfo(null)}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1135,8 +1160,10 @@ export const ONNXSettingsPanel: React.FC = () => {
 
             <div className="flex justify-end pt-1">
               <button
+                type="button"
+                aria-label="Close guidance details"
                 onClick={() => setActiveInfo(null)}
-                className="px-4 py-1.5 bg-[#1e293b] hover:bg-[#334155] text-white text-xs font-bold rounded-lg border border-[#334155] transition-colors cursor-pointer"
+                className="px-4 py-1.5 bg-[#1e293b] hover:bg-[#334155] text-white text-xs font-bold rounded-lg border border-[#334155] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
               >
                 Done
               </button>
@@ -1148,6 +1175,9 @@ export const ONNXSettingsPanel: React.FC = () => {
       {/* Deep Neural Engine Specification Modal */}
       {selectedEngine && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="engine-spec-title"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in"
           onClick={() => setSelectedEngine(null)}
         >
@@ -1171,7 +1201,7 @@ export const ONNXSettingsPanel: React.FC = () => {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-white text-sm">{selectedEngine.name}</h3>
+                    <h3 id="engine-spec-title" className="font-bold text-white text-sm">{selectedEngine.name}</h3>
                     <span className={`px-2 py-0.5 text-[9px] font-mono font-bold rounded-full border ${
                       selectedEngine.status === 'ACTIVE_LANE_1'
                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
@@ -1186,8 +1216,10 @@ export const ONNXSettingsPanel: React.FC = () => {
                 </div>
               </div>
               <button
+                type="button"
+                aria-label="Close engine specification modal"
                 onClick={() => setSelectedEngine(null)}
-                className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                className="text-gray-400 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1279,8 +1311,10 @@ export const ONNXSettingsPanel: React.FC = () => {
             {/* Close Action */}
             <div className="flex justify-end pt-1">
               <button
+                type="button"
+                aria-label="Close engine specification details"
                 onClick={() => setSelectedEngine(null)}
-                className="px-5 py-2 bg-[#1e293b] hover:bg-[#334155] text-white text-xs font-bold rounded-xl border border-[#334155] transition-colors cursor-pointer"
+                className="px-5 py-2 bg-[#1e293b] hover:bg-[#334155] text-white text-xs font-bold rounded-xl border border-[#334155] transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
               >
                 Close Engine Specs
               </button>

@@ -167,3 +167,21 @@ def test_failed_win_rate_retains_lock(temp_incubator):
     assert status["status"] == "INCUBATOR"
     assert status["is_locked"] is True
     assert temp_incubator.is_locked(CryptoAsset.GOLD) is True
+
+
+def test_onnx_30_cycle_85_percent_certification(temp_incubator):
+    """Verify 30 test cycles with 85% win rate certifies 32-D Gold ONNX Bot."""
+    runner = Lane2GoldShadowRunner(incubator=temp_incubator, strategy_mode="ONNX", target_win_rate=0.85)
+
+    assert temp_incubator.is_locked(CryptoAsset.GOLD) is True
+    # 26 wins out of 30 = 86.7% >= 85.0%
+    results = runner.run_simulation_batch(num_cycles=30, win_count=26)
+    assert len(results) == 30
+
+    status = temp_incubator.get_status(CryptoAsset.GOLD)
+    assert status["completed_cycles"] == 30
+    assert status["wins"] == 26
+    assert status["current_win_rate"] >= 0.85
+    assert status["status"] == "CERTIFIED"
+    assert status["is_locked"] is False
+    assert temp_incubator.is_locked(CryptoAsset.GOLD) is False

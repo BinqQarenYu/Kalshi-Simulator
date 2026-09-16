@@ -53,24 +53,21 @@ These are immutable mathematical and regulatory invariants that supersede all co
    - Zero tolerance for IEEE-754 floating-point (`float` in Python, native `number` in JS) in pricing, balances, strike diffs, fees, and PnL. Python `Decimal` and TypeScript `decimal.js` / string-wrapped types only.
 2. **Micro-Bankroll Sizing Armor**:
    - Accounts under \$75 are strictly capped at **1 contract per trade** across all active assets (`BTC`, `ETH`, `SOL`, `DOGE`, `GOLD`). No scaling up without capital certification.
-3. **Execution Mode & Single-Process Authority**:
-   - Live execution token (`trading_engine.lock`) on port `8001` held exclusively by `StandaloneBotEngine`. Port `8000` (Mother Server) is strictly restricted to read-only simulation and telemetry monitoring.
+3. **Execution Mode & Single-Process Authority (Port 8000 Monolith)**:
+   - Live execution token (`trading_engine.lock`) held exclusively by Mother Server on port `8000` (`kalshi_sim.server`). Port 8000 acts as the institutional unified engine hosting all modular strategies (Bot 1, Bot 2, Bot 3). Standalone multi-port servers (8001, 8002, 8003) are permanently retired.
 4. **Anti-Wash Trading & Cannibalism Shield**:
    - Opposing positions (YES vs NO) on the same asset/cycle across any running bot on the account are strictly vetoed synchronously by `LiveCoordinator` (`CFTC ANTI-WASH TRADING VETO`).
 5. **In-Flight Intent Lock**:
-   - Trade intent must be reserved synchronously *before* awaiting network I/O to prevent duplicate order bursts over 200–500ms HTTP windows.
+   - Trade intent must be reserved synchronously *before* awaiting network I/O to prevent duplicate order bursts over 200–500ms HTTP windows (with 15s TTL auto-expiration).
 
 ### SHELF 2: The Active Blueprint (Current Production Reality)
 The live operational state of the fleet across ports, background daemons, and UI surfaces:
-- **Lane 1 (Live Real Money Execution)**:
-  - **Bot 1 (`ThreeStepDominationBot`)**: Running on port `8001` (`kalshi_sim.standalone_bot`).
-  - Active Basket: Multi-asset basket mode (`BTC`, `GOLD`, `DOGE`).
-  - Entry Envelopes: Option C calibrated timing windows (BTC: 12.0m–4.5m remaining; GOLD: 7.0m–2.0m remaining; DOGE: 8.0m–3.0m remaining).
-  - Parameter Persistence: Governed centrally by `data/bot_parameters_domination.json`.
-  - UI: Pocket Cockpit (`standalone_pocket_cockpit.html`) with dual-panel layout, live switch controls, and Engine Room matrix.
-- **Lane 2 (Shadow / Incubator)**:
-  - **Bot 2 (`OnnxExecutionStrategy`)**: Dual-ONNX ML model running on port `8002` (`standalone_onnx.py`).
-  - **Bot 3 (`MacroExecutionStrategy`)**: Macro Trend 52¢ Bot running on port `8003` (`standalone_macro.py`).
+- **Unified Engine (Port 8000 Monolith)**:
+  - **Mother Server (`server.py` on Port 8000)**: Houses all trading bots, AI workers, orderbook feeds, and execution clients.
+  - **Bot 1 (`ThreeStepDominationBot`)**: Fully authorized live execution engine with automated SHA-256 Seal of Excellence.
+  - **Bot 2 (`DualONNXArbitrageBot`)**: In-process dual-brain ONNX & HMM microstructure strategy.
+  - **Bot 3 (`MacroTrendDominionBot`)**: Fully authorized live execution engine with automated SHA-256 Seal of Excellence.
+  - **Pluggable Strategy Bus**: 1-click strategy switching via Mother Dash and docked Baby Bot console. Zero inter-process lock collisions.
 - **Lane 3 (Backtesting & Offline Simulation)**:
   - `src/kalshi_sim/backtest.py` and `src/kalshi_sim/monte_carlo.py`.
 
@@ -80,12 +77,13 @@ Every rule on this shelf was purchased with real drawdown or catastrophic produc
 - **Lesson 1**: In-flight intent locks prevent duplicate order placement during async event loops.
 - **Lesson 2**: Kalshi taker fee drag ($\lceil 0.07 \cdot C \cdot P \cdot (1-P) \rceil$) turns $\ge \$0.70$ entries into negative mathematical expectancy. Maker limit discounts at $\$0.48$ with $\$0.00$ fee are mathematically mandatory.
 - **Lesson 4**: Brownian noise dead zones ($\pm \$15$ to $\pm \$35$ around strike) are coin-flips; entry is strictly vetoed.
-- **Lesson 5**: Process collision between port 8000 and 8001 creates corrupted balance syncs.
+- **Lesson 5**: Process collision between port 8000 and 8001 creates corrupted balance syncs and 10s timer skews. Eliminated by Option C monolithic consolidation into Port 8000.
 - **Lesson 6**: Consecutive Loss Streak Breaker (auto-disarm after 3 consecutive losses) protects against tail-risk wipeouts.
 - **Lesson 7**: Gold CF Benchmarks settlement uses 60s TWAP parity just like BTC.
 
 ### SHELF 4: The Graveyard (Deprecated & Supposed-To-Be-Deleted)
 Artifacts, scripts, and configurations that are obsolete, superseded, or dead:
+- **Retired Multi-Port Standalone Engines**: `standalone_bot.py` (Port 8001), `standalone_onnx.py` (Port 8002), `standalone_macro.py` (Port 8003) and their `.bat` spawning wrappers (`run_standalone_*.bat`).
 - **Superseded Parameter Files**: Old single-asset `data/bot_parameters.json` (superseded by `data/bot_parameters_domination.json`).
 - **Orphan One-Off Scripts**: Scratch files in `scratch/` (e.g. `check_kxgold.py`, `check_pyth_gold.py`, `analyze_trades.py`) that completed their purpose and should not be referenced in production logic.
 - **Legacy 5-Minute Contracts**: Any leftover `KXBTC5M` or `KXETH5M` routines that bypass active 15M multi-asset coordination.

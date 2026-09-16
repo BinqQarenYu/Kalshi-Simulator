@@ -23,6 +23,12 @@ import logging
 import os
 from pathlib import Path
 import sys
+
+# Ensure 'src' directory is in sys.path even when executed directly or without PYTHONPATH
+_SRC_DIR = Path(__file__).resolve().parent.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 import threading
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
@@ -50,6 +56,7 @@ from kalshi_sim.auth import (
 )
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
 from kalshi_sim.cfbenchmarks_sync import CFBenchmarksSync
+from kalshi_sim.clock_sync import clock_sync
 from kalshi_sim.db import get_db, get_db_writer, DatabaseWriter
 from kalshi_sim.live_coordinator import LiveCoordinator
 from kalshi_sim.ml.dual_onnx_gateway import DualONNXGateway
@@ -241,6 +248,7 @@ class StandaloneMacroEngine:
         self.active_market_close_dt: Optional[datetime] = None
         self.target_time_str: str = ""
         self.time_window_str: str = ""
+        self.twap_60s: Optional[Decimal] = None
 
         # Live Inside-Touch Quotes
         self.best_yes_bid: Optional[Decimal] = None
@@ -304,14 +312,15 @@ class StandaloneMacroEngine:
             self.interlock_msg = "Exclusive Authority Active (Lane 2 Incubator)"
 
     def get_time_to_expiry(self) -> float:
-        """Calculate exact remaining seconds until active contract expiration boundary."""
-        if self.active_market_close_dt:
-            now_utc = datetime.now(timezone.utc)
+        """Calculate exact remaining seconds until active contract expiration boundary (Kalshi web calibrated)."""
+        now_utc = clock_sync.web_now()
+        
+        if getattr(self, "active_market_close_dt", None):
             delta = (self.active_market_close_dt - now_utc).total_seconds()
             return max(0.0, delta)
-        now_dt = datetime.now(timezone.utc)
-        cur_min = now_dt.minute
-        cur_sec = now_dt.second + now_dt.microsecond / 1_000_000.0
+            
+        cur_min = now_utc.minute
+        cur_sec = now_utc.second + now_utc.microsecond / 1_000_000.0
         boundary_min = 15 * (cur_min // 15 + 1)
         secs_left = (boundary_min - cur_min) * 60.0 - cur_sec
         return max(0.0, secs_left)
@@ -329,10 +338,22 @@ class StandaloneMacroEngine:
         self.bot.update_parameters(**kwargs)
         return self.get_parameters()
 
+    def _sync_kalshi_clock(self) -> None:
+        """Calculate Kalshi server time drift vs local OS clock via universal clock_sync."""
+        try:
+            drift = clock_sync.sync()
+            self._clock_drift_seconds = drift
+        except Exception as e:
+            logger.warning("[NTP SYNC] Clock sync warning on Port 8003: %s", e)
+            self._clock_drift_seconds = getattr(self, "_clock_drift_seconds", 0.0)
+
     async def start(self) -> None:
         """Start all background loops for Port 8003."""
         self._running = True
         prevent_windows_sleep()
+
+        # Synchronize NTP time drift with Kalshi API
+        self._sync_kalshi_clock()
 
         await self.db_writer.start()
 
@@ -385,6 +406,8 @@ class StandaloneMacroEngine:
                 def _on_cf_asset_update(asset: CryptoAsset, price: Decimal, twap: Optional[Decimal], source: str) -> None:
                     if asset == self.active_asset:
                         self.current_btc_spot = price
+                        if twap is not None:
+                            self.twap_60s = twap
                         self.brti_connected = True
 
                 self.cf_sync = CFBenchmarksSync(
@@ -421,7 +444,8 @@ class StandaloneMacroEngine:
     async def _binance_feed_loop(self) -> None:
         """Stream Binance spot price to feed Brain 1 tensor builder."""
         url = "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT"
-        async with aiohttp.ClientSession() as session:
+        connector = create_aiohttp_connector()
+        async with aiohttp.ClientSession(connector=connector) as session:
             while self._running:
                 try:
                     async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
@@ -445,44 +469,126 @@ class StandaloneMacroEngine:
                     await asyncio.sleep(2.0)
 
     async def _market_discovery_and_book_loop(self) -> None:
-        """Poll active Kalshi 15M market and update inside quotes."""
-        while self._running:
-            try:
-                now_dt = datetime.now(timezone.utc)
-                cur_min = now_dt.minute
-                boundary_min = 15 * (cur_min // 15 + 1)
-                if boundary_min == 60:
-                    close_dt = (now_dt + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
-                else:
-                    close_dt = now_dt.replace(minute=boundary_min, second=0, microsecond=0)
-                self.active_market_close_dt = close_dt
-                self.time_window_str = format_cycle_time_from_iso(close_dt.isoformat())
+        """Continuously synchronize active market, target strike, expiry timer, and orderbook with Kalshi source of truth."""
+        connector = create_aiohttp_connector()
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+            "Accept": "application/json",
+        }
+        async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
+            while self._running:
+                try:
+                    now_utc = clock_sync.web_now()
+                    synced_from_mother = False
 
-                if self.current_btc_spot > Decimal("0.00") and self.target_strike == Decimal("0.00"):
-                    base = (int(self.current_btc_spot) // 250) * 250
-                    self.target_strike = Decimal(str(base))
-                    self.active_ticker = f"KXBTC15M-{close_dt.strftime('%y%b%d-%H%M').upper()}"
+                    # 1. Primary Sync: Inherit 100% unified market truth from Mother Dash (Port 8000)
+                    try:
+                        async with session.get("http://127.0.0.1:8000/api/state", timeout=aiohttp.ClientTimeout(total=0.5)) as resp:
+                            if resp.status == 200:
+                                m_data = await resp.json()
+                                market = m_data.get("market", {})
+                                if market and market.get("ticker"):
+                                    new_ticker = market["ticker"]
+                                    if self.active_ticker and new_ticker != self.active_ticker:
+                                        logger.info("🔄 [CYCLE ROLLOVER] %s -> %s. Sweeping resting orders...", self.active_ticker, new_ticker)
+                                        asyncio.create_task(self._cancel_resting_orders())
 
-                if self.target_strike > Decimal("0.00") and self.best_yes_bid is None:
-                    diff = self.current_btc_spot - self.target_strike
-                    if diff >= 0:
-                        self.best_yes_bid = Decimal("52")
-                        self.best_yes_ask = Decimal("54")
-                        self.best_no_bid = Decimal("46")
-                        self.best_no_ask = Decimal("48")
-                    else:
-                        self.best_yes_bid = Decimal("46")
-                        self.best_yes_ask = Decimal("48")
-                        self.best_no_bid = Decimal("52")
-                        self.best_no_ask = Decimal("54")
-                    self.kalshi_ws_connected = True
+                                    self.active_ticker = new_ticker
+                                    if market.get("target_strike") is not None:
+                                        self.target_strike = Decimal(str(market["target_strike"]))
+                                    if market.get("current_btc_price") is not None:
+                                        self.current_btc_spot = Decimal(str(market["current_btc_price"]))
+                                        self.brti_connected = True
+                                    if market.get("twap_60s_price") is not None:
+                                        self.twap_60s = Decimal(str(market["twap_60s_price"]))
 
-                await asyncio.sleep(1.0)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.warning("Market discovery error: %s", exc)
-                await asyncio.sleep(3.0)
+                                    t_rem = market.get("expiry_countdown_seconds")
+                                    if t_rem is not None:
+                                        self.active_market_close_dt = now_utc + timedelta(seconds=int(t_rem))
+
+                                    self.target_time_str = market.get("target_time_str", "")
+                                    self.time_window_str = market.get("time_window_str", "")
+
+                                    yb = market.get("best_yes_bid")
+                                    ya = market.get("best_yes_ask")
+                                    nb = market.get("best_no_bid")
+                                    na = market.get("best_no_ask")
+                                    if yb is not None and yb > 0:
+                                        self.best_yes_bid = Decimal(str(round(yb * 100, 1))) if yb < 1.0 else Decimal(str(yb))
+                                    if ya is not None and ya > 0:
+                                        self.best_yes_ask = Decimal(str(round(ya * 100, 1))) if ya < 1.0 else Decimal(str(ya))
+                                    if nb is not None and nb > 0:
+                                        self.best_no_bid = Decimal(str(round(nb * 100, 1))) if nb < 1.0 else Decimal(str(nb))
+                                    if na is not None and na > 0:
+                                        self.best_no_ask = Decimal(str(round(na * 100, 1))) if na < 1.0 else Decimal(str(na))
+
+                                    self.kalshi_ws_connected = True
+                                    synced_from_mother = True
+                    except Exception:
+                        synced_from_mother = False
+
+                    # 2. Standalone Fallback: Query live Kalshi public REST API directly (Zero mock data)
+                    if not synced_from_mother:
+                        series = self.active_cfg.series_ticker_15m
+                        url = f"{self.rest_base}/markets?series_ticker={series}&status=open&limit=10"
+                        async with session.get(url, timeout=aiohttp.ClientTimeout(total=2.5)) as resp2:
+                            if resp2.status == 200:
+                                data = await resp2.json()
+                                markets = data.get("markets", [])
+                                valid_m = []
+                                for m in markets:
+                                    c_str = m.get("close_time") or m.get("expiration_time")
+                                    if c_str:
+                                        c_dt = datetime.fromisoformat(c_str.replace("Z", "+00:00"))
+                                        if c_dt > now_utc:
+                                            valid_m.append((c_dt, m))
+                                if valid_m:
+                                    valid_m.sort(key=lambda x: x[0])
+                                    active_close, active_m = valid_m[0]
+                                    new_ticker = active_m.get("ticker", "")
+                                    if self.active_ticker and new_ticker != self.active_ticker:
+                                        logger.info("🔄 [CYCLE ROLLOVER] %s -> %s. Sweeping resting orders...", self.active_ticker, new_ticker)
+                                        asyncio.create_task(self._cancel_resting_orders())
+
+                                    self.active_ticker = new_ticker
+                                    self.active_market_close_dt = active_close
+                                    fl = active_m.get("floor_strike") or active_m.get("cap_strike")
+                                    if fl is not None:
+                                        self.target_strike = Decimal(str(fl))
+
+                                    et_tz = ZoneInfo("America/New_York")
+                                    close_et = active_close.astimezone(et_tz)
+                                    start_et = close_et - timedelta(minutes=15)
+                                    hr_target = close_et.hour % 12 or 12
+                                    ampm_target = "am" if close_et.hour < 12 else "pm"
+                                    self.target_time_str = f"{hr_target}:{close_et.minute:02d}{ampm_target} ET"
+                                    hr_open = start_et.hour % 12 or 12
+                                    self.time_window_str = f"{start_et.strftime('%B %d')}, {hr_open}:{start_et.strftime('%M')} - {hr_target}:{close_et.strftime('%M %p ET')}"
+
+                                    # Fetch real L2 orderbook
+                                    ob_url = f"{self.rest_base}/markets/{new_ticker}/orderbook"
+                                    async with session.get(ob_url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp_ob:
+                                        if resp_ob.status == 200:
+                                            ob_data = await resp_ob.json()
+                                            raw_book = ob_data.get("orderbook_fp") or ob_data.get("orderbook") or {}
+                                            bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []
+                                            asks = raw_book.get("no_dollars") or raw_book.get("no") or []
+                                            if bids:
+                                                self.best_yes_bid = Decimal(str(bids[0][0])) * Decimal("100") if Decimal(str(bids[0][0])) < Decimal("1.0") else Decimal(str(bids[0][0]))
+                                            if asks:
+                                                self.best_no_bid = Decimal(str(asks[0][0])) * Decimal("100") if Decimal(str(asks[0][0])) < Decimal("1.0") else Decimal(str(asks[0][0]))
+                                            if self.best_yes_bid and not self.best_yes_ask:
+                                                self.best_yes_ask = (Decimal("100") - self.best_no_bid) if self.best_no_bid else self.best_yes_bid + Decimal("2")
+                                            if self.best_no_bid and not self.best_no_ask:
+                                                self.best_no_ask = (Decimal("100") - self.best_yes_bid) if self.best_yes_bid else self.best_no_bid + Decimal("2")
+                                            self.kalshi_ws_connected = True
+
+                    await asyncio.sleep(0.5)
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    logger.warning("Market discovery error: %s", exc)
+                    await asyncio.sleep(2.0)
 
     async def _hmm_evaluation_loop(self) -> None:
         """Evaluate 5m HMM regime at 10-second intervals."""
@@ -850,8 +956,7 @@ async def get_state() -> Dict[str, Any]:
         diff_pct_dec = Decimal("0.00")
 
     is_up = diff_dec >= Decimal("0.00")
-    diff_sign = "+" if is_up else "-"
-    diff_str = f"{diff_sign}{cfg.format_price(abs(diff_dec))}"
+    diff_str = cfg.format_diff(diff_dec, diff_pct_dec)
 
     dec = app_engine.last_decision
     diag = app_engine.bot.learning_engine.get_diagnostics()
@@ -874,10 +979,14 @@ async def get_state() -> Dict[str, Any]:
         "active_ticker": app_engine.active_ticker,
         "time_remaining_str": t_str,
         "time_window_str": app_engine.time_window_str,
+        "target_time_str": app_engine.target_time_str,
         "expiry_countdown_seconds": int(t_rem),
         "spot_price": float(spot_dec),
         "target_strike": float(strike_dec),
+        "spot_diff": float(diff_dec),
+        "spot_diff_pct": float(diff_pct_dec),
         "spot_diff_str": diff_str,
+        "twap_60s": float(app_engine.twap_60s) if getattr(app_engine, "twap_60s", None) else None,
         "is_above_strike": is_up,
         "best_yes_bid": float(app_engine.best_yes_bid) if app_engine.best_yes_bid else None,
         "best_yes_ask": float(app_engine.best_yes_ask) if app_engine.best_yes_ask else None,
@@ -1046,7 +1155,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Kalshi Macro Trend Dominion Standalone Bot")
     parser.add_argument("--port", type=int, default=8003, help="HTTP Cockpit port (default: 8003)")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="HTTP Cockpit host (default: 0.0.0.0)")
-    parser.add_argument("--paper", action="store_true", default=True, help="Enable paper execution (Lane 2 Incubator)")
+    parser.add_argument("--paper", action="store_true", default=False, help="Enable paper execution (Lane 2 Incubator)")
     parser.add_argument("--live", action="store_true", default=False, help="Enable live execution mode")
     parser.add_argument("--force", action="store_true", default=False, help="Force lock acquisition if stale")
     parser.add_argument("--no-browser", action="store_true", default=False, help="Do not open browser automatically")

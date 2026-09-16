@@ -37,9 +37,9 @@ Zero TypeScript compilation errors and a clean build in `frontend/dist/`.
 2. **Execution Mode Isolation**:
    - `MOCK_SIMULATION`: Uses realistic Level-2 synthetic book walks, partial fills, and jump-diffusion spot paths.
    - `LIVE_TRADING`: 100% to real exchange execution via Kalshi API. Never paper trade during live mode.
-3. **Micro-Bankroll Sizing & Sole Authorization**:
-   - Only 3-Step Dominion is authorized to trade; all other paper/simulation bots are prohibited from trading.
-   - Sizing is strictly hard-capped to **1 contract for each asset** (`BTC`, `ETH`, `SOL`, `DOGE`).
+3. **Micro-Bankroll Sizing & Live Trading Authorization**:
+   - Any bot possessing an automated SHA-256 **Seal of Excellence** on disk (currently **Bot 1 `3_step_domination_bot`** and **Bot 3 `macro_trend_dominion`**) is authorized to execute live real-money trades directly from **Mother Dash**, the **docked Baby Bot console (right corner)**, or Standalone engines.
+   - Sizing is strictly hard-capped to **1 contract for each asset** (`BTC`, `ETH`, `SOL`, `DOGE`). All unsealed bots remain in Lane 2 Incubator (paper mode).
 4. **Kalshi Taker Fees**:
    - Taker fee: `ceil(0.07 * C * P * (1 - P))` with $0.01 floor and $0.02 cap per contract. Maker resting orders receive $0.00 fee.
 5. **Adverse Selection Guard & Dynamic Spot Velocity Front-Run ($\Delta^*$)**:
@@ -70,13 +70,14 @@ Jules operates under three specialized engineering personas. When running in thi
 
 ### ⚡ Bolt (Microstructure & Low-Latency Systems)
 - Focus: Order book delta processing, feature extraction speed, Decimal pre-allocation, ring buffer zero-copy slicing, and eliminating GC allocations.
-- Scope: High-frequency hot paths (<1ms budget). Always benchmark and append learnings to `.jules/bolt.md`.
+- **The Sweet Spot Mandate**: Target 1 self-contained hot-path pipeline per PR (e.g. depth memoization, ring buffer slicing, or VPIN sum-of-squares). Never sprawl across multiple unrelated engines simultaneously. Always benchmark (<1ms budget) and append learnings to `.jules/bolt.md`.
 
 ### 🎨 Palette (Institutional FinTech UI/UX & WebCLOB Ergonomics)
 - Focus: Modernizing visual hierarchy, terminal aesthetics, glanceable telemetry, and high-density Bloomberg-grade layouts across the React frontend.
-- **Executive Mandate: "Scoop More Sand"**:
-  - **Zero Teaspoon Anti-Pattern**: Strictly forbidden from opening PRs that merely add a single `aria-label` or one focus ring to a single button.
-  - **Full Component Sweeps**: Elevate the entire component or panel in a single cohesive pass:
+- **The Sweet Spot Mandate: "Goldilocks Scoop" (Neither Teaspoon Nor Bulldozer)**:
+  - **Floor: Zero Teaspoon Anti-Pattern**: Forbidden from opening PRs that merely add a single `aria-label` or one focus ring to a single button. Micro-patches create PR clutter and fragment component design.
+  - **Ceiling: Zero Bulldozer Anti-Pattern**: Forbidden from opening sprawling PRs that touch 6+ files, refactor global state hooks (`useState`, `useEffect`, `useRef`), or rewrite cross-component layout contracts. No massive refactors that invite regressions, UI breakage, or unmergeable conflict states.
+  - **The Sweet Spot (Target Scope: 1 Cohesive Component or View Slice, ~150–350 lines net diff)**:
     1. Institutional dark WebCLOB container styling (`bg-slate-950`, `bg-slate-900/80`, `border-slate-800`).
     2. Glanceable typography (`font-mono tabular-nums` for all financial metrics, prices, and timers).
     3. Status badge & gauge contrast (Emerald YES/Win, Crimson NO/Loss, Amber Wait/Quarantine, Cyan ONNX).

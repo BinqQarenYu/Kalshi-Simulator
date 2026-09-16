@@ -22,6 +22,12 @@ import logging
 import os
 from pathlib import Path
 import sys
+
+# Ensure 'src' directory is in sys.path even when executed directly or without PYTHONPATH
+_SRC_DIR = Path(__file__).resolve().parent.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 import threading
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -48,6 +54,7 @@ from kalshi_sim.auth import (
 )
 from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
 from kalshi_sim.cfbenchmarks_sync import CFBenchmarksSync
+from kalshi_sim.clock_sync import clock_sync
 from kalshi_sim.db import get_db, get_db_writer, DatabaseWriter
 from kalshi_sim.live_coordinator import LiveCoordinator
 from kalshi_sim.ml.dual_onnx_gateway import DualONNXGateway
@@ -317,14 +324,15 @@ class StandaloneONNXEngine:
             self.execution_mode = "LIVE" if self.is_live else "SHADOW"
 
     def get_time_to_expiry(self) -> float:
-        """Calculate exact remaining seconds until active contract expiration boundary."""
-        if self.active_market_close_dt:
-            now_utc = datetime.now(timezone.utc)
+        """Calculate exact remaining seconds until active contract expiration boundary (Kalshi web calibrated)."""
+        now_utc = clock_sync.web_now()
+        
+        if getattr(self, "active_market_close_dt", None):
             delta = (self.active_market_close_dt - now_utc).total_seconds()
             return max(0.0, delta)
-        now_dt = datetime.now(timezone.utc)
-        cur_min = now_dt.minute
-        cur_sec = now_dt.second + now_dt.microsecond / 1_000_000.0
+            
+        cur_min = now_utc.minute
+        cur_sec = now_utc.second + now_utc.microsecond / 1_000_000.0
         boundary_min = 15 * (cur_min // 15 + 1)
         secs_left = (boundary_min - cur_min) * 60.0 - cur_sec
         return max(0.0, secs_left)
@@ -338,8 +346,8 @@ class StandaloneONNXEngine:
         return params
 
     def update_parameters(self, **kwargs) -> Dict[str, Any]:
-        """Dynamically update strategy parameters and guardrail caps."""
-        max_contracts = kwargs.pop("max_contracts", None)
+        """Update ONNX Strategy dials dynamically."""
+        max_contracts = kwargs.get("max_contracts")
         if max_contracts is not None:
             clamped_size = max(1, min(1, int(max_contracts)))
             self.guardrails.max_micro_bankroll_contracts = clamped_size
@@ -351,10 +359,22 @@ class StandaloneONNXEngine:
         self.bot.update_parameters(**kwargs)
         return self.get_parameters()
 
+    def _sync_kalshi_clock(self) -> None:
+        """Perform HTTP round-trip to calculate Kalshi server time drift vs local OS clock."""
+        try:
+            drift = clock_sync.sync()
+            self._clock_drift_seconds = drift
+        except Exception as e:
+            logger.warning("[NTP SYNC] Clock sync warning on Port 8002: %s", e)
+            self._clock_drift_seconds = getattr(self, "_clock_drift_seconds", 0.0)
+
     async def start(self) -> None:
         """Start all background loops for Port 8002."""
         self._running = True
         prevent_windows_sleep()
+
+        # Synchronize NTP time drift with Kalshi API
+        self._sync_kalshi_clock()
 
         # Start database persistence writer
         await self.db_writer.start()
@@ -599,7 +619,34 @@ class StandaloneONNXEngine:
     async def _discover_active_market(self, session: aiohttp.ClientSession) -> None:
         """Discover current open 15M BTC contract, or upcoming initialized contract during maintenance."""
         try:
-            now_utc = datetime.now(timezone.utc)
+            now_utc = clock_sync.web_now()
+
+            # 0. Primary Sync: Inherit unified market truth from Mother Dash (Port 8000)
+            try:
+                async with session.get("http://127.0.0.1:8000/api/state", timeout=aiohttp.ClientTimeout(total=0.5)) as resp0:
+                    if resp0.status == 200:
+                        m_data = await resp0.json()
+                        market = m_data.get("market", {})
+                        if market and market.get("ticker"):
+                            new_ticker = market["ticker"]
+                            if self.active_ticker and new_ticker != self.active_ticker:
+                                logger.info("🔄 [CYCLE ROLLOVER] %s -> %s. Sweeping resting orders...", self.active_ticker, new_ticker)
+                                asyncio.create_task(self._cancel_resting_orders())
+                            self.active_ticker = new_ticker
+                            if market.get("target_strike") is not None:
+                                self.target_strike = Decimal(str(market["target_strike"]))
+                            if market.get("current_btc_price") is not None:
+                                self.current_btc_spot = Decimal(str(market["current_btc_price"]))
+                                self.brti_connected = True
+                            t_rem = market.get("expiry_countdown_seconds")
+                            if t_rem is not None:
+                                self.active_market_close_dt = now_utc + timedelta(seconds=int(t_rem))
+                            self.target_time_str = market.get("target_time_str", "")
+                            self.time_window_str = market.get("time_window_str", "")
+                            return
+            except Exception:
+                pass
+
             valid_markets = []
 
             # 1. Primary: open markets

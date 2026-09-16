@@ -1,14 +1,16 @@
 # Palette's Journal — Institutional WebCLOB FinTech Design & Ergonomics
 
-## 🏛️ Executive Scope Directive: "Scoop More Sand" (Macro-UX Overhauls vs Micro-Patches)
-- **Zero Teaspoon Anti-Pattern**: Never open a PR that merely adds a single `aria-label` or one focus ring to a single button. Micro-patches create PR clutter and fragment component design.
-- **Full Component & View Sweeps**: When tasked with a component or panel, execute a comprehensive, aggressive visual and ergonomic overhaul:
+## 🏛️ Executive Scope Directive: The "Goldilocks Scoop" (The Sweet Spot Standard)
+- **Floor: Zero Teaspoon Anti-Pattern**: Never open a PR that merely adds a single `aria-label` or one focus ring to a single button. Micro-patches create PR clutter and fragment component design.
+- **Ceiling: Zero Bulldozer Anti-Pattern**: Never open sprawling PRs that touch 6+ files, refactor global React state (`useState`, `useEffect`, `useRef`), or rewrite cross-component parent layouts. Overly large PRs cause merge gridlock and invite visual regressions.
+- **The Sweet Spot Target Scope (1 Cohesive Component or View Slice, ~150–350 lines net diff)**:
+  When tasked with a component or panel, execute a comprehensive, balanced visual and ergonomic sweep within its boundaries:
   1. **Visual Hierarchy & Layout Density**: Institutional dark WebCLOB theme (`bg-slate-950`, `bg-slate-900/80`, `border-slate-800`), crisp panel cards, high-density Bloomberg-terminal grid spacing (`gap-1.5`, `p-2`, `text-xs`).
   2. **Glanceable Telemetry**: Strict `font-mono tabular-nums` for all financial figures, strike prices, countdown timers, PnL percentages, and neural probabilities.
   3. **Cohesive Interactive States**: Seamless hover, focus-visible rings (`focus-visible:ring-2 focus-visible:ring-cyan-500/50`), active press, and disabled styling across *every* interactive element in the file.
   4. **Microstructure Color System**: Emerald (`#10b981`) for YES/Win, Crimson (`#f43f5e`) for NO/Loss, Amber (`#f59e0b`) for Quarantine/Wait, Cyan/Indigo (`#06b6d4`/`#6366f1`) for Dual-Brain ONNX inference.
   5. **Zero-Lag Reactivity**: High-performance CSS transforms and transitions (`transition-all duration-150`) that run smoothly at 60fps without triggering DOM thrashing.
-  6. **Complete Domain Polish**: Always elevate the entire component (header, body metrics, buttons, empty states, tooltips) in a single unified PR.
+  6. **Complete Domain Polish**: Always elevate the entire component (header, body metrics, buttons, empty states, tooltips) in a single unified PR without breaking outside contracts.
 
 ---
 
@@ -64,3 +66,7 @@
 ## 2026-09-20 - Quantitative Strategy Dropdown Menu & Real-Time Telemetry Accessibility
 **Learning:** Custom strategy selection dropdown menus require explicit keyboard `Escape` dismissal handlers, `aria-controls` container linking, `type="button"` and `aria-label` attributes on option items, and `font-mono tabular-nums` for real-time probability/EV metrics to prevent layout thrashing and preserve screen reader accessibility during high-frequency telemetry updates.
 **Action:** Always wire `Escape` key handlers on custom dropdown menus, link dropdown buttons with `aria-controls`, add explicit `aria-label` text to options, and format live numeric readouts with `font-mono tabular-nums`.
+
+## 2026-09-22 - Streaming Trade Tape Telemetry & Scroll Region Accessibility
+**Learning:** Continuous streaming data views (such as real-time exchange trade tape prints) require `tabIndex={0}`, `role="region"`, explicit `aria-label`, and `focus-visible:ring-2` focus outlines on their scroll containers so keyboard-only users can focus and navigate historical prints. Formatting numerical trade figures with `tabular-nums` prevents layout jitter during high-frequency streaming updates, while providing a glanceable telemetry summary header gives instant terminal awareness.
+**Action:** Always wrap scrollable streaming data containers in `tabIndex={0}` regions with `aria-label` and `focus-visible:ring-2` outlines, apply `tabular-nums` to financial data columns, and include a glanceable telemetry summary bar above the table.
