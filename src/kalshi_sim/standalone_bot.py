@@ -24,6 +24,12 @@ import math
 import os
 from pathlib import Path
 import sys
+
+# Ensure 'src' directory is in sys.path even when executed directly or without PYTHONPATH
+_SRC_DIR = Path(__file__).resolve().parent.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 import threading
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Union

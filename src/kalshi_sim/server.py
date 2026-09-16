@@ -18,12 +18,18 @@ import math
 import os
 import random
 import re
+from pathlib import Path
 import sys
+
+# Ensure 'src' directory is in sys.path even when executed directly or without PYTHONPATH
+_SRC_DIR = Path(__file__).resolve().parent.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional
 from zoneinfo import ZoneInfo
 

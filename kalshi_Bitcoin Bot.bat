@@ -10,14 +10,24 @@ echo   Standalone Execution Engine ^| Multi-Timeframe Microstructure ONNX CLOB
 echo ===============================================================================
 echo.
 
-rem 1. Check Python installation
+rem 1. Check Python installation and prioritize Python 3.12
+if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
+    set "PATH=%LOCALAPPDATA%\Programs\Python\Python312;%LOCALAPPDATA%\Programs\Python\Python312\Scripts;!PATH!"
+)
+
+set "PYTHON_CMD=python"
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Python 3.11+ is not found in your PATH.
-    echo Please install Python and ensure "Add Python to PATH" is checked.
-    echo.
-    pause
-    exit /b 1
+if !errorlevel! neq 0 (
+    py --version >nul 2>&1
+    if !errorlevel! equ 0 (
+        set "PYTHON_CMD=py"
+    ) else (
+        echo [ERROR] Python 3.11+ is not found in your PATH.
+        echo Please install Python and ensure "Add Python to PATH" is checked.
+        echo.
+        pause
+        exit /b 1
+    )
 )
 
 rem 2. Set PYTHONPATH to src
@@ -27,7 +37,7 @@ rem 3. Check for ONNX AI Model
 if not exist "models\nano_microscope_overhauled.onnx" (
     echo [WARNING] ONNX model 'models\nano_microscope_overhauled.onnx' missing.
     echo Attempting model synchronization...
-    python -m kalshi_sim.gdrive_sync --pull-models
+    !PYTHON_CMD! -m kalshi_sim.gdrive_sync --pull-models
 )
 
 rem 4. Check Frontend Build Distribution
@@ -73,7 +83,7 @@ rem Launch default browser
 start "" http://localhost:8000
 
 rem Start Python server with unbuffered console output
-python -u -m kalshi_sim.server
+!PYTHON_CMD! -u -m kalshi_sim.server
 
 :finish
 if %errorlevel% neq 0 (
