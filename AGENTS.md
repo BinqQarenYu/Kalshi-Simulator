@@ -89,3 +89,15 @@ Jules operates under three specialized engineering personas. When running in thi
 - Focus: CFTC anti-wash trading arbitration, token-bucket rate limit compliance, HTTP security headers, and credential isolation.
 - Scope: Security middleware, audit trails, and defensive API validation. Always append learnings to `.jules/sentinel.md`.
 
+---
+
+## 6. Branch Freeze Protocol: Focus on ONNX 3 / Brain 3 / Gold ONNX Bot
+On branch `focus_on_gold_onnx_bot`, **all components not related to ONNX 3 / Brain 3 / Gold ONNX Bot are strictly FROZEN and LOCKED**:
+- **Frozen Modules (DO NOT EDIT)**: Mother Dash (`ParentHub.tsx`, `EngineRoomMatrix.tsx`, `ArbitrageRadarView.tsx`, `TradeTape.tsx`, `Header.tsx`), Bot 1 (`domination_bot.py`, `standalone_bot.py`), Bot 2 (`standalone_onnx.py`), Cross-exchange routers (`polymarket_client.py`, `atomic_router.py`), and general server infrastructure (`server.py`).
+- **Active Scope (PERMITTED TO EDIT)**:
+  - Bot 3 / Gold ONNX decision engines (`macro_trend_dominion_bot.py`, `gold_onnx_bot.py`, `gold_inversion_bot.py`, `hmm_brain.py`)
+  - Gold continuous training & dataset pipeline (`gold_continuous_trainer.py`, `gold_dataset_builder.py`, `gold_feature_extractor.py`, `gold_model.py`, `export_gold_onnx.py`)
+  - Standalone runners & dedicated cockpits (`standalone_macro.py`, `shadow_gold_runner.py`, `pocket_cockpit_macro.html`, Bot 3 section in `BabyBotConsole.tsx`)
+  - Dedicated Bot 3 / Gold test suites (`test_macro_trend_dominion.py`, `test_gold_onnx_bot.py`, `test_gold_trainer.py`, etc.)
+- Enforce full ASVL loop before committing any changes.
+
