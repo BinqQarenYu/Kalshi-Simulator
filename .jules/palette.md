@@ -64,3 +64,7 @@
 ## 2026-09-20 - Quantitative Strategy Dropdown Menu & Real-Time Telemetry Accessibility
 **Learning:** Custom strategy selection dropdown menus require explicit keyboard `Escape` dismissal handlers, `aria-controls` container linking, `type="button"` and `aria-label` attributes on option items, and `font-mono tabular-nums` for real-time probability/EV metrics to prevent layout thrashing and preserve screen reader accessibility during high-frequency telemetry updates.
 **Action:** Always wire `Escape` key handlers on custom dropdown menus, link dropdown buttons with `aria-controls`, add explicit `aria-label` text to options, and format live numeric readouts with `font-mono tabular-nums`.
+
+## 2026-09-22 - Streaming Trade Tape Telemetry & Scroll Region Accessibility
+**Learning:** Continuous streaming data views (such as real-time exchange trade tape prints) require `tabIndex={0}`, `role="region"`, explicit `aria-label`, and `focus-visible:ring-2` focus outlines on their scroll containers so keyboard-only users can focus and navigate historical prints. Formatting numerical trade figures with `tabular-nums` prevents layout jitter during high-frequency streaming updates, while providing a glanceable telemetry summary header gives instant terminal awareness.
+**Action:** Always wrap scrollable streaming data containers in `tabIndex={0}` regions with `aria-label` and `focus-visible:ring-2` outlines, apply `tabular-nums` to financial data columns, and include a glanceable telemetry summary bar above the table.
