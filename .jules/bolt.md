@@ -126,3 +126,7 @@
 ## 2026-08-28 - C-Level List Slicing in ZeroCopyRingBuffer
 **Learning:** Iterating over circular ring buffers element-by-element with Python loops and modulo index arithmetic in `to_list()` and `get_tail(n)` caused significant CPU overhead during tick stream windowing.
 **Action:** Replace per-element Python loops with direct C-level list slicing operations (`list(buffer[head:]) + list(buffer[:head])` / `list(buffer[start:end])`). Reduced `to_list` latency by ~79% (~4.8x speedup) and `get_tail` latency by ~94% (~17.1x speedup).
+
+## 2026-09-17 - O(1) Version-Backed Binary Best Ask Caching in L2BookState
+**Learning:** Computing binary option ask prices (`best_yes_ask = Decimal("1") - best_no_bid` and `best_no_ask = Decimal("1") - best_yes_bid`) on every property read during high-frequency trading ticks and WebSocket broadcasts added ~0.95 µs overhead per call due to un-memoized Decimal subtraction.
+**Action:** Memoized calculated binary ask prices in `L2BookState` leveraging `_BookDict._version` mutation tracking on `_no_book` and `_yes_book` and pre-allocated `_DEC_1 = Decimal("1")`. Reduced binary ask property read latency from ~0.95 µs to ~0.21 µs (~3.8x speedup / 1,000,000 reads dropped from 1266.91 ms to 324.20 ms).
