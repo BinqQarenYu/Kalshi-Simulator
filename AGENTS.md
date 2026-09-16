@@ -93,8 +93,9 @@ Jules operates under three specialized engineering personas. When running in thi
 
 ## 6. Branch Freeze Protocol: Focus on ONNX 3 / Brain 3 / Gold ONNX Bot
 On branch `focus_on_gold_onnx_bot`, **all components not related to ONNX 3 / Brain 3 / Gold ONNX Bot are strictly FROZEN and LOCKED**:
-- **Frozen Modules (DO NOT EDIT)**: Mother Dash (`ParentHub.tsx`, `EngineRoomMatrix.tsx`, `ArbitrageRadarView.tsx`, `TradeTape.tsx`, `Header.tsx`), Bot 1 (`domination_bot.py`, `standalone_bot.py`), Bot 2 (`standalone_onnx.py`), Cross-exchange routers (`polymarket_client.py`, `atomic_router.py`), and general server infrastructure (`server.py`).
+- **Frozen Modules (DO NOT EDIT)**: Mother Dash general UI (`ParentHub.tsx`, `EngineRoomMatrix.tsx`, `ArbitrageRadarView.tsx`, `TradeTape.tsx`, `Header.tsx`), Bot 1 (`domination_bot.py`, `standalone_bot.py`), Bot 2 (`standalone_onnx.py`), and cross-exchange routers (`polymarket_client.py`, `atomic_router.py`).
 - **Active Scope (PERMITTED TO EDIT)**:
+  - Mother Server Port 8000 integration (`server.py` for Bot 3 / Gold ONNX endpoints, background tasks, and WebSocket streaming)
   - Bot 3 / Gold ONNX decision engines (`macro_trend_dominion_bot.py`, `gold_onnx_bot.py`, `gold_inversion_bot.py`, `hmm_brain.py`)
   - Gold continuous training & dataset pipeline (`gold_continuous_trainer.py`, `gold_dataset_builder.py`, `gold_feature_extractor.py`, `gold_model.py`, `export_gold_onnx.py`)
   - Standalone runners & dedicated cockpits (`standalone_macro.py`, `shadow_gold_runner.py`, `pocket_cockpit_macro.html`, Bot 3 section in `BabyBotConsole.tsx`)

@@ -1,4 +1,4 @@
-﻿---
+---
 trigger: always_on
 glob: "**/*"
 description: Branch Freeze Protocol for focus_on_gold_onnx_bot — strictly lock all components not related to ONNX 3 / Brain 3 / Gold ONNX Bot.
@@ -29,22 +29,23 @@ The following components are read-only and locked against any modifications:
    - `src/kalshi_sim/atomic_router.py`
    - `src/kalshi_sim/polymarket_client.py`
    - `src/kalshi_sim/clock_sync.py`
-   - `src/kalshi_sim/server.py` (Port 8000 server endpoints for Bot 1/2)
 
 ## 3. Active & Permitted Scope (ONNX 3 / Brain 3 / Gold ONNX ONLY)
 Work on this branch is strictly confined to the following active files:
-1. **Bot 3 / Gold ONNX Decision Engines**:
+1. **Server & Monolithic Runtime Integration**:
+   - `src/kalshi_sim/server.py` (Port 8000 Mother Server endpoints, WebSocket streaming, and state management for Bot 3 / Gold ONNX)
+2. **Bot 3 / Gold ONNX Decision Engines**:
    - `src/kalshi_sim/ml/macro_trend_dominion_bot.py`
    - `src/kalshi_sim/ml/gold_onnx_bot.py`
    - `src/kalshi_sim/ml/gold_inversion_bot.py`
    - `src/kalshi_sim/ml/quolas_core/hmm_brain.py` (Brain 3 HMM module)
-2. **Gold ONNX Model, Dataset & Continuous Training**:
+3. **Gold ONNX Model, Dataset & Continuous Training**:
    - `src/kalshi_sim/ml/gold_continuous_trainer.py`
    - `src/kalshi_sim/ml/gold_dataset_builder.py`
    - `src/kalshi_sim/ml/gold_feature_extractor.py`
    - `src/kalshi_sim/ml/gold_model.py`
    - `src/kalshi_sim/ml/export_gold_onnx.py`
-3. **Execution Runners & Dedicated Cockpits**:
+4. **Execution Runners & Dedicated Cockpits**:
    - `src/kalshi_sim/standalone_macro.py` (Bot 3 Standalone Runner on Port 8003)
    - `src/kalshi_sim/shadow_gold_runner.py` (Lane 2 Gold Incubator Runner)
    - `src/kalshi_sim/templates/pocket_cockpit_macro.html` (Bot 3 Mobile Cockpit)
