@@ -8,9 +8,10 @@ is required.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 from decimal import Decimal
 import logging
+import time
 
 from kalshi_sim.schemas import (
     L2BookState,
@@ -21,8 +22,9 @@ from kalshi_sim.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# Performance optimization: Pre-instantiate Decimal("0") constant to eliminate object allocation per L2 delta message
+_ZERO_DECIMAL = Decimal("0")
 
-import time
 
 class OrderBookManager:
     """Manages reconstructed L2 order books across multiple Kalshi markets."""
@@ -113,11 +115,13 @@ class OrderBookManager:
             book._stale = False
 
         # Apply delta to the appropriate side book
-        side_book = book.yes_book if delta.side == "yes" else book.no_book
-        current_qty = side_book.get(delta.price, Decimal("0"))
+        # Performance optimization: Direct attribute access to _yes_book / _no_book bypasses property getter overhead.
+        # Uses pre-instantiated _ZERO_DECIMAL constant to avoid creating new Decimal objects per delta message.
+        side_book = book._yes_book if delta.side == "yes" else book._no_book
+        current_qty = side_book.get(delta.price, _ZERO_DECIMAL)
         new_qty = current_qty + delta.delta
 
-        if new_qty <= Decimal("0"):
+        if new_qty <= _ZERO_DECIMAL:
             side_book.pop(delta.price, None)
         else:
             side_book[delta.price] = new_qty

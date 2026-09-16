@@ -88,15 +88,24 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';
   const isSealed = is3StepBot || isMacroTrend || Boolean(signals?.is_sealed || signals?.bot_sealed);
 
-  // Close dropdown on outside click
+  // Close dropdown on outside click or Escape key
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsDropdownOpen(false);
       }
     };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsDropdownOpen(false);
+      }
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   const pUpPct = (((signals?.p_up ?? 0)) * 100).toFixed(1);
@@ -177,13 +186,22 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             type="button"
             aria-expanded={isDropdownOpen}
             aria-haspopup="listbox"
+            aria-controls="strategy-select-dropdown"
             aria-label="Select quantitative trading strategy bot"
             onClick={() => {
               soundFX.playClickSound();
               setIsDropdownOpen(!isDropdownOpen);
             }}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                if (!isDropdownOpen) {
+                  e.preventDefault();
+                  setIsDropdownOpen(true);
+                }
+              }
+            }}
             className="flex items-center gap-2 px-3 py-1.5 bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-blue-500/50 rounded-xl transition-all shadow-sm group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-            title="Click to switch strategy bot"
+            title="Click or press Down Arrow to switch strategy bot"
           >
             {isDualOnnx ? (
               <div className="h-5 w-5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center">
@@ -221,7 +239,12 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
           {/* Strategy Dropdown Menu */}
           {isDropdownOpen && (
-            <div role="listbox" aria-label="Quantitative trading strategy options" className="absolute left-0 top-full mt-2 w-72 bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl z-50 p-2 flex flex-col gap-1 animate-in fade-in zoom-in-95">
+            <div
+              id="strategy-select-dropdown"
+              role="listbox"
+              aria-label="Quantitative trading strategy options"
+              className="absolute left-0 top-full mt-2 w-72 bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl z-50 p-2 flex flex-col gap-1 animate-in fade-in zoom-in-95"
+            >
               <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-[#21262d]">
                 Select Quantitative Trading Bot
               </div>
@@ -231,6 +254,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 type="button"
                 role="option"
                 aria-selected={isDualOnnx}
+                aria-label="Select Dual-ONNX Arbitrage strategy bot"
                 onClick={() => handleStrategyChange('dual_onnx')}
                 className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                   isDualOnnx
@@ -240,7 +264,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               >
                 <div className="flex items-start gap-2.5">
                   <div className="h-7 w-7 rounded-lg bg-cyan-500/25 border border-cyan-500/50 flex items-center justify-center shrink-0 mt-0.5">
-                    <Layers className="h-4 w-4 text-cyan-300" />
+                    <Layers className="h-4 w-4 text-cyan-300" aria-hidden="true" />
                   </div>
                   <div>
                     <div className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -254,7 +278,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                     </p>
                   </div>
                 </div>
-                {isDualOnnx && <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-1" />}
+                {isDualOnnx && <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-1" aria-hidden="true" />}
               </button>
 
               {/* Macro ONNX Bot */}
@@ -262,6 +286,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 type="button"
                 role="option"
                 aria-selected={isMacroOnnx}
+                aria-label="Select Macro ONNX Bot strategy"
                 onClick={() => handleStrategyChange('macro_onnx')}
                 className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 ${
                   isMacroOnnx
@@ -271,7 +296,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               >
                 <div className="flex items-start gap-2.5">
                   <div className="h-7 w-7 rounded-lg bg-purple-500/25 border border-purple-500/50 flex items-center justify-center shrink-0 mt-0.5">
-                    <Cpu className="h-4 w-4 text-purple-300" />
+                    <Cpu className="h-4 w-4 text-purple-300" aria-hidden="true" />
                   </div>
                   <div>
                     <div className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -285,7 +310,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                     </p>
                   </div>
                 </div>
-                {isMacroOnnx && <Check className="h-4 w-4 text-purple-400 shrink-0 mt-1" />}
+                {isMacroOnnx && <Check className="h-4 w-4 text-purple-400 shrink-0 mt-1" aria-hidden="true" />}
               </button>
 
               {/* Bot: Macro Trend Dominion */}
@@ -293,6 +318,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 type="button"
                 role="option"
                 aria-selected={isMacroTrend}
+                aria-label="Select Macro Trend Dominion strategy bot"
                 onClick={() => handleStrategyChange('macro_trend_dominion')}
                 className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 ${
                   isMacroTrend
@@ -302,7 +328,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               >
                 <div className="flex items-start gap-2.5">
                   <div className="h-7 w-7 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center shrink-0 mt-0.5">
-                    <TrendingUp className="h-4 w-4 text-cyan-400" />
+                    <TrendingUp className="h-4 w-4 text-cyan-400" aria-hidden="true" />
                   </div>
                   <div>
                     <div className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -316,7 +342,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                     </p>
                   </div>
                 </div>
-                {isMacroTrend && <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-1" />}
+                {isMacroTrend && <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-1" aria-hidden="true" />}
               </button>
 
               {/* Bot 1: 3-Step Domination Bot */}
@@ -324,6 +350,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 type="button"
                 role="option"
                 aria-selected={is3StepBot}
+                aria-label="Select 3-Step Domination Bot strategy"
                 onClick={() => handleStrategyChange('3_step_domination_bot')}
                 className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
                   is3StepBot
@@ -333,7 +360,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               >
                 <div className="flex items-start gap-2.5">
                   <div className="h-7 w-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 mt-0.5">
-                    <Zap className="h-4 w-4 text-amber-400" />
+                    <Zap className="h-4 w-4 text-amber-400" aria-hidden="true" />
                   </div>
                   <div>
                     <div className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -347,7 +374,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                     </p>
                   </div>
                 </div>
-                {is3StepBot && <Check className="h-4 w-4 text-amber-400 shrink-0 mt-1" />}
+                {is3StepBot && <Check className="h-4 w-4 text-amber-400 shrink-0 mt-1" aria-hidden="true" />}
               </button>
 
               {/* Bot 2: ONNX Microstructure Bot */}
@@ -355,6 +382,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                 type="button"
                 role="option"
                 aria-selected={isOnnxBot}
+                aria-label="Select ONNX Microstructure Bot strategy"
                 onClick={() => handleStrategyChange('onnx_microstructure_bot')}
                 className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                   isOnnxBot
@@ -364,7 +392,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               >
                 <div className="flex items-start gap-2.5">
                   <div className="h-7 w-7 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center shrink-0 mt-0.5">
-                    <Cpu className="h-4 w-4 text-blue-400" />
+                    <Cpu className="h-4 w-4 text-blue-400" aria-hidden="true" />
                   </div>
                   <div>
                     <div className="text-xs font-bold text-white flex items-center gap-1.5">
@@ -378,7 +406,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                     </p>
                   </div>
                 </div>
-                {isOnnxBot && <Check className="h-4 w-4 text-blue-400 shrink-0 mt-1" />}
+                {isOnnxBot && <Check className="h-4 w-4 text-blue-400 shrink-0 mt-1" aria-hidden="true" />}
               </button>
             </div>
           )}
@@ -388,11 +416,16 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
         <div className="flex items-center gap-2">
           {onOpenReports && (
             <button
-              onClick={onOpenReports}
-              className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl transition-colors shadow-sm"
+              type="button"
+              aria-label="Open 15-Minute Event Win/Loss Reports modal"
+              onClick={() => {
+                soundFX.playClickSound();
+                onOpenReports();
+              }}
+              className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
               title="Open 15-Minute Event Win/Loss Reports"
             >
-              <Award className="h-3.5 w-3.5" />
+              <Award className="h-3.5 w-3.5 text-emerald-400" aria-hidden="true" />
               <span>Reports</span>
             </button>
           )}
@@ -583,25 +616,25 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
           <div className="grid grid-cols-4 gap-2 bg-[#0d1117] border border-[#30363d] rounded-lg p-2 text-center">
             <div>
               <div className="text-[9px] text-gray-400 font-medium">MAX RISK</div>
-              <div className="text-xs font-mono font-bold text-rose-400">
+              <div className="text-xs font-mono tabular-nums font-bold text-rose-400">
                 {(localDiscount * 100).toFixed(0)}¢
               </div>
             </div>
             <div>
               <div className="text-[9px] text-gray-400 font-medium">MAX PROFIT</div>
-              <div className="text-xs font-mono font-bold text-emerald-400">
+              <div className="text-xs font-mono tabular-nums font-bold text-emerald-400">
                 {((1 - localDiscount) * 100).toFixed(0)}¢
               </div>
             </div>
             <div>
               <div className="text-[9px] text-gray-400 font-medium">PAYOUT ROI</div>
-              <div className="text-xs font-mono font-bold text-amber-300">
+              <div className="text-xs font-mono tabular-nums font-bold text-amber-300">
                 {localDiscount > 0 ? (((1 - localDiscount) / localDiscount)).toFixed(2) : '0.00'}x
               </div>
             </div>
             <div>
               <div className="text-[9px] text-gray-400 font-medium">MAKER FEE</div>
-              <div className="text-xs font-mono font-bold text-cyan-400">
+              <div className="text-xs font-mono tabular-nums font-bold text-cyan-400">
                 $0.00
               </div>
             </div>
@@ -649,14 +682,14 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
           />
         </div>
 
-        <div className="grid grid-cols-3 text-center text-xs font-mono pt-1">
-          <div className="text-[#00d084] font-bold">
+        <div className="grid grid-cols-3 text-center text-xs font-mono tabular-nums pt-1">
+          <div className="text-[#00d084] font-bold" aria-label={`Probability YES: ${pUpPct}%`}>
             YES: {pUpPct}%
           </div>
-          <div className="text-gray-400 font-medium">
+          <div className="text-gray-400 font-medium" aria-label={`Probability WAIT: ${pWaitPct}%`}>
             WAIT: {pWaitPct}%
           </div>
-          <div className="text-[#ff4d4d] font-bold">
+          <div className="text-[#ff4d4d] font-bold" aria-label={`Probability NO: ${pDnPct}%`}>
             NO: {pDnPct}%
           </div>
         </div>
@@ -668,15 +701,15 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
         <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-2.5 flex flex-col gap-1">
           <div className="text-[11px] text-[#8b949e] flex items-center justify-between font-semibold">
             <span className="flex items-center gap-1">
-              <DollarSign className="h-3 w-3 text-[#00d084]" />
+              <DollarSign className="h-3 w-3 text-[#00d084]" aria-hidden="true" />
               <span>Net E[YES]</span>
             </span>
-            <span className="text-[9px] text-gray-500 font-mono">-1¢ fee</span>
+            <span className="text-[9px] text-gray-500 font-mono tabular-nums">-1¢ fee</span>
           </div>
-          <div className={`font-mono text-sm font-bold ${(signals?.ev_yes ?? 0) >= 0.02 ? 'text-[#00d084]' : 'text-gray-300'}`}>
+          <div className={`font-mono tabular-nums text-sm font-bold ${(signals?.ev_yes ?? 0) >= 0.02 ? 'text-[#00d084]' : 'text-gray-300'}`}>
             {(signals?.ev_yes ?? 0) >= 0 ? '+' : ''}${(((signals?.ev_yes ?? 0)) * 100).toFixed(1)}¢
           </div>
-          <div className="text-[10px] text-[#8b949e]">
+          <div className="text-[10px] text-[#8b949e] font-mono tabular-nums">
             Kelly f*: {(((signals?.kelly_f_yes ?? 0)) * 100).toFixed(1)}%
           </div>
         </div>
@@ -685,15 +718,15 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
         <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-2.5 flex flex-col gap-1">
           <div className="text-[11px] text-[#8b949e] flex items-center justify-between font-semibold">
             <span className="flex items-center gap-1">
-              <DollarSign className="h-3 w-3 text-[#ff4d4d]" />
+              <DollarSign className="h-3 w-3 text-[#ff4d4d]" aria-hidden="true" />
               <span>Net E[NO]</span>
             </span>
-            <span className="text-[9px] text-gray-500 font-mono">-1¢ fee</span>
+            <span className="text-[9px] text-gray-500 font-mono tabular-nums">-1¢ fee</span>
           </div>
-          <div className={`font-mono text-sm font-bold ${(signals?.ev_no ?? 0) >= 0.02 ? 'text-[#ff4d4d]' : 'text-gray-300'}`}>
+          <div className={`font-mono tabular-nums text-sm font-bold ${(signals?.ev_no ?? 0) >= 0.02 ? 'text-[#ff4d4d]' : 'text-gray-300'}`}>
             {(signals?.ev_no ?? 0) >= 0 ? '+' : ''}${(((signals?.ev_no ?? 0)) * 100).toFixed(1)}¢
           </div>
-          <div className="text-[10px] text-[#8b949e]">
+          <div className="text-[10px] text-[#8b949e] font-mono tabular-nums">
             Kelly f*: {(((signals?.kelly_f_no ?? 0)) * 100).toFixed(1)}%
           </div>
         </div>
@@ -812,9 +845,11 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
       {onTestBot && (
         <div className="flex flex-col gap-2 pt-1">
           <button
+            type="button"
+            aria-label={`Execute test trade evaluation for ${isMacroOnnx ? 'Macro ONNX Bot' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2' : is3StepBot ? '3-Step Domination' : 'ONNX Bot'}`}
             onClick={handleTestBot}
             disabled={isTesting}
-            className={`w-full py-2.5 px-4 text-white font-bold text-xs rounded-xl shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 transition-all disabled:opacity-50 ${
+            className={`w-full py-2.5 px-4 text-white font-bold text-xs rounded-xl shadow-lg active:scale-[0.98] flex items-center justify-center gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 focus-visible:ring-offset-[#111620] disabled:opacity-50 ${
               isMacroOnnx
                 ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 shadow-purple-500/25'
                 : isMacroTrend

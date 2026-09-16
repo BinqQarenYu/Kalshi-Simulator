@@ -22,6 +22,12 @@ import logging
 import os
 from pathlib import Path
 import sys
+
+# Ensure 'src' directory is in sys.path even when executed directly or without PYTHONPATH
+_SRC_DIR = Path(__file__).resolve().parent.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 import threading
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -104,14 +110,21 @@ def prevent_windows_sleep() -> None:
     """Keep Windows execution state active 24/7 with monitor off."""
     if sys.platform == "win32":
         try:
+            try:
+                import psutil
+                proc = psutil.Process()
+                if proc.nice() != psutil.ABOVE_NORMAL_PRIORITY_CLASS:
+                    proc.nice(psutil.ABOVE_NORMAL_PRIORITY_CLASS)
+            except Exception:
+                pass
+
             ES_CONTINUOUS = 0x80000000
             ES_SYSTEM_REQUIRED = 0x00000001
-            ES_AWAYMODE_REQUIRED = 0x00000040
             res = ctypes.windll.kernel32.SetThreadExecutionState(
-                ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED
             )
             if res != 0:
-                logger.info("🛡️ [POWER MANAGEMENT] Windows Sleep Prevention & Away Mode ACTIVE.")
+                logger.info("🛡️ [POWER MANAGEMENT] Windows Sleep Prevention ACTIVE. System running 24/7 with external display & clamshell support.")
             else:
                 logger.warning("⚠️ [POWER MANAGEMENT] SetThreadExecutionState returned 0.")
         except Exception as exc:

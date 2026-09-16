@@ -1108,3 +1108,66 @@ def test_entry_timing_window_and_auto_sweep(tmp_path: Path):
     assert "order_sell_tp" in engine.active_resting_orders
 
 
+def test_standalone_poe_endpoints_and_flight_recorder(tmp_path: Path):
+    """Verify POE endpoints /api/poe/scorecards and /api/poe/report on StandaloneBotEngine."""
+    import kalshi_sim.standalone_bot as sb
+
+    engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
+    sb.app_engine = engine
+
+    client = TestClient(sb.app)
+
+    # Initial state
+    resp = client.get("/api/poe/scorecards")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    assert data["total_records"] == 0
+
+    # Buffer a veto candidate and flush it
+    engine._cycle_veto_candidates["KXBTC15M-TEST-001"] = {
+        "cycle_id": "KXBTC15M-TEST-001",
+        "tau_seconds_remaining": 400.0,
+        "spot_price": 88000.0,
+        "target_strike": 87900.0,
+        "moneyness_diff": 100.0,
+        "spot_velocity_10s": 10.0,
+        "vpin_score": 0.20,
+        "ai_predicted_side": "YES",
+        "ai_confidence": 0.85,
+        "ev_gross": Decimal("0.08"),
+        "ev_net": Decimal("0.06"),
+        "decision": "VETO",
+        "primary_blocking_parameter": "AI_CONVICTION_FLOOR",
+    }
+    engine._flush_cycle_veto("KXBTC15M-TEST-001")
+    assert "KXBTC15M-TEST-001" in engine.poe_recorder._records
+
+    # Settle the vetoed cycle (settled NO -> Q4 Shielded Capital)
+    engine.poe_recorder.record_settlement(
+        cycle_id="KXBTC15M-TEST-001",
+        settlement_spot=87850.0,
+        contract_winning_side="NO",
+        settled_payout=Decimal("0.00"),
+    )
+
+    # Check scorecards endpoint
+    resp2 = client.get("/api/poe/scorecards")
+    assert resp2.status_code == 200
+    data2 = resp2.json()
+    assert data2["settled_records"] == 1
+    assert "AI_CONVICTION_FLOOR" in data2["scorecards"]
+    sc = data2["scorecards"]["AI_CONVICTION_FLOOR"]
+    assert sc["quadrant_4_shielded"] == 1
+    assert sc["vps_score_pct"] == 100.0
+    assert sc["status"] == "SHIELD"
+
+    # Check report endpoint
+    rep_resp = client.get("/api/poe/report")
+    assert rep_resp.status_code == 200
+    rep_data = rep_resp.json()
+    assert "AGENT POE: EMPIRICAL AUDIT REPORT" in rep_data["report_markdown"]
+    assert "AI_CONVICTION_FLOOR" in rep_data["report_markdown"]
+
+
+

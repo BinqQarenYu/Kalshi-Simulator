@@ -18,12 +18,18 @@ import math
 import os
 import random
 import re
+from pathlib import Path
 import sys
+
+# Ensure 'src' directory is in sys.path even when executed directly or without PYTHONPATH
+_SRC_DIR = Path(__file__).resolve().parent.parent
+if str(_SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(_SRC_DIR))
+
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from pathlib import Path
 from typing import Any, AsyncIterator, Literal, Optional
 from zoneinfo import ZoneInfo
 
@@ -169,18 +175,37 @@ def prevent_windows_sleep() -> None:
     """Prevent Windows from sleeping or suspending background execution even when monitor is off."""
     if sys.platform == "win32":
         try:
+            try:
+                import psutil
+                proc = psutil.Process()
+                if proc.nice() != psutil.ABOVE_NORMAL_PRIORITY_CLASS:
+                    proc.nice(psutil.ABOVE_NORMAL_PRIORITY_CLASS)
+            except Exception:
+                pass
+
             ES_CONTINUOUS = 0x80000000
             ES_SYSTEM_REQUIRED = 0x00000001
-            ES_AWAYMODE_REQUIRED = 0x00000040
             res = ctypes.windll.kernel32.SetThreadExecutionState(
-                ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED
+                ES_CONTINUOUS | ES_SYSTEM_REQUIRED
             )
             if res != 0:
-                logger.info("🛡️ [POWER MANAGEMENT] Windows Sleep Prevention & Away Mode ACTIVE. Process running 24/7 with monitor off.")
+                logger.info("🛡️ [POWER MANAGEMENT] Windows Sleep Prevention ACTIVE. System running 24/7 with external display & clamshell support.")
             else:
                 logger.warning("⚠️ [POWER MANAGEMENT] SetThreadExecutionState returned 0.")
         except Exception as e:
             logger.warning("Could not set Windows execution state: %s", e)
+
+
+async def _windows_keep_alive_loop() -> None:
+    """Periodically refresh Win32 execution state (every 60s) to guard against laptop lid closure or monitor flip sleep events."""
+    while True:
+        try:
+            await asyncio.sleep(60.0)
+            prevent_windows_sleep()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.debug("Windows keep-alive heartbeat error: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +277,7 @@ class ServerState:
         self._standalone_macro_data: Optional[dict[str, Any]] = None
         self._last_standalone_macro_sync: float = 0.0
         self.standalone_sync_task: Optional[asyncio.Task] = None
+        self.keep_alive_task: Optional[asyncio.Task] = None
 
 
         # Real-time Institutional Bitcoin Orderflow Feed (Binance / Coinbase L2)
@@ -1993,6 +2019,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await state.gdrive_sync.stop()
     if state.ai_worker:
         state.ai_worker.stop()
+    if state.keep_alive_task:
+        state.keep_alive_task.cancel()
     if hasattr(state, "hmm_regime_task") and state.hmm_regime_task:
         state.hmm_regime_task.cancel()
     if state.standalone_sync_task:

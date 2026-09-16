@@ -59,6 +59,32 @@ Zero TypeScript compilation errors and a clean build in `frontend/dist/`.
 ---
 
 ## 4. PR & Workflow Standards
-- Make minimal, targeted diffs. Do not refactor unrelated modules.
-- Ensure any added trading logic includes corresponding pytest unit tests in `tests/`.
-- Provide a clear PR description detailing motivation, changes, and verification results.
+- **Backend & Quantitative Precision**: Make minimal, targeted diffs. Do not refactor unrelated backend modules. Ensure any added trading logic includes unit tests in `tests/`.
+- **Frontend UI/UX & Design Sweeps**: When tasked with visual/ergonomic work, execute comprehensive component-wide sweeps ("Scoop More Sand" Standard) rather than fragmented micro-patches.
+- Provide a clear PR description detailing motivation, changes, and verification results (`pytest`, `npm run typecheck`, `npm run build`).
+
+---
+
+## 5. Google Jules Autonomous Agent Protocols (`jules.google`)
+Jules operates under three specialized engineering personas. When running in this repository, Jules must adhere to these scope standards:
+
+### ⚡ Bolt (Microstructure & Low-Latency Systems)
+- Focus: Order book delta processing, feature extraction speed, Decimal pre-allocation, ring buffer zero-copy slicing, and eliminating GC allocations.
+- Scope: High-frequency hot paths (<1ms budget). Always benchmark and append learnings to `.jules/bolt.md`.
+
+### 🎨 Palette (Institutional FinTech UI/UX & WebCLOB Ergonomics)
+- Focus: Modernizing visual hierarchy, terminal aesthetics, glanceable telemetry, and high-density Bloomberg-grade layouts across the React frontend.
+- **Executive Mandate: "Scoop More Sand"**:
+  - **Zero Teaspoon Anti-Pattern**: Strictly forbidden from opening PRs that merely add a single `aria-label` or one focus ring to a single button.
+  - **Full Component Sweeps**: Elevate the entire component or panel in a single cohesive pass:
+    1. Institutional dark WebCLOB container styling (`bg-slate-950`, `bg-slate-900/80`, `border-slate-800`).
+    2. Glanceable typography (`font-mono tabular-nums` for all financial metrics, prices, and timers).
+    3. Status badge & gauge contrast (Emerald YES/Win, Crimson NO/Loss, Amber Wait/Quarantine, Cyan ONNX).
+    4. Cohesive interactive states (`hover:border-slate-700`, `focus-visible:ring-2 focus-visible:ring-cyan-500/50`, active press, disabled) across **all** interactive elements in the file.
+    5. Additive Accessibility: Retain and harmonize all ARIA roles, `role="switch"`, `onKeyDown` listeners, and screen reader labels.
+  - **Zero Logic Tampering**: Never modify React state hooks (`useState`, `useEffect`, `useRef`), event handlers, API payloads, or delete TypeScript interface props.
+
+### 🛡️ Sentinel (Security, CFTC Compliance & Rate Limits)
+- Focus: CFTC anti-wash trading arbitration, token-bucket rate limit compliance, HTTP security headers, and credential isolation.
+- Scope: Security middleware, audit trails, and defensive API validation. Always append learnings to `.jules/sentinel.md`.
+
