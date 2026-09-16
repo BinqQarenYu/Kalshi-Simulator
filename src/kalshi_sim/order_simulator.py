@@ -575,7 +575,8 @@ class OrderSimulator:
             if first_price is None:
                 first_price = fill_price
 
-            qty_int = int(qty)
+            # Fast-path quantity type check to avoid Decimal->int conversion overhead when already int
+            qty_int = qty if isinstance(qty, int) else int(qty)
             fill_qty = remaining if remaining <= qty_int else qty_int
             if fill_qty <= 0:
                 continue
@@ -599,14 +600,15 @@ class OrderSimulator:
         )
 
         # Realistic adverse selection / latency price drift:
-        # If market momentum is running strongly in trade direction,
-        # by the time the order arrives (75-150ms), price has drifted adversely
-        vel_threshold = self.get_adverse_velocity_threshold(asset_or_ticker)
+        # Performance optimization: Guard threshold lookup behind spot_velocity != 0.0 check
+        # to avoid string upper-casing and tuple lookup on zero-velocity ticks.
         adverse_penalty = _DEC_0_00
-        if order_side == OrderSide.YES and spot_velocity > vel_threshold:
-            adverse_penalty = _DEC_0_01
-        elif order_side == OrderSide.NO and spot_velocity < -vel_threshold:
-            adverse_penalty = _DEC_0_01
+        if spot_velocity != 0.0:
+            vel_threshold = self.get_adverse_velocity_threshold(asset_or_ticker)
+            if order_side == OrderSide.YES and spot_velocity > vel_threshold:
+                adverse_penalty = _DEC_0_01
+            elif order_side == OrderSide.NO and spot_velocity < -vel_threshold:
+                adverse_penalty = _DEC_0_01
 
         final_vwap = (vwap + adjusted_slippage + adverse_penalty).quantize(
             _DEC_0_0001, rounding=ROUND_HALF_UP
