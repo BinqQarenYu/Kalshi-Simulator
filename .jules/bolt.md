@@ -80,10 +80,14 @@
 **Learning:** In order book depth walking routines (`_walk_book`), passing `key=lambda x: x[0]` to `sorted(book_side.items(), reverse=True)` incurred CPython function call overhead (~0.85 µs per call) even though price keys are strictly unique `Decimal` objects where native tuple comparison compares price elements directly. Additionally, re-parsing `Decimal("0.0001")` strings inside `quantize()` calls on every order fill added object allocation overhead.
 **Action:** Remove `key=lambda` on dictionary item sorts, eliminate redundant branch logic in book walking, and pre-allocate `_DEC_0_0001` at module level, reducing `_walk_book` latency from 14.49 µs to 12.47 µs per call (~1.16x speedup).
 
-<<<<<<< HEAD
 ## 2026-09-03 - Unrolled Fixed-Depth Top-5 Level Volume Summation in Gold Feature Extractor
 **Learning:** Calling `sum(bid_sizes[:5])` and `sum(ask_sizes[:5])` inside per-tick feature extraction created list slicing (`[:5]`) allocations and generic iterator/function call overhead on every tick.
 **Action:** Unroll top-5 volume summation using direct index addition (`bid_sizes[0] + bid_sizes[1] + bid_sizes[2] + bid_sizes[3] + bid_sizes[4]`), safely guarded by prior depth list padding (to `target_depth` = 15). Reduced feature extraction volume sum latency by ~13%.
+
+## 2026-09-14 - O(1) Version-Backed Micro-Price & Mid-Price Caching in L2BookState
+**Learning:** Re-evaluating volume-weighted micro-price `(bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty)` and mid-price `(bid + ask) / 2` repeatedly across ticks or features on unchanged order book states added ~3.1 µs overhead per call due to repeated `Decimal` multiplication, addition, and division.
+**Action:** Utilize `_BookDict._version` mutation tracking on `_yes_book` and `_no_book` inside `L2BookState` to memoize calculated `micro_price` and `mid_price`. Reduced property access latency on cache hit from ~3.1 µs down to ~0.21 µs (~14.7x speedup).
+
 ## 2026-09-15 - O(1) Version-Backed Micro-Price Caching in L2BookState
 **Learning:** Re-calculating volume-weighted micro-price `(bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty)` across high-frequency orderbook updates and ML feature extraction loops added ~2.84 µs overhead per call due to redundant dictionary access and Decimal arithmetic.
 **Action:** Memoize `micro_price` in `L2BookState` leveraging existing `_BookDict._version` mutation tracking on bid and ask books (`_yes_book` and `_no_book`). Reduced `micro_price` cache hit latency from ~2.84 µs to ~0.22 µs per call (~13x speedup).
@@ -111,4 +115,3 @@
 ## 2026-09-15 - Fast OS Random Bytes Order ID Generation & LRU Caching in Order Simulator
 **Learning:** `uuid.uuid4().hex[:8]` instantiated full Python `UUID` objects calling `posix.urandom(16)` and bit-shifting logic, consuming ~16% (~7.1 µs) of total market order simulation execution time. Uncached string upper-casing and tuple scans in `get_adverse_velocity_threshold` added redundant CPU overhead.
 **Action:** Replaced `uuid.uuid4().hex[:8]` with `os.urandom(4).hex()` (~4x faster ID generation), memoized `get_adverse_velocity_threshold` using `@functools.lru_cache(maxsize=256)`, and eliminated redundant 3rd `.quantize()` call in `_walk_book`. Reduced `simulate_market_order` latency from 35.0 µs to 27.88 µs per call (~20.3% speedup).
-
