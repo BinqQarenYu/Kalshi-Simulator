@@ -86,3 +86,7 @@
 ## 2026-09-15 - O(1) Version-Backed Micro-Price Caching in L2BookState
 **Learning:** Re-calculating volume-weighted micro-price `(bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty)` across high-frequency orderbook updates and ML feature extraction loops added ~2.84 µs overhead per call due to redundant dictionary access and Decimal arithmetic.
 **Action:** Memoize `micro_price` in `L2BookState` leveraging existing `_BookDict._version` mutation tracking on bid and ask books (`_yes_book` and `_no_book`). Reduced `micro_price` cache hit latency from ~2.84 µs to ~0.22 µs per call (~13x speedup).
+
+## 2026-09-16 - O(1) Version-Backed OrderBookLevel Model Depth Caching in L2BookState
+**Learning:** Calling `get_depth(n)` on `L2BookState` repeatedly constructed ~30 Pydantic `OrderBookLevel` model instances per invocation, incurring model validation and allocation overhead (~58.0 µs per call) even when order book levels remained unchanged between reads.
+**Action:** Added `_cached_depth_models_key` and `_cached_depth_models` memoization to `L2BookState.get_depth(n)` keyed on `_yes_book._version`, `_no_book._version`, depth `n`, and `is_spot`. Reduced `get_depth(15)` cache hit latency from ~58.0 µs to ~0.29 µs per call (>160x speedup).
