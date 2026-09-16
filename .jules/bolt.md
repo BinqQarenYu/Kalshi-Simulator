@@ -80,6 +80,7 @@
 **Learning:** In order book depth walking routines (`_walk_book`), passing `key=lambda x: x[0]` to `sorted(book_side.items(), reverse=True)` incurred CPython function call overhead (~0.85 µs per call) even though price keys are strictly unique `Decimal` objects where native tuple comparison compares price elements directly. Additionally, re-parsing `Decimal("0.0001")` strings inside `quantize()` calls on every order fill added object allocation overhead.
 **Action:** Remove `key=lambda` on dictionary item sorts, eliminate redundant branch logic in book walking, and pre-allocate `_DEC_0_0001` at module level, reducing `_walk_book` latency from 14.49 µs to 12.47 µs per call (~1.16x speedup).
 
+<<<<<<< HEAD
 ## 2026-09-03 - Unrolled Fixed-Depth Top-5 Level Volume Summation in Gold Feature Extractor
 **Learning:** Calling `sum(bid_sizes[:5])` and `sum(ask_sizes[:5])` inside per-tick feature extraction created list slicing (`[:5]`) allocations and generic iterator/function call overhead on every tick.
 **Action:** Unroll top-5 volume summation using direct index addition (`bid_sizes[0] + bid_sizes[1] + bid_sizes[2] + bid_sizes[3] + bid_sizes[4]`), safely guarded by prior depth list padding (to `target_depth` = 15). Reduced feature extraction volume sum latency by ~13%.
@@ -106,4 +107,8 @@
 ## 2026-09-16 - Bisect Sorted List Rolling Volume Baseline & Unrolled Spatial Vector Assignment
 **Learning:** Allocating and sorting a 100-element list on every feature extraction tick (`vols = list(self.rolling_volumes); vols.sort()`) to calculate baseline volume median and computing spatial decay vector slices via list comprehensions (`[decays[i] * (bid_sizes[i] - ask_sizes[i]) * inv_baseline for i in range(15)]`) added ~2.2 µs overhead per tick.
 **Action:** Maintain a synchronized sorted list using `bisect.insort` and `remove` to compute median in $O(1)$ after $O(\log N)$ insertion, and unroll spatial decay vector assignment for standard `target_depth=15` direct numpy buffer index writes. Reduced feature extraction latency from ~12.0 µs / 14.3 µs to ~10.0 µs / 11.9 µs per tick (~1.18x speedup).
+
+## 2026-09-15 - Fast OS Random Bytes Order ID Generation & LRU Caching in Order Simulator
+**Learning:** `uuid.uuid4().hex[:8]` instantiated full Python `UUID` objects calling `posix.urandom(16)` and bit-shifting logic, consuming ~16% (~7.1 µs) of total market order simulation execution time. Uncached string upper-casing and tuple scans in `get_adverse_velocity_threshold` added redundant CPU overhead.
+**Action:** Replaced `uuid.uuid4().hex[:8]` with `os.urandom(4).hex()` (~4x faster ID generation), memoized `get_adverse_velocity_threshold` using `@functools.lru_cache(maxsize=256)`, and eliminated redundant 3rd `.quantize()` call in `_walk_book`. Reduced `simulate_market_order` latency from 35.0 µs to 27.88 µs per call (~20.3% speedup).
 
