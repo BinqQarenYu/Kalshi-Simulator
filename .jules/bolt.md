@@ -119,3 +119,10 @@
 ## 2026-09-15 - Fast OS Random Bytes Order ID Generation & LRU Caching in Order Simulator
 **Learning:** `uuid.uuid4().hex[:8]` instantiated full Python `UUID` objects calling `posix.urandom(16)` and bit-shifting logic, consuming ~16% (~7.1 µs) of total market order simulation execution time. Uncached string upper-casing and tuple scans in `get_adverse_velocity_threshold` added redundant CPU overhead.
 **Action:** Replaced `uuid.uuid4().hex[:8]` with `os.urandom(4).hex()` (~4x faster ID generation), memoized `get_adverse_velocity_threshold` using `@functools.lru_cache(maxsize=256)`, and eliminated redundant 3rd `.quantize()` call in `_walk_book`. Reduced `simulate_market_order` latency from 35.0 µs to 27.88 µs per call (~20.3% speedup).
+## 2026-08-27 - Deferred Pydantic Model Instantiation in L2 Order Book Depth Slicing
+**Learning:** Instantiating Pydantic `OrderBookLevel` objects for all price levels in an order book dictionary before sorting and slicing `[:n]` generated severe Pydantic validation overhead (~2.4ms per 10k calls).
+**Action:** Sort raw price-quantity dictionary items `(price, qty)` first, slice top `n` levels, and instantiate Pydantic `OrderBookLevel` objects only for the sliced slice. Reduced `get_depth` latency by 64% (~2.8x speedup).
+
+## 2026-08-28 - C-Level List Slicing in ZeroCopyRingBuffer
+**Learning:** Iterating over circular ring buffers element-by-element with Python loops and modulo index arithmetic in `to_list()` and `get_tail(n)` caused significant CPU overhead during tick stream windowing.
+**Action:** Replace per-element Python loops with direct C-level list slicing operations (`list(buffer[head:]) + list(buffer[:head])` / `list(buffer[start:end])`). Reduced `to_list` latency by ~79% (~4.8x speedup) and `get_tail` latency by ~94% (~17.1x speedup).
