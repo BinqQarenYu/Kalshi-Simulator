@@ -96,7 +96,7 @@
 **Learning:** Re-calculating volume-weighted micro-price `(bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty)` across high-frequency orderbook updates and ML feature extraction loops added ~2.84 µs overhead per call due to redundant dictionary access and Decimal arithmetic.
 **Action:** Memoize `micro_price` in `L2BookState` leveraging existing `_BookDict._version` mutation tracking on bid and ask books (`_yes_book` and `_no_book`). Reduced `micro_price` cache hit latency from ~2.84 µs to ~0.22 µs per call (~13x speedup).
 
-<<<<<<< HEAD
+
 ## 2026-09-15 - Dedicated Trade Quantities Float Deque & Sum-of-Squares VPIN Calculation
 **Learning:** Extracting trade quantities via dictionary key lookups (`[t["q"] for t in self.rolling_trades]`) on every trade print during rolling trade entropy and dynamic whale threshold calculation added unnecessary dict lookup allocations. In addition, computing VPIN standard deviation via double-pass variance loops created list copy allocations.
 **Action:** Maintain a dedicated float deque (`rolling_trade_quantities`) synchronized with `rolling_trades` and compute VPIN variance via the single-pass sum-of-squares formula $\text{Var}(X) = E[X^2] - (E[X])^2$. Reduced trade processing latency in feature extractors from ~35.2 µs to ~23.6 µs per trade print (~33% speedup).
@@ -129,8 +129,9 @@
 **Learning:** Iterating over circular ring buffers element-by-element with Python loops and modulo index arithmetic in `to_list()` and `get_tail(n)` caused significant CPU overhead during tick stream windowing.
 **Action:** Replace per-element Python loops with direct C-level list slicing operations (`list(buffer[head:]) + list(buffer[:head])` / `list(buffer[start:end])`). Reduced `to_list` latency by ~79% (~4.8x speedup) and `get_tail` latency by ~94% (~17.1x speedup).
 
-<<<<<<< HEAD
-<<<<<<< HEAD
+
+
+
 ## 2026-09-16 - Algebraic Simplification of Binary Option EV Payoff & F-String Decimal Formatting
 **Learning:** Evaluating binary option expected value using `p * (1 - K) - (1 - p) * K` in Decimal space invoked 4 separate Decimal arithmetic operations and 2 `Decimal("1.00")` object instantiations per call (~17.8 µs). Algebraically simplifying $p(1 - K) - (1 - p)K = p - K$ eliminates 3 Decimal ops, and replacing `Decimal(str(round(p, 4)))` with `Decimal(f"{p:.4f}")` reduces single-side EV latency to ~13.1 µs (~26% speedup).
 **Action:** Use $p - K$ algebraic identity for binary option gross EV payoffs and fast f-string float-to-Decimal conversions in high-frequency risk evaluation loops.
@@ -150,4 +151,9 @@
 ## 2026-09-17 - Fast C Struct Packing & Direct Buffer Deserialization in ML Feature Vector Assembly
 **Learning:** Individually writing 28–32 float values into pre-allocated NumPy array indices (`buf[i] = val`) and returning defensive array copies (`buf.copy()`) incurred per-element Python assignment and C-API array allocation overhead (~11.35 µs -> ~8.94 µs per feature extraction call).
 **Action:** Compiled static module-level `struct.Struct("32f")` / `struct.Struct("28f")` instances to pack feature scalars in C in a single call, instantiating float32 numpy arrays via zero-copy `np.frombuffer()`. Reduced Gold feature extraction latency by ~21% (~11.35 µs -> ~8.94 µs) and Kalshi feature extraction latency by ~12% (~9.00 µs -> ~7.90 µs).
+
+
+## 2026-09-17 - Version-Cached Depth Tuples in Order Book Depth Walking
+**Learning:** In `OrderSimulator._walk_book`, sorting dictionary price levels (`sorted(book_side.items(), key=_PRICE_GETTER, reverse=True)`) on every fill simulation call introduced redundant sorting and tuple allocation overhead (~7.30 µs per call).
+**Action:** Passed `L2BookState` into `_walk_book` to leverage `book.get_depth_tuples()`, which memoizes pre-sorted price level tuples in O(1) time using version-backed `_BookDict` mutation tracking (`_yes_book._version`, `_no_book._version`). Reduced `_walk_book` execution latency to ~6.48 µs per call (~11.2% speedup).
 

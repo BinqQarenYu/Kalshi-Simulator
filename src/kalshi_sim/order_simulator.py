@@ -377,6 +377,7 @@ class OrderSimulator:
             timeframe,
             spot_velocity=spot_velocity,
             asset_or_ticker=asset or book.market_ticker,
+            book=book,
         )
 
         if total_filled == 0:
@@ -539,6 +540,7 @@ class OrderSimulator:
         timeframe: Timeframe,
         spot_velocity: float = 0.0,
         asset_or_ticker: str = "",
+        book: L2BookState | None = None,
     ) -> tuple[Decimal, int, Decimal]:
         """Walk the order book to compute fill price with realistic depth and slippage.
 
@@ -554,6 +556,7 @@ class OrderSimulator:
             timeframe: For slippage multiplier.
             spot_velocity: Rolling spot velocity in dollars (adverse selection drift).
             asset_or_ticker: Asset key or ticker string for threshold calibration.
+            book: Optional L2BookState instance to leverage version-cached depth tuples.
 
         Returns:
             Tuple of (vwap_price, total_filled, total_slippage).
