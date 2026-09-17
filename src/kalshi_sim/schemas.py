@@ -9,8 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
-import operator
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 # Module-level fast item getter for order book sorting and pre-allocated Decimal constants
 _PRICE_GETTER = operator.itemgetter(0)
@@ -423,52 +422,50 @@ class TradeEvent(BaseModel):
 # Internal — Reconstructed L2 Book State
 # ---------------------------------------------------------------------------
 
-class _BookDict(dict):
-    """Dictionary subclass that increments a version counter on mutations.
+class FastBook(dict):
+    """Dictionary subclass that tracks top-of-book max price level in O(1) time.
 
-    Used by L2BookState to invalidate cached top-of-book levels in O(1) time.
+    Performance Optimization:
+    Maintains `_best` price level in O(1) time upon item setting, deletion, popping,
+    clearing, or updating, eliminating repeated O(N) linear scans with max(keys())
+    for high-frequency top-of-book / spread / mid-price queries.
     """
-    __slots__ = ("_version",)
+    __slots__ = ("_best",)
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._version: int = 0
+        self._best: Decimal | None = max(self.keys()) if self else None
 
-    def __setitem__(self, key, value) -> None:
+    @property
+    def best_bid(self) -> Decimal | None:
+        if self._best is None and self:
+            self._best = max(self.keys())
+        return self._best
+
+    def __setitem__(self, key: Decimal, value: Decimal) -> None:
         super().__setitem__(key, value)
-        self._version += 1
+        if self._best is None or key > self._best:
+            self._best = key
 
-    def __delitem__(self, key) -> None:
+    def __delitem__(self, key: Decimal) -> None:
         super().__delitem__(key)
-        self._version += 1
+        if self._best == key:
+            self._best = None
 
-    def pop(self, key, default=...):
-        self._version += 1
-        if default is ...:
-            return super().pop(key)
-        return super().pop(key, default)
-
-    def popitem(self):
-        self._version += 1
-        return super().popitem()
+    def pop(self, key: Decimal, default: Any = ...) -> Any:
+        existed = key in self
+        res = super().pop(key, default) if default is not ... else super().pop(key)
+        if existed and self._best == key:
+            self._best = None
+        return res
 
     def clear(self) -> None:
         super().clear()
-        self._version += 1
+        self._best = None
 
-    def update(self, *args, **kwargs) -> None:
+    def update(self, *args: Any, **kwargs: Any) -> None:
         super().update(*args, **kwargs)
-        self._version += 1
-
-    def __ior__(self, other):
-        super().__ior__(other)
-        self._version += 1
-        return self
-
-    def setdefault(self, key, default=None):
-        if key not in self:
-            self._version += 1
-        return super().setdefault(key, default)
+        self._best = max(self.keys()) if self else None
 
 
 class L2BookState:
@@ -514,8 +511,8 @@ class L2BookState:
         self.market_ticker = market_ticker
         self.is_spot = is_spot
         self.last_seq: int = -1
-        self._yes_book: _BookDict = _BookDict()  # price → qty (Bids in spot or YES in binary)
-        self._no_book: _BookDict = _BookDict()   # price → qty (Asks in spot or NO in binary)
+        self._yes_book: FastBook = FastBook()
+        self._no_book: FastBook = FastBook()
         self.last_update: datetime = datetime.now(timezone.utc)
         self._stale: bool = True
         self._cached_best_yes_bid: Decimal | None = None
@@ -568,20 +565,28 @@ class L2BookState:
     # -- Properties ----------------------------------------------------------
 
     @property
+    def yes_book(self) -> FastBook:
+        return self._yes_book
+
+    @yes_book.setter
+    def yes_book(self, value: dict[Decimal, Decimal]) -> None:
+        self._yes_book = value if isinstance(value, FastBook) else FastBook(value)
+
+    @property
+    def no_book(self) -> FastBook:
+        return self._no_book
+
+    @no_book.setter
+    def no_book(self, value: dict[Decimal, Decimal]) -> None:
+        self._no_book = value if isinstance(value, FastBook) else FastBook(value)
+
+    @property
     def best_yes_bid(self) -> Decimal | None:
-        yb = self._yes_book
-        if yb._version != self._cached_yes_version:
-            self._cached_best_yes_bid = max(yb.keys()) if yb else None
-            self._cached_yes_version = yb._version
-        return self._cached_best_yes_bid
+        return self._yes_book.best_bid
 
     @property
     def best_no_bid(self) -> Decimal | None:
-        nb = self._no_book
-        if nb._version != self._cached_no_version:
-            self._cached_best_no_bid = max(nb.keys()) if nb else None
-            self._cached_no_version = nb._version
-        return self._cached_best_no_bid
+        return self._no_book.best_bid
 
     @property
     def best_yes_ask(self) -> Decimal | None:
@@ -692,56 +697,27 @@ class L2BookState:
 
     # -- Depth ---------------------------------------------------------------
 
-    def get_depth_tuples(self, n: int = 15) -> tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:
-        """Return top *n* bid and ask (price, quantity) tuples, sorted best-first.
+    def get_depth_raw(
+        self, n: int = 15
+    ) -> tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:
+        """Return top *n* bid and ask raw (price, quantity) tuples, sorted best-first.
+
+        Performance Optimization:
+        Bypasses Pydantic model creation and validation when raw numeric prices and quantities
+        are sufficient (e.g., in ML feature extraction hot paths).
+        """
+        top_yes = sorted(self.yes_book.items(), key=lambda item: item[0], reverse=True)[:n]
+        top_no = sorted(self.no_book.items(), key=lambda item: item[0], reverse=True)[:n]
+        return top_yes, top_no
+
+    def get_depth(self, n: int = 15) -> tuple[list[OrderBookLevel], list[OrderBookLevel]]:
+        """Return top *n* bid and ask levels, sorted best-first.
 
         Performance optimization: Uses version-backed _BookDict tracking to memoize depth levels
         in O(1) time (~0.3 µs hit vs ~13.5 µs miss). In streaming ML pipelines where features are
         read frequently across ticks, this reduces feature extraction latency by ~38%.
         """
-        key = (self._yes_book._version, self._no_book._version, n, self.is_spot)
-        if self._cached_depth_key == key and self._cached_depth_tuples is not None:
-            return self._cached_depth_tuples
-
-        top_yes = sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]
-        top_no = sorted(self.no_book.items(), key=_PRICE_GETTER, reverse=not self.is_spot)[:n]
-
-        self._cached_depth_key = key
-        self._cached_depth_tuples = (top_yes, top_no)
-        return self._cached_depth_tuples
-
-    def get_depth_float_tuples(
-        self, n: int = 15
-    ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
-        """Return top *n* bid and ask (price, quantity) tuples converted to floats, sorted best-first.
-
-        Performance optimization: Uses version-backed _BookDict tracking to memoize float-converted
-        depth levels in O(1) time (~0.4 µs hit vs ~10.3 µs per-tick Decimal->float loop).
-        """
-        key = (self._yes_book._version, self._no_book._version, n, self.is_spot)
-        if self._cached_depth_float_key == key and self._cached_depth_float_tuples is not None:
-            return self._cached_depth_float_tuples
-
-        top_yes, top_no = self.get_depth_tuples(n)
-        float_yes = [(float(p), float(q)) for p, q in top_yes]
-        float_no = [(float(p), float(q)) for p, q in top_no]
-
-        self._cached_depth_float_key = key
-        self._cached_depth_float_tuples = (float_yes, float_no)
-        return float_yes, float_no
-
-    def get_depth(self, n: int = 15) -> tuple[list[OrderBookLevel], list[OrderBookLevel]]:
-        """Return top *n* bid and ask levels as OrderBookLevel models, sorted best-first.
-
-        Performance optimization: Uses version-backed _BookDict tracking to memoize created
-        OrderBookLevel Pydantic models in O(1) time (~0.3 µs hit vs ~61.0 µs per-call allocation/validation).
-        Eliminates redundant object instantiations when order book state remains unchanged between reads.
-        """
-        key = (self._yes_book._version, self._no_book._version, n, self.is_spot)
-        if self._cached_depth_models_key == key and self._cached_depth_models is not None:
-            return self._cached_depth_models
-
-        top_yes, top_no = self.get_depth_tuples(n)
+        top_yes, top_no = self.get_depth_raw(n)
         bids = [OrderBookLevel(price=p, quantity=q) for p, q in top_yes]
         asks = [OrderBookLevel(price=p, quantity=q) for p, q in top_no]
 

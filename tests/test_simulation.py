@@ -232,6 +232,50 @@ class TestKalshiSimulation(unittest.TestCase):
         port.close_position("KXBTC15M-CLOSELOSS", exit_price=Decimal("0.05"))
         self.assertTrue(port.circuit_breaker_tripped)
 
+    def test_fastbook_and_l2bookstate_optimization(self):
+        """FastBook O(1) top-of-book indexing and L2BookState property correctness."""
+        from kalshi_sim.schemas import FastBook
+
+        # 1. FastBook operations
+        fb = FastBook({Decimal("0.40"): Decimal("100"), Decimal("0.45"): Decimal("200")})
+        self.assertIsInstance(fb, dict)
+        self.assertEqual(fb.best_bid, Decimal("0.45"))
+
+        # Add higher level -> O(1) update
+        fb[Decimal("0.48")] = Decimal("300")
+        self.assertEqual(fb.best_bid, Decimal("0.48"))
+
+        # Delete non-best level -> best_bid remains Decimal("0.48")
+        del fb[Decimal("0.40")]
+        self.assertEqual(fb.best_bid, Decimal("0.48"))
+
+        # Pop best level -> lazily recomputes to Decimal("0.45")
+        fb.pop(Decimal("0.48"))
+        self.assertEqual(fb.best_bid, Decimal("0.45"))
+
+        # Clear -> None
+        fb.clear()
+        self.assertIsNone(fb.best_bid)
+
+        # 2. L2BookState integration
+        book = L2BookState("KXBTC15M-FASTBOOK")
+        book.yes_book[Decimal("0.48")] = Decimal("100")
+        book.yes_book[Decimal("0.47")] = Decimal("200")
+        book.no_book[Decimal("0.51")] = Decimal("150")
+        book.no_book[Decimal("0.50")] = Decimal("300")
+
+        self.assertEqual(book.best_yes_bid, Decimal("0.48"))
+        self.assertEqual(book.best_no_bid, Decimal("0.51"))
+        self.assertEqual(book.best_yes_ask, Decimal("0.49"))
+        self.assertEqual(book.best_no_ask, Decimal("0.52"))
+        self.assertEqual(book.spread, Decimal("0.01"))
+        self.assertEqual(book.mid_price, Decimal("0.485"))
+
+        # Test dictionary re-assignment
+        book.yes_book = {Decimal("0.55"): Decimal("500")}
+        self.assertIsInstance(book.yes_book, FastBook)
+        self.assertEqual(book.best_yes_bid, Decimal("0.55"))
+
 
 if __name__ == "__main__":
     unittest.main()

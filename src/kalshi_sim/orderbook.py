@@ -22,8 +22,8 @@ from kalshi_sim.schemas import (
 
 logger = logging.getLogger(__name__)
 
-# Performance optimization: Pre-instantiate Decimal("0") constant to eliminate object allocation per L2 delta message
-_ZERO_DECIMAL = Decimal("0")
+# Pre-computed Decimal zero constant to bypass allocation overhead in tick loops
+_ZERO = Decimal("0")
 
 
 class OrderBookManager:
@@ -114,14 +114,12 @@ class OrderBookManager:
                 return book
             book._stale = False
 
-        # Apply delta to the appropriate side book
-        # Performance optimization: Direct attribute access to _yes_book / _no_book bypasses property getter overhead.
-        # Uses pre-instantiated _ZERO_DECIMAL constant to avoid creating new Decimal objects per delta message.
+        # Apply delta to the appropriate side book directly (bypassing property getter overhead & Decimal allocations)
         side_book = book._yes_book if delta.side == "yes" else book._no_book
-        current_qty = side_book.get(delta.price, _ZERO_DECIMAL)
+        current_qty = side_book.get(delta.price, _ZERO)
         new_qty = current_qty + delta.delta
 
-        if new_qty <= _ZERO_DECIMAL:
+        if new_qty <= _ZERO:
             side_book.pop(delta.price, None)
         else:
             side_book[delta.price] = new_qty

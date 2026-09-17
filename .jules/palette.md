@@ -51,22 +51,6 @@
 **Learning:** Interactive list/table rows (like order book price levels) implemented as `<div>` elements are invisible to keyboard tab order and screen reader action queues unless marked with `role="button"`, `tabIndex={0}`, explicit `aria-label`, and `onKeyDown` handlers for `Enter`/`Space`.
 **Action:** When converting interactive container elements (e.g. order book price rows) into accessible controls, add `role="button"`, `tabIndex={0}`, descriptive `aria-label`, `onKeyDown` keyboard event listeners, `focus-visible:ring-*` focus outlines, and sound feedback (`soundFX.playClickSound()`).
 
-## 2026-09-10 - Header Action Controls Keyboard Accessibility and ARIA Labels
-**Learning:** Top navigation action controls combining icon graphics and text (e.g., Emergency Stop, Test Bot, Reports, Capital Reset, and Integrity Verification) often lack explicit `type="button"`, explicit `aria-label` descriptions, and color-matched focus ring indicators (`focus-visible:ring-2`), creating ambiguous screen reader context and low contrast during keyboard tab navigation.
-**Action:** Always supply explicit `type="button"`, descriptive `aria-label` attributes, and theme-matched `focus-visible:ring-2` focus rings on top navigation header action controls.
-
-## 2026-09-12 - Portfolio Account Switcher Tabs & ARIA Tabpanel Linking
-**Learning:** Tab switches that toggle portfolio views (such as Paper Account vs Live Exchange Account) require proper `role="tablist"` container wrapping, `role="tab"`, `aria-selected`, `aria-controls`, and `focus-visible:ring-2` keyboard focus rings. Linking tab buttons directly to their respective content panels using `id`, `role="tabpanel"`, and `aria-labelledby` ensures screen reader users can seamlessly discover and navigate account views.
-**Action:** Always structure account view toggles with `role="tablist"`, `role="tab"`, `aria-selected`, `aria-controls`, `focus-visible:ring-2`, and wrap panel bodies with `role="tabpanel"` and `aria-labelledby`.
-
-## 2026-09-16 - Quick Action Trade Pill Buttons Accessibility
-**Learning:** Compact quick-action pill buttons in banner toolbars (e.g., "Up 4.6¢" / "Down 95.4¢") often omit `type="button"`, explicit `aria-label`, and `title` tooltip attributes, causing screen readers to announce abbreviated text without market contract context during quick trading interactions.
-**Action:** Always supply explicit `type="button"`, descriptive `aria-label` (e.g. `aria-label="Quick trade UP contract at 4.6¢"`), and matching `title` tooltips on quick action pill buttons.
-
-## 2026-09-20 - Quantitative Strategy Dropdown Menu & Real-Time Telemetry Accessibility
-**Learning:** Custom strategy selection dropdown menus require explicit keyboard `Escape` dismissal handlers, `aria-controls` container linking, `type="button"` and `aria-label` attributes on option items, and `font-mono tabular-nums` for real-time probability/EV metrics to prevent layout thrashing and preserve screen reader accessibility during high-frequency telemetry updates.
-**Action:** Always wire `Escape` key handlers on custom dropdown menus, link dropdown buttons with `aria-controls`, add explicit `aria-label` text to options, and format live numeric readouts with `font-mono tabular-nums`.
-
-## 2026-09-22 - Streaming Trade Tape Telemetry & Scroll Region Accessibility
-**Learning:** Continuous streaming data views (such as real-time exchange trade tape prints) require `tabIndex={0}`, `role="region"`, explicit `aria-label`, and `focus-visible:ring-2` focus outlines on their scroll containers so keyboard-only users can focus and navigate historical prints. Formatting numerical trade figures with `tabular-nums` prevents layout jitter during high-frequency streaming updates, while providing a glanceable telemetry summary header gives instant terminal awareness.
-**Action:** Always wrap scrollable streaming data containers in `tabIndex={0}` regions with `aria-label` and `focus-visible:ring-2` outlines, apply `tabular-nums` to financial data columns, and include a glanceable telemetry summary bar above the table.
+## 2026-09-08 - Scrollable Data Table Feed Focusability & Table Row Semantics
+**Learning:** Scrollable container wrappers holding live data feeds (such as real-time trade tape tables) require `tabIndex={0}` and focus ring styles so keyboard users can navigate and scroll the container. Non-interactive `<tr>` rows should NOT receive `tabIndex={0}` or `aria-label` overrides, as doing so pollutes the document tab sequence and breaks standard screen reader table navigation semantics.
+**Action:** Place `tabIndex={0}`, `aria-label`, and `focus-visible:ring-*` on the scrollable container `<div>`, use `scope="col"` on `<th>`, and preserve semantic table row/cell structure without forcing non-interactive rows into the tab order.
