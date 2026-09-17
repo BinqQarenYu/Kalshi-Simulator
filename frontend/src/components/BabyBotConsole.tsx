@@ -113,8 +113,8 @@ export const BOT_PROFILES: Record<string, BotProfile> = {
     telemetryType: 'dominion',
     description: '3-Step Playbook Cycle Sniper (Early Breakout, Mid OFI Drift, Late Gamma Snub)',
     hardCapContracts: 1,
-    discountCeiling: 0.48,
-    playbook: 'Playbook 2: OFI Trend Drift · Resting $0.48 Limit',
+    discountCeiling: 0.51,
+    playbook: 'Playbook 2: OFI Trend Drift · Resting $0.51 Limit · +96% ROI',
   },
   'macro_onnx': {
     id: 'macro_onnx',
@@ -309,9 +309,9 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   }, [selectedBotId, reportMode]);
 
   const [botParams, setBotParams] = useState<Record<string, any>>({
-    discount_limit_price: 0.48,
-    entry_discount_depth: 0.48,
-    momentum_max_price: 0.62,
+    discount_limit_price: 0.51,
+    entry_discount_depth: 0.51,
+    momentum_max_price: 0.63,
     min_confidence: 0.81,
     min_ev_dollars: 0.02,
     min_edge_pct: 6.0,
@@ -319,9 +319,9 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     vpin_toxic_threshold: 0.60,
     take_profit_price_threshold: 0.92,
     enable_take_profit_ceiling: true,
-    require_reversal_for_tp_ceiling: false,
+    require_reversal_for_tp_ceiling: true,
     enable_reverse_take_profit_roi: true,
-    reverse_indicator_threshold: 85.0,
+    reverse_indicator_threshold: 83.0,
     min_take_profit_roi: 40.0,
     enable_trailing_ratchet: true,
     trailing_ratchet_buffer: 0.08,
@@ -524,8 +524,9 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     } else {
       setBotParams((prev) => ({
         ...prev,
-        discount_limit_price: 0.48,
-        momentum_max_price: 0.62,
+        discount_limit_price: 0.51,
+        entry_discount_depth: 0.51,
+        momentum_max_price: 0.63,
         min_confidence: 0.81,
         min_edge_pct: 6.0,
         min_ev_dollars: 0.02,
@@ -533,7 +534,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         min_spot_diff: assetMoat,
         take_profit_price_threshold: activeAssetKey === 'GOLD' || activeAssetKey === 'DOGE' ? 0.90 : 0.92,
         enable_take_profit_ceiling: true,
-        require_reversal_for_tp_ceiling: false,
+        require_reversal_for_tp_ceiling: true,
         enable_reverse_take_profit_roi: true,
         reverse_indicator_threshold: activeAssetKey === 'GOLD' ? 52.0 : 83.0,
         min_take_profit_roi: activeAssetKey === 'GOLD' ? 35.0 : 40.0,
