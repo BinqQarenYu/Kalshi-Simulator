@@ -47,3 +47,7 @@
 ## 2026-09-02 - Property Getter Bypass & Module-Level Decimal Zero Constant in L2 Delta Ingestion
 **Learning:** Accessing `book.yes_book` / `book.no_book` Python property getters and calling `Decimal("0")` dynamically on every delta update in high-frequency WebSocket order book processing adds property lookup and object instantiation overhead.
 **Action:** Access internal `book._yes_book` and `book._no_book` attributes directly in internal `OrderBookManager.apply_delta` loops and reuse a pre-computed module-level `_ZERO = Decimal("0")` constant. Reduced `apply_delta` latency from ~2.27 µs to ~1.54 µs per delta (~32% latency reduction / ~47% throughput boost).
+
+## 2026-09-03 - FastBook Version-Backed Depth Tuple Caching & Itemgetter Speedup
+**Learning:** Re-sorting order book levels with `sorted()` on every tick in `L2BookState.get_depth_raw` when book states were unchanged added ~7.72 µs overhead per tick across strategy loops.
+**Action:** Leveraged `FastBook._version` mutation tracking and `_PRICE_GETTER = operator.itemgetter(0)` in `L2BookState.get_depth_raw(n)` to memoize sorted depth tuples in $O(1)$ time. Reduced depth read cache hit latency from 7.72 µs down to 0.40 µs (~19.3x speedup / ~95% latency reduction per hit).

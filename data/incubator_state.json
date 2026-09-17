@@ -335,6 +335,27 @@
       "realized_pnl": "0.50",
       "fee": "0.02",
       "adverse_drift": false
+    },
+    {
+      "trade_id": "API-TEST-SHADOW-1",
+      "bot_id": "dominion_2_bot",
+      "bot_name": "Dominion 2 Bot",
+      "ticker": "KXBTC15M-API-TEST",
+      "cycle_id": "CYCLE-API-1",
+      "side": "yes",
+      "count": 1,
+      "entry_price": "0.48",
+      "target_strike": "78600.0",
+      "entry_spot": "78605.0",
+      "vpin_at_entry": 0.12,
+      "entry_time": "2026-09-17T20:43:00.552485+00:00",
+      "settled": true,
+      "settlement_twap": "78620.0",
+      "outcome": "YES_WIN",
+      "won": true,
+      "realized_pnl": "0.50",
+      "fee": "0.02",
+      "adverse_drift": false
     }
   ],
   "post_mortems": [
@@ -865,7 +886,40 @@
       "total_pnl": "0.50",
       "diagnosis": "Cycle CYCLE-API-1 settled YES_WIN (TWAP $78620.00 vs Strike $78600.00, Diff: $+20.00). Bot 'Dominion 2 Bot' won +$0.50 with YES @ $0.48.",
       "timestamp": "2026-09-15T11:10:30.432945+00:00"
+    },
+    {
+      "cycle_id": "CYCLE-API-1",
+      "ticker": "KXBTC15M-API-TEST",
+      "settlement_twap": "78620.0",
+      "target_strike": "78600.0",
+      "outcome": "YES_WIN",
+      "trades": [
+        {
+          "trade_id": "API-TEST-SHADOW-1",
+          "bot_id": "dominion_2_bot",
+          "bot_name": "Dominion 2 Bot",
+          "ticker": "KXBTC15M-API-TEST",
+          "cycle_id": "CYCLE-API-1",
+          "side": "yes",
+          "count": 1,
+          "entry_price": "0.48",
+          "target_strike": "78600.0",
+          "entry_spot": "78605.0",
+          "vpin_at_entry": 0.12,
+          "entry_time": "2026-09-17T20:43:00.552485+00:00",
+          "settled": true,
+          "settlement_twap": "78620.0",
+          "outcome": "YES_WIN",
+          "won": true,
+          "realized_pnl": "0.50",
+          "fee": "0.02",
+          "adverse_drift": false
+        }
+      ],
+      "total_pnl": "0.50",
+      "diagnosis": "Cycle CYCLE-API-1 settled YES_WIN (TWAP $78620.00 vs Strike $78600.00, Diff: $+20.00). Bot 'Dominion 2 Bot' won +$0.50 with YES @ $0.48.",
+      "timestamp": "2026-09-17T20:43:00.559100+00:00"
     }
   ],
-  "saved_at": "2026-09-15T11:10:30.433121+00:00"
+  "saved_at": "2026-09-17T20:43:00.559238+00:00"
 }
