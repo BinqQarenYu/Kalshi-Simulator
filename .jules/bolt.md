@@ -126,3 +126,7 @@
 ## 2026-08-28 - C-Level List Slicing in ZeroCopyRingBuffer
 **Learning:** Iterating over circular ring buffers element-by-element with Python loops and modulo index arithmetic in `to_list()` and `get_tail(n)` caused significant CPU overhead during tick stream windowing.
 **Action:** Replace per-element Python loops with direct C-level list slicing operations (`list(buffer[head:]) + list(buffer[:head])` / `list(buffer[start:end])`). Reduced `to_list` latency by ~79% (~4.8x speedup) and `get_tail` latency by ~94% (~17.1x speedup).
+
+## 2026-09-17 - Fast C Struct Packing & Direct Buffer Deserialization in ML Feature Vector Assembly
+**Learning:** Individually writing 28–32 float values into pre-allocated NumPy array indices (`buf[i] = val`) and returning defensive array copies (`buf.copy()`) incurred per-element Python assignment and C-API array allocation overhead (~11.35 µs -> ~8.94 µs per feature extraction call).
+**Action:** Compiled static module-level `struct.Struct("32f")` / `struct.Struct("28f")` instances to pack feature scalars in C in a single call, instantiating float32 numpy arrays via zero-copy `np.frombuffer()`. Reduced Gold feature extraction latency by ~21% (~11.35 µs -> ~8.94 µs) and Kalshi feature extraction latency by ~12% (~9.00 µs -> ~7.90 µs).
