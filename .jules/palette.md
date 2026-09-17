@@ -1,14 +1,16 @@
 # Palette's Journal — Institutional WebCLOB FinTech Design & Ergonomics
 
-## 🏛️ Executive Scope Directive: "Scoop More Sand" (Macro-UX Overhauls vs Micro-Patches)
-- **Zero Teaspoon Anti-Pattern**: Never open a PR that merely adds a single `aria-label` or one focus ring to a single button. Micro-patches create PR clutter and fragment component design.
-- **Full Component & View Sweeps**: When tasked with a component or panel, execute a comprehensive, aggressive visual and ergonomic overhaul:
+## 🏛️ Executive Scope Directive: The "Goldilocks Scoop" (The Sweet Spot Standard)
+- **Floor: Zero Teaspoon Anti-Pattern**: Never open a PR that merely adds a single `aria-label` or one focus ring to a single button. Micro-patches create PR clutter and fragment component design.
+- **Ceiling: Zero Bulldozer Anti-Pattern**: Never open sprawling PRs that touch 6+ files, refactor global React state (`useState`, `useEffect`, `useRef`), or rewrite cross-component parent layouts. Overly large PRs cause merge gridlock and invite visual regressions.
+- **The Sweet Spot Target Scope (1 Cohesive Component or View Slice, ~150–350 lines net diff)**:
+  When tasked with a component or panel, execute a comprehensive, balanced visual and ergonomic sweep within its boundaries:
   1. **Visual Hierarchy & Layout Density**: Institutional dark WebCLOB theme (`bg-slate-950`, `bg-slate-900/80`, `border-slate-800`), crisp panel cards, high-density Bloomberg-terminal grid spacing (`gap-1.5`, `p-2`, `text-xs`).
   2. **Glanceable Telemetry**: Strict `font-mono tabular-nums` for all financial figures, strike prices, countdown timers, PnL percentages, and neural probabilities.
   3. **Cohesive Interactive States**: Seamless hover, focus-visible rings (`focus-visible:ring-2 focus-visible:ring-cyan-500/50`), active press, and disabled styling across *every* interactive element in the file.
   4. **Microstructure Color System**: Emerald (`#10b981`) for YES/Win, Crimson (`#f43f5e`) for NO/Loss, Amber (`#f59e0b`) for Quarantine/Wait, Cyan/Indigo (`#06b6d4`/`#6366f1`) for Dual-Brain ONNX inference.
   5. **Zero-Lag Reactivity**: High-performance CSS transforms and transitions (`transition-all duration-150`) that run smoothly at 60fps without triggering DOM thrashing.
-  6. **Complete Domain Polish**: Always elevate the entire component (header, body metrics, buttons, empty states, tooltips) in a single unified PR.
+  6. **Complete Domain Polish**: Always elevate the entire component (header, body metrics, buttons, empty states, tooltips) in a single unified PR without breaking outside contracts.
 
 ---
 
@@ -49,18 +51,6 @@
 **Learning:** Interactive list/table rows (like order book price levels) implemented as `<div>` elements are invisible to keyboard tab order and screen reader action queues unless marked with `role="button"`, `tabIndex={0}`, explicit `aria-label`, and `onKeyDown` handlers for `Enter`/`Space`.
 **Action:** When converting interactive container elements (e.g. order book price rows) into accessible controls, add `role="button"`, `tabIndex={0}`, descriptive `aria-label`, `onKeyDown` keyboard event listeners, `focus-visible:ring-*` focus outlines, and sound feedback (`soundFX.playClickSound()`).
 
-## 2026-09-10 - Header Action Controls Keyboard Accessibility and ARIA Labels
-**Learning:** Top navigation action controls combining icon graphics and text (e.g., Emergency Stop, Test Bot, Reports, Capital Reset, and Integrity Verification) often lack explicit `type="button"`, explicit `aria-label` descriptions, and color-matched focus ring indicators (`focus-visible:ring-2`), creating ambiguous screen reader context and low contrast during keyboard tab navigation.
-**Action:** Always supply explicit `type="button"`, descriptive `aria-label` attributes, and theme-matched `focus-visible:ring-2` focus rings on top navigation header action controls.
-
-## 2026-09-12 - Portfolio Account Switcher Tabs & ARIA Tabpanel Linking
-**Learning:** Tab switches that toggle portfolio views (such as Paper Account vs Live Exchange Account) require proper `role="tablist"` container wrapping, `role="tab"`, `aria-selected`, `aria-controls`, and `focus-visible:ring-2` keyboard focus rings. Linking tab buttons directly to their respective content panels using `id`, `role="tabpanel"`, and `aria-labelledby` ensures screen reader users can seamlessly discover and navigate account views.
-**Action:** Always structure account view toggles with `role="tablist"`, `role="tab"`, `aria-selected`, `aria-controls`, `focus-visible:ring-2`, and wrap panel bodies with `role="tabpanel"` and `aria-labelledby`.
-
-## 2026-09-16 - Quick Action Trade Pill Buttons Accessibility
-**Learning:** Compact quick-action pill buttons in banner toolbars (e.g., "Up 4.6¢" / "Down 95.4¢") often omit `type="button"`, explicit `aria-label`, and `title` tooltip attributes, causing screen readers to announce abbreviated text without market contract context during quick trading interactions.
-**Action:** Always supply explicit `type="button"`, descriptive `aria-label` (e.g. `aria-label="Quick trade UP contract at 4.6¢"`), and matching `title` tooltips on quick action pill buttons.
-
-## 2026-09-20 - Quantitative Strategy Dropdown Menu & Real-Time Telemetry Accessibility
-**Learning:** Custom strategy selection dropdown menus require explicit keyboard `Escape` dismissal handlers, `aria-controls` container linking, `type="button"` and `aria-label` attributes on option items, and `font-mono tabular-nums` for real-time probability/EV metrics to prevent layout thrashing and preserve screen reader accessibility during high-frequency telemetry updates.
-**Action:** Always wire `Escape` key handlers on custom dropdown menus, link dropdown buttons with `aria-controls`, add explicit `aria-label` text to options, and format live numeric readouts with `font-mono tabular-nums`.
+## 2026-09-08 - Scrollable Data Table Feed Focusability & Table Row Semantics
+**Learning:** Scrollable container wrappers holding live data feeds (such as real-time trade tape tables) require `tabIndex={0}` and focus ring styles so keyboard users can navigate and scroll the container. Non-interactive `<tr>` rows should NOT receive `tabIndex={0}` or `aria-label` overrides, as doing so pollutes the document tab sequence and breaks standard screen reader table navigation semantics.
+**Action:** Place `tabIndex={0}`, `aria-label`, and `focus-visible:ring-*` on the scrollable container `<div>`, use `scope="col"` on `<th>`, and preserve semantic table row/cell structure without forcing non-interactive rows into the tab order.

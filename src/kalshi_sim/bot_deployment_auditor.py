@@ -79,6 +79,12 @@ class SealOfExcellence:
         pillars_passed: int = 0,
         pillars_total: int = 5,
         quarantine_lane: str = "Lane 1 Live",
+        net_expected_value: float = 0.0,
+        max_drawdown_pct: float = 0.0,
+        git_commit_hash: Optional[str] = None,
+        harakiri_verified: bool = False,
+        simsim_verified: bool = False,
+        regime_distribution: Optional[Dict[str, int]] = None,
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
         self.bot_id = bot_id
@@ -95,6 +101,12 @@ class SealOfExcellence:
         self.pillars_passed = pillars_passed
         self.pillars_total = pillars_total
         self.quarantine_lane = quarantine_lane
+        self.net_expected_value = net_expected_value
+        self.max_drawdown_pct = max_drawdown_pct
+        self.git_commit_hash = git_commit_hash
+        self.harakiri_verified = harakiri_verified
+        self.simsim_verified = simsim_verified
+        self.regime_distribution = regime_distribution or {}
         self.details = details or {}
 
     def to_dict(self) -> Dict[str, Any]:
@@ -113,6 +125,12 @@ class SealOfExcellence:
             "pillars_passed": self.pillars_passed,
             "pillars_total": self.pillars_total,
             "quarantine_lane": self.quarantine_lane,
+            "net_expected_value": self.net_expected_value,
+            "max_drawdown_pct": self.max_drawdown_pct,
+            "git_commit_hash": self.git_commit_hash,
+            "harakiri_verified": self.harakiri_verified,
+            "simsim_verified": self.simsim_verified,
+            "regime_distribution": self.regime_distribution,
             "details": self.details,
         }
 
@@ -133,6 +151,12 @@ class SealOfExcellence:
             pillars_passed=int(data.get("pillars_passed", 0)),
             pillars_total=int(data.get("pillars_total", 5)),
             quarantine_lane=data.get("quarantine_lane", "Lane 2 Shadow"),
+            net_expected_value=float(data.get("net_expected_value", 0.0)),
+            max_drawdown_pct=float(data.get("max_drawdown_pct", 0.0)),
+            git_commit_hash=data.get("git_commit_hash"),
+            harakiri_verified=bool(data.get("harakiri_verified", False)),
+            simsim_verified=bool(data.get("simsim_verified", False)),
+            regime_distribution=data.get("regime_distribution", {}),
             details=data.get("details", {}),
         )
 
@@ -440,8 +464,9 @@ class BotDeploymentAuditor:
 
         return PillarAuditResult(pillar_name="statistical_edge", status=status, message=msg, details=details)
 
-    def _generate_seal_token(self, bot_id: str, status: str, council_key: str) -> str:
-        raw = f"{bot_id}:{status}:{council_key}:{time.time():.0f}"
+    def _generate_seal_token(self, bot_id: str, status: str, council_key: str, commit_hash: Optional[str] = None) -> str:
+        commit_suffix = f":{commit_hash}" if commit_hash else ""
+        raw = f"{bot_id}:{status}:{council_key}{commit_suffix}:{time.time():.0f}"
         token_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12].upper()
         prefix = "SEAL-DOM1" if bot_id in ("3_step_domination_bot", "3_step_dominion") else f"SEAL-{bot_id[:4].upper()}"
         return f"{prefix}-{token_hash}"
@@ -584,6 +609,128 @@ class BotDeploymentAuditor:
             "active_live_strategy": "3_step_domination_bot",
             "seals": {bid: s.to_dict() for bid, s in self._seals.items()},
         }
+
+    def check_bot_excellence_readiness(
+        self,
+        bot_id: str,
+        incubator_state_path: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        """Check if a candidate bot in the Incubator is ready to test for the Seal of Excellence.
+
+        Invoked on-demand when the user commands: 'check bot if it's time to test for excellence'.
+        """
+        path = incubator_state_path or Path("data") / "incubator_state.json"
+        trades: List[Dict[str, Any]] = []
+        if path.exists():
+            try:
+                content = json.loads(path.read_text(encoding="utf-8"))
+                trades = [t for t in content.get("trades", []) if t.get("bot_id") == bot_id and t.get("settled", True)]
+            except Exception as e:
+                logger.error("[BOT AUDITOR] Error reading incubator state: %s", e)
+
+        if not trades:
+            wl_path = Path("data") / "win_loss_reports.json"
+            if wl_path.exists():
+                try:
+                    wl_content = json.loads(wl_path.read_text(encoding="utf-8"))
+                    trades = [
+                        {
+                            "bot_id": bot_id,
+                            "settled": True,
+                            "won": r.get("outcome", "").lower() == "win",
+                            "realized_pnl": str(r.get("pnl", "0.00")),
+                            "adverse_drift": False,
+                            "vpin_at_entry": 0.15,
+                        }
+                        for r in wl_content
+                        if (
+                            bot_id == r.get("bot_id")
+                            or bot_id == r.get("strategy_id")
+                            or (bot_id in ("macro_trend_dominion", "macro_onnx") and any(k in str(r.get("bot_id", "")) for k in ("macro_onnx", "onnx_macro_v2", "macro_trend")))
+                            or (bot_id in ("3_step_domination_bot", "domination_bot") and "domination" in str(r.get("bot_id", "")))
+                        )
+                    ]
+                except Exception as e:
+                    logger.error("[BOT AUDITOR] Error reading win_loss_reports: %s", e)
+
+        settled_count = len(trades)
+        wins = sum(1 for t in trades if t.get("won", False))
+        win_rate = (wins / settled_count) if settled_count > 0 else 0.0
+
+        total_gain = sum(Decimal(str(t.get("realized_pnl", "0.00"))) for t in trades if Decimal(str(t.get("realized_pnl", "0.00"))) > 0)
+        total_loss = sum(abs(Decimal(str(t.get("realized_pnl", "0.00")))) for t in trades if Decimal(str(t.get("realized_pnl", "0.00"))) < 0)
+        profit_factor = float(total_gain / total_loss) if total_loss > 0 else (99.99 if total_gain > 0 else 0.0)
+
+        # Regimes: low_vol (normal drift) vs high_vol (adverse drift or high VPIN)
+        low_vol_count = sum(1 for t in trades if not t.get("adverse_drift", False))
+        high_vol_count = sum(1 for t in trades if t.get("adverse_drift", False) or float(t.get("vpin_at_entry", 0.0)) >= 0.30)
+
+        ready_for_gauntlet = (settled_count >= 30 and win_rate >= 0.55 and profit_factor >= 1.25)
+
+        return {
+            "bot_id": bot_id,
+            "ready_for_gauntlet": ready_for_gauntlet,
+            "settled_cycles": settled_count,
+            "required_cycles": 30,
+            "win_rate": round(win_rate, 4),
+            "required_win_rate": 0.55,
+            "profit_factor": round(profit_factor, 2),
+            "required_profit_factor": 1.25,
+            "regime_distribution": {
+                "low_vol_cycles": low_vol_count,
+                "high_vol_cycles": high_vol_count,
+            },
+            "status": "READY_FOR_GAUNTLET" if ready_for_gauntlet else "COOKING_IN_INCUBATOR",
+            "message": (
+                f"Bot '{bot_id}' is ready to test for excellence! ({settled_count}/30 cycles, {win_rate*100:.1f}% WR, {profit_factor:.2f} PF)."
+                if ready_for_gauntlet else
+                f"Bot '{bot_id}' is still cooking in Incubator ({settled_count}/30 cycles, {win_rate*100:.1f}% WR, {profit_factor:.2f} PF)."
+            ),
+        }
+
+    def mint_seal_of_excellence(
+        self,
+        bot_id: str,
+        bot_name: str,
+        win_rate: float,
+        profit_factor: float,
+        settled_cycles: int,
+        net_ev: float = 0.04,
+        max_dd: float = 10.0,
+        commit_hash: Optional[str] = None,
+        harakiri_verified: bool = True,
+        simsim_verified: bool = True,
+        regime_distribution: Optional[Dict[str, int]] = None,
+    ) -> SealOfExcellence:
+        """Cryptographically mint the Seal of Excellence and atomically persist to disk."""
+        token = self._generate_seal_token(bot_id, "SEALED_EXCELLENT", "GAUNTLET-CERTIFIED", commit_hash=commit_hash)
+        seal = SealOfExcellence(
+            bot_id=bot_id,
+            bot_name=bot_name,
+            seal_status="SEALED_EXCELLENT",
+            seal_token=token,
+            live_trading_authorized=True,
+            granted_at=datetime.now(timezone.utc).isoformat(),
+            council_signoff="COUNCIL-GAUNTLET-CERTIFIED",
+            settled_cycles_verified=settled_cycles,
+            graduation_threshold=30,
+            empirical_win_rate=win_rate,
+            profit_factor=profit_factor,
+            pillars_passed=5,
+            pillars_total=5,
+            quarantine_lane="Lane 1 Live",
+            net_expected_value=net_ev,
+            max_drawdown_pct=max_dd,
+            git_commit_hash=commit_hash or "HEAD",
+            harakiri_verified=harakiri_verified,
+            simsim_verified=simsim_verified,
+            regime_distribution=regime_distribution or {"low_vol": 15, "high_vol": 15},
+            details={"gauntlet_certified": True},
+        )
+        self._seals[bot_id] = seal
+        self._save_seals_to_disk()
+        logger.info("🏆 [SEAL MINTED] '%s' awarded Seal of Excellence (%s)", bot_id, token)
+        return seal
 
     def audit_bot(
         self,

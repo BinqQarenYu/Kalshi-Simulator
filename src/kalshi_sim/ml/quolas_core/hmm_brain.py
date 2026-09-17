@@ -48,6 +48,11 @@ class HMMBrain:
 
         self._load_model()
 
+    @property
+    def is_trained(self) -> bool:
+        """Return True if the underlying GaussianHMM model is initialized and trained."""
+        return self.model is not None
+
     def train(self, data_bundle: Dict[str, List[Dict]]) -> bool:
         """Train HMM on a bundle of asset candles (e.g., BTCUSDT)."""
         try:
@@ -89,7 +94,12 @@ class HMMBrain:
             return self.current_regime, self.regime_probabilities
 
         try:
-            btc_data = data_bundle.get("BTCUSDT", data_bundle.get("BTC", []))
+            if isinstance(data_bundle, list):
+                btc_data = data_bundle
+            elif isinstance(data_bundle, dict):
+                btc_data = data_bundle.get("BTCUSDT", data_bundle.get("BTC", []))
+            else:
+                btc_data = []
             features = self._extract_features(btc_data)
             if features is None or len(features) < 1:
                 return self.current_regime, self.regime_probabilities

@@ -75,36 +75,42 @@ class ThreeStepDominationBot:
 
     def __init__(
         self,
-        min_edge_pct: float = 0.06,  # 6.0% minimum edge (raised from 4% — data shows 4-6% edge trades are coin-flips)
+        min_edge_pct: float = 0.015,  # 1.5% minimum edge (realistic for Kalshi 15M makers)
         min_ev_dollars: Decimal = Decimal("0.02"),  # Minimum $0.02 net EV per contract
         vpin_toxic_threshold: float = 0.60,
         vpin_safe_threshold: float = 0.35,
         default_btc_1m_volatility: float = 14.0,  # $14 typical 1-min BTC spot std dev
-        take_profit_price_threshold: Decimal = Decimal("0.95"),  # 95c tail risk ceiling
+        take_profit_price_threshold: Decimal = Decimal("0.92"),  # 92c tail risk ceiling (Historical best)
         enable_take_profit_ceiling: bool = True,  # Take profit price ceiling toggle
         require_reversal_for_tp_ceiling: bool = True,  # Only exit at ceiling if indicators >= 85% reverse; if not, continue to expiry
         enable_reverse_take_profit_roi: bool = True,  # Only take profit on min_take_profit_roi if indicators >= 85% reverse
         reverse_indicator_threshold: float = 0.85,  # 85% conviction in opposite direction required
-        min_take_profit_roi: float = 0.20,  # +20% minimum ROI for early exit
+        min_take_profit_roi: float = 0.40,  # +40% minimum ROI for early exit (Historical best)
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
         fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
         max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
         discount_limit_price: Decimal = Decimal("0.52"),  # Configurable discount sniper ceiling (48¢-52¢ sweetspot)
-        min_confidence: float = 0.70,  # 70% model conviction threshold
+        min_confidence: float = 0.81,  # 81% model conviction threshold (Historical best)
         enable_trailing_ratchet: bool = True,  # High-water mark trailing profit ratchet and breakeven armor
-        trailing_ratchet_buffer: Decimal = Decimal("0.10"),  # $0.10 pullback buffer below peak bid
+        trailing_ratchet_buffer: Decimal = Decimal("0.08"),  # $0.08 pullback buffer below peak bid (Historical best)
         spot_delta_front_run_threshold: float = 28.0,  # $28.0 rolling 3s spot velocity base threshold (2.0σ winning sweetspot)
         enable_dynamic_spot_velocity: bool = True,  # 4-Regime Fading Mathematics dynamic front-runner
         velocity_z_score_threshold: float = 2.50,  # 2.50 sigma statistical anomaly threshold
-        moneyness_moat_multiplier: float = 2.0,  # 2.0x sigma*sqrt(t) deep ITM protection moat
+        
+        # [FROZEN] The following 3 parameters were historically paralyzing the bot.
+        # FROZEN_OLD_min_edge_pct = 0.06 (6.0%) -> Now 0.015 (1.5%)
+        # FROZEN_OLD_max_queue_depth_ahead = 250 -> Now 25000
+        # FROZEN_OLD_moneyness_moat_multiplier = 2.0 -> Now 1.36
+        moneyness_moat_multiplier: float = 1.36,  # 1.36x sigma*sqrt(t) deep ITM protection moat (sweet spot)
+        
         twap_fading_quarantine_seconds: float = 15.0,  # 15s expiration quarantine (strict hold to $1.00)
         twap_fading_window_seconds: float = 60.0,  # 60s Silas TWAP fading evaluation window
         enable_dynamic_reversal_curve: bool = True,  # Time-adaptive reversal curve (decays 85% -> 50% as tau -> 0)
         opening_quarantine_seconds: float = 90.0,  # Quarantine opening seconds of cycle to eliminate false breakouts
         onnx_engine: Optional[Any] = None,  # Brain 1 QuoLas Nano Microscope ONNX inference engine
         twap_immutability_sniper_cents: float = 0.75,  # 75¢ ceiling for Silas TWAP late-cycle arbitrage harvest
-        max_queue_depth_ahead: int = 250,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
+        max_queue_depth_ahead: int = 25000,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
         max_clob_spread_cents: float = 0.05,  # Max allowable bid-ask spread corridor cap ($0.05)
         asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
@@ -168,14 +174,14 @@ class ThreeStepDominationBot:
         self.min_spot_diff = float(cfg.min_spot_diff)
         self.typical_1m_volatility = float(cfg.typical_1m_volatility)
         self.default_btc_1m_volatility = self.typical_1m_volatility
-        logger.info("[DOMINATION BOT] Calibrated for %s: min_spot_diff=%.6f, 1m_vol=%.6f", cfg.name, self.min_spot_diff, self.typical_1m_volatility)
+        logger.debug("[DOMINATION BOT] Calibrated for %s: min_spot_diff=%.6f, 1m_vol=%.6f", cfg.name, self.min_spot_diff, self.typical_1m_volatility)
 
     def set_discount_limit_price(self, new_price: Decimal | float | str) -> None:
         """Dynamically update the maker discount limit price ceiling."""
         dec_price = Decimal(str(new_price))
         clamped = max(Decimal("0.10"), min(Decimal("0.65"), dec_price))
         self.discount_limit_price = clamped
-        logger.info("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
+        logger.debug("[DOMINATION BOT] Dynamic discount limit price updated to: $%s", clamped)
 
     def get_parameters(self) -> Dict[str, Any]:
         """Return current live strategy parameters."""
@@ -183,7 +189,7 @@ class ThreeStepDominationBot:
             "asset": self.asset.value if hasattr(self, "asset") else "BTC",
             "discount_limit_price": float(self.discount_limit_price),
             "momentum_max_price": float(self.max_entry_price),
-            "min_confidence": round(float(self.min_confidence) * 100.0, 1) if self.min_confidence <= 1.0 else round(float(self.min_confidence), 1),
+            "min_confidence": float(self.min_confidence),
             "min_edge_pct": round(float(self.min_edge_pct) * 100.0, 1),
             "min_ev_dollars": float(self.min_ev_dollars),
             "min_spot_diff": float(self.min_spot_diff),
@@ -327,7 +333,7 @@ class ThreeStepDominationBot:
             self.max_queue_depth_ahead = max(10, min(2000, int(max_queue_depth_ahead)))
         if max_clob_spread_cents is not None:
             self.max_clob_spread_cents = max(0.01, min(0.25, float(max_clob_spread_cents)))
-        logger.info("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
+        logger.debug("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
     def get_dynamic_proximity_threshold(
@@ -411,6 +417,7 @@ class ThreeStepDominationBot:
         max_position_size: int = 1,
         estimated_vpin: float = 0.15,
         twap_60s: Optional[float] = None,
+        **kwargs: Any,
     ) -> DominationDecision:
         """Execute 3-step cycle analysis and determine optimal playbook execution."""
         if not book or (not book.yes_book and not book.no_book) or spot_price <= 0 or target_strike <= 0:
@@ -985,7 +992,8 @@ class ThreeStepDominationBot:
             # Require 12% minimum edge to filter noise trades that don't survive reversals.
             razor_tight_threshold = self.get_dynamic_proximity_threshold(time_to_expiry_s, cycle_duration_s=cycle_duration_s)
             marginal_zone_upper = razor_tight_threshold * 1.5
-            marginal_min_edge = 12.0  # 12% minimum edge in marginal territory
+            # [FROZEN] OLD_marginal_min_edge = 12.0 (12%). Paralyzing hurdle in marginal territory.
+            marginal_min_edge = 2.0  # 2.0% minimum edge in marginal territory (matches new 1.5% base edge)
             if abs(spot_diff) < marginal_zone_upper and edge_pct < marginal_min_edge:
                 diff_str = cfg.format_diff(spot_diff)
                 return self._build_wait_decision(
@@ -1259,6 +1267,7 @@ class ThreeStepDominationBot:
         spot_velocity_3s: float = 0.0,
         twap_60s: Optional[float] = None,
         rolling_vol_1m: Optional[float] = None,
+        **kwargs: Any,
     ) -> DominationExitDecision:
         """Evaluate open position against quantitative Take-Profit and Early Liquidation rules."""
         if not book or size <= 0:

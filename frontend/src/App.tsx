@@ -198,6 +198,7 @@ export function App() {
           preflightGates={data.preflight_gates}
           macroDominionTelemetry={data.macro_trend_dominion_telemetry}
           hmmMacroRegime={data.hmm_macro_regime}
+          sealOfExcellence={data.seal_of_excellence}
           onOpenReports={() => {
             if (window.opener) {
               try {

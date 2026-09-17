@@ -211,12 +211,6 @@ const CYLINDERS: CylinderDef[] = [
         desc: 'Maximum limit price the bot will post resting orders at to guarantee positive risk/reward asymmetry.',
       },
       {
-        param: 'min_edge_pct',
-        defaultVal: '8.0%',
-        range: '2.0% – 25.0%',
-        desc: 'Minimum theoretical edge over the implied market probability before placing resting orders.',
-      },
-      {
         param: 'vpin_toxic_threshold',
         defaultVal: '0.60',
         range: '0.40 – 0.85',

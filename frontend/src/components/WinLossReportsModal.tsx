@@ -254,10 +254,11 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close win loss report modal"
-              className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-[#21262d] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+              aria-label="Close win loss reports modal"
+              className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-[#21262d] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+              title="Close Report Modal"
             >
-              <X className="h-5 w-5" />
+              <X className="h-5 w-5" aria-hidden="true" />
             </button>
           </div>
         </div>
