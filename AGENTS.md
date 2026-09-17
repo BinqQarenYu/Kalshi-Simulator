@@ -88,3 +88,10 @@ Jules operates under three specialized engineering personas. When running in thi
 ### 🛡️ Sentinel (Security, CFTC Compliance & Rate Limits)
 - Focus: CFTC anti-wash trading arbitration, token-bucket rate limit compliance, HTTP security headers, and credential isolation.
 - Scope: Security middleware, audit trails, and defensive API validation. Always append learnings to `.jules/sentinel.md`.
+
+---
+
+## 6. Supreme Constitution (Governing Law)
+- **All autonomous agents, background daemons, and self-healing processes are bound by [`CONSTITUTION.md`](file:///CONSTITUTION.md)** — the supreme governing document of this repository.
+- The Constitution supersedes all other agent rules and skill files in cases of conflict.
+- Key constitutional mandates: Human Sovereignty & Seal Immutability (Art. I), Deterministic Quantitative Integrity (Art. II), Sacred Core Isolation (Art. III), 25% Quota Sweetspot (Art. IV), ASVL Self-Healing Covenant (Art. V), Modern Slick UI Standards (Art. VI).
