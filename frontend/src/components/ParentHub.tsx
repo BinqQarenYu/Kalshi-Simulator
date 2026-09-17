@@ -311,10 +311,12 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   const b1Seal = seals?.['3_step_domination_bot'];
   const b2Seal = seals?.['dominion_2_bot'] ?? seals?.['the_onnx_strategy'] ?? seals?.['macro_onnx'];
   const b3Seal = seals?.['macro_trend_dominion'];
+  const b4Seal = seals?.['gold_onnx_bot'];
 
   const b1IsSealed = b1Seal ? (b1Seal.seal_status === 'SEALED_EXCELLENT' && b1Seal.live_trading_authorized) : true;
   const b3IsSealed = b3Seal ? (b3Seal.seal_status === 'SEALED_EXCELLENT' && b3Seal.live_trading_authorized) : true;
   const b2IsSealed = b2Seal ? (b2Seal.seal_status === 'SEALED_EXCELLENT' && b2Seal.live_trading_authorized) : false;
+  const b4IsSealed = b4Seal ? (b4Seal.seal_status === 'SEALED_EXCELLENT' && b4Seal.live_trading_authorized) : false;
 
   // Bot 1 Live Metrics (Port 8001 Live Production)
   const b1Events = livePortfolio?.settled_cycles ?? portfolio?.settled_cycles ?? 0;
@@ -420,6 +422,36 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           ? 'text-amber-400 bg-amber-500/15 border-amber-500/40'
           : 'text-cyan-300 bg-cyan-500/15 border-cyan-500/30',
         liveAuthorized: Boolean(b3IsSealed),
+        canPromote: false,
+      },
+      {
+        id: 'gold_onnx_bot',
+        name: 'Gold ONNX Bot (Bot 4)',
+        subName: '32-D Spacetime Inference Engine (KXGOLD15M)',
+        asset: 'GOLD-15M',
+        lane: b4IsSealed ? 'Lane 1 (LIVE)' : 'Lane 2 (Shadow Incubator)',
+        events: b4Seal?.settled_cycles_verified ?? 0,
+        winRate: b4Seal?.empirical_win_rate != null && (b4Seal.settled_cycles_verified ?? 0) > 0
+          ? `${(Number(b4Seal.empirical_win_rate) * 100).toFixed(1)}%`
+          : '—',
+        profitFactor: b4Seal?.profit_factor ? Number(b4Seal.profit_factor).toFixed(2) : '—',
+        drawdown: '—',
+        vpinPass: '100%',
+        status: b4IsSealed
+          ? 'ACTIVE LIVE (KXGOLD15M)'
+          : 'LANE 2 INCUBATOR (SHADOW)',
+        statusColor: b4IsSealed
+          ? 'text-[#10b981] bg-[#10b981]/15 border-[#10b981]/30'
+          : 'text-amber-400 bg-amber-500/15 border-amber-500/30',
+        sealStatus: b4IsSealed ? 'SEALED_EXCELLENT' : (b4Seal?.seal_status ?? 'IN_INCUBATION'),
+        sealToken: b4Seal?.seal_token ?? 'INCUBATING-KXGOLD15M',
+        sealLabel: b4IsSealed
+          ? '🏆 SEALED EXCELLENT'
+          : `⏳ INCUBATING (${b4Seal?.settled_cycles_verified ?? 0}/30)`,
+        sealColor: b4IsSealed
+          ? 'text-amber-400 bg-amber-500/15 border-amber-500/40'
+          : 'text-amber-300 bg-amber-500/15 border-amber-500/30',
+        liveAuthorized: Boolean(b4IsSealed),
         canPromote: false,
       },
     ];
@@ -2111,6 +2143,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                     ? 'Bot 1 (3-Step Dom)'
                     : selectedBotId === 'macro_trend_dominion'
                     ? 'Bot 3 (Macro Trend)'
+                    : selectedBotId === 'gold_onnx_bot'
+                    ? 'Bot 4 (Gold ONNX)'
                     : 'Baby Bot'}
                 </span>
               </span>

@@ -193,12 +193,12 @@ export const BOT_PROFILES: Record<string, BotProfile> = {
   },
   'gold_onnx_bot': {
     id: 'gold_onnx_bot',
-    name: 'Gold ONNX Bot (Triple-Brain)',
-    shortName: 'Gold ONNX',
-    version: 'v2.5 (Gold Sovereign)',
+    name: 'Gold ONNX Bot (Bot 4)',
+    shortName: 'Gold ONNX (B4)',
+    version: 'v2.5 (32-D Spacetime)',
     lane: 'LANE 1 (LIVE REAL-MONEY)',
     laneBadge: 'live',
-    asset: 'BTC',
+    asset: 'GOLD',
     timeframe: '15m',
     telemetryType: 'macro_dominion',
     description: 'Triple-Brain Gold Sovereign: Binance Spot ONNX + Kalshi Binary ONNX + 5M HMM Regime Fusion',
@@ -867,6 +867,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           BOT_PROFILES['3_step_domination_bot'],
           BOT_PROFILES['dual_onnx'] || BOT_PROFILES['the_onnx_strategy'] || BOT_PROFILES['macro_onnx'],
           BOT_PROFILES['macro_trend_dominion'],
+          BOT_PROFILES['gold_onnx_bot'],
         ].filter(Boolean).map((profile) => {
           const profileSeal =
             sealOfExcellence?.seals?.[profile.id] ||

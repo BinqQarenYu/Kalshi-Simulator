@@ -189,7 +189,7 @@ class ThreeStepDominationBot:
             "asset": self.asset.value if hasattr(self, "asset") else "BTC",
             "discount_limit_price": float(self.discount_limit_price),
             "momentum_max_price": float(self.max_entry_price),
-            "min_confidence": float(self.min_confidence),
+            "min_confidence": round(float(self.min_confidence) * 100.0, 1) if self.min_confidence <= 1.0 else round(float(self.min_confidence), 1),
             "min_edge_pct": round(float(self.min_edge_pct) * 100.0, 1),
             "min_ev_dollars": float(self.min_ev_dollars),
             "min_spot_diff": float(self.min_spot_diff),
