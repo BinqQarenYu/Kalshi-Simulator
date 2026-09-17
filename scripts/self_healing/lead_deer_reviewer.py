@@ -101,20 +101,20 @@ RESPOND STRICTLY IN VALID JSON:
 
             import truststore
             truststore.inject_into_ssl()
-            from langchain_google_genai import ChatGoogleGenerativeAI
+            from google import genai
 
-            llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", api_key=api_key, max_tokens=300)
-            res = llm.invoke(prompt)
-            
-            raw_text = res.content
-            # Handle list-wrapped content if returned by langchain
-            if isinstance(raw_text, list) and raw_text:
-                raw_text = raw_text[0].get("text", "")
+            client = genai.Client(api_key=api_key)
+            resp = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+            raw_text = resp.text.strip() if resp.text else ""
 
             # Clean json fences if present
-            raw_text = raw_text.strip()
             if raw_text.startswith("```json"):
                 raw_text = raw_text[7:]
+            elif raw_text.startswith("```"):
+                raw_text = raw_text[3:]
             if raw_text.endswith("```"):
                 raw_text = raw_text[:-3]
 

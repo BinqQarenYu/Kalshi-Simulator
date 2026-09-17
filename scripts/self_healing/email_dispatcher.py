@@ -21,6 +21,7 @@ def send_sentinel_email_alert(
     explanation: str,
     proposed_fix: str,
     is_fatal: bool = True,
+    agent_role: str = "Lead Deer (Backend Self-Healer)",
 ) -> bool:
     """
     Sends an instant email notification via Google SMTP (Port 587 TLS).
@@ -33,8 +34,8 @@ def send_sentinel_email_alert(
         print("[!] Email credentials missing in .env. Skipping dispatch.")
         return False
 
-    status_prefix = "🚨 [FATAL FLAW ISOLATED]" if is_fatal else "⚠️ [SUSPECT CODE FLAGGED]"
-    subject = f"{status_prefix} {Path(file_path).name}:{line_no}"
+    status_prefix = "🚨 [FATAL FLAW ISOLATED]" if is_fatal else "🎨 [UI/UX ERGONOMIC POLISH]" if "Architect" in agent_role else "⚠️ [SUSPECT CODE FLAGGED]"
+    subject = f"{status_prefix} {Path(file_path).name}:{line_no} [{agent_role.split(' ')[0]}]"
 
     # Strip whitespace from app password just in case
     clean_password = password.replace(" ", "")
@@ -77,7 +78,7 @@ Action: Autonomous ASVL verification gate commencing in 60 seconds...
             </div>
 
             <div style="margin-bottom: 16px;">
-                <h3 style="font-size: 14px; color: #cbd5e1; margin-bottom: 6px;">Lead Deer Falsification Diagnosis:</h3>
+                <h3 style="font-size: 14px; color: #cbd5e1; margin-bottom: 6px;">{agent_role} Diagnosis:</h3>
                 <p style="margin: 0; color: #e2e8f0; font-size: 14px; line-height: 1.5; background: #182234; padding: 12px; border-left: 4px solid #f43f5e; border-radius: 4px;">
                     {explanation}
                 </p>
