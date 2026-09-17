@@ -33,6 +33,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.self_healing.ast_truth_scanner import scan_directory
 from scripts.self_healing.circuit_breakers import CircuitBreakerManager
+from scripts.self_healing.email_dispatcher import send_sentinel_email_alert
 
 AUDIT_LOG = Path("docs/audits/SELF_HEALING_AUDIT.md")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
