@@ -697,15 +697,27 @@ class L2BookState:
 
     # -- Depth ---------------------------------------------------------------
 
-    def get_depth_tuples(self, n: int = 15) -> tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:
-        """Return top *n* bid and ask (price, quantity) tuples, sorted best-first.
+    def get_depth_raw(
+        self, n: int = 15
+    ) -> tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:
+        """Return top *n* bid and ask raw (price, quantity) tuples, sorted best-first.
+
+        Performance Optimization:
+        Bypasses Pydantic model creation and validation when raw numeric prices and quantities
+        are sufficient (e.g., in ML feature extraction hot paths).
+        """
+        top_yes = sorted(self.yes_book.items(), key=lambda item: item[0], reverse=True)[:n]
+        top_no = sorted(self.no_book.items(), key=lambda item: item[0], reverse=True)[:n]
+        return top_yes, top_no
+
+    def get_depth(self, n: int = 15) -> tuple[list[OrderBookLevel], list[OrderBookLevel]]:
+        """Return top *n* bid and ask levels, sorted best-first.
 
         Performance optimization: Uses version-backed _BookDict tracking to memoize depth levels
         in O(1) time (~0.3 µs hit vs ~13.5 µs miss). In streaming ML pipelines where features are
         read frequently across ticks, this reduces feature extraction latency by ~38%.
         """
-        top_yes = sorted(self._yes_book.items(), key=lambda item: item[0], reverse=True)[:n]
-        top_no = sorted(self._no_book.items(), key=lambda item: item[0], reverse=True)[:n]
+        top_yes, top_no = self.get_depth_raw(n)
         bids = [OrderBookLevel(price=p, quantity=q) for p, q in top_yes]
         asks = [OrderBookLevel(price=p, quantity=q) for p, q in top_no]
 
