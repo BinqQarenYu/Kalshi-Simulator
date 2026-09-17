@@ -278,6 +278,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
 
   const formatBotDisplayName = (botType?: string): string => {
     if (!botType) return '3-Step Dom';
+    if (botType.includes('gold_onnx')) return 'Gold ONNX (B4)';
     if (botType.includes('macro_onnx')) return 'ONNX Macro';
     if (botType.includes('macro_trend')) return 'Macro Trend';
     if (botType.includes('dominion_2')) return 'Dominion 2';
@@ -297,7 +298,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   const handleSelectBot = async (botId: string) => {
     soundFX.playClickSound();
     setSelectedBotId(botId);
-    if (onSelectStrategy && ['3_step_domination_bot', 'macro_onnx', 'macro_trend_dominion', 'onnx_microstructure_bot'].includes(botId)) {
+    if (onSelectStrategy && ['3_step_domination_bot', 'macro_onnx', 'macro_trend_dominion', 'onnx_microstructure_bot', 'gold_onnx_bot', 'gold_onnx'].includes(botId)) {
       try {
         await onSelectStrategy(botId);
       } catch (e) {
