@@ -47,14 +47,20 @@ Zero TypeScript compilation errors and a clean build in `frontend/dist/`.
    - In simulation, fast market adverse drift (+$0.01) is triggered when spot velocity exceeds calibrated asset thresholds.
 6. **CF Benchmarks BRTI 5Hz & Settlement TWAP Parity**:
    - Spot price ($S_t$) and moneyness ($S_t - K$) must stream from Kalshi's authenticated CME CF Bitcoin Real-Time Index feed (`cfbenchmarks_value_5hz` at 200ms) with official trailing 60s TWAP (`avg_60s_data`) for exact settlement parity.
-7. **Pluggable Strategy Architecture & Multi-Lane Execution**:
-   - Follow [.agents/rules/bot-management-standards.md](file:///.agents/rules/bot-management-standards.md).
-   - **Zero Branch-per-Bot Anti-Pattern**: Never branch the repo or spawn git worktrees to run different bots. All bots exist as modular Python classes in `strategies/`.
-   - **Three Distinct Lanes**: Lane 1 (Live Real Money, 1 bot at a time), Lane 2 (Shadow / Incubator, paper trading on live ticks for cooking new bots), Lane 3 (Offline Simulation & Backtesting).
-   - **Unified Dashboard**: Single port and unified server manage all lanes without process lock collisions.
-8. **Multi-Bot Anti-Cannibalism & Wash-Trading Shield**:
-   - Multiple bots on the same account must **NEVER** hold opposing positions (YES vs NO) on the same contract cycle.
-   - Any opposing submission is blocked synchronously by `LiveCoordinator` to eliminate guaranteed negative-arbitrage loss (-4¢/pair) and CFTC wash-trading violations.
+7. **Pluggable Multi-Engine Strategy Architecture & Execution Lanes**:
+   - **Zero Branch-per-Bot Anti-Pattern**: Never branch the repo or spawn git worktrees to run different bots. All bots exist as modular Python classes inheriting `BaseStrategyEngine` (`domination_bot.py`, `dual_onnx.py`, `macro_trend_dominion_bot.py`).
+   - **Three Execution Lanes**:
+     - *Lane 1 (Live Real Money)*: Authorized live trading bots holding certified SHA-256 Seals of Excellence (**Bot 1** and **Bot 3**).
+     - *Lane 2 (Shadow / Incubator — The 1 Quant University)*: Multi-paper trading on live tick feeds to evaluate candidate bots through Freshman -> Sophomore -> Junior -> Senior curriculum tiers.
+     - *Lane 3 (Offline Simulation & Backtesting)*: High-throughput L2 synthetic book walks and jump-diffusion stress testing.
+   - **Unified Port 8000 Dashboard Monolith**: A single master server (`server.py` on Port 8000) orchestrates all engines, Mother Dashboard WebCLOB, docked Baby Bot Console, and university telemetry simultaneously.
+8. **Multi-Bot Live & Paper Execution with Anti-Cannibalism Shield**:
+   - Multiple bots on the same account/ticker must **NEVER** hold opposing positions (YES vs NO) on the same contract cycle.
+   - Synchronously arbitrated by `LiveCoordinator` (`live_coordinator.py`) with absolute CFTC anti-wash trading veto power.
+   - Cooperative same-direction execution permitted up to the multi-bot micro-bankroll cap (max 2 contracts combined).
+9. **The 1 Quant University & Passage of the Seal of Excellence**:
+   - Every algorithmic candidate must graduate from the Lane 2 Incubator University by completing at least 30 settled cycles with $\ge 52\%$ win rate and $\ge 1.10$ profit factor.
+   - Pre-flight passage requires passing the 5-Pillar Gauntlet audited by `BotDeploymentAuditor` (Guardrails, Mathematical Decimal Integrity, Data Truths/CF Benchmarks, Regulatory Wash-Trading, and Empirical Statistical Edge).
 
 ---
 

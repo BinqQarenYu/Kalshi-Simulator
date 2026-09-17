@@ -23,6 +23,12 @@ We, the autonomous agent collective of this trading ecosystem—**Lead Deer** (B
    - No autonomous worker may edit, refactor, reorganize, optimize, or reset code, JSON parameters, or UI sliders belonging to a sealed bot.
    - **Unlock Protocol**: Sealed bots may ONLY be modified if the human operator gives an explicit, affirmative command in the current conversation turn (e.g. "revise Bot 1", "unlock Bot 1 to change parameters").
 4. **Lane 2 Sandbox Freedom**: Autonomous self-improvement and experimental strategy cooking are encouraged within **Lane 2 Incubator (Paper/Shadow Mode)**, allowing rapid iteration without risking live capital.
+5. **The 1 Quant University & Curriculum Tiers**:
+   - All candidate algorithms enroll in the **Unified Quant University (Lane 2 Incubator)**.
+   - Progression follows deterministic academic standings: **Freshman** (0-9 cycles, Sandbox), **Sophomore** (10-19 cycles, Lab Trials), **Junior** (20-29 cycles, Stress Arena), **Senior / Graduation Candidate** (30+ cycles, Oral Defense).
+6. **The Passage of the Seal of Excellence**:
+   - Graduation requires passing the comprehensive 5-Pillar Gauntlet: **Guardrail Pillar** (sizing & cycle locks), **Mathematical Integrity Pillar** (strict Decimal & EV), **Data Truths Pillar** (zero-mock & 5Hz CME CF parity), **CFTC Compliance Pillar** (anti-wash & uncrossed books), and **Statistical Edge Pillar** (>= 30 cycles, >= 52% WR, >= 1.10 PF).
+   - Only upon passing all 5 pillars is a cryptographic SHA-256 Seal minted, promoting the bot from multi-paper candidate to authorized live execution.
 
 ---
 
@@ -38,10 +44,15 @@ We, the autonomous agent collective of this trading ecosystem—**Lead Deer** (B
 ## Article III: Zero-Downtime Sacred Core Isolation & Hardware Budget
 
 1. **The Sacred Core**: Port 8000 (`server.py`), live WebSockets, ONNX CPU inference, and authenticated CME CF 5Hz streams represent the Sacred Core.
-2. **Hardware Budget Allocation**:
+2. **One Unified App & Monolithic Dashboard Architecture**:
+   - All engines, bot university sandboxes, multi-paper incubators, and multi-live execution pipelines converge into **One Unified Application** served on **Port 8000** (`server.py` + Mother Dashboard / docked Baby Bot Console).
+   - Disparate ports (8001, 8002) and external process wrappers are permanently retired into internal modular engine threads arbitrated by `TradingEngineLock`.
+3. **Multi-Engine Execution Hub**:
+   - Supports concurrent modular execution engines (Bot 1 Domination, Bot 2 Dual-ONNX, Bot 3 Macro Trend) orchestrated through `LiveCoordinator` and `ExchangeRouter`.
+4. **Hardware Budget Allocation**:
    - **Sacred Core & OS Buffer**: At least **22 GB RAM** and **4 CPU threads** on the Intel Core i7-7700 rig are permanently reserved for live trading.
    - **DeerFlow & Background Workers**: Capped to **at most 8.0 GB RAM** and **at most 3-4 inference threads**.
-3. **Latency Invariant**: Background self-healing, log scraping, or research must immediately throttle or pause if tick latency exceeds **100ms** or system CPU exceeds **85%**. Live execution always takes precedence over background thinking.
+5. **Latency Invariant**: Background self-healing, log scraping, or research must immediately throttle or pause if tick latency exceeds **100ms** or system CPU exceeds **85%**. Live execution always takes precedence over background thinking.
 
 ---
 

@@ -185,6 +185,10 @@ class BotAuditReport:
     def is_certified(self) -> bool:
         return self.status == "CERTIFIED"
 
+    @property
+    def failure_reasons(self) -> List[str]:
+        return [p.message for p in self.pillars if p.status == "FAIL"]
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "bot_id": self.bot_id,

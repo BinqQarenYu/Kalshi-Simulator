@@ -264,6 +264,33 @@ class BotScorecard:
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
 
+    @property
+    def academic_standing(self) -> str:
+        """Quant University academic standing tier based on settled cycle count."""
+        if self.total_trades < 10:
+            return "Freshman (Incubator Sandbox)"
+        elif self.total_trades < 20:
+            return "Sophomore (Lab Trials)"
+        elif self.total_trades < 30:
+            return "Junior (Stress Arena)"
+        else:
+            return "Senior (Graduation Candidate)"
+
+    @property
+    def curriculum_progress_pct(self) -> int:
+        """Progress towards 30-cycle graduation requirement (0-100%)."""
+        return min(100, int((self.total_trades / 30) * 100))
+
+    @property
+    def graduation_eligible(self) -> bool:
+        """Whether the candidate bot has satisfied minimum cycles and performance criteria."""
+        return (
+            self.total_trades >= 30
+            and self.win_rate_pct >= Decimal("52.00")
+            and self.profit_factor >= Decimal("1.10")
+            and self.max_drawdown_pct <= Decimal("15.00")
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "bot_id": self.bot_id,
@@ -279,6 +306,9 @@ class BotScorecard:
             "toxic_vpin_trades_count": self.toxic_vpin_trades_count,
             "promotion_status": self.promotion_status,
             "readiness_score_pct": self.readiness_score_pct,
+            "academic_standing": self.academic_standing,
+            "curriculum_progress_pct": self.curriculum_progress_pct,
+            "graduation_eligible": self.graduation_eligible,
             "last_audit": self.last_audit,
         }
 
@@ -593,6 +623,42 @@ class IncubatorAgent:
             ])
 
         return "\n".join(lines)
+
+    def take_certification_exam(self, bot_id: str, bot_instance: Optional[Any] = None) -> Dict[str, Any]:
+        """Administer the Quant University final certification exam and Seal of Excellence audit."""
+        scorecard = self.get_bot_scorecard(bot_id)
+        reasons: List[str] = []
+
+        # 1. Sample size check (Senior Standing)
+        if scorecard.total_trades < 30:
+            reasons.append(f"Insufficient shadow sample size: completed {scorecard.total_trades}/30 required settled cycles.")
+
+        # 2. Minimum statistical hurdle check
+        if scorecard.win_rate_pct < Decimal("52.00"):
+            reasons.append(f"Win rate {scorecard.win_rate_pct}% below 52.00% graduation threshold.")
+
+        if scorecard.profit_factor < Decimal("1.10"):
+            reasons.append(f"Profit factor {scorecard.profit_factor} below 1.10 minimum graduation threshold.")
+
+        # 3. 5-Pillar Audit Gauntlet
+        target_inst = bot_instance if bot_instance is not None else object()
+        audit_report = self.auditor.audit_bot(bot_id=bot_id, bot_instance=target_inst, mode="live")
+
+        if not audit_report.is_certified:
+            reasons.extend(audit_report.failure_reasons)
+
+        graduated = len(reasons) == 0 and audit_report.is_certified
+
+        return {
+            "bot_id": bot_id,
+            "bot_name": scorecard.bot_name,
+            "academic_standing": scorecard.academic_standing,
+            "graduated": graduated,
+            "reasons": reasons,
+            "scorecard": scorecard.to_dict(),
+            "audit_report": audit_report.to_dict(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
 
 
 # Singleton factory
