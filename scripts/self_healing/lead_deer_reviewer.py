@@ -39,27 +39,50 @@ class LeadDeerReviewer:
         except Exception:
             return False
 
+    def _load_vault_axiom(self, category: str) -> str:
+        vault_path = Path("data/immutable_truth_vault.json")
+        if not vault_path.exists():
+            return "STRICT_DECIMAL_ONLY: Use Decimal for all monetary math. Zero float tolerance."
+        try:
+            data = json.loads(vault_path.read_text(encoding="utf-8"))
+            if "FLOAT" in category or "DIVISION" in category:
+                ax = data.get("tier_0_math_axioms", {}).get("AXIOM_0_1_DECIMAL_ONLY", {})
+                return f"{ax.get('name')}: {ax.get('description')}"
+            elif "BOUNDARY" in category or "SINGULARITY" in category:
+                ax = data.get("tier_0_math_axioms", {}).get("AXIOM_0_3_EXPIRATION_SINGULARITY", {})
+                return f"{ax.get('name')}: {ax.get('description')}"
+            elif "WASH" in category or "CANNIBAL" in category:
+                ax = data.get("tier_1_regulatory_invariants", {}).get("AXIOM_1_1_CFTC_ANTI_WASH", {})
+                return f"{ax.get('name')}: {ax.get('description')}"
+            return "GENERAL_INVARIANT: Adhere strictly to institutional quantitative truth math."
+        except Exception:
+            return "STRICT_DECIMAL_ONLY: Zero float tolerance on financial numbers."
+
     def review_suspect_math(self, file_path: str, line_no: int, snippet: str, concern: str) -> Optional[Dict[str, Any]]:
         """
-        Sends an isolated micro-snippet to Lead Deer (Gemini 3.6 Flash) under adversarial falsification.
+        Sends an isolated micro-snippet to Lead Deer (Gemini 3.6 Flash) bound by the Citadel Truth Vault.
         """
         if not self._check_rate_limit():
             return {"status": "RATE_LIMITED", "reason": "Exceeded 2 calls/hour token armor limit"}
 
-        prompt = f"""You are LEAD DEER, an adversarial quantitative proof reviewer.
-Evaluate this suspect Python code snippet from an institutional trading terminal:
+        axiom_constraint = self._load_vault_axiom(concern)
 
+        prompt = f"""You are LEAD DEER, an adversarial quantitative proof reviewer legally bound by the CITADEL TRUTH VAULT.
+
+MANDATORY TRUTH INVARIANT:
+[{axiom_constraint}]
+
+TARGET SNIPPET TO AUDIT:
 FILE: {file_path} (Line {line_no})
 CONCERN: {concern}
-SNIPPET:
 ```python
 {snippet}
 ```
 
 ADVERSARIAL MISSION:
-Your sole goal is to FALSIFY this code. Find if it contains a real mathematical, numerical, or boundary flaw (e.g. IEEE 754 float drift, division by zero at T->0, negative variance).
-If it is mathematically sound or non-fatal, mark is_fatal=false.
-If fatal, provide a minimal <=5 line fix using Python Decimal.
+Evaluate strictly against the Mandatory Truth Invariant above.
+If the code violates this invariant or contains IEEE-754 precision drift, mark is_fatal=true and give a <=3 line Decimal fix.
+If mathematically safe and non-violating, mark is_fatal=false.
 
 RESPOND STRICTLY IN VALID JSON:
 {{
