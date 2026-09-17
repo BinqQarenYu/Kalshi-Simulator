@@ -1,0 +1,6 @@
+{
+    "deer": {
+        "primary_model": "nemotron:latest",
+        "lightweight_model": "nemotron-mini:latest"
+    }
+}
