@@ -6,6 +6,7 @@ Timestamps are parsed into timezone-aware ``datetime`` objects.
 
 from __future__ import annotations
 
+import operator
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
@@ -538,33 +539,6 @@ class L2BookState:
         self._cached_mid_no_version: int = -1
 
     @property
-    def yes_book(self) -> dict[Decimal, Decimal]:
-        return self._yes_book
-
-    @yes_book.setter
-    def yes_book(self, val: dict[Decimal, Decimal]) -> None:
-        if isinstance(val, _BookDict):
-            self._yes_book = val
-        else:
-            self._yes_book = _BookDict(val)
-        self._cached_yes_version = -1
-
-    @property
-    def no_book(self) -> dict[Decimal, Decimal]:
-        return self._no_book
-
-    @no_book.setter
-    def no_book(self, val: dict[Decimal, Decimal]) -> None:
-        if isinstance(val, _BookDict):
-            self._no_book = val
-        else:
-            self._no_book = _BookDict(val)
-        self._cached_no_version = -1
-        self._cached_spot_ask_version = -1
-
-    # -- Properties ----------------------------------------------------------
-
-    @property
     def yes_book(self) -> FastBook:
         return self._yes_book
 
@@ -593,10 +567,7 @@ class L2BookState:
         """In a spot market, yes ask is the lowest ask price. In binary, yes ask = 1 - best_no_bid."""
         if self.is_spot:
             nb = self._no_book
-            if nb._version != self._cached_spot_ask_version:
-                self._cached_best_yes_ask_spot = min(nb.keys()) if nb else None
-                self._cached_spot_ask_version = nb._version
-            return self._cached_best_yes_ask_spot
+            return min(nb.keys()) if nb else None
         nb_bid = self.best_no_bid
         if nb_bid is None:
             return None
@@ -614,82 +585,39 @@ class L2BookState:
 
     @property
     def spread(self) -> Decimal | None:
-        """Bid-ask spread at top of book: ask - bid.
-
-        Performance optimization: Uses version-backed _BookDict tracking to memoize spread
-        in O(1) time (~0.22 µs hit vs ~0.90 µs miss). Reduces redundant spread calculation overhead by ~4x.
-        """
-        yb_ver = self._yes_book._version
-        nb_ver = self._no_book._version
-        if yb_ver == self._cached_spread_yes_version and nb_ver == self._cached_spread_no_version:
-            return self._cached_spread
-
+        """Bid-ask spread at top of book: ask - bid."""
         bid = self.best_yes_bid
         ask = self.best_yes_ask
         if bid is None or ask is None:
-            self._cached_spread = None
-        else:
-            self._cached_spread = ask - bid
-
-        self._cached_spread_yes_version = yb_ver
-        self._cached_spread_no_version = nb_ver
-        return self._cached_spread
+            return None
+        return ask - bid
 
     @property
     def mid_price(self) -> Decimal | None:
-        """Mid-market price at top of book: (bid + ask) / 2.
-
-        Performance optimization: Uses version-backed _BookDict tracking to memoize mid-price
-        in O(1) time (~0.21 µs hit vs ~1.18 µs miss). Reduces redundant mid-price calculation overhead by ~5.5x.
-        """
-        yb_ver = self._yes_book._version
-        nb_ver = self._no_book._version
-        if yb_ver == self._cached_mid_yes_version and nb_ver == self._cached_mid_no_version:
-            return self._cached_mid_price
-
+        """Mid-market price at top of book: (bid + ask) / 2."""
         bid = self.best_yes_bid
         ask = self.best_yes_ask
         if bid is None or ask is None:
-            self._cached_mid_price = None
-        else:
-            self._cached_mid_price = (bid + ask) / _DEC_2
-
-        self._cached_mid_yes_version = yb_ver
-        self._cached_mid_no_version = nb_ver
-        return self._cached_mid_price
+            return None
+        return (bid + ask) / _DEC_2
 
     @property
     def micro_price(self) -> Decimal | None:
-        """Volume-weighted micro-price at top of book: (bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty).
-
-        Performance optimization: Uses version-backed _BookDict tracking to memoize the micro-price
-        in O(1) time (~0.24 µs hit vs ~2.84 µs miss). Reduces repeated micro-price calculation overhead by ~11x.
-        """
-        yb_ver = self._yes_book._version
-        nb_ver = self._no_book._version
-        if yb_ver == self._cached_micro_yes_version and nb_ver == self._cached_micro_no_version:
-            return self._cached_micro_price
-
+        """Volume-weighted micro-price at top of book: (bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty)."""
         bid = self.best_yes_bid
         ask = self.best_yes_ask
         if bid is None or ask is None:
-            self._cached_micro_price = None
+            return None
+        bid_qty = self._yes_book.get(bid, _DEC_0)
+        if self.is_spot:
+            ask_qty = self._no_book.get(ask, _DEC_0)
         else:
-            bid_qty = self._yes_book.get(bid, _DEC_0)
-            if self.is_spot:
-                ask_qty = self._no_book.get(ask, _DEC_0)
-            else:
-                nb = self.best_no_bid
-                ask_qty = self._no_book.get(nb, _DEC_0) if nb is not None else _DEC_0
-            total_qty = bid_qty + ask_qty
-            if total_qty <= _DEC_0:
-                self._cached_micro_price = (bid + ask) / 2
-            else:
-                self._cached_micro_price = (bid_qty * ask + ask_qty * bid) / total_qty
-
-        self._cached_micro_yes_version = yb_ver
-        self._cached_micro_no_version = nb_ver
-        return self._cached_micro_price
+            nb = self.best_no_bid
+            ask_qty = self._no_book.get(nb, _DEC_0) if nb is not None else _DEC_0
+        total_qty = bid_qty + ask_qty
+        if total_qty <= _DEC_0:
+            return (bid + ask) / _DEC_2
+        return (bid_qty * ask + ask_qty * bid) / total_qty
 
     @property
     def is_stale(self) -> bool:
@@ -703,28 +631,24 @@ class L2BookState:
         """Return top *n* bid and ask raw (price, quantity) tuples, sorted best-first.
 
         Performance Optimization:
-        Bypasses Pydantic model creation and validation when raw numeric prices and quantities
+        Uses C-level _PRICE_GETTER (operator.itemgetter(0)) instead of Python lambda frame allocation,
+        and bypasses Pydantic model creation and validation when raw numeric prices and quantities
         are sufficient (e.g., in ML feature extraction hot paths).
         """
-        top_yes = sorted(self.yes_book.items(), key=lambda item: item[0], reverse=True)[:n]
-        top_no = sorted(self.no_book.items(), key=lambda item: item[0], reverse=True)[:n]
+        top_yes = sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]
+        top_no = sorted(self.no_book.items(), key=_PRICE_GETTER, reverse=True)[:n]
         return top_yes, top_no
 
     def get_depth(self, n: int = 15) -> tuple[list[OrderBookLevel], list[OrderBookLevel]]:
         """Return top *n* bid and ask levels, sorted best-first.
 
-        Performance optimization: Uses version-backed _BookDict tracking to memoize depth levels
-        in O(1) time (~0.3 µs hit vs ~13.5 µs miss). In streaming ML pipelines where features are
-        read frequently across ticks, this reduces feature extraction latency by ~38%.
+        Performance optimization: Uses fast get_depth_raw tuple extraction with C-level operator.itemgetter
+        and instantiates OrderBookLevel Pydantic models only for top-n sliced levels.
         """
         top_yes, top_no = self.get_depth_raw(n)
         bids = [OrderBookLevel(price=p, quantity=q) for p, q in top_yes]
         asks = [OrderBookLevel(price=p, quantity=q) for p, q in top_no]
-
-        res = (bids, asks)
-        self._cached_depth_models_key = key
-        self._cached_depth_models = res
-        return res
+        return bids, asks
 
 
 # ---------------------------------------------------------------------------
