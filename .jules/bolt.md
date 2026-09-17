@@ -129,6 +129,7 @@
 **Learning:** Iterating over circular ring buffers element-by-element with Python loops and modulo index arithmetic in `to_list()` and `get_tail(n)` caused significant CPU overhead during tick stream windowing.
 **Action:** Replace per-element Python loops with direct C-level list slicing operations (`list(buffer[head:]) + list(buffer[:head])` / `list(buffer[start:end])`). Reduced `to_list` latency by ~79% (~4.8x speedup) and `get_tail` latency by ~94% (~17.1x speedup).
 
+<<<<<<< HEAD
 ## 2026-09-16 - Algebraic Simplification of Binary Option EV Payoff & F-String Decimal Formatting
 **Learning:** Evaluating binary option expected value using `p * (1 - K) - (1 - p) * K` in Decimal space invoked 4 separate Decimal arithmetic operations and 2 `Decimal("1.00")` object instantiations per call (~17.8 µs). Algebraically simplifying $p(1 - K) - (1 - p)K = p - K$ eliminates 3 Decimal ops, and replacing `Decimal(str(round(p, 4)))` with `Decimal(f"{p:.4f}")` reduces single-side EV latency to ~13.1 µs (~26% speedup).
 **Action:** Use $p - K$ algebraic identity for binary option gross EV payoffs and fast f-string float-to-Decimal conversions in high-frequency risk evaluation loops.
@@ -140,4 +141,8 @@
 ## 2026-09-16 - Version-Backed O(1) Depth Tuple Consumption in L2 Order Simulator
 **Learning:** `OrderSimulator.simulate_market_order` passed raw price-quantity dictionaries (`book.no_book` / `book.yes_book`) to `_walk_book`, where `sorted(book_side.items(), key=_PRICE_GETTER, reverse=True)` was re-executed on every order simulation call (~29.6 µs per call) even when order book states were unmutated.
 **Action:** Updated `OrderSimulator.simulate_market_order` to consume pre-sorted, version-backed depth tuples via `L2BookState.get_depth_tuples(100)` in O(1) memoized time, and updated `_walk_book` to accept pre-sorted level sequences. Reduced `_walk_book` level sorting overhead by ~2.4x (~17 µs saved per market order simulation).
+
+## 2026-09-17 - Fast-Path Dictionary Operations & Attribute Localization in OrderBookManager
+**Learning:** In high-frequency L2 order book delta processing (`apply_delta`), calling `side_book.get(delta.price, _ZERO_DECIMAL)` and `side_book.pop(delta.price, None)` on every update created function call overhead, and accessing `delta.*` attributes repeatedly generated attribute lookup cost across ticks.
+**Action:** Localize `delta` attributes into stack variables and fast-path key containment/deletion (`price in side_book` / `del side_book[price]`). Reduced delta tick processing latency from ~1.50 µs to ~0.95 µs per update (~33% speedup / ~1.05M deltas/sec).
 
