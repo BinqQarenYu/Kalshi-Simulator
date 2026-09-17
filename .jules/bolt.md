@@ -130,6 +130,7 @@
 **Action:** Replace per-element Python loops with direct C-level list slicing operations (`list(buffer[head:]) + list(buffer[:head])` / `list(buffer[start:end])`). Reduced `to_list` latency by ~79% (~4.8x speedup) and `get_tail` latency by ~94% (~17.1x speedup).
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ## 2026-09-16 - Algebraic Simplification of Binary Option EV Payoff & F-String Decimal Formatting
 **Learning:** Evaluating binary option expected value using `p * (1 - K) - (1 - p) * K` in Decimal space invoked 4 separate Decimal arithmetic operations and 2 `Decimal("1.00")` object instantiations per call (~17.8 µs). Algebraically simplifying $p(1 - K) - (1 - p)K = p - K$ eliminates 3 Decimal ops, and replacing `Decimal(str(round(p, 4)))` with `Decimal(f"{p:.4f}")` reduces single-side EV latency to ~13.1 µs (~26% speedup).
 **Action:** Use $p - K$ algebraic identity for binary option gross EV payoffs and fast f-string float-to-Decimal conversions in high-frequency risk evaluation loops.
@@ -145,4 +146,8 @@
 ## 2026-09-17 - Fast-Path Dictionary Operations & Attribute Localization in OrderBookManager
 **Learning:** In high-frequency L2 order book delta processing (`apply_delta`), calling `side_book.get(delta.price, _ZERO_DECIMAL)` and `side_book.pop(delta.price, None)` on every update created function call overhead, and accessing `delta.*` attributes repeatedly generated attribute lookup cost across ticks.
 **Action:** Localize `delta` attributes into stack variables and fast-path key containment/deletion (`price in side_book` / `del side_book[price]`). Reduced delta tick processing latency from ~1.50 µs to ~0.95 µs per update (~33% speedup / ~1.05M deltas/sec).
+
+## 2026-09-17 - Fast C Struct Packing & Direct Buffer Deserialization in ML Feature Vector Assembly
+**Learning:** Individually writing 28–32 float values into pre-allocated NumPy array indices (`buf[i] = val`) and returning defensive array copies (`buf.copy()`) incurred per-element Python assignment and C-API array allocation overhead (~11.35 µs -> ~8.94 µs per feature extraction call).
+**Action:** Compiled static module-level `struct.Struct("32f")` / `struct.Struct("28f")` instances to pack feature scalars in C in a single call, instantiating float32 numpy arrays via zero-copy `np.frombuffer()`. Reduced Gold feature extraction latency by ~21% (~11.35 µs -> ~8.94 µs) and Kalshi feature extraction latency by ~12% (~9.00 µs -> ~7.90 µs).
 
