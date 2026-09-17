@@ -80,14 +80,14 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   };
 
   const activeStrategy = signals.strategy_id || '3_step_domination_bot';
-  const isDualOnnx = activeStrategy === 'dual_onnx' || activeStrategy === 'dual_onnx_bot' || activeStrategy === 'dual_onnx_arbitrage';
-  const isGoldOnnx = activeStrategy === 'gold_onnx_bot' || activeStrategy === 'gold_onnx' || activeStrategy === 'macro_trend_dominion';
-  const isMacroOnnx = !isDualOnnx && !isGoldOnnx && (activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion');
-  const isMacroTrend = isGoldOnnx || (!isDualOnnx && !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend'));
-  const is3StepBot = activeStrategy === '3_step_domination_bot';
+  const is3StepBot = activeStrategy === '3_step_domination_bot'; // Bot 1 (Dominion Sniper)
+  const isDualOnnx = activeStrategy === 'dual_onnx' || activeStrategy === 'dual_onnx_bot' || activeStrategy === 'dual_onnx_arbitrage'; // Bot 2
+  const isMacroTrend = activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend'; // Bot 3 (Macro Trend Dominion)
+  const isGoldOnnx = activeStrategy === 'gold_onnx_bot' || activeStrategy === 'gold_onnx'; // Bot 4 (Gold ONNX Spacetime Bot)
+  const isMacroOnnx = activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion';
   const isDominion2 = false; // Deprecated and unregistered
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';
-  const isSealed = is3StepBot || isGoldOnnx || isMacroTrend || Boolean(signals?.is_sealed || signals?.bot_sealed);
+  const isSealed = is3StepBot || isMacroTrend || isGoldOnnx || Boolean(signals?.is_sealed || signals?.bot_sealed);
 
   // Close dropdown on outside click or Escape key
   useEffect(() => {
@@ -232,7 +232,21 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
             <div className="text-left">
               <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                <span>{isDualOnnx ? 'Dual-ONNX Arbitrage' : isGoldOnnx || isMacroTrend ? 'Gold ONNX Bot (Triple-Brain)' : isMacroOnnx ? 'Macro ONNX Bot' : isDominion2 ? 'Dominion 2 Bot' : is3StepBot ? '3-Step Domination Bot' : 'ONNX Microstructure Bot'}</span>
+                <span>
+                  {is3StepBot
+                    ? 'Bot 1: 3-Step Domination Bot'
+                    : isDualOnnx
+                    ? 'Bot 2: Dual-ONNX Arbitrage'
+                    : isMacroTrend
+                    ? 'Bot 3: Macro Trend Dominion'
+                    : isGoldOnnx
+                    ? 'Bot 4: Gold ONNX Spacetime Bot'
+                    : isMacroOnnx
+                    ? 'Macro ONNX Bot'
+                    : isDominion2
+                    ? 'Dominion 2 Bot'
+                    : 'ONNX Microstructure Bot'}
+                </span>
                 <ChevronDown className={`h-3 w-3 text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
               </div>
             </div>
@@ -344,6 +358,38 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                   </div>
                 </div>
                 {isMacroTrend && <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-1" aria-hidden="true" />}
+              </button>
+
+              {/* Bot 4: Gold ONNX Spacetime Bot */}
+              <button
+                type="button"
+                role="option"
+                aria-selected={isGoldOnnx}
+                aria-label="Select Gold ONNX Spacetime Bot strategy"
+                onClick={() => handleStrategyChange('gold_onnx_bot')}
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                  isGoldOnnx
+                    ? 'bg-amber-500/20 border border-amber-500/50'
+                    : 'hover:bg-[#21262d] border border-transparent'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="h-7 w-7 rounded-lg bg-amber-500/20 border border-amber-500/50 flex items-center justify-center shrink-0 mt-0.5">
+                    <Crown className="h-4 w-4 text-amber-400" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>Bot 4: Gold ONNX Bot</span>
+                      <span className="px-1.5 py-0.2 text-[9px] font-mono bg-amber-500/20 text-amber-300 rounded-full font-bold">
+                        Gold ONNX
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
+                      32-D Spacetime Inference • Gold KXGOLD15M • Velocity Shield
+                    </p>
+                  </div>
+                </div>
+                {isGoldOnnx && <Check className="h-4 w-4 text-amber-400 shrink-0 mt-1" aria-hidden="true" />}
               </button>
 
               {/* Bot 1: 3-Step Domination Bot */}
