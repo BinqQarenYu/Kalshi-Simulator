@@ -591,10 +591,10 @@ export const ParentHub: React.FC<ParentHubProps> = ({
     <div className="flex h-screen w-screen overflow-hidden bg-[#0f1319] text-white font-sans">
       <ResizableSplitPane
         storageKey="kalshi_parenthub_layout_sizes"
-        defaultSizes={[22, 53, 25]}
-        minPixelSizes={[280, 420, 260]}
-        minPercentageSizes={[14, 30, 15]}
-        maxPercentageSizes={[40, 75, 45]}
+        defaultSizes={[20, 48, 32]}
+        minPixelSizes={[260, 380, 320]}
+        minPercentageSizes={[14, 25, 20]}
+        maxPercentageSizes={[35, 70, 60]}
         panelClassNames={['h-full overflow-hidden', 'h-full overflow-hidden', 'h-full overflow-hidden']}
         className="w-full h-full"
         isRightPanelHidden={isBabyBotRailHidden}

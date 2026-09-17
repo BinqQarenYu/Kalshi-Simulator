@@ -362,33 +362,41 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
           tabIndex={0}
           aria-orientation="vertical"
           aria-valuenow={sizes[2]}
-          aria-label="Resize center and right panels"
+          aria-label="Drag to resize right Baby Bot console panel"
           onMouseDown={(e) => handleMouseDown(1, e)}
           onTouchStart={(e) => handleTouchStart(1, e)}
           onDoubleClick={() => handleDoubleClick(1)}
           onMouseEnter={() => setHoveredGutter(1)}
           onMouseLeave={() => setHoveredGutter(null)}
-          className={`relative z-20 w-1.5 shrink-0 h-full cursor-col-resize flex items-center justify-center transition-colors duration-150 ${
+          className={`relative z-30 w-2.5 shrink-0 h-full cursor-col-resize flex items-center justify-center transition-all duration-150 border-x border-[#1a2027] ${
             activeGutter === 1
-              ? 'bg-[#00bda5] shadow-[0_0_10px_rgba(0,189,165,0.6)]'
+              ? 'bg-[#00bda5] shadow-[0_0_15px_rgba(0,189,165,0.8)]'
               : hoveredGutter === 1
-              ? 'bg-[#00bda5]/80'
-              : 'bg-[#262d35] hover:bg-[#00bda5]/60'
+              ? 'bg-[#00bda5] shadow-[0_0_10px_rgba(0,189,165,0.5)]'
+              : 'bg-[#1e252d] hover:bg-[#00bda5]/80'
           }`}
+          title="Drag left/right to resize console or double-click to reset"
         >
-          {/* Invisible expanded hit area for effortless grabbing (12px hit zone) */}
-          <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
+          {/* Invisible expanded hit area for effortless grabbing (20px hit zone) */}
+          <div className="absolute inset-y-0 -left-2.5 -right-2.5 cursor-col-resize" />
 
-          {/* Center tactile grip pill */}
-          <div
-            className={`w-0.5 h-6 rounded-full transition-all duration-150 ${
-              activeGutter === 1
-                ? 'bg-white h-9 shadow'
-                : hoveredGutter === 1
-                ? 'bg-white/90 h-8'
-                : 'bg-[#8c9ba5]/40'
-            }`}
-          />
+          {/* Center tactile grip pill with grip dots */}
+          <div className="flex flex-col items-center gap-1">
+            <div
+              className={`w-1 rounded-full transition-all duration-150 ${
+                activeGutter === 1
+                  ? 'bg-white h-12 shadow-md'
+                  : hoveredGutter === 1
+                  ? 'bg-white h-10'
+                  : 'bg-[#00bda5] h-8 shadow-sm'
+              }`}
+            />
+            <div className="flex flex-col gap-0.5 opacity-80">
+              <span className="w-1 h-1 rounded-full bg-slate-300" />
+              <span className="w-1 h-1 rounded-full bg-slate-300" />
+              <span className="w-1 h-1 rounded-full bg-slate-300" />
+            </div>
+          </div>
         </div>
       )}
 
