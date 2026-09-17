@@ -96,6 +96,7 @@
 **Learning:** Re-calculating volume-weighted micro-price `(bid_qty * ask + ask_qty * bid) / (bid_qty + ask_qty)` across high-frequency orderbook updates and ML feature extraction loops added ~2.84 µs overhead per call due to redundant dictionary access and Decimal arithmetic.
 **Action:** Memoize `micro_price` in `L2BookState` leveraging existing `_BookDict._version` mutation tracking on bid and ask books (`_yes_book` and `_no_book`). Reduced `micro_price` cache hit latency from ~2.84 µs to ~0.22 µs per call (~13x speedup).
 
+<<<<<<< HEAD
 ## 2026-09-15 - Dedicated Trade Quantities Float Deque & Sum-of-Squares VPIN Calculation
 **Learning:** Extracting trade quantities via dictionary key lookups (`[t["q"] for t in self.rolling_trades]`) on every trade print during rolling trade entropy and dynamic whale threshold calculation added unnecessary dict lookup allocations. In addition, computing VPIN standard deviation via double-pass variance loops created list copy allocations.
 **Action:** Maintain a dedicated float deque (`rolling_trade_quantities`) synchronized with `rolling_trades` and compute VPIN variance via the single-pass sum-of-squares formula $\text{Var}(X) = E[X^2] - (E[X])^2$. Reduced trade processing latency in feature extractors from ~35.2 µs to ~23.6 µs per trade print (~33% speedup).
@@ -119,6 +120,7 @@
 ## 2026-09-15 - Fast OS Random Bytes Order ID Generation & LRU Caching in Order Simulator
 **Learning:** `uuid.uuid4().hex[:8]` instantiated full Python `UUID` objects calling `posix.urandom(16)` and bit-shifting logic, consuming ~16% (~7.1 µs) of total market order simulation execution time. Uncached string upper-casing and tuple scans in `get_adverse_velocity_threshold` added redundant CPU overhead.
 **Action:** Replaced `uuid.uuid4().hex[:8]` with `os.urandom(4).hex()` (~4x faster ID generation), memoized `get_adverse_velocity_threshold` using `@functools.lru_cache(maxsize=256)`, and eliminated redundant 3rd `.quantize()` call in `_walk_book`. Reduced `simulate_market_order` latency from 35.0 µs to 27.88 µs per call (~20.3% speedup).
+
 ## 2026-08-27 - Deferred Pydantic Model Instantiation in L2 Order Book Depth Slicing
 **Learning:** Instantiating Pydantic `OrderBookLevel` objects for all price levels in an order book dictionary before sorting and slicing `[:n]` generated severe Pydantic validation overhead (~2.4ms per 10k calls).
 **Action:** Sort raw price-quantity dictionary items `(price, qty)` first, slice top `n` levels, and instantiate Pydantic `OrderBookLevel` objects only for the sliced slice. Reduced `get_depth` latency by 64% (~2.8x speedup).
@@ -126,3 +128,8 @@
 ## 2026-08-28 - C-Level List Slicing in ZeroCopyRingBuffer
 **Learning:** Iterating over circular ring buffers element-by-element with Python loops and modulo index arithmetic in `to_list()` and `get_tail(n)` caused significant CPU overhead during tick stream windowing.
 **Action:** Replace per-element Python loops with direct C-level list slicing operations (`list(buffer[head:]) + list(buffer[:head])` / `list(buffer[start:end])`). Reduced `to_list` latency by ~79% (~4.8x speedup) and `get_tail` latency by ~94% (~17.1x speedup).
+
+## 2026-09-16 - Algebraic Simplification of Binary Option EV Payoff & F-String Decimal Formatting
+**Learning:** Evaluating binary option expected value using `p * (1 - K) - (1 - p) * K` in Decimal space invoked 4 separate Decimal arithmetic operations and 2 `Decimal("1.00")` object instantiations per call (~17.8 µs). Algebraically simplifying $p(1 - K) - (1 - p)K = p - K$ eliminates 3 Decimal ops, and replacing `Decimal(str(round(p, 4)))` with `Decimal(f"{p:.4f}")` reduces single-side EV latency to ~13.1 µs (~26% speedup).
+**Action:** Use $p - K$ algebraic identity for binary option gross EV payoffs and fast f-string float-to-Decimal conversions in high-frequency risk evaluation loops.
+
