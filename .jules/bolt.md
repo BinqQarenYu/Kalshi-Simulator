@@ -20,30 +20,10 @@
 **Learning:** Volume-Synchronized Probability of Informed Trading (VPIN) calculations recalculating across non-fixed volume slices caused variable latency spikes.
 **Action:** Implemented fixed-volume constant bucket ring buffers with circular pointer indexing, ensuring $O(1)$ toxicity updates on every trade print and deterministic pre-trade veto response time.
 
-## 2026-08-27 - Pydantic Field Setattr Bypass & Decimal Type Fast-Pathing in OHLCV Aggregator
-**Learning:** Unconditionally mutating Pydantic BaseModel attributes (e.g., `active.high = max(...)`) in high-frequency tick loops triggers Pydantic's `__setattr__` validator logic on every tick. Additionally, calling `Decimal(str(price))` when input is already a `Decimal` adds unnecessary string serialization and parsing overhead.
-**Action:** Guard high/low attribute assignments with conditional checks (`if price_dec > active.high: active.high = price_dec`), use fast-path `isinstance(price, Decimal)` checks, and precompute static interval tuples to achieve ~3x faster tick aggregation throughput.
+## 2026-08-27 - Deferred Pydantic Model Instantiation in L2 Order Book Depth Slicing
+**Learning:** Instantiating Pydantic `OrderBookLevel` objects for all price levels in an order book dictionary before sorting and slicing `[:n]` generated severe Pydantic validation overhead (~2.4ms per 10k calls).
+**Action:** Sort raw price-quantity dictionary items `(price, qty)` first, slice top `n` levels, and instantiate Pydantic `OrderBookLevel` objects only for the sliced slice. Reduced `get_depth` latency by 64% (~2.8x speedup).
 
-## 2026-08-28 - Small Array NumPy Overhead vs Pure Python List Precomputation
-**Learning:** Calling `np.median` or creating tiny 15-28 element NumPy arrays inside high-frequency per-tick loops adds C-API array construction and boxing overhead that is significantly slower than native Python list sorting and pre-computed tuple lookups.
-**Action:** Pre-compute exponential decay tuples in `__init__`, use fast list sorting for small rolling deques (≤100 items), and use reciprocal multiplication (`1.0 / baseline_volume`) to reduce feature extraction latency from ~160μs to ~95μs per tick.
-
-## 2026-08-29 - Pydantic Model Instantiation Bypass in High-Frequency ML Feature Extraction
-**Learning:** Calling `book.get_depth(15)` inside the per-tick feature extraction loop instantiated ~30 Pydantic `OrderBookLevel` objects on every tick, triggering Pydantic model validation and object allocation overhead that consumed ~66% of tick processing time.
-**Action:** Implemented `book.get_depth_tuples(n)` on `L2BookState` to return raw `(price, quantity)` tuple pairs directly and fast-path feature extraction, reducing ML feature extraction latency from ~95μs to ~32μs per tick (~3x throughput boost).
-
-## 2026-08-30 - O(1) Version-Backed Depth Tuple Caching in L2BookState
-**Learning:** Executing `sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]` on every feature extraction tick introduced redundant sorting overhead (~13.5 µs) even when order book states were unchanged between reads across ticks.
-**Action:** Leveraged existing `_BookDict._version` mutation tracking in `L2BookState.get_depth_tuples(n)` to cache sorted depth tuples. Reduced `get_depth_tuples` cache hit time to ~0.3 µs (~40x faster) and overall feature extraction tick latency from ~38.6 µs to ~23.7 µs (~38% speedup).
-
-## 2026-08-31 - O(1) Running CVD & Persistent ONNX Input Tensor Buffers
-**Learning:** Computing `sum()` over 5-minute rolling trade deques on every tick and allocating NumPy arrays for small statistics (median, stddev on ≤100 items) or ONNX input dicts per tick incurred linear loop overhead and GC pauses.
-**Action:** Maintain running CVD totals incrementally on trade push/pop, replace small-sample NumPy calls with pure Python arithmetic/sorting, and mutate pre-allocated ONNX input buffers in-place (`copy=False`).
-
-## 2026-09-01 - Zero-Copy Ring Buffer C-Level Range Slicing
-**Learning:** In `ZeroCopyRingBuffer`, computing `to_list()` and `get_tail(n)` using Python `for i in range(...)` loops with modulo arithmetic per item introduced significant interpreter loop and index computation overhead under high-frequency stream querying.
-**Action:** Replace element-by-element range loops with C-level list range slicing (`self._buffer[head:] + self._buffer[:head]` and single/double range slices `self._buffer[start_idx:end_idx]`). Reduced `get_tail(100)` latency from ~23.8 µs down to ~1.16 µs per call (~20.6x speedup) and `to_list()` latency from ~50.6 µs down to ~5.78 µs per call (~8.75x speedup).
-
-## 2026-09-02 - Redundant Per-Tick State Recalculation Elimination
-**Learning:** Re-computing trade size entropy inside `extract_features_from_book` created duplicate deque iteration, list allocation, and logarithmic math overhead on every tick, even though trade entropy was already calculated on trade event arrival in `process_trade()` and cached in `self._cached_entropy`.
-**Action:** Audit stateful feature extractors for dead local computations. Ensure metrics computed in event handlers (`process_trade`) are consumed directly from cached fields rather than recalculated during feature vector assembly. Reduced feature extraction latency from ~35.8 µs to ~20.2 µs per call (~43% execution time reduction).
+## 2026-08-28 - O(1) Top-of-Book Dict Subclass Indexing (`FastBook`)
+**Learning:** Evaluating `best_yes_bid`, `best_no_bid`, `spread`, and `mid_price` repeatedly on every tick or WebSocket state broadcast executed linear $O(N)$ `max(dict.keys())` scans, incurring ~11.2μs per query.
+**Action:** Implemented `FastBook` dictionary subclass tracking `_best` price level in $O(1)$ time upon item setting/deletion/popping. Reduced top-of-book query latency by ~70% (~3.28x speedup).
