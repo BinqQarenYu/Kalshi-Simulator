@@ -42,6 +42,9 @@ class KalshiOrderflowFeatureExtractor:
         # Performance optimization: Dedicated float deque for trade quantities eliminates dict key lookup
         # overhead in entropy and dynamic whale calculations.
         self.rolling_trade_quantities: deque[float] = deque(maxlen=100)
+        # Performance optimization: Maintain a synchronized sorted list alongside deque to enable
+        # O(log N) bisect insertion and O(1) median lookup, eliminating per-trade list(deque).sort() allocations.
+        self.sorted_rolling_trade_quantities: List[float] = []
 
         # Volume baseline tracking (rolling median)
         # Performance optimization: Maintain a synchronized sorted list alongside deque to enable
@@ -101,7 +104,7 @@ class KalshiOrderflowFeatureExtractor:
     def process_trade(self, trade_event: TradeEvent) -> None:
         """Update trade-dependent state (CVD, VPIN, Whale prints, Absorption)."""
         qty = float(trade_event.count)
-        price = float(trade_event.price if getattr(trade_event, "price", None) is not None else trade_event.yes_price)
+        price = float(trade_event.price if trade_event.price is not None else trade_event.yes_price)
         ts = trade_event.timestamp.timestamp()
         taker_side = str(trade_event.taker_side).lower()
         trade_dir = 1.0 if taker_side in ("yes", "buy") else -1.0
@@ -113,7 +116,11 @@ class KalshiOrderflowFeatureExtractor:
             "ts": ts,
         }
         self.rolling_trades.append(trade_dict)
+        if len(self.rolling_trade_quantities) == 100:
+            old_qty = self.rolling_trade_quantities[0]
+            self.sorted_rolling_trade_quantities.remove(old_qty)
         self.rolling_trade_quantities.append(qty)
+        bisect.insort(self.sorted_rolling_trade_quantities, qty)
 
         self._update_cached_entropy()
 
