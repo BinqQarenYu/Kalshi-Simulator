@@ -87,6 +87,18 @@ def sentinel_cycle():
         # Flaws would be reviewed via lead_deer_reviewer here
 
 
+def run_sentinel_forever(interval_seconds: int = 1500):
+    """24/7 Continuous Autonomous Watchman Loop (WF-006 'Project Hephaestus')."""
+    print(f"[*] Autonomous Self-Healing Sentinel Daemon engaged. Cadence: {interval_seconds // 60}m.")
+    while True:
+        try:
+            sentinel_cycle()
+        except Exception as exc:
+            print(f"[!] Unexpected error in sentinel cycle: {exc}")
+        print(f"[*] Standing watch. Sleeping {interval_seconds // 60} minutes until next self-healing sweep...")
+        time.sleep(interval_seconds)
+
+
 if __name__ == "__main__":
-    print("[*] Autonomous Self-Healing Sentinel Daemon starting...")
-    sentinel_cycle()
+    run_sentinel_forever()
+

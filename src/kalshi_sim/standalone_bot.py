@@ -1046,6 +1046,7 @@ class StandaloneBotEngine:
             "execution_mode": "live" if self.order_client else "paper",
             "bot_type": self.bot_id,
             "exit_reason": exit_reason,
+            "bot_parameters": self.bot.get_parameters() if hasattr(self.bot, "get_parameters") else None,
         }
         all_reports.insert(0, report)
         try:
@@ -2410,6 +2411,7 @@ class StandaloneBotEngine:
                                 "execution_mode": "live",
                                 "lane": "LANE 1 (LIVE)",
                                 "timestamp_utc": settled_ts,
+                                "bot_parameters": self.bot.get_parameters() if hasattr(self.bot, "get_parameters") else None,
                             }
 
                             all_reports.insert(0, rep)

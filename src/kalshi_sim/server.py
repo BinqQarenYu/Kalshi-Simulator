@@ -873,6 +873,7 @@ def record_win_loss_event_report(
     balance_after: Optional[Decimal] = None,
     settlement_spot_price: Optional[Decimal] = None,
     asset: Optional[str] = None,
+    bot_parameters: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Generate and persist a standardized event win/loss report (5m or 15m)."""
     now_utc = datetime.now(timezone.utc)
@@ -1010,6 +1011,19 @@ def record_win_loss_event_report(
         "lane": "LANE 1 (LIVE)" if exec_mode_resolved == "live" else "LANE 2 (SHADOW)",
         "timestamp_utc": timestamp_utc or now_utc.isoformat(),
     }
+
+    # Attach live or resolved bot parameters snapshot for permanent review
+    resolved_params = bot_parameters
+    if resolved_params is None:
+        try:
+            bot_inst = resolve_bot_instance(bot_type_resolved)
+            if bot_inst and hasattr(bot_inst, "get_parameters"):
+                resolved_params = bot_inst.get_parameters()
+        except Exception:
+            resolved_params = None
+
+    if resolved_params:
+        report["bot_parameters"] = resolved_params
 
     state.win_loss_reports.insert(0, report)
     state.save_persisted_reports()
