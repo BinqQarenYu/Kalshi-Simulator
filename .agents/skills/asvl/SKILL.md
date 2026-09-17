@@ -61,3 +61,15 @@ Process all implementation tasks using this internal step-by-step cycle:
 5. **FIX**: If gaps or errors exist, isolate root cause and re-verify.
 6. **REGRESSION CHECK**: Run the full project test harness (`pytest tests/ -q` and `npm run build`).
 7. **COMPLETE**: Document changes in a walkthrough artifact and present verified results.
+
+---
+
+## 6. Continuous 24/7 Dual-Lead Autonomous Architecture
+The self-healing and self-verification lifecycle operates 24/7 across two dedicated Gemini Free-Tier leads:
+
+| Autonomous Role | Engine & Model | Operational Domain & Mandate |
+|---|---|---|
+| **Lead Deer** (Backend Lead) | Google Gemini Free API | **24/7 Autonomous Backend Self-Healer**: Continually monitors `server.py`, error logs, WebSocket sequence gaps, L2 book resyncs, and regressions. Diagnoses runtime exceptions, executes backend self-repairs, and dispatches incident digests to `likhahomebuild`. |
+| **Lead Architect** (Frontend Lead) | Google Gemini Free API | **24/7 Autonomous Frontend Quant Designer**: Continually polishes WebCLOB ergonomics, visual hierarchy, dark institutional theming, glanceable telemetry, and layout responsiveness. Operates under strict **harmless execution invariants**: zero tampering with React state hooks, WebSocket feeds, or execution handlers. |
+
+Both 24/7 autonomous leads operate within Google's Free Tier quotas (15 RPM / 1M TPM / $0.00 cost) with zero latency impact on live trading.
