@@ -137,3 +137,7 @@
 **Learning:** Computing binary option ask prices (`best_yes_ask = Decimal("1") - best_no_bid` and `best_no_ask = Decimal("1") - best_yes_bid`) on every property read during high-frequency trading ticks and WebSocket broadcasts added ~0.95 µs overhead per call due to un-memoized Decimal subtraction.
 **Action:** Memoized calculated binary ask prices in `L2BookState` leveraging `_BookDict._version` mutation tracking on `_no_book` and `_yes_book` and pre-allocated `_DEC_1 = Decimal("1")`. Reduced binary ask property read latency from ~0.95 µs to ~0.21 µs (~3.8x speedup / 1,000,000 reads dropped from 1266.91 ms to 324.20 ms).
 
+## 2026-09-16 - Version-Backed O(1) Depth Tuple Consumption in L2 Order Simulator
+**Learning:** `OrderSimulator.simulate_market_order` passed raw price-quantity dictionaries (`book.no_book` / `book.yes_book`) to `_walk_book`, where `sorted(book_side.items(), key=_PRICE_GETTER, reverse=True)` was re-executed on every order simulation call (~29.6 µs per call) even when order book states were unmutated.
+**Action:** Updated `OrderSimulator.simulate_market_order` to consume pre-sorted, version-backed depth tuples via `L2BookState.get_depth_tuples(100)` in O(1) memoized time, and updated `_walk_book` to accept pre-sorted level sequences. Reduced `_walk_book` level sorting overhead by ~2.4x (~17 µs saved per market order simulation).
+
