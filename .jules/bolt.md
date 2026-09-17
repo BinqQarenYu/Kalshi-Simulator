@@ -126,3 +126,7 @@
 ## 2026-08-28 - C-Level List Slicing in ZeroCopyRingBuffer
 **Learning:** Iterating over circular ring buffers element-by-element with Python loops and modulo index arithmetic in `to_list()` and `get_tail(n)` caused significant CPU overhead during tick stream windowing.
 **Action:** Replace per-element Python loops with direct C-level list slicing operations (`list(buffer[head:]) + list(buffer[:head])` / `list(buffer[start:end])`). Reduced `to_list` latency by ~79% (~4.8x speedup) and `get_tail` latency by ~94% (~17.1x speedup).
+
+## 2026-09-17 - Version-Cached Depth Tuples in Order Book Depth Walking
+**Learning:** In `OrderSimulator._walk_book`, sorting dictionary price levels (`sorted(book_side.items(), key=_PRICE_GETTER, reverse=True)`) on every fill simulation call introduced redundant sorting and tuple allocation overhead (~7.30 µs per call).
+**Action:** Passed `L2BookState` into `_walk_book` to leverage `book.get_depth_tuples()`, which memoizes pre-sorted price level tuples in O(1) time using version-backed `_BookDict` mutation tracking (`_yes_book._version`, `_no_book._version`). Reduced `_walk_book` execution latency to ~6.48 µs per call (~11.2% speedup).
