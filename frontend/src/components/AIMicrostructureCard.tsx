@@ -81,12 +81,13 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
   const activeStrategy = signals.strategy_id || '3_step_domination_bot';
   const isDualOnnx = activeStrategy === 'dual_onnx' || activeStrategy === 'dual_onnx_bot' || activeStrategy === 'dual_onnx_arbitrage';
-  const isMacroOnnx = !isDualOnnx && (activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion');
-  const isMacroTrend = !isDualOnnx && !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend');
+  const isGoldOnnx = activeStrategy === 'gold_onnx_bot' || activeStrategy === 'gold_onnx' || activeStrategy === 'macro_trend_dominion';
+  const isMacroOnnx = !isDualOnnx && !isGoldOnnx && (activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion');
+  const isMacroTrend = isGoldOnnx || (!isDualOnnx && !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend'));
   const is3StepBot = activeStrategy === '3_step_domination_bot';
   const isDominion2 = false; // Deprecated and unregistered
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';
-  const isSealed = is3StepBot || isMacroTrend || Boolean(signals?.is_sealed || signals?.bot_sealed);
+  const isSealed = is3StepBot || isGoldOnnx || isMacroTrend || Boolean(signals?.is_sealed || signals?.bot_sealed);
 
   // Close dropdown on outside click or Escape key
   useEffect(() => {
@@ -207,13 +208,13 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               <div className="h-5 w-5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center">
                 <Layers className="h-3.5 w-3.5 text-cyan-300" />
               </div>
+            ) : isGoldOnnx || isMacroTrend ? (
+              <div className="h-5 w-5 rounded-lg bg-amber-500/20 border border-amber-500/50 flex items-center justify-center">
+                <Crown className="h-3.5 w-3.5 text-amber-400" />
+              </div>
             ) : isMacroOnnx ? (
               <div className="h-5 w-5 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
                 <Cpu className="h-3.5 w-3.5 text-purple-300" />
-              </div>
-            ) : isMacroTrend ? (
-              <div className="h-5 w-5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center">
-                <TrendingUp className="h-3.5 w-3.5 text-cyan-400" />
               </div>
             ) : isDominion2 ? (
               <div className="h-5 w-5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
@@ -231,7 +232,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
             <div className="text-left">
               <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                <span>{isDualOnnx ? 'Dual-ONNX Arbitrage' : isMacroOnnx ? 'Macro ONNX Bot' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2 Bot' : is3StepBot ? '3-Step Domination Bot' : 'ONNX Microstructure Bot'}</span>
+                <span>{isDualOnnx ? 'Dual-ONNX Arbitrage' : isGoldOnnx || isMacroTrend ? 'Gold ONNX Bot (Triple-Brain)' : isMacroOnnx ? 'Macro ONNX Bot' : isDominion2 ? 'Dominion 2 Bot' : is3StepBot ? '3-Step Domination Bot' : 'ONNX Microstructure Bot'}</span>
                 <ChevronDown className={`h-3 w-3 text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
               </div>
             </div>
