@@ -490,7 +490,9 @@ def test_mother_server_monolithic_source_of_truth(client: TestClient) -> None:
     state.active_asset = CryptoAsset.ETH
     state.target_strike = Decimal("2160.00")
     state.current_btc_price = Decimal("2162.50")
+    state.twap_60s_price = None
     state.mode = "mock"
+
 
     payload = _build_full_state_payload()
     m = payload["market"]

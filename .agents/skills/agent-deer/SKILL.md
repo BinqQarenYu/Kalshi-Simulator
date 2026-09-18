@@ -36,7 +36,8 @@ In direct alignment with `high-throughput-data-memory-manager`, `agent-integrity
 ### Model & Inference Invariants
 - **Autonomous Self-Healer Engine**: Driven by **Google Gemini Free Tier API** (`gemini-1.5-flash` / `gemini-2.0-flash`), leveraging Google's zero-cost public rate tiers (15 RPM / 1M TPM / 1,500 RPD).
 - **Zero Financial Cost**: Operating under the Google AI Studio free tier incurs **$0.00 credit charge** and **0 billable message fees**.
-- **Local Fallback (Optional)**: If network access is offline, subagents fall back to local `nemotron-mini` via Ollama without incurring token fees.
+- **Local Fallback (Optional)**: If network access is offline, subagents fall back to local Ollama using primary model `nemotron:latest` and lightweight model `nemotron-mini:latest` without incurring token fees.
+
 
 ---
 
