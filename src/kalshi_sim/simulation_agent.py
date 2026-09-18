@@ -36,9 +36,12 @@ from kalshi_sim.notifications import TelemetryAlertDispatcher
 from kalshi_sim.order_client import KalshiDemoOrderClient
 from kalshi_sim.order_simulator import OrderSimulator
 from kalshi_sim.virtual_order_router import VirtualOrderRouter
+from kalshi_sim.simulation_settlement import SimulationSettlementCoordinator
+from kalshi_sim.strategy_evaluator import StrategyEvaluationCoordinator
 from kalshi_sim.process_lock import get_active_lock_holder
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.portfolio import Portfolio
+from kalshi_sim.settlement import check_expirations
 from kalshi_sim.schemas import (
     L2BookState,
     MarketInfo,
@@ -116,6 +119,25 @@ class SimulationAgent:
             bot_auditor=self.bot_auditor,
             order_client=self._order_client,
             telemetry_alerts=self._telemetry_alerts,
+        )
+        self._strategy_evaluator = StrategyEvaluationCoordinator(
+            guardrails=self._guardrails,
+            simulator=self._simulator,
+            db_writer=self._db_writer,
+            onnx_engine=self._onnx_engine,
+            ev_engine=self._ev_engine,
+            macro_trend_bot=self._macro_trend_bot,
+            dominion2_bot=self._dominion2_bot,
+            domination_bot=self._domination_bot,
+            dual_onnx_bot=self._dual_onnx_bot,
+            btc_orderflow_feed=self._btc_orderflow_feed,
+            spot_price_getter=self._spot_price_getter,
+        )
+        self._settlement_coordinator = SimulationSettlementCoordinator(
+            exec_logger=self._exec_logger,
+            db_writer=self._db_writer,
+            guardrails=self._guardrails,
+            spot_price_getter=self._spot_price_getter,
         )
 
         # Run Pre-Deployment Audit Certification Gate on all candidate bots
@@ -324,513 +346,23 @@ class SimulationAgent:
             self._domination_bot.set_asset(asset)
         logger.info("SimulationAgent underlying asset updated to: %s", asset)
 
-    async def _evaluate_market(self, ticker: str, book: OrderBook) -> None:
-        """Evaluate trading decisions concurrently for both 3-Step Domination and ONNX Neural Net bots."""
-        timeframe = self._ticker_timeframe_map.get(ticker)
-        if timeframe is None:
-            timeframe = Timeframe.FIVE_MIN if ("5M" in ticker and "15M" not in ticker) else Timeframe.FIFTEEN_MIN
-            self._ticker_timeframe_map[ticker] = timeframe
-
-        trades = self._recent_trades.get(ticker, [])
-
-        # ===================================================================
-        # Ensure we only evaluate active cycle contracts (<= 930s to expiration)
-        market_info = self._market_cache.get(ticker)
-        if market_info and market_info.expiration_time:
-            now_utc = datetime.now(timezone.utc)
-            remaining_s = (market_info.expiration_time - now_utc).total_seconds()
-            if remaining_s <= 0 or remaining_s > 930:
-                return
-            if remaining_s <= 45:
-                # Cycle closing window: cancel any resting maker orders on this ticker
-                self._simulator.cancel_resting_orders_for_ticker(ticker)
-
-        # ===================================================================
-        # STRICT ISOLATION: In LIVE mode, execute only active bot on active 15M contract; ALL secondary paper stops!
-        # ===================================================================
-        is_live = getattr(self, "execution_mode", "simulated") == "live"
-        if is_live and not ticker.startswith("KXBTC15M"):
-            return
-
-        # If another engine (e.g. Standalone Bot) holds the exclusive live lock, silence Mother evaluations
-        if is_live:
-            holder = get_active_lock_holder()
-            if holder and holder[1] != os.getpid():
-                return
-
-        # If this cycle is already locked by guardrails, skip evaluation immediately
-        cycle_key = market_info.event_ticker if (market_info and market_info.event_ticker) else ticker
-        if is_live and (cycle_key in self._guardrails._cycle_locks or ticker in self._guardrails._cycle_locks):
-            return
-
-        # ===================================================================
-        # BOT 3: Macro ONNX & Macro Trend Dominion (Sealed & Live Authorized)
-        # ===================================================================
-        if self.active_strategy_bot in (
-            "macro_onnx",
-            "macro_onnx_bot",
-            "macro_trend_onnx_fusion",
-            "macro_trend_dominion",
-            "macro_trend",
-            "macro_trend_dominion_bot",
-        ):
-            if (
-                not self._portfolio_macro_trend.circuit_breaker_tripped
-                and len(self._portfolio_macro_trend.open_positions) < MAX_CONCURRENT_POSITIONS
-                and self._portfolio_macro_trend.get_position(ticker) is None
-            ):
-                if not hasattr(self, "_last_macro_eval_time"):
-                    self._last_macro_eval_time: dict[str, float] = {}
-                _m_now = time.monotonic()
-                if _m_now - self._last_macro_eval_time.get(ticker, 0.0) >= 3.0:
-                    self._last_macro_eval_time[ticker] = _m_now
-                    try:
-                        target_strike = float(market_info.target_strike if market_info else 78650.0)
-                        if self._spot_price_getter:
-                            try:
-                                spot_price = float(self._spot_price_getter())
-                            except Exception:
-                                spot_price = target_strike
-                        else:
-                            spot_price = float(market_info.target_strike if market_info else 78650.0)
-                        time_to_expiry_s = 600.0
-
-                        if market_info and market_info.expiration_time:
-                            now_utc = datetime.now(timezone.utc)
-                            rem_secs = (market_info.expiration_time - now_utc).total_seconds()
-                            if rem_secs <= 15.0:
-                                return
-                            time_to_expiry_s = rem_secs
-
-                        vpin_score = 0.15
-                        onnx_res = None
-                        try:
-                            # 1. Fetch live continuous Bitcoin L2 orderbook and trades from btc_orderflow_feed
-                            btc_book, btc_trades = self._btc_orderflow_feed.get_btc_l2_state()
-                            # 2. Run ONNX inference on genuine Bitcoin orderflow
-                            onnx_res = await asyncio.to_thread(
-                                self._onnx_engine.process_orderbook_tick, btc_book, btc_trades
-                            )
-                            vpin_score = float(onnx_res.get("vpin_score", 0.15))
-                        except Exception as exc:
-                            logger.debug("[BTC ONNX] Inference fallback: %s", exc)
-                            try:
-                                vpin_score = float(self._onnx_engine.extractor.compute_vpin())
-                            except Exception:
-                                pass
-
-                        macro_dec = self._macro_trend_bot.evaluate(
-                            book=book,
-                            spot_price=spot_price,
-                            target_strike=target_strike,
-                            time_to_expiry_s=time_to_expiry_s,
-                            recent_trades=trades,
-                            total_equity=self._portfolio_macro_trend.equity,
-                            max_position_size=1,
-                            estimated_vpin=vpin_score,
-                            onnx_result=onnx_res,
-                        )
-
-                        if macro_dec.recommended_side in ("yes", "no") and macro_dec.recommended_contracts > 0:
-                            m_side = OrderSide.YES if macro_dec.recommended_side == "yes" else OrderSide.NO
-                            is_macro_onnx = self.active_strategy_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion")
-                            bot_label = "LIVE MACRO ONNX" if (is_live and is_macro_onnx) else ("LIVE MACRO TREND" if is_live else ("MACRO ONNX BOT" if is_macro_onnx else "MACRO TREND DOMINION"))
-                            bot_tag = "macro_onnx" if is_macro_onnx else "macro_trend_dominion"
-                            logger.info(
-                                "[%s] %-18s | %-3s (%s) | ONNX BTC: %s(%.1f%%) [L:%.2f S:%.2f] | Regime: %s (1h: %+.2f%%) | Edge=%+.1f%% | EV=+%s/ct | Size=%d ct",
-                                bot_label,
-                                ticker,
-                                macro_dec.recommended_side.upper(),
-                                macro_dec.active_playbook,
-                                macro_dec.onnx_signal,
-                                macro_dec.onnx_confidence * 100.0,
-                                macro_dec.onnx_prob_long,
-                                macro_dec.onnx_prob_short,
-                                macro_dec.macro_regime,
-                                macro_dec.trend_1h_pct,
-                                macro_dec.edge_pct,
-                                f"${max(macro_dec.ev_yes, macro_dec.ev_no):.2f}",
-                                1,
-                            )
-                            lim_p = Decimal(str(getattr(macro_dec, "limit_price", "0.52") or "0.52"))
-                            await self._place_virtual_order(
-                                book=book,
-                                ticker=ticker,
-                                side=m_side,
-                                max_size=1,
-                                timeframe=timeframe,
-                                reasoning=macro_dec.rationale,
-                                portfolio=self._portfolio_macro_trend,
-                                bot_type=bot_tag,
-                                order_type="limit",
-                                limit_price=lim_p,
-                            )
-                    except Exception as exc:
-                        logger.debug("Macro ONNX / Trend bot evaluation error: %s", exc)
-
-        # ===================================================================
-        # BOT 0: Dominion 2 Bot
-        # ===================================================================
-        if self.active_strategy_bot in ("dominion_2_bot", "dominion2", "dominion_v2"):
-            if (
-                not self._portfolio_dominion2.circuit_breaker_tripped
-                and len(self._portfolio_dominion2.open_positions) < MAX_CONCURRENT_POSITIONS
-                and self._portfolio_dominion2.get_position(ticker) is None
-            ):
-                try:
-                    target_strike = float(market_info.target_strike if market_info else 78650.0)
-                    if self._spot_price_getter:
-                        try:
-                            spot_price = float(self._spot_price_getter())
-                        except Exception:
-                            spot_price = target_strike
-                    else:
-                        spot_price = float(market_info.target_strike if market_info else 78650.0)
-                    time_to_expiry_s = 600.0
-
-                    if market_info and market_info.expiration_time:
-                        now_utc = datetime.now(timezone.utc)
-                        rem_secs = (market_info.expiration_time - now_utc).total_seconds()
-                        if rem_secs <= 15.0:
-                            return
-                        time_to_expiry_s = rem_secs
-
-                    vpin_score = 0.15
-                    try:
-                        vpin_score = float(self._onnx_engine.extractor.compute_vpin())
-                    except Exception:
-                        pass
-
-                    decision2 = self._dominion2_bot.evaluate(
-                        book=book,
-                        spot_price=spot_price,
-                        target_strike=target_strike,
-                        time_to_expiry_s=time_to_expiry_s,
-                        recent_trades=trades,
-                        total_equity=self._portfolio_dominion2.equity,
-                        max_position_size=1,  # 1 contract for other bots only
-                        estimated_vpin=vpin_score,
-                    )
-
-                    if decision2.recommended_side in ("yes", "no") and decision2.recommended_contracts > 0:
-                        side_enum = OrderSide.YES if decision2.recommended_side == "yes" else OrderSide.NO
-                        logger.info(
-                            "[%s] %-18s | %-3s (%s) | Edge=%+.1f%% | EV=+%s/ct | Size=%d cts",
-                            "LIVE DOMINION 2" if is_live else "DOMINION 2",
-                            ticker,
-                            decision2.recommended_side.upper(),
-                            decision2.active_playbook,
-                            decision2.edge_pct * 100.0,
-                            f"${max(decision2.ev_yes, decision2.ev_no):.2f}",
-                            decision2.recommended_contracts,
-                        )
-                        await self._place_virtual_order(
-                            book=book,
-                            ticker=ticker,
-                            side=side_enum,
-                            max_size=decision2.recommended_contracts,
-                            timeframe=timeframe,
-                            reasoning=decision2.rationale,
-                            portfolio=self._portfolio_dominion2,
-                            bot_type="dominion_2_bot",
-                        )
-                except Exception as exc:
-                    logger.debug("Dominion 2 bot evaluation error: %s", exc)
-
-        # ===================================================================
-        # BOT 1: 3-Step Domination Bot (Evaluated against _portfolio_domination)
-        if self.active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination"):
-
-            if (
-                not self._portfolio_domination.circuit_breaker_tripped
-                and len(self._portfolio_domination.open_positions) < MAX_CONCURRENT_POSITIONS
-                and self._portfolio_domination.get_position(ticker) is None
-            ):
-                # P0 Fix: 3-second per-ticker evaluation cooldown to prevent tick-spam
-                # (Bug: bot was evaluating 45x/sec on every tick, causing log spam + wasted CPU)
-                if not hasattr(self, "_last_dom_eval_time"):
-                    self._last_dom_eval_time: dict[str, float] = {}
-                _eval_now = time.monotonic()
-                if _eval_now - self._last_dom_eval_time.get(ticker, 0.0) < 3.0:
-                    return
-                self._last_dom_eval_time[ticker] = _eval_now
-                try:
-                    target_strike = float(market_info.target_strike if market_info else 78650.0)
-                    if self._spot_price_getter:
-                        try:
-                            spot_price = float(self._spot_price_getter())
-                        except Exception:
-                            spot_price = target_strike
-                    else:
-                        spot_price = float(market_info.target_strike if market_info else 78650.0)
-                    time_to_expiry_s = 600.0
-
-                    if market_info and market_info.expiration_time:
-                        now_utc = datetime.now(timezone.utc)
-                        rem_secs = (market_info.expiration_time - now_utc).total_seconds()
-                        if rem_secs <= 15.0:
-                            # Contract already expired or expiring within 15 seconds; skip
-                            return
-                        time_to_expiry_s = rem_secs
-
-                    vpin_score = 0.15
-                    try:
-                        vpin_score = float(self._onnx_engine.extractor.compute_vpin())
-                    except Exception:
-                        pass
-
-                    decision = self._domination_bot.evaluate(
-                        book=book,
-                        spot_price=spot_price,
-                        target_strike=target_strike,
-                        time_to_expiry_s=time_to_expiry_s,
-                        recent_trades=trades,
-                        total_equity=self._portfolio_domination.equity,
-                        max_position_size=self._get_max_size_for_tf(timeframe),
-                        estimated_vpin=vpin_score,
-                    )
-
-                    now_mono = time.monotonic()
-                    if now_mono - self._last_pred_log_time.get(ticker, 0.0) >= 3.0:
-                        self._last_pred_log_time[ticker] = now_mono
-                        self._db_writer.enqueue_ai_prediction(
-                            ticker=ticker,
-                            p_up=decision.p_up,
-                            p_down=decision.p_down,
-                            p_wait=decision.p_wait,
-                            vpin=decision.vpin,
-                            ev_yes=decision.ev_yes,
-                            ev_no=decision.ev_no,
-                            recommended_side=decision.recommended_side,
-                            rationale=decision.rationale,
-                        )
-
-                    if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
-                        order_size = 1  # Strictly 1 contract for each asset
-                        side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
-                        logger.info(
-                            "[%s] %-18s | %-3s (%s) | Edge=%+.1f%% | EV=+%s/ct | Size=%d cts",
-                            "LIVE 3-STEP BOT" if is_live else "3-STEP BOT",
-                            ticker,
-                            decision.recommended_side.upper(),
-                            decision.active_playbook,
-                            decision.edge_pct,
-                            f"${max(decision.ev_yes, decision.ev_no):.2f}",
-                            order_size,
-                        )
-                        order_type_val = getattr(decision, "order_type", "limit")
-                        limit_price_val = Decimal(str(getattr(decision, "limit_price", self._domination_bot.discount_limit_price)))
-                        await self._place_virtual_order(
-                            book=book,
-                            ticker=ticker,
-                            side=side_enum,
-                            max_size=order_size,
-                            timeframe=timeframe,
-                            reasoning=decision.rationale,
-                            portfolio=self._portfolio_domination,
-                            bot_type="3_step_domination_bot",
-                            order_type=order_type_val,
-                            limit_price=limit_price_val,
-                        )
-                except Exception as exc:
-                    logger.debug("Domination bot evaluation error: %s", exc)
-
-        # ===================================================================
-        # BOT: The ONNX Strategy (Dual-Brain Spot Lead vs Kalshi Lag CLOB)
-        # Evaluated against _portfolio_dual_onnx in Lane 2 Paper Trading on Live Market Ticks
-        # ===================================================================
-        if self.active_strategy_bot in (
-            "dual_onnx",
-            "the_onnx_strategy",
-            "onnx_macro_v2",
-            "dual_onnx_bot",
-            "dual_onnx_arbitrage",
-            "dual_onnx_arbitrage_bot",
-        ):
-            if (
-                not self._portfolio_dual_onnx.circuit_breaker_tripped
-                and len(self._portfolio_dual_onnx.open_positions) < MAX_CONCURRENT_POSITIONS
-                and self._portfolio_dual_onnx.get_position(ticker) is None
-                and not (hasattr(self._simulator, "_resting_orders") and self._simulator._resting_orders.get(ticker))
-                and ticker not in self._guardrails._cycle_locks
-            ):
-                if not hasattr(self, "_last_dual_onnx_eval_time"):
-                    self._last_dual_onnx_eval_time: dict[str, float] = {}
-                _d_now = time.monotonic()
-                if _d_now - self._last_dual_onnx_eval_time.get(ticker, 0.0) >= 1.0:
-                    self._last_dual_onnx_eval_time[ticker] = _d_now
-                    try:
-                        target_strike = float(market_info.target_strike if market_info else 78650.0)
-                        if self._spot_price_getter:
-                            try:
-                                spot_price = float(self._spot_price_getter())
-                            except Exception:
-                                spot_price = target_strike
-                        else:
-                            spot_price = float(market_info.target_strike if market_info else 78650.0)
-                        time_to_expiry_s = 600.0
-
-                        if market_info and market_info.expiration_time:
-                            now_utc = datetime.now(timezone.utc)
-                            rem_secs = (market_info.expiration_time - now_utc).total_seconds()
-                            if rem_secs <= 15.0:
-                                return
-                            time_to_expiry_s = rem_secs
-
-                        btc_book, btc_trades = None, None
-                        try:
-                            if hasattr(self, "_btc_orderflow_feed") and self._btc_orderflow_feed:
-                                btc_book, btc_trades = self._btc_orderflow_feed.get_btc_l2_state()
-                                if not getattr(self._dual_onnx_bot, "candle_builder", None):
-                                    self._dual_onnx_bot.candle_builder = getattr(self._btc_orderflow_feed, "candle_builder_1m", None) or getattr(self._btc_orderflow_feed, "candle_builder_5m", None)
-                        except Exception:
-                            pass
-
-                        spot_diff = float(spot_price - target_strike)
-                        l2_book = book.get_state() if hasattr(book, "get_state") else book
-                        dec_dual = self._dual_onnx_bot.evaluate(
-                            spot_l2=btc_book if btc_book is not None else l2_book,
-                            kalshi_l2=l2_book,
-                            time_to_expiry_s=time_to_expiry_s,
-                            spot_diff=spot_diff,
-                            latest_spot_trades=btc_trades if btc_trades is not None else trades,
-                            latest_kalshi_trades=trades,
-                        )
-
-                        if dec_dual.side in ("yes", "no") and dec_dual.recommended_contracts > 0:
-                            side_enum = OrderSide.YES if dec_dual.side == "yes" else OrderSide.NO
-                            order_size = 1  # Strictly 1 contract under Tier 0 Micro-Bankroll Armor
-                            limit_price_val = Decimal(str(round(dec_dual.recommended_limit_price, 2)))
-                            logger.info(
-                                "[SHADOW PAPER ONNX STRATEGY] %-18s | %-3s (%s) | EV=+$%s | Size=%d ct @ $%s | Rationale=%s",
-                                ticker,
-                                dec_dual.side.upper(),
-                                dec_dual.regime.value if hasattr(dec_dual.regime, "value") else str(dec_dual.regime),
-                                f"{float(dec_dual.expected_value):.2f}",
-                                order_size,
-                                f"{float(limit_price_val):.2f}",
-                                dec_dual.rationale,
-                            )
-                            await self._place_virtual_order(
-                                book=book,
-                                ticker=ticker,
-                                side=side_enum,
-                                max_size=order_size,
-                                timeframe=timeframe,
-                                reasoning=dec_dual.rationale,
-                                portfolio=self._portfolio_dual_onnx,
-                                bot_type="onnx_macro_v2",
-                                order_type="limit",
-                                limit_price=limit_price_val,
-                            )
-                    except Exception as exc:
-                        logger.warning("Dual ONNX bot evaluation error on %s: %s", ticker, exc)
-
-        # ===================================================================
-        # BOT 2: ONNX Microstructure Neural Net Bot (Evaluated against _portfolio_onnx)
-        # ===================================================================
-        if self.active_strategy_bot in ("onnx_microstructure_bot", "onnx_bot"):
-            now_ts = time.time()
-            if not hasattr(self, "_last_onnx_ts"):
-                self._last_onnx_ts: dict[str, float] = {}
-
-            if (
-                now_ts - self._last_onnx_ts.get(ticker, 0.0) >= 0.5
-                and not self._portfolio_onnx.circuit_breaker_tripped
-                and len(self._portfolio_onnx.open_positions) < MAX_CONCURRENT_POSITIONS
-                and self._portfolio_onnx.get_position(ticker) is None
-            ):
-                self._last_onnx_ts[ticker] = now_ts
-                try:
-                    t0 = time.perf_counter()
-                    onnx_res = await asyncio.to_thread(
-                        self._onnx_engine.process_orderbook_tick, book, trades
-                    )
-                    latency_ms = (time.perf_counter() - t0) * 1000.0
-
-                    onnx_signal = onnx_res.get("signal", "WAIT")
-                    onnx_conf = onnx_res.get("confidence", 0.0)
-                    vpin_score = onnx_res.get("vpin_score", 0.0)
-
-                    self._eval_count = getattr(self, "_eval_count", 0) + 1
-                    if onnx_signal in ("LONG", "SHORT") or self._eval_count % 10 == 0:
-                        logger.info(
-                            "[ONNX AI]   %-18s | Signal=%-5s (%4.1f%%) | VPIN=%.2f | OFI_L1=%+.2f | Latency=%.2fms",
-                            ticker, onnx_signal, onnx_conf * 100.0, vpin_score, onnx_res.get("ofi_l1", 0.0), latency_ms
-                        )
-
-                    if not onnx_res.get("vpin_veto"):
-                        rel_long = onnx_res.get("rel_long", onnx_res.get("prob_long", 0.33))
-                        rel_short = onnx_res.get("rel_short", onnx_res.get("prob_short", 0.33))
-                        prob_wait = onnx_res.get("prob_wait", 0.34)
-
-                        if onnx_signal == "LONG":
-                            prob_long = max(0.55, rel_long)
-                            prob_short = 1.0 - prob_long
-                            prob_wait_in = 0.0
-                        elif onnx_signal == "SHORT":
-                            prob_short = max(0.55, rel_short)
-                            prob_long = 1.0 - prob_short
-                            prob_wait_in = 0.0
-                        else:
-                            prob_long = rel_long
-                            prob_short = rel_short
-                            prob_wait_in = prob_wait
-
-                        best_yes_ask = book.best_yes_ask
-                        best_yes_bid = book.best_yes_bid
-                        best_no_ask = (Decimal("1.00") - best_yes_bid) if best_yes_bid is not None else None
-
-                        ev_result = self._ev_engine.compute_optimal_execution(
-                            prob_up=prob_long,
-                            prob_down=prob_short,
-                            best_yes_ask=best_yes_ask,
-                            best_no_ask=best_no_ask,
-                            total_equity=self._portfolio_onnx.equity,
-                            max_position_size=1,  # 1 contract for other bots only
-                            vpin=vpin_score,
-                            prob_wait=prob_wait_in,
-                        )
-
-                        now_mono = time.monotonic()
-                        if ev_result.recommended_side is not None or now_mono - self._last_pred_log_time.get(ticker, 0.0) >= 3.0:
-                            self._last_pred_log_time[ticker] = now_mono
-                            self._db_writer.enqueue_ai_prediction(
-                                ticker=ticker,
-                                p_up=prob_long,
-                                p_down=prob_short,
-                                p_wait=prob_wait,
-                                vpin=vpin_score,
-                                ev_yes=float(ev_result.expected_value if ev_result.recommended_side == OrderSide.YES else 0.0),
-                                ev_no=float(ev_result.expected_value if ev_result.recommended_side == OrderSide.NO else 0.0),
-                                recommended_side=ev_result.recommended_side.value if ev_result.recommended_side else "none",
-                                rationale=ev_result.rationale,
-                            )
-
-                        if ev_result.has_positive_edge and ev_result.recommended_side is not None:
-                            logger.info(
-                                "[STAGE 2 EV] %-18s | %-3s @ $%-4s | AI_P=%.1f%% | EV=+%s/ct | Edge=%+.1f%% | Kelly=%.1f%% (%d cts)",
-                                ticker,
-                                ev_result.recommended_side.value.upper(),
-                                ev_result.market_price,
-                                ev_result.ai_prob * 100.0,
-                                f"${ev_result.expected_value:.3f}",
-                                ev_result.statistical_edge * 100.0,
-                                ev_result.kelly_fraction * 100.0,
-                                ev_result.recommended_contracts,
-                            )
-                            await self._place_virtual_order(
-                                book=book,
-                                ticker=ticker,
-                                side=ev_result.recommended_side,
-                                max_size=ev_result.recommended_contracts,
-                                timeframe=timeframe,
-                                reasoning=ev_result.rationale,
-                                portfolio=self._portfolio_onnx,
-                                bot_type="onnx_microstructure_bot",
-                            )
-                except Exception as exc:
-                    logger.debug("ONNX bot evaluation error: %s", exc)
+    async def _evaluate_market(self, ticker: str, book: L2BookState) -> None:
+        """Evaluate trading decisions concurrently for active strategy bots."""
+        await self._strategy_evaluator.evaluate_market(
+            ticker=ticker,
+            book=book,
+            active_strategy_bot=self.active_strategy_bot,
+            execution_mode=getattr(self, "execution_mode", "simulated"),
+            market_cache=self._market_cache,
+            recent_trades=self._recent_trades,
+            ticker_timeframe_map=self._ticker_timeframe_map,
+            portfolio_macro_trend=self._portfolio_macro_trend,
+            portfolio_dominion2=self._portfolio_dominion2,
+            portfolio_domination=self._portfolio_domination,
+            portfolio_onnx=self._portfolio_onnx,
+            portfolio_dual_onnx=self._portfolio_dual_onnx,
+            place_order_fn=self._place_virtual_order,
+        )
 
     async def on_ticker_update(self, update: TickerUpdate) -> None:
         """Process a ticker update — update caches and mark-to-market both portfolios."""
@@ -855,15 +387,7 @@ class SimulationAgent:
     def settle_expired_market(
         self, ticker: str, market_info: MarketInfo, final_tick: TickerUpdate
     ) -> None:
-        """Immediately settle an expired position against the final BTC settlement price across both portfolios."""
-        from kalshi_sim.settlement import settle_position
-        spot_dec = None
-        if self._spot_price_getter:
-            try:
-                spot_dec = Decimal(str(self._spot_price_getter()))
-            except Exception:
-                pass
-
+        """Immediately settle an expired position against final BTC settlement price across portfolios."""
         active_macro_tag = "macro_onnx" if self.active_strategy_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion") else "macro_trend_dominion"
         portfolios_to_settle = [
             (self._portfolio_macro_trend, active_macro_tag),
@@ -875,88 +399,15 @@ class SimulationAgent:
         if hasattr(self, "_portfolio_dual_onnx") and self._portfolio_dual_onnx is not None:
             portfolios_to_settle.append((self._portfolio_dual_onnx, "onnx_macro_v2"))
 
-        for p_inst, b_type in portfolios_to_settle:
-            result = settle_position(
-                portfolio=p_inst,
-                ticker=ticker,
-                market_info=market_info,
-                last_ticker_update=final_tick,
-                btc_settle_price=spot_dec,
-            )
-            if result:
-                self._exec_logger.log_settlement(result)
-                self._db_writer.enqueue_settlement(
-                    settlement_id=f"st_{int(time.time()*1000)}_{result.ticker}_{random.randint(100, 999)}",
-                    ticker=result.ticker,
-                    side=result.side.value,
-                    size=result.size,
-                    entry_price=float(result.entry_price),
-                    settlement_price=float(result.settlement_price),
-                    outcome=result.outcome,
-                    pnl=float(result.pnl),
-                    balance_after=float(p_inst.balance),
-                    bot_type=b_type,
-                    execution_mode="simulated",
-                )
-                self._guardrails.record_cycle_settlement(
-                    ticker=result.ticker,
-                    outcome=result.outcome,
-                    pnl=result.pnl,
-                    balance_after=p_inst.balance,
-                    cycle_id=result.ticker,
-                )
-                if hasattr(self, "_macro_trend_bot") and hasattr(self._macro_trend_bot, "record_cycle_outcome"):
-                    if b_type in ("macro_trend_dominion", "macro_onnx", "macro_trend", "macro_trend_dominion_bot"):
-                        try:
-                            self._macro_trend_bot.record_cycle_outcome(
-                                cycle_id=result.ticker,
-                                ticker=result.ticker,
-                                call=result.side.value.upper(),
-                                predicted_prob=0.65,
-                                fill_price=result.entry_price,
-                                outcome=result.outcome.upper(),
-                                pnl=result.pnl,
-                                execution_mode=self.execution_mode,
-                            )
-                        except Exception as exc:
-                            logger.debug("Failed to record macro dominion cycle outcome: %s", exc)
-                try:
-                    from kalshi_sim.server import record_win_loss_event_report
-                    strike_val = market_info.floor_strike if market_info.floor_strike is not None else (market_info.target_strike if market_info.target_strike is not None else Decimal("0.0"))
-                    settle_spot = spot_dec if spot_dec is not None else strike_val
-                    is_5m = ("5M" in result.ticker and "15M" not in result.ticker) or getattr(market_info, "timeframe", None) == "5m"
-                    tf_val = "5m" if is_5m else "15m"
-                    record_win_loss_event_report(
-                        ticker=result.ticker,
-                        side=result.side.value,
-                        contracts=result.size,
-                        entry_price=result.entry_price,
-                        settlement_btc_price=settle_spot,
-                        strike_price=strike_val,
-                        timeframe=tf_val,
-                        ai_confidence=0.82,
-                        ai_rationale=f"Natural {tf_val.upper()} Expiration Settlement for {b_type} | BTC: ${float(settle_spot):,.2f} vs Strike: ${float(strike_val):,.2f}",
-                        vpin_score=0.15,
-                        ev_edge=0.10,
-                        bot_type=b_type,
-                        execution_mode="simulated",
-                        custom_outcome=result.outcome,
-                        custom_pnl=result.pnl,
-                        balance_after=p_inst.balance,
-                    )
-                except Exception as rep_err:
-                    logger.debug("Failed to record win-loss report on settlement: %s", rep_err)
-
-                logger.info(
-                    "[SETTLED] [%-20s] %-18s | %-3s %s %d contracts | P&L=%+$7.2f | Balance=$%.2f",
-                    b_type,
-                    ticker,
-                    result.side.value.upper(),
-                    result.outcome.upper(),
-                    result.size,
-                    result.pnl,
-                    p_inst.balance,
-                )
+        self._settlement_coordinator.settle_expired_market(
+            ticker=ticker,
+            market_info=market_info,
+            final_tick=final_tick,
+            portfolios_to_settle=portfolios_to_settle,
+            macro_trend_bot=getattr(self, "_macro_trend_bot", None),
+            execution_mode=getattr(self, "execution_mode", "simulated"),
+            spot_price_getter=self._spot_price_getter,
+        )
 
     async def on_trade_event(self, trade: TradeEvent) -> None:
         """Accumulate recent trade executions for ONNX feature extraction."""
@@ -1072,28 +523,14 @@ class SimulationAgent:
                 if hasattr(self, "_portfolio_dual_onnx") and self._portfolio_dual_onnx is not None:
                     portfolios_to_check.append((self._portfolio_dual_onnx, "onnx_macro_v2"))
 
-                for p_inst, b_type in portfolios_to_check:
-                    expired_tickers = check_expirations(
-                        positions=p_inst.open_positions,
-                        markets=self._market_cache,
-                        current_time=now,
-                    )
-                    for ticker in expired_tickers:
-                        market_info = self._market_cache.get(ticker)
-                        if market_info is None:
-                            market_info = MarketInfo(
-                                ticker=ticker,
-                                series_ticker=ticker.split("-")[0] if "-" in ticker else "KXBTC15M",
-                                title=ticker,
-                                subtitle="",
-                                status=MarketStatus.CLOSED,
-                                close_time=now,
-                                expiration_time=now,
-                                floor_strike=None,
-                                cap_strike=None,
-                                strike_type="greater",
-                            )
-                        last_update = self._ticker_cache.get(ticker)
-                        self.settle_expired_market(ticker, market_info, last_update)
+                self._settlement_coordinator.check_and_settle_expirations(
+                    now=now,
+                    market_cache=self._market_cache,
+                    ticker_cache=self._ticker_cache,
+                    portfolios_to_check=portfolios_to_check,
+                    macro_trend_bot=getattr(self, "_macro_trend_bot", None),
+                    execution_mode=getattr(self, "execution_mode", "simulated"),
+                    settle_callback=self.settle_expired_market,
+                )
             except Exception as exc:
                 logger.debug("Error in settlement loop: %s", exc)
