@@ -2631,48 +2631,6 @@ async def broadcast_loop() -> None:
         await asyncio.sleep(0.08)
 
 
-
-
-class BotSpawnRequest(BaseModel):
-    bot_id: str
-
-
-@app.post("/api/bots/spawn")
-async def spawn_bot(req: BotSpawnRequest) -> dict[str, Any]:
-    """Activate strategy bot directly inside the unified single-port engine."""
-    bot_id = req.bot_id.strip()
-
-    # Synchronize active strategy bot on Mother Server
-    canonical_strat = bot_id
-    if bot_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "onnx_macro_v2"):
-        canonical_strat = "dual_onnx"
-    elif bot_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
-        canonical_strat = "macro_onnx"
-    elif bot_id in ("macro_trend", "macro_trend_dominion", "macro_trend_dominion_bot"):
-        canonical_strat = "macro_trend_dominion"
-    elif bot_id in ("dominion2", "dominion_v2", "dominion_2_bot"):
-        canonical_strat = "dominion_2_bot"
-    elif bot_id in ("3_step_domination_bot", "domination_bot", "domination"):
-        canonical_strat = "3_step_domination_bot"
-
-    state.active_strategy_bot = canonical_strat
-    if state.ai_worker:
-        state.ai_worker.set_active_strategy(canonical_strat)
-    if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):
-        state.sim_agent.set_active_strategy(canonical_strat)
-    state.is_dirty = True
-    asyncio.create_task(trigger_instant_broadcast())
-
-    logger.info("🚀 [BOT ACTIVATED] Unified single-port engine activated '%s' (Canonical: '%s')", bot_id, canonical_strat)
-    return {
-        "status": "success",
-        "bot_id": bot_id,
-        "strategy": canonical_strat,
-        "url": "http://localhost:8000",
-        "message": f"Bot '{bot_id}' activated in unified engine on Port 8000",
-    }
-
-
 # ---------------------------------------------------------------------------
 # Modular Router Mounts
 # ---------------------------------------------------------------------------
@@ -2712,6 +2670,8 @@ from kalshi_sim.routers.strategies import (
     ResetRequest,
     trigger_emergency_kill_switch,
     reset_circuit_breaker,
+    spawn_bot,
+    BotSpawnRequest,
 )
 init_strategies_router(
     state_getter=lambda: state,
