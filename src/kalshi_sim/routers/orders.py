@@ -66,6 +66,10 @@ def _get_active_lock_holder():
     fn = getattr(server_module, "get_active_lock_holder", get_active_lock_holder)
     return fn()
 
+async def _async_validate_credentials(*args, **kwargs):
+    fn = getattr(server_module, "async_validate_credentials", async_validate_credentials)
+    return await fn(*args, **kwargs)
+
 
 
 async def trigger_instant_broadcast() -> None:
@@ -118,7 +122,7 @@ async def validate_kalshi_credentials(req: ValidateCredentialsRequest) -> Valida
             account_info={},
         )
 
-    valid, msg, account_data = await async_validate_credentials(
+    valid, msg, account_data = await _async_validate_credentials(
         api_key_id=api_key_id,
         private_key=private_key_source,
         is_demo=req.is_demo,

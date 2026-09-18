@@ -27,6 +27,7 @@ from kalshi_sim.db.writer import get_db_writer
 from kalshi_sim.order_simulator import OrderSimulator
 from kalshi_sim.preset_manager import get_preset_manager
 from kalshi_sim.process_lock import get_active_lock_holder
+import kalshi_sim.server as server_module
 from kalshi_sim.schemas import (
     CryptoAsset,
     L2BookState,
@@ -77,6 +78,10 @@ def get_state():
         return _state_getter()
     from kalshi_sim.server import state
     return state
+
+def _get_active_lock_holder():
+    fn = getattr(server_module, "get_active_lock_holder", get_active_lock_holder)
+    return fn()
 
 def resolve_bot_instance(bot_id: str) -> Any:
     if _resolve_bot_instance_fn is not None:
@@ -175,7 +180,7 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
             )
         )
         if req.ai_auto_trade and is_live_request:
-            holder = get_active_lock_holder()
+            holder = _get_active_lock_holder()
             if holder and holder[1] != os.getpid():
                 raise HTTPException(
                     status_code=409,
@@ -229,7 +234,7 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
                 logger.info("[MODE SWITCH] Switching to Interactive Mock Feed...")
                 await start_mock_feed()
         if state.sim_agent:
-            holder = get_active_lock_holder()
+            holder = _get_active_lock_holder()
             if (holder and holder[1] != os.getpid()) or state.active_strategy_bot in ("dual_onnx", "the_onnx_strategy", "onnx_macro_v2", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot"):
                 state.sim_agent.execution_mode = "simulated"
             else:
