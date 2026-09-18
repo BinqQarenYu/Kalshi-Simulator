@@ -99,16 +99,45 @@ RESPOND STRICTLY IN VALID JSON:
             if not api_key:
                 return {"status": "ERROR", "reason": "No GEMINI_API_KEY found in .env"}
 
-            import truststore
-            truststore.inject_into_ssl()
-            from google import genai
-
-            client = genai.Client(api_key=api_key)
-            resp = client.models.generate_content(
-                model="gemini-3.6-flash",
-                contents=prompt,
+            import urllib.request
+            import urllib.error
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 500,
+                    "responseMimeType": "application/json"
+                }
+            }
+            data_bytes = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data_bytes,
+                headers={"Content-Type": "application/json"},
+                method="POST"
             )
-            raw_text = resp.text.strip() if resp.text else ""
+
+            raw_text = ""
+            for attempt in range(3):
+                try:
+                    with urllib.request.urlopen(req, timeout=12.0) as resp:
+                        resp_json = json.loads(resp.read().decode("utf-8"))
+                        candidates = resp_json.get("candidates", [])
+                        if not candidates:
+                            return {"status": "ERROR", "reason": "No candidates returned from Gemini"}
+                        raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                        break
+                except urllib.error.HTTPError as he:
+                    if he.code in (503, 429) and attempt < 2:
+                        time.sleep(2.0 * (attempt + 1))
+                        continue
+                    return {"status": "ERROR", "reason": f"HTTP {he.code}: {he.reason}"}
+                except Exception as ex:
+                    if attempt < 2:
+                        time.sleep(1.0)
+                        continue
+                    return {"status": "ERROR", "reason": str(ex)}
 
             # Clean json fences if present
             if raw_text.startswith("```json"):

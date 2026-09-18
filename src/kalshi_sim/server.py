@@ -2116,6 +2116,7 @@ class OrderRequest(BaseModel):
     limit_price: float | None = Field(default=None)
     resting_only: bool = Field(default=False)
     execution_mode: Literal["paper", "live"] | None = Field(default=None)
+    bot_type: Optional[str] = Field(default=None)
 
 
 # ---------------------------------------------------------------------------

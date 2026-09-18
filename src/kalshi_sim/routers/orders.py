@@ -23,7 +23,6 @@ from kalshi_sim.auth import (
     async_validate_credentials,
 )
 from kalshi_sim.db import get_db_writer
-import kalshi_sim.server as server_module
 from kalshi_sim.order_client import KalshiLiveOrderClient
 from kalshi_sim.process_lock import get_active_lock_holder
 
@@ -59,16 +58,28 @@ def get_state():
     return state
 
 def _get_live_order_client(*args, **kwargs):
-    cls = getattr(server_module, "KalshiLiveOrderClient", KalshiLiveOrderClient)
-    return cls(*args, **kwargs)
+    try:
+        import kalshi_sim.server as server_mod
+        cls = getattr(server_mod, "KalshiLiveOrderClient", KalshiLiveOrderClient)
+        return cls(*args, **kwargs)
+    except Exception:
+        return KalshiLiveOrderClient(*args, **kwargs)
 
 def _get_active_lock_holder():
-    fn = getattr(server_module, "get_active_lock_holder", get_active_lock_holder)
-    return fn()
+    try:
+        import kalshi_sim.server as server_mod
+        fn = getattr(server_mod, "get_active_lock_holder", get_active_lock_holder)
+        return fn()
+    except Exception:
+        return get_active_lock_holder()
 
 async def _async_validate_credentials(*args, **kwargs):
-    fn = getattr(server_module, "async_validate_credentials", async_validate_credentials)
-    return await fn(*args, **kwargs)
+    try:
+        import kalshi_sim.server as server_mod
+        fn = getattr(server_mod, "async_validate_credentials", async_validate_credentials)
+        return await fn(*args, **kwargs)
+    except Exception:
+        return await async_validate_credentials(*args, **kwargs)
 
 
 
@@ -95,6 +106,7 @@ class OrderRequest(BaseModel):
     limit_price: float | None = Field(default=None)
     resting_only: bool = Field(default=False)
     execution_mode: Literal["paper", "live"] | None = Field(default=None)
+    bot_type: Optional[str] = Field(default=None)
 
 @router.post("/api/kalshi/validate-credentials", response_model=ValidateCredentialsResponse)
 async def validate_kalshi_credentials(req: ValidateCredentialsRequest) -> ValidateCredentialsResponse:
@@ -548,7 +560,7 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
     # =========================================================================
     if req.execution_mode == "live":
         # Strict Seal of Excellence Pre-Flight Live Authorization Gate
-        target_bot = req.bot_type or state.active_strategy_bot
+        target_bot = getattr(req, "bot_type", None) or state.active_strategy_bot
         if not state.bot_auditor.has_seal_of_excellence(target_bot):
             logger.error("[SEAL OF EXCELLENCE VETO] Live order rejected for '%s': Strategy lacks active live seal.", target_bot)
             return {

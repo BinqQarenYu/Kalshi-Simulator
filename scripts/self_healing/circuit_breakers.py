@@ -74,7 +74,10 @@ class CircuitBreakerManager:
                 return False, f"Live sanctuary active: {total_positions} open positions on market."
 
             # 2. Check time remaining to expiry (Trade Blackout Window)
-            t_rem = data.get("market", {}).get("time_left_seconds")
+            market_dict = data.get("market", {})
+            t_rem = market_dict.get("expiry_countdown_seconds")
+            if t_rem is None:
+                t_rem = market_dict.get("time_left_seconds")
             if t_rem is not None and t_rem <= self.blackout_seconds:
                 return False, f"Trade Blackout Window active: {t_rem}s <= {self.blackout_seconds}s to expiration."
 

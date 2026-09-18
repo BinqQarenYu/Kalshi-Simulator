@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
+from kalshi_sim.ml.lead_deer_quant_brain import ExitDecision, LeadDeerQuantBrain
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
 from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, get_asset_config
 
@@ -155,6 +156,14 @@ class ThreeStepDominationBot:
         self.twap_immutability_sniper_cents = float(twap_immutability_sniper_cents)
         self.max_queue_depth_ahead = int(max_queue_depth_ahead)
         self.max_clob_spread_cents = float(max_clob_spread_cents)
+        self.enable_lead_deer_peak_harvester = True
+
+        # Lead Deer Quant Brain & Continuous Experience Buffer (Council Weapon)
+        self.lead_deer_brain = LeadDeerQuantBrain(
+            min_confidence=float(self.min_confidence),
+            min_ev_dollars=float(self.min_ev_dollars),
+            maker_discount_ceiling=float(self.discount_limit_price),
+        )
 
         # Underlying Stage 2 EV & Quarter-Kelly Optimizer
         self._ev_engine = StatisticalEVEngine(
@@ -215,6 +224,7 @@ class ThreeStepDominationBot:
             "twap_immutability_sniper_cents": float(self.twap_immutability_sniper_cents),
             "max_queue_depth_ahead": int(self.max_queue_depth_ahead),
             "max_clob_spread_cents": float(self.max_clob_spread_cents),
+            "enable_lead_deer_peak_harvester": bool(getattr(self, "enable_lead_deer_peak_harvester", True)),
         }
 
     def compute_dynamic_reversal_threshold(self, time_to_expiry_s: float) -> float:
@@ -333,6 +343,8 @@ class ThreeStepDominationBot:
             self.max_queue_depth_ahead = max(10, min(2000, int(max_queue_depth_ahead)))
         if max_clob_spread_cents is not None:
             self.max_clob_spread_cents = max(0.01, min(0.25, float(max_clob_spread_cents)))
+        if "enable_lead_deer_peak_harvester" in kwargs and kwargs["enable_lead_deer_peak_harvester"] is not None:
+            self.enable_lead_deer_peak_harvester = bool(kwargs["enable_lead_deer_peak_harvester"])
         logger.debug("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
@@ -1440,6 +1452,52 @@ class ThreeStepDominationBot:
                     f"(>= {dyn_reversal_threshold*100:.0f}% target) | "
                     f"Net ROI +{roi*100:.1f}% >= +{self.min_take_profit_roi*100:.0f}% target at ${best_bid:.2f} | "
                     f"Net profit +${total_net_pnl:.2f} | Securing banked returns before reversal destroys gains."
+                ),
+            )
+
+        # Rule 5.5: Lead Deer Quant Horizon Bag Evaluator (Peak Harvester)
+        if getattr(self, "enable_lead_deer_peak_harvester", False) and hasattr(self, "lead_deer_brain") and self.lead_deer_brain is not None:
+            bag_eval: ExitDecision = self.lead_deer_brain.evaluate_in_flight_bag(
+                position_side="yes" if side_is_yes else "no",
+                entry_price=float(safe_entry),
+                current_contract_bid=float(best_bid),
+                spot_price=spot_price,
+                target_strike=target_strike,
+                time_to_expiry_s=time_to_expiry_s,
+                onnx_prob_up=prob_yes,
+                onnx_prob_down=prob_no,
+                spot_velocity_3s=spot_velocity_3s,
+                twap_60s=twap_60s,
+            )
+            if bag_eval.action == "HARVEST_PEAK" and net_pnl_per_ct > Decimal("0.00") and self.enable_take_profit_ceiling:
+                return DominationExitDecision(
+                    should_exit=True,
+                    exit_reason="PEAK_HARVESTER",
+                    exit_price=best_bid,
+                    profit_pct=round(roi * 100.0, 2),
+                    unrealized_pnl=round(total_net_pnl, 4),
+                    rationale=f"🏔️ [{bag_eval.action}] {bag_eval.reason} | Liquidating on maker ask to bank locked-in profits.",
+                )
+
+        # Rule 6: Valley Ejector (Early Loss Capping / Dynamic Capital Salvage)
+        # When trade is failing early (T > 180s), best bid dropped to <= $0.38, reverse conviction >= 70%,
+        # and not a gap-down recovery from a previous deep profit high-water mark.
+        if (
+            time_to_expiry_s > 180.0
+            and best_bid <= Decimal("0.38")
+            and reverse_prob >= 0.70
+            and (peak_bid is None or peak_bid < Decimal("0.80"))
+        ):
+            return DominationExitDecision(
+                should_exit=True,
+                exit_reason="VALLEY_EJECTOR",
+                exit_price=best_bid,
+                profit_pct=round(roi * 100.0, 2),
+                unrealized_pnl=round(total_net_pnl, 4),
+                rationale=(
+                    f"🛑 [VALLEY EJECTOR] Bid collapsed to ${best_bid:.2f} with {reverse_prob*100:.1f}% adverse conviction "
+                    f"(T={int(time_to_expiry_s)}s > 180s) | Liquidating early to salvage capital (PnL: -${abs(total_net_pnl):.2f}) "
+                    f"instead of absorbing a -100% expiration loss."
                 ),
             )
 
