@@ -195,48 +195,8 @@ class KalshiOrderflowFeatureExtractor:
             for t in latest_trades:
                 self.process_trade(t)
 
-        # Performance Optimization: Use get_depth_raw to receive raw (price, qty) Decimal tuples.
-        # This avoids instantiating and validating Pydantic OrderBookLevel instances for feature extraction (~4.7x overall speedup).
-        if hasattr(book, "get_depth_raw"):
-            bids, asks = book.get_depth_raw(self.target_depth)
-            if not bids or not asks:
-                return np.zeros(28, dtype=np.float32)
-            best_bid = float(bids[0][0])
-            best_ask = float(Decimal("1.0") - asks[0][0]) if asks else (best_bid + 0.01)
-            bid_sizes = [float(qty) for _, qty in bids] + [0.0] * (self.target_depth - len(bids))
-            ask_sizes = [float(qty) for _, qty in asks] + [0.0] * (self.target_depth - len(asks))
-        else:
-            bids_obj, asks_obj = book.get_depth(self.target_depth)
-            if not bids_obj or not asks_obj:
-                return np.zeros(28, dtype=np.float32)
-            best_bid = float(bids_obj[0].price)
-            best_ask = float(Decimal("1.0") - asks_obj[0].price) if asks_obj else (best_bid + 0.01)
-            bid_sizes = [float(lv.quantity) for lv in bids_obj] + [0.0] * (self.target_depth - len(bids_obj))
-            ask_sizes = [float(lv.quantity) for lv in asks_obj] + [0.0] * (self.target_depth - len(asks_obj))
-
-        # 1. Price Mechanics
-        if best_bid <= 0:
-            best_bid = 0.01
-        if best_ask <= best_bid:
-            best_ask = best_bid + 0.01
-
-            if is_spot:
-                best_ask = top_no[0][0] if top_no else (best_bid + 0.01)
-                if best_ask <= best_bid:
-                    best_ask = best_bid + 0.01
-                mid = (best_bid + best_ask) * 0.5
-                spread_bps = max(0.0001, ((best_ask - best_bid) / mid) * 100.0)
-            else:
-                best_ask = (1.0 - top_no[0][0]) if top_no else (best_bid + 0.01)
-                if best_bid <= 0:
-                    best_bid = 0.01
-                if best_ask <= best_bid:
-                    best_ask = best_bid + 0.01
-                spread_bps = max(0.001, min(0.25, best_ask - best_bid))
-
-            bid_sizes = [qty for _, qty in top_yes]
-            ask_sizes = [qty for _, qty in top_no]
-        elif hasattr(book, "get_depth_tuples"):
+        # 1. Book Depth Extraction
+        if hasattr(book, "get_depth_tuples"):
             top_yes, top_no = book.get_depth_tuples(self.target_depth)
             if not top_yes or not top_no:
                 return np.zeros(28, dtype=np.float32)
@@ -256,6 +216,32 @@ class KalshiOrderflowFeatureExtractor:
                     best_bid = 0.01
                 if best_ask <= best_bid:
                     best_ask = best_bid + 0.01
+                mid = (best_bid + best_ask) * 0.5
+                spread_bps = max(0.001, min(0.25, best_ask - best_bid))
+
+            bid_sizes = [float(qty) for _, qty in top_yes]
+            ask_sizes = [float(qty) for _, qty in top_no]
+        elif hasattr(book, "get_depth_raw"):
+            top_yes, top_no = book.get_depth_raw(self.target_depth)
+            if not top_yes or not top_no:
+                return np.zeros(28, dtype=np.float32)
+
+            best_bid = float(top_yes[0][0])
+            is_spot = getattr(book, "is_spot", False) or best_bid > 10.0
+
+            if is_spot:
+                best_ask = float(top_no[0][0]) if top_no else (best_bid + 0.01)
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                mid = (best_bid + best_ask) * 0.5
+                spread_bps = max(0.0001, ((best_ask - best_bid) / mid) * 100.0)
+            else:
+                best_ask = (1.0 - float(top_no[0][0])) if top_no else (best_bid + 0.01)
+                if best_bid <= 0:
+                    best_bid = 0.01
+                if best_ask <= best_bid:
+                    best_ask = best_bid + 0.01
+                mid = (best_bid + best_ask) * 0.5
                 spread_bps = max(0.001, min(0.25, best_ask - best_bid))
 
             bid_sizes = [float(qty) for _, qty in top_yes]
@@ -280,19 +266,28 @@ class KalshiOrderflowFeatureExtractor:
                     best_bid = 0.01
                 if best_ask <= best_bid:
                     best_ask = best_bid + 0.01
+                mid = (best_bid + best_ask) * 0.5
                 spread_bps = max(0.001, min(0.25, best_ask - best_bid))
 
             bid_sizes = [float(lv.quantity) for lv in bids]
             ask_sizes = [float(lv.quantity) for lv in asks]
 
         # 2. Spatial Volumes
-        total_visible_volume = sum(bid_sizes) + sum(ask_sizes) + 1e-9
+        len_bids = len(bid_sizes)
+        len_asks = len(ask_sizes)
+        target_depth = self.target_depth
+
+        if len_bids < target_depth:
+            bid_sizes.extend([0.0] * (target_depth - len_bids))
+        if len_asks < target_depth:
+            ask_sizes.extend([0.0] * (target_depth - len_asks))
+
+        sum_bids = sum(bid_sizes)
+        sum_asks = sum(ask_sizes)
+        total_visible_volume = sum_bids + sum_asks + 1e-9
         self.rolling_volumes.append(total_visible_volume)
-        # Performance Optimization: Use statistics.median to calculate median without array allocation overhead
         median_volume = float(statistics.median(self.rolling_volumes))
         baseline_volume = max(median_volume, 1e-9)
-
-        # Precompute reciprocal multiplier to replace division with fast floating-point multiplication
         inv_baseline = 1.0 / baseline_volume
 
         # 3. Order Flow Imbalance (OFI)
