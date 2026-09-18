@@ -284,6 +284,103 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
     }
 
 
+@router.post("/api/reset")
+async def reset_portfolio(req: ResetRequest) -> dict[str, Any]:
+    state.starting_capital = Decimal(str(req.capital))
+    portfolios = []
+    if state.sim_agent:
+        for attr in ["_portfolio_domination", "_portfolio_onnx", "_portfolio_macro_trend", "_portfolio_dominion2", "_portfolio"]:
+            if hasattr(state.sim_agent, attr):
+                p = getattr(state.sim_agent, attr)
+                if p not in portfolios:
+                    portfolios.append(p)
+    if getattr(state, "portfolio", None) and state.portfolio not in portfolios:
+        portfolios.append(state.portfolio)
+
+    for p in portfolios:
+        p._balance = Decimal(str(req.capital))
+        p._positions.clear()
+        p._fill_history.clear()
+        p._settlement_history.clear()
+        p._total_trades = 0
+        p._wins = 0
+        p._losses = 0
+        p._starting_balance = Decimal(str(req.capital))
+        p._max_drawdown_limit = p._starting_balance * p._max_drawdown_pct
+        p._circuit_breaker_tripped = False
+        p._peak_equity = p._starting_balance
+
+    if state.guardrails_agent:
+        state.guardrails_agent.reset_circuit_breaker(Decimal(str(req.capital)))
+
+    state.is_dirty = True
+    return {"success": True, "capital": req.capital}
+
+
+@router.post("/api/circuit-breaker/reset")
+async def reset_circuit_breaker() -> dict[str, Any]:
+    """Manually reset the drawdown circuit breaker to resume trading."""
+    if getattr(state, "mode", "mock") == "live" and getattr(state, "live_portfolio", None):
+        cur_bal = Decimal(str(state.live_portfolio.get("balance_dollars", "20.00")))
+    elif state.sim_agent:
+        cur_bal = state.sim_agent._portfolio.balance
+    else:
+        cur_bal = state.starting_capital
+
+    if state.sim_agent:
+        for attr in ["_portfolio_domination", "_portfolio_onnx", "_portfolio_macro_trend", "_portfolio_dominion2", "_portfolio"]:
+            if hasattr(state.sim_agent, attr):
+                getattr(state.sim_agent, attr).reset_circuit_breaker()
+
+    if state.guardrails_agent:
+        state.guardrails_agent.reset_circuit_breaker(cur_bal)
+
+    state.is_dirty = True
+    return {"success": True, "message": f"Circuit breaker reset. Re-anchored to ${cur_bal:.2f}. Trading resumed."}
+
+
+@router.post("/api/bot/kill-switch")
+@router.post("/api/circuit-breaker/trip")
+async def trigger_emergency_kill_switch() -> dict[str, Any]:
+    """Emergency kill switch: Trip circuit breaker, halt all automated & manual orders, and dispatch alert."""
+    try:
+        if state.sim_agent:
+            if hasattr(state.sim_agent, "_portfolio_domination"):
+                state.sim_agent._portfolio_domination._circuit_breaker_tripped = True
+            if hasattr(state.sim_agent, "_portfolio_onnx"):
+                state.sim_agent._portfolio_onnx._circuit_breaker_tripped = True
+            state.ai_auto_trade = False
+            try:
+                p = state.sim_agent.portfolio
+                db_writer = get_db_writer()
+                db_writer.write_system_event("EMERGENCY_KILL_SWITCH", {
+                    "reason": "Operator manual panic or critical error",
+                    "balance": float(p.balance),
+                    "open_positions": len(p.positions),
+                })
+            except Exception:
+                pass
+
+        if state.guardrails_agent:
+            state.guardrails_agent._circuit_breaker_tripped = True
+
+        cancelled = 0
+        if state.sim_agent and hasattr(state.sim_agent, "_simulator"):
+            cancelled = state.sim_agent._simulator.cancel_all_resting_orders()
+
+        state.is_dirty = True
+        return {
+            "success": True,
+            "status": "HALTED",
+            "cancelled_orders": cancelled,
+            "message": "🚨 EMERGENCY KILL SWITCH TRIPPED: All automated trading stopped and resting orders cancelled.",
+        }
+    except Exception as exc:
+        logger.error("Error triggering kill switch: %s", exc)
+        return {"success": False, "error": str(exc)}
+
+
+
 @router.get("/api/bot/domination/config")
 async def get_domination_config_endpoint() -> dict[str, Any]:
     """Get current Domination Bot Maker Discount Sniper configuration."""
