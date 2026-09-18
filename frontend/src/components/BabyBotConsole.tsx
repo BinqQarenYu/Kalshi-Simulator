@@ -58,6 +58,9 @@ import { BabyBotParametersDrawer } from './baby_bot/BabyBotParametersDrawer';
 import { BabyBotMicroLedger } from './baby_bot/BabyBotMicroLedger';
 import { BabyBotTelemetryDeck } from './baby_bot/BabyBotTelemetryDeck';
 import { BabyBotHeaderActions } from './baby_bot/BabyBotHeaderActions';
+import { BabyBotHorizonBanner } from './baby_bot/BabyBotHorizonBanner';
+import { BabyBotDiagnosticHUD } from './baby_bot/BabyBotDiagnosticHUD';
+import { BabyBotPositionDeck } from './baby_bot/BabyBotPositionDeck';
 export type { BotProfile };
 export { BOT_PROFILES };
 
@@ -651,198 +654,28 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         activeSeal={activeSeal}
       />
 
-      {/* Target Contract Banner */}
-      <div className="px-4 py-1.5 bg-[#12161a] border-b border-[#262d35] flex items-center justify-between text-[11px] font-mono text-[#8c9ba5]">
-        <div className="flex items-center gap-2">
-          <span className="text-white font-bold">{market.ticker || 'KXBTC15M-CURRENT'}</span>
-          <span
-            className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
-              is5m
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                : 'bg-teal-500/20 text-teal-300 border border-teal-500/40'
-            }`}
-          >
-            {is5m ? '5M SPRINT' : '15M CYCLE'}
-          </span>
-        </div>
-        <span className="text-emerald-400">TAPE: OK (5Hz BRTI)</span>
-      </div>
+      {/* 3. Target Contract & Event Horizon Banner */}
+      <BabyBotHorizonBanner
+        market={market}
+        is5m={is5m}
+        diffColor={diffColor}
+        diffBg={diffBg}
+        diffVal={diffVal}
+        isDiffPositive={isDiffPositive}
+        phase5m={phase5m}
+        remSecs={remSecs}
+        progressPct={progressPct}
+        yesProb={yesProb}
+        noProb={noProb}
+      />
 
-      {/* 3. Live Event Horizon: Strike K vs CME Spot S_t */}
-      <div className="p-4 bg-[#12161a] border-b border-[#262d35] space-y-3">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div className="text-left">
-            <div className="text-[10px] uppercase font-mono tracking-wider text-[#8c9ba5]">TO BEAT (K)</div>
-            <div className="text-lg font-bold font-mono text-white tracking-tight">
-              {market.target_strike_str || '$88,450.00'}
-            </div>
-            <div className="text-[10px] text-[#8c9ba5]">{market.target_time_str || '10:00 AM ET'}</div>
-          </div>
-
-          <div className="text-center">
-            <div className="text-[10px] uppercase font-mono tracking-wider text-[#8c9ba5]">NOW (SPOT)</div>
-            <div className={`text-lg font-bold font-mono tracking-tight ${diffColor}`}>
-              {market.current_btc_price_str || '$88,482.50'}
-            </div>
-            <div className="text-[10px] text-emerald-400 flex items-center justify-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>CF Benchmarks</span>
-            </div>
-          </div>
-
-          <div className="text-right">
-            <div className="text-[10px] uppercase font-mono tracking-wider text-[#8c9ba5]">SPOT DIFF</div>
-            <div className={`text-sm font-bold font-mono tracking-tight ${diffColor}`}>
-              {isDiffPositive ? '▲' : '▼'} {market.diff_str ? market.diff_str.split(' ')[0] : `${isDiffPositive ? '+' : ''}$${Math.abs(diffVal).toFixed(2)}`}
-            </div>
-            <span className={`inline-block px-1.5 py-0.2 rounded text-[10px] font-mono font-bold border mt-0.5 ${diffBg}`}>
-              {isDiffPositive ? '+' : ''}
-              {market.diff_pct?.toFixed(3) ?? '0.037'}%
-            </span>
-          </div>
-        </div>
-
-        {/* Dynamic 5M vs 15M Progress Bar */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between text-[11px] font-mono">
-            <span className="text-[#8c9ba5] flex items-center gap-1.5">
-              <span>{is5m ? '5M Velocity Window' : '15M Settlement Countdown'}:</span>
-              {phase5m && <span className={`font-semibold ${phase5m.color}`}>{phase5m.label}</span>}
-            </span>
-            <span className="font-bold text-white tracking-wider">
-              {market.expiry_countdown_str || '03:02'} ({remSecs}s)
-            </span>
-          </div>
-          <div className="w-full h-2 bg-[#171c22] rounded-full overflow-hidden border border-[#262d35] relative">
-            <div
-              className={`h-full transition-all duration-300 ${
-                is5m ? phase5m?.bar || 'bg-emerald-500' : 'bg-gradient-to-r from-teal-500 to-emerald-400'
-              }`}
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* 4. CLOB Inside Touch & Implied Probability */}
-      <div className="px-4 py-2.5 bg-[#0f1319] border-b border-[#262d35] space-y-2">
-        <div className="flex items-center justify-between text-xs font-mono">
-          <div className="flex items-center gap-2">
-            <span className="text-[#10b981] font-bold">YES</span>
-            <span className="text-white font-extrabold">{market.yes_cents_str || '58¢'}</span>
-            <span className="text-[10px] text-[#8c9ba5]">(9 cts)</span>
-          </div>
-          <div className="text-[10px] text-[#8c9ba5] font-semibold uppercase tracking-wider">CLOB INSIDE TOUCH</div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-[#8c9ba5]">(14 cts)</span>
-            <span className="text-white font-extrabold">{market.no_cents_str || '44¢'}</span>
-            <span className="text-[#f43f5e] font-bold">NO</span>
-          </div>
-        </div>
-
-        {/* Probability Split Bar */}
-        <div className="w-full h-3 bg-[#171c22] rounded overflow-hidden flex text-[9px] font-mono font-bold leading-3">
-          <div
-            className="bg-[#10b981] text-black pl-1.5 flex items-center transition-all duration-300"
-            style={{ width: `${yesProb}%` }}
-          >
-            YES {yesProb.toFixed(0)}%
-          </div>
-          <div
-            className="bg-[#f43f5e] text-white pr-1.5 flex items-center justify-end transition-all duration-300"
-            style={{ width: `${noProb}%` }}
-          >
-            {noProb.toFixed(0)}% NO
-          </div>
-        </div>
-      </div>
-
-      {/* 4.5. THE "WHY NO TRADE?" PRE-FLIGHT DIAGNOSTIC HUD (Pillar 2) */}
-      <div className="px-3 py-2 bg-[#090c10] border-b border-[#262d35] font-mono text-[10px]">
-        <div className="flex items-center justify-between pb-1.5 text-[#8c9ba5]">
-          <span className="text-[9px] uppercase font-bold tracking-wider flex items-center gap-1 text-gray-300">
-            <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-            Pre-Flight Gates (Why No Trade?)
-          </span>
-          <span className="text-[8px] text-gray-500">Continuous Microstructure Guardian</span>
-        </div>
-
-        <div className="grid grid-cols-4 gap-1.5">
-          {/* Gate 1: Dynamic Moat */}
-          <div 
-            className={`p-1.5 rounded border text-center transition-all ${
-              (preflightGates?.moat_gate?.status ?? (Math.abs(diffVal) >= 40.25 ? 'PASS' : 'VETO')) === 'PASS'
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                : 'bg-amber-500/15 border-amber-500/40 text-amber-300 ring-1 ring-amber-500/30'
-            }`}
-            title={preflightGates?.moat_gate?.reason || `Moat: |Diff| $${Math.abs(diffVal).toFixed(2)} vs $40.25 Floor`}
-          >
-            <div className="text-[8px] text-gray-400 uppercase font-bold">Dynamic Moat</div>
-            <div className="font-bold text-[10px] mt-0.5">
-              {(preflightGates?.moat_gate?.status ?? (Math.abs(diffVal) >= 40.25 ? 'PASS' : 'VETO'))}
-            </div>
-          </div>
-
-          {/* Gate 2: VPIN Safety */}
-          <div 
-            className={`p-1.5 rounded border text-center transition-all ${
-              (preflightGates?.vpin_gate?.status ?? (vpin < 0.60 ? 'PASS' : 'VETO')) === 'PASS'
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                : 'bg-rose-500/15 border-rose-500/40 text-rose-300 ring-1 ring-rose-500/30'
-            }`}
-            title={preflightGates?.vpin_gate?.reason || `VPIN: ${vpin.toFixed(2)} vs 0.60 Threshold`}
-          >
-            <div className="text-[8px] text-gray-400 uppercase font-bold">VPIN Safety</div>
-            <div className="font-bold text-[10px] mt-0.5">
-              {(preflightGates?.vpin_gate?.status ?? (vpin < 0.60 ? 'PASS' : 'VETO'))}
-            </div>
-          </div>
-
-          {/* Gate 3: Cycle Lock */}
-          <div 
-            className={`p-1.5 rounded border text-center transition-all ${
-              (preflightGates?.cycle_lock_gate?.status ?? 'READY') === 'READY'
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                : 'bg-rose-500/15 border-rose-500/40 text-rose-300'
-            }`}
-            title={preflightGates?.cycle_lock_gate?.reason || '1 trade per 15M cycle protection'}
-          >
-            <div className="text-[8px] text-gray-400 uppercase font-bold">Cycle Lock</div>
-            <div className="font-bold text-[10px] mt-0.5">
-              {(preflightGates?.cycle_lock_gate?.status ?? 'READY')}
-            </div>
-          </div>
-
-          {/* Gate 4: Edge / EV */}
-          <div 
-            className={`p-1.5 rounded border text-center transition-all ${
-              (preflightGates?.edge_gate?.status ?? (aiSignals?.recommended_side !== 'wait' ? 'PASS' : 'WAIT')) === 'PASS'
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                : 'bg-slate-800/80 border-slate-700 text-slate-400'
-            }`}
-            title={preflightGates?.edge_gate?.reason || 'Waiting for statistical edge > 5%'}
-          >
-            <div className="text-[8px] text-gray-400 uppercase font-bold">Edge / EV</div>
-            <div className="font-bold text-[10px] mt-0.5">
-              {(preflightGates?.edge_gate?.status ?? (aiSignals?.recommended_side !== 'wait' ? 'PASS' : 'WAIT'))}
-            </div>
-          </div>
-        </div>
-
-        {/* Dynamic Veto Explanation Bar */}
-        {((preflightGates?.moat_gate?.status === 'VETO') || (preflightGates?.vpin_gate?.status === 'VETO') || (preflightGates?.cycle_lock_gate?.status === 'LOCKED')) && (
-          <div className="mt-2 px-2.5 py-1 bg-amber-500/10 border border-amber-500/30 rounded text-[9px] text-amber-200 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse shrink-0" />
-            <span>
-              {preflightGates?.vpin_gate?.status === 'VETO'
-                ? preflightGates.vpin_gate.reason
-                : preflightGates?.cycle_lock_gate?.status === 'LOCKED'
-                ? preflightGates.cycle_lock_gate.reason
-                : preflightGates?.moat_gate?.reason || 'Proximity Veto: Trapped inside strike noise trap.'}
-            </span>
-          </div>
-        )}
-      </div>
+      {/* 4. Pre-Flight Diagnostic HUD */}
+      <BabyBotDiagnosticHUD
+        preflightGates={preflightGates}
+        diffVal={diffVal}
+        vpin={vpin}
+        aiSignals={aiSignals}
+      />
 
       {/* 5. STRATEGY-SPECIFIC TELEMETRY DECK */}
       <BabyBotTelemetryDeck
@@ -876,109 +709,14 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       />
 
       {/* 6. Active Position & Risk Telemetry */}
-      <div className="p-4 bg-[#12161a] border-b border-[#262d35] space-y-2.5">
-        <div className="flex items-center justify-between text-xs font-mono">
-          <span className="text-[#8c9ba5] uppercase tracking-wider text-[10px] font-bold">Active Position</span>
-          <span className="text-[10px] text-amber-400 font-bold">Hard Cap: 1 Contract</span>
-        </div>
-
-        <div className="p-2.5 rounded-lg bg-[#171c22] border border-[#262d35] flex items-center justify-between font-mono text-xs">
-          {activePosition && activePosition.size > 0 ? (
-            <>
-              <div className="flex items-center gap-2">
-                <span
-                  className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
-                    activePosition.side === 'yes'
-                      ? 'bg-[#10b981]/20 text-[#10b981]'
-                      : 'bg-[#f43f5e]/20 text-[#f43f5e]'
-                  }`}
-                >
-                  {activePosition.side.toUpperCase()}
-                </span>
-                <span className="text-white font-bold">
-                  {activePosition.size} ct @ {activePosition.entry_price * 100}¢
-                </span>
-              </div>
-              <div className="text-right">
-                <div
-                  className={`font-bold ${
-                    activePosition.unrealized_pnl >= 0 ? 'text-[#10b981]' : 'text-[#f43f5e]'
-                  }`}
-                >
-                  {activePosition.unrealized_pnl >= 0 ? '+' : ''}${activePosition.unrealized_pnl.toFixed(2)}
-                </div>
-                <div className="text-[10px] text-[#8c9ba5]">Unrealized PnL</div>
-              </div>
-            </>
-          ) : (
-            <div className="w-full text-center text-[#8c9ba5] py-1 text-xs">
-              FLAT · No open contract positions (Holding ${(botParams.discount_limit_price || 0.52).toFixed(2)} Maker Resting Limit)
-            </div>
-          )}
-        </div>
-
-        {/* Asymmetric Risk Breakdown */}
-        <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-          <div className="p-2 rounded bg-[#13171c] border border-[#1f262d]">
-            <span className="text-[#8c9ba5] text-[10px]">MAX RISK (CAPITAL):</span>
-            <div className="text-sm font-bold text-[#f43f5e] mt-0.5">
-              -${(botParams.discount_limit_price || 0.52).toFixed(2)} / ct
-            </div>
-          </div>
-          <div className="p-2 rounded bg-[#13171c] border border-[#1f262d]">
-            <span className="text-[#8c9ba5] text-[10px]">MAX SETTLEMENT WIN:</span>
-            <div className="text-sm font-bold text-[#10b981] mt-0.5">
-              +${(1.0 - (botParams.discount_limit_price || 0.52)).toFixed(2)} / ct
-            </div>
-          </div>
-        </div>
-
-        {/* Guardrail Health: Consecutive Losses & VPIN */}
-        <div className="grid grid-cols-2 gap-2 text-[11px] font-mono pt-1">
-          <div className="flex items-center justify-between p-2 rounded bg-[#13171c] border border-[#1f262d]">
-            <span className="text-[#8c9ba5]">Loss Breaker:</span>
-            <div className="flex items-center gap-1">
-              {[0, 1, 2].map((idx) => (
-                <span
-                  key={idx}
-                  className={`w-2 h-2 rounded-full border ${
-                    idx < consecutiveLosses
-                      ? 'bg-[#f43f5e] border-[#f43f5e]'
-                      : 'bg-transparent border-[#8c9ba5]/40'
-                  }`}
-                />
-              ))}
-              <span className="text-[10px] text-[#8c9ba5] ml-1">{consecutiveLosses}/3</span>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between p-2 rounded bg-[#13171c] border border-[#1f262d]">
-            <span className="text-[#8c9ba5]">VPIN Toxicity:</span>
-            <span className={`font-bold ${isVpinToxic ? 'text-[#f43f5e]' : 'text-emerald-400'}`}>
-              {vpin.toFixed(2)} {isVpinToxic ? '⚠️' : 'OK'}
-            </span>
-          </div>
-        </div>
-
-        {/* Coin-Flip Dead-Zone Indicator */}
-        <div
-          className={`p-2 rounded-lg border text-[11px] font-mono flex items-center justify-between ${
-            isDeadZone
-              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-          }`}
-        >
-          <div className="flex items-center gap-1.5">
-            <span
-              className={`w-2 h-2 rounded-full ${isDeadZone ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`}
-            />
-            <span>{isDeadZone ? 'Razor-Tight Dead Zone Active' : 'Directional Edge Ready'}</span>
-          </div>
-          <span className="text-[10px] font-bold uppercase tracking-wider">
-            {isDeadZone ? 'SKIPPING' : 'EDGE CONFIRMED'}
-          </span>
-        </div>
-      </div>
+      <BabyBotPositionDeck
+        activePosition={activePosition}
+        botParams={botParams}
+        consecutiveLosses={consecutiveLosses}
+        vpin={vpin}
+        isVpinToxic={isVpinToxic}
+        isDeadZone={isDeadZone}
+      />
 
       {/* 7. EXPANDABLE STRATEGY PARAMETERS & GUARDRAILS ACCORDION */}
       <div className="border-b border-[#262d35] bg-[#0c0f12]">
