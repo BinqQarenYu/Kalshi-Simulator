@@ -232,12 +232,12 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
           <label htmlFor="shares-input">Shares</label>
           <div id="shares-balance-info" className="flex items-center gap-1.5 text-[11px]">
             {isLive ? (
-              <span className="text-emerald-400 font-mono" title="Live Kalshi Actual Account Cash">
+              <span className="text-emerald-400 font-mono tabular-nums" title="Live Kalshi Actual Account Cash">
                 Live Available: <strong className={`${availableLiveCash <= 0.05 ? 'text-amber-400' : 'text-emerald-300'}`}>${availableLiveCash.toFixed(2)}</strong>
               </span>
             ) : (
-              <span className="text-gray-300">
-                Paper Balance: <strong className="text-white font-mono">${portfolio.balance.toLocaleString('en-US', { minimumFractionDigits: 2 })}</strong>
+              <span className="text-gray-300 font-mono tabular-nums">
+                Paper Balance: <strong className="text-white font-mono tabular-nums">${portfolio.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
               </span>
             )}
           </div>
@@ -252,7 +252,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
             max={isLive ? 1 : 5000}
             value={shares}
             onChange={(e) => setShares(isLive ? 1 : Math.max(1, parseInt(e.target.value) || 0))}
-            className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono text-sm font-bold text-white outline-none focus:border-[#00d084] focus-visible:ring-2 focus-visible:ring-[#00d084]"
+            className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono tabular-nums text-sm font-bold text-white outline-none focus:border-[#00d084] focus-visible:ring-2 focus-visible:ring-[#00d084]"
           />
         </div>
         {/* Quick Share Chips */}
@@ -310,12 +310,12 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
                 const parsed = parseFloat(e.target.value);
                 setLimitPriceCents(Number.isFinite(parsed) ? parseFloat(parsed.toFixed(1)) : 0);
               }}
-              className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono text-sm font-bold text-white outline-none focus:border-[#00d084] focus-visible:ring-2 focus-visible:ring-[#00d084] pr-8"
+              className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-2 text-right font-mono tabular-nums text-sm font-bold text-white outline-none focus:border-[#00d084] focus-visible:ring-2 focus-visible:ring-[#00d084] pr-8"
             />
             <span className="absolute right-3 top-2.5 text-xs text-[#8b949e] font-mono">¢</span>
           </div>
           {/* Quick Step Controls */}
-          <div className="flex items-center justify-end gap-1.5 mt-1">
+          <div role="group" aria-label="Limit price adjustment controls" className="flex items-center justify-end gap-1.5 mt-1">
             <button
               type="button"
               aria-label="Decrease limit price by 1 cent"
@@ -323,7 +323,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
                 soundFX.playClickSound();
                 setLimitPriceCents((prev) => Math.max(0.1, parseFloat((prev - 1.0).toFixed(1))));
               }}
-              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#00d084]"
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084]"
             >
               -1¢
             </button>
@@ -334,7 +334,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
                 soundFX.playClickSound();
                 setLimitPriceCents((prev) => Math.max(0.1, parseFloat((prev - 0.1).toFixed(1))));
               }}
-              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#00d084]"
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084]"
             >
               -0.1¢
             </button>
@@ -345,7 +345,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
                 soundFX.playClickSound();
                 setLimitPriceCents((prev) => Math.min(99.9, parseFloat((prev + 0.1).toFixed(1))));
               }}
-              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#00d084]"
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084]"
             >
               +0.1¢
             </button>
@@ -356,7 +356,7 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
                 soundFX.playClickSound();
                 setLimitPriceCents((prev) => Math.min(99.9, parseFloat((prev + 1.0).toFixed(1))));
               }}
-              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#00d084]"
+              className="px-2 py-0.5 text-[10px] font-mono font-bold bg-[#161b22] text-slate-300 border border-[#30363d] rounded hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084]"
             >
               +1¢
             </button>
@@ -394,12 +394,12 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       {/* Live Financial Breakdown */}
       <div className="space-y-1.5 text-xs border-t border-[#21262d] pt-3 text-[#8b949e]">
         <div className="flex justify-between">
-          <span>Cost to buy {shares} contracts:</span>
-          <span className="font-mono font-bold text-white">${totalCost.toFixed(2)}</span>
+          <span>Cost to buy {shares} contract{shares !== 1 ? 's' : ''}:</span>
+          <span className="font-mono tabular-nums font-bold text-white">${totalCost.toFixed(2)}</span>
         </div>
         <div className="flex justify-between">
           <span>Max Potential Payout:</span>
-          <span className="font-mono font-bold text-[#00d084]">${maxPayout.toFixed(2)}</span>
+          <span className="font-mono tabular-nums font-bold text-[#00d084]">${maxPayout.toFixed(2)}</span>
         </div>
       </div>
 
@@ -443,6 +443,11 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
       <button
         type="button"
         disabled={isSubmitting || (isLive && isLiveFrozen)}
+        aria-label={
+          isLive && isLiveFrozen
+            ? `Order disabled due to insufficient live balance`
+            : `Execute 1-click ${side.toUpperCase()} order for ${shares} contract${shares !== 1 ? 's' : ''} at ${limitPriceCents.toFixed(1)} cents`
+        }
         aria-describedby={isLive && isLiveFrozen ? 'live-balance-depleted-msg' : undefined}
         title={
           isLive && isLiveFrozen
@@ -450,12 +455,12 @@ export const OrderEntryPanel: React.FC<OrderEntryPanelProps> = ({
             : undefined
         }
         onClick={handleExecute}
-        className={`w-full py-3.5 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+        className={`w-full py-3.5 rounded-xl font-extrabold text-sm flex items-center justify-center gap-2 shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[#111620] ${
           isLive && isLiveFrozen
-            ? 'bg-[#21262d] text-gray-400 border border-amber-500/30'
+            ? 'bg-[#21262d] text-gray-400 border border-amber-500/30 focus-visible:ring-amber-400'
             : side === 'yes'
-            ? 'bg-[#00d084] hover:bg-[#00b573] text-black shadow-[#00d084]/20'
-            : 'bg-[#ff4d4d] hover:bg-[#e63e3e] text-white shadow-[#ff4d4d]/20'
+            ? 'bg-[#00d084] hover:bg-[#00b573] text-black shadow-[#00d084]/20 focus-visible:ring-[#00d084]'
+            : 'bg-[#ff4d4d] hover:bg-[#e63e3e] text-white shadow-[#ff4d4d]/20 focus-visible:ring-[#ff4d4d]'
         }`}
       >
         {isLive && isLiveFrozen ? (
