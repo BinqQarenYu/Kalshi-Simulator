@@ -61,6 +61,11 @@ Zero TypeScript compilation errors and a clean build in `frontend/dist/`.
 9. **The 1 Quant University & Passage of the Seal of Excellence**:
    - Every algorithmic candidate must graduate from the Lane 2 Incubator University by completing at least 30 settled cycles with $\ge 52\%$ win rate and $\ge 1.10$ profit factor.
    - Pre-flight passage requires passing the 5-Pillar Gauntlet audited by `BotDeploymentAuditor` (Guardrails, Mathematical Decimal Integrity, Data Truths/CF Benchmarks, Regulatory Wash-Trading, and Empirical Statistical Edge).
+10. **Monolith Prevention & Architectural Governance**:
+    - All AI agents and human contributors MUST adhere to strict line-budget ceilings enforced by `test_architectural_governance.py`.
+    - Core orchestrators (`server.py`, `standalone_bot.py`) MUST delegate logic to specialized submodules via Dependency Injection (`init_*` callbacks or `_BaseCoordinator` proxy pattern).
+    - Never append large feature blocks directly into refactored monoliths (`server.py`, `ParentHub.tsx`, etc.). Create a new submodule in `src/kalshi_sim/` or child component in `frontend/src/components/`.
+    - Single functions in refactored modules MUST NOT exceed 80 lines or 10 decision paths.
 
 ---
 
