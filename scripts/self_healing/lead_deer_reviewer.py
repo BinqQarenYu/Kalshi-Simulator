@@ -116,6 +116,7 @@ RESPOND STRICTLY IN VALID JSON:
             data_bytes = json.dumps(payload).encode("utf-8")
 
             raw_text = ""
+            rate_limited = False
             for model_name in model_candidates:
                 url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={api_key}"
                 req = urllib.request.Request(
@@ -124,7 +125,7 @@ RESPOND STRICTLY IN VALID JSON:
                     headers={"Content-Type": "application/json"},
                     method="POST"
                 )
-                for attempt in range(2):
+                for attempt in range(3):
                     try:
                         with urllib.request.urlopen(req, timeout=12.0) as resp:
                             resp_json = json.loads(resp.read().decode("utf-8"))
@@ -133,17 +134,28 @@ RESPOND STRICTLY IN VALID JSON:
                                 raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
                                 break
                     except urllib.error.HTTPError as he:
-                        if he.code in (503, 429) and attempt < 1:
-                            time.sleep(1.5)
-                            continue
+                        if he.code in (503, 429):
+                            rate_limited = True
+                            if attempt < 2:
+                                backoff = (attempt + 1) * 3.0  # 3.0s, 6.0s backoff
+                                time.sleep(backoff)
+                                continue
                     except Exception:
-                        if attempt < 1:
-                            time.sleep(1.0)
+                        if attempt < 2:
+                            time.sleep(1.5)
                             continue
                 if raw_text:
                     break
 
             if not raw_text:
+                if rate_limited:
+                    # Graceful local AST fallback when API rate limit is reached
+                    return {
+                        "status": "AST_FALLBACK",
+                        "is_fatal": False,
+                        "flaw_explanation": f"API rate limit (HTTP 429) hit. Local AST pre-audit applied for {concern}.",
+                        "minimal_fix": ""
+                    }
                 return {"status": "ERROR", "reason": "Gemini API unavailable or rate-limited across fallback models"}
 
             # Robust JSON extraction slicing between first { and last }

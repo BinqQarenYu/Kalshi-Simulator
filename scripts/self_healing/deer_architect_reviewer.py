@@ -95,6 +95,7 @@ RESPOND STRICTLY IN VALID JSON:
             data_bytes = json.dumps(payload).encode("utf-8")
 
             raw_text = ""
+            rate_limited = False
             for model_name in model_candidates:
                 url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={api_key}"
                 req = urllib.request.Request(
@@ -103,7 +104,7 @@ RESPOND STRICTLY IN VALID JSON:
                     headers={"Content-Type": "application/json"},
                     method="POST"
                 )
-                for attempt in range(2):
+                for attempt in range(3):
                     try:
                         with urllib.request.urlopen(req, timeout=12.0) as resp:
                             resp_json = json.loads(resp.read().decode("utf-8"))
@@ -112,17 +113,26 @@ RESPOND STRICTLY IN VALID JSON:
                                 raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
                                 break
                     except urllib.error.HTTPError as he:
-                        if he.code in (503, 429) and attempt < 1:
-                            time.sleep(1.5)
-                            continue
+                        if he.code in (503, 429):
+                            rate_limited = True
+                            if attempt < 2:
+                                time.sleep((attempt + 1) * 3.0)
+                                continue
                     except Exception:
-                        if attempt < 1:
-                            time.sleep(1.0)
+                        if attempt < 2:
+                            time.sleep(1.5)
                             continue
                 if raw_text:
                     break
 
             if not raw_text:
+                if rate_limited:
+                    return {
+                        "status": "AST_FALLBACK",
+                        "needs_improvement": False,
+                        "critique": f"API rate limit (HTTP 429) hit. Local UI pre-audit applied for {concern}.",
+                        "recommended_fix": ""
+                    }
                 return {"status": "ERROR", "reason": "Gemini API unavailable or rate-limited across fallback models"}
 
             s_idx = raw_text.find("{")

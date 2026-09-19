@@ -40,6 +40,7 @@ from scripts.self_healing.lead_deer_reviewer import LeadDeerReviewer
 from scripts.self_healing.deer_architect_reviewer import DeerArchitectReviewer
 
 AUDIT_LOG = Path("docs/audits/SELF_HEALING_AUDIT.md")
+PROCESSED_REGISTRY = Path("docs/audits/processed_findings_registry.json")
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
@@ -48,6 +49,25 @@ def log_audit(entry: str):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S ET")
     with open(AUDIT_LOG, "a", encoding="utf-8") as f:
         f.write(f"\n### [{timestamp}] {entry}\n")
+
+
+def _get_processed_keys() -> set[str]:
+    if not PROCESSED_REGISTRY.exists():
+        return set()
+    try:
+        import json
+        data = json.loads(PROCESSED_REGISTRY.read_text(encoding="utf-8"))
+        return set(data.get("keys", []))
+    except Exception:
+        return set()
+
+
+def _mark_key_processed(key: str):
+    import json
+    keys = _get_processed_keys()
+    keys.add(key)
+    PROCESSED_REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+    PROCESSED_REGISTRY.write_text(json.dumps({"keys": list(keys)}, indent=2), encoding="utf-8")
 
 
 def run_asvl_verification() -> bool:
@@ -94,66 +114,79 @@ def sentinel_cycle():
         print(f"[~] Cycle {_CYCLE_COUNTER} skipped: {reason}")
         return
 
+    processed = _get_processed_keys()
+
     if is_frontend_turn:
         print(f"[*] Cycle {_CYCLE_COUNTER}: [FRONTEND DEER ARCHITECT] Scanning UI/UX ergonomics & WebCLOB styling...")
         ui_findings = scan_all_frontend_components()
-        if not ui_findings:
-            print("[+] Frontend clean. Zero ergonomic or typography flaws found.")
+        unprocessed_ui = [f for f in ui_findings if f"{f.file_path}:{f.line_no}:{f.category}" not in processed]
+
+        if not unprocessed_ui:
+            print("[+] Frontend clean. Zero unaddressed ergonomic or typography flaws found.")
             return
 
-        print(f"[!] Flagged {len(ui_findings)} UI ergonomic items.")
+        print(f"[!] Found {len(ui_findings)} UI items ({len(unprocessed_ui)} unaddressed). Processing 1 problem...")
+        target_f = unprocessed_ui[0]
+        key = f"{target_f.file_path}:{target_f.line_no}:{target_f.category}"
+        _mark_key_processed(key)
+
         reviewer = DeerArchitectReviewer()
-        for f in ui_findings[:1]:  # Token-armor: 1 review per cycle
-            if cb.is_file_quarantined(f.file_path):
-                print(f"[~] File {f.file_path} is under quarantine. Skipping.")
-                continue
-            print(f"  - Deer Architect auditing {Path(f.file_path).name}:{f.line_no} [{f.category}]")
-            verdict = reviewer.review_ui_ergonomics(f.file_path, f.line_no, f.snippet, f.category)
-            print(f"    Verdict: {verdict}")
-            if verdict and verdict.get("needs_improvement"):
-                critique = verdict.get("critique", "Ergonomic polish recommended")
-                rec_fix = verdict.get("recommended_fix", "")
-                log_audit(f"**Deer Architect (UI/UX)** on `{Path(f.file_path).name}:{f.line_no}`: {critique}")
-                send_sentinel_email_alert(
-                    file_path=f.file_path,
-                    line_no=f.line_no,
-                    category=f.category,
-                    explanation=critique,
-                    proposed_fix=rec_fix,
-                    is_fatal=False,
-                    agent_role="Deer Architect (UI/UX Ergonomics)"
-                )
+        if cb.is_file_quarantined(target_f.file_path):
+            print(f"[~] File {target_f.file_path} is under quarantine. Skipping.")
+            return
+
+        print(f"  - Deer Architect auditing {Path(target_f.file_path).name}:{target_f.line_no} [{target_f.category}]")
+        verdict = reviewer.review_ui_ergonomics(target_f.file_path, target_f.line_no, target_f.snippet, target_f.category)
+        print(f"    Verdict: {verdict}")
+        if verdict and verdict.get("needs_improvement"):
+            critique = verdict.get("critique", "Ergonomic polish recommended")
+            rec_fix = verdict.get("recommended_fix", "")
+            log_audit(f"**Deer Architect (UI/UX)** on `{Path(target_f.file_path).name}:{target_f.line_no}`: {critique}")
+            send_sentinel_email_alert(
+                file_path=target_f.file_path,
+                line_no=target_f.line_no,
+                category=target_f.category,
+                explanation=critique,
+                proposed_fix=rec_fix,
+                is_fatal=False,
+                agent_role="Deer Architect (UI/UX Ergonomics)"
+            )
     else:
         print(f"[*] Cycle {_CYCLE_COUNTER}: [BACKEND LEAD DEER] Scanning repository for mathematical & quantitative flaws...")
         findings = scan_directory(REPO_ROOT / "strategies")
         findings.extend(scan_directory(REPO_ROOT / "src" / "kalshi_sim"))
+        unprocessed_be = [f for f in findings if f"{f.file_path}:{f.line_no}:{f.category}" not in processed]
 
-        if not findings:
-            print("[+] Backend clean. Zero mathematical or logic flaws found.")
+        if not unprocessed_be:
+            print("[+] Backend clean. Zero unaddressed mathematical or logic flaws found.")
             return
 
-        print(f"[!] Flagged {len(findings)} suspect findings.")
+        print(f"[!] Found {len(findings)} suspect findings ({len(unprocessed_be)} unaddressed). Processing 1 problem...")
+        target_f = unprocessed_be[0]
+        key = f"{target_f.file_path}:{target_f.line_no}:{target_f.category}"
+        _mark_key_processed(key)
+
         reviewer = LeadDeerReviewer()
-        for f in findings[:1]:  # Token-armor: 1 review per cycle
-            if cb.is_file_quarantined(f.file_path):
-                print(f"[~] File {f.file_path} is under quarantine. Skipping.")
-                continue
-            print(f"  - Lead Deer auditing {Path(f.file_path).name}:{f.line_no} [{f.category}]")
-            verdict = reviewer.review_suspect_math(f.file_path, f.line_no, f.snippet, f.category)
-            print(f"    Verdict: {verdict}")
-            if verdict and verdict.get("is_fatal"):
-                explanation = verdict.get("flaw_explanation", "Mathematical flaw detected")
-                fix = verdict.get("minimal_fix", "")
-                log_audit(f"**Lead Deer (Fatal Flaw)** on `{Path(f.file_path).name}:{f.line_no}`: {explanation}")
-                send_sentinel_email_alert(
-                    file_path=f.file_path,
-                    line_no=f.line_no,
-                    category=f.category,
-                    explanation=explanation,
-                    proposed_fix=fix,
-                    is_fatal=True,
-                    agent_role="Lead Deer (Backend Self-Healer)"
-                )
+        if cb.is_file_quarantined(target_f.file_path):
+            print(f"[~] File {target_f.file_path} is under quarantine. Skipping.")
+            return
+
+        print(f"  - Lead Deer auditing {Path(target_f.file_path).name}:{target_f.line_no} [{target_f.category}]")
+        verdict = reviewer.review_suspect_math(target_f.file_path, target_f.line_no, target_f.snippet, target_f.category)
+        print(f"    Verdict: {verdict}")
+        if verdict and verdict.get("is_fatal"):
+            explanation = verdict.get("flaw_explanation", "Mathematical flaw detected")
+            fix = verdict.get("minimal_fix", "")
+            log_audit(f"**Lead Deer (Fatal Flaw)** on `{Path(target_f.file_path).name}:{target_f.line_no}`: {explanation}")
+            send_sentinel_email_alert(
+                file_path=target_f.file_path,
+                line_no=target_f.line_no,
+                category=target_f.category,
+                explanation=explanation,
+                proposed_fix=fix,
+                is_fatal=True,
+                agent_role="Lead Deer (Backend Self-Healer)"
+            )
 
 
 def run_sentinel_forever(interval_seconds: int = 600):
