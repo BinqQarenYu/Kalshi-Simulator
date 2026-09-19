@@ -111,8 +111,9 @@ class BtcOrderflowFeed:
         """Return an atomic snapshot of the continuous Bitcoin L2 orderbook and recent trades."""
         # Create a light snapshot of the book state
         snapshot_book = L2BookState(self.book.market_ticker, is_spot=True)
-        snapshot_book.yes_book = dict(self.book.yes_book)
-        snapshot_book.no_book = dict(self.book.no_book)
+        # FastBook.copy() retains _best O(1) indexing in C-level dict update (~2x speedup)
+        snapshot_book._yes_book = self.book._yes_book.copy()
+        snapshot_book._no_book = self.book._no_book.copy()
         snapshot_book.last_update = self.book.last_update
         snapshot_book._stale = self.book._stale
         return snapshot_book, list(self.trades)

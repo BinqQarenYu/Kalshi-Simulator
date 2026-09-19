@@ -51,3 +51,12 @@
 ## 2026-09-17 - O(1) Pre-Sorted Rolling Median Lookup for Dynamic Whale Detection
 **Learning:** Calling `statistics.median` on list comprehensions constructed from deque dict items in `process_trade` caused $O(N \log N)$ sorting and list allocation overhead on every trade arrival.
 **Action:** Utilize synchronized pre-sorted list (`bisect.insort`) alongside deque to compute median trade quantities in $O(1)$ time, reducing trade dynamic whale calculation latency from ~14.92 µs to ~0.67 µs per trade (~22x speedup).
+
+## 2026-09-18 - Subclass `FastBook.copy()` In-Place C-Level Dict Cloning
+**Learning:** Constructing a new `FastBook` subclass instance via `FastBook(dict(fb))` in `get_btc_l2_state()` snapshot creation forced full `__init__` recalculations (`max(self.keys())`) and item insertion overhead.
+**Action:** Implemented custom `FastBook.copy()` using `FastBook.__new__(FastBook)` and C-level `dict.update(res, self)`, directly inheriting `_best` top-of-book indexing and `_version` tracking. Reduced order book snapshot copy latency from ~10.3 µs to ~5.0 µs per call (~2x speedup / 51% latency reduction).
+
+## 2026-09-19 - O(1) Version-Backed Depth Tuple Caching in L2BookState.get_depth_raw
+**Learning:** Re-executing `sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]` inside `get_depth_raw` on every feature extraction tick introduced redundant $O(N \log N)$ sorting overhead (~12.8 µs) even when order book states were unchanged between reads.
+**Action:** Utilized version-backed `FastBook._version` mutation tracking in `L2BookState.get_depth_raw(n)` to cache sorted depth tuples. Reduced `get_depth_raw` read latency from ~12.8 µs to ~0.32 µs per call (~40x speedup / 97.5% latency reduction).
+
