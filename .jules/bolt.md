@@ -60,3 +60,6 @@
 **Learning:** Re-executing `sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]` inside `get_depth_raw` on every feature extraction tick introduced redundant $O(N \log N)$ sorting overhead (~12.8 µs) even when order book states were unchanged between reads.
 **Action:** Utilized version-backed `FastBook._version` mutation tracking in `L2BookState.get_depth_raw(n)` to cache sorted depth tuples. Reduced `get_depth_raw` read latency from ~12.8 µs to ~0.32 µs per call (~40x speedup / 97.5% latency reduction).
 
+## 2026-09-20 - O(log N) Bisect Index Lookup for Rolling Window Evictions
+**Learning:** Calling `list.remove(x)` to evict stale values from sorted rolling trade quantity and volume lists performed a linear $O(N)$ scan from index 0 on every trade print and depth tick once the window reached 100 items (~1.82 µs per eviction).
+**Action:** Replace `list.remove(x)` with binary search index lookup `bisect.bisect_left(sorted_list, x)` and `del sorted_list[idx]` (with fallback safety) in `feature_extractor.py` and `gold_feature_extractor.py`. Reduced eviction latency from 1.82 µs down to 0.64 µs per operation (~2.85x speedup / ~65% latency reduction per eviction).

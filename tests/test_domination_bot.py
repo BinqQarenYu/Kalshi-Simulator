@@ -634,3 +634,69 @@ def test_domination_bot_playbook4_silas_twap_immutability_sniper() -> None:
     assert decision.recommended_contracts == 1
     assert decision.limit_price == 0.72
     assert "Endgame Harvest" in decision.rationale
+
+
+def test_feature_extractors_rolling_window_bisect_eviction() -> None:
+    """Verify that KalshiOrderflowFeatureExtractor and GoldOrderflowFeatureExtractor bisect eviction functions correctly when >100 trade quantities and volumes are ingested."""
+    from datetime import datetime, timezone
+    from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
+    from kalshi_sim.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
+    from kalshi_sim.schemas import TradeEvent
+
+    # 1. Test KalshiOrderflowFeatureExtractor trade and volume eviction
+    extractor = KalshiOrderflowFeatureExtractor(target_depth=15)
+    book = L2BookState(market_ticker="KXBTC15M-T79000")
+    book.yes_book = {Decimal("0.50"): Decimal("100.0")}
+    book.no_book = {Decimal("0.50"): Decimal("100.0")}
+
+    # Process 120 trade events (>100 maxlen)
+    for i in range(120):
+        evt = TradeEvent(
+            trade_id=f"t-{i}",
+            market_ticker="KXBTC15M-T79000",
+            yes_price=Decimal("0.50"),
+            no_price=Decimal("0.50"),
+            count=Decimal(str(float(i + 1))),
+            taker_side="buy",
+            timestamp=datetime.now(timezone.utc),
+        )
+        extractor.process_trade(evt)
+
+    assert len(extractor.rolling_trade_quantities) == 100
+    assert len(extractor.sorted_rolling_trade_quantities) == 100
+    assert extractor.sorted_rolling_trade_quantities == sorted(extractor.rolling_trade_quantities)
+
+    # Process 120 book ticks (>100 maxlen for rolling_volumes)
+    for _ in range(120):
+        vec = extractor.extract_features_from_book(book)
+        assert vec.shape == (28,)
+
+    assert len(extractor.rolling_volumes) == 100
+    assert len(extractor.sorted_rolling_volumes) == 100
+    assert extractor.sorted_rolling_volumes == sorted(extractor.rolling_volumes)
+
+    # 2. Test GoldOrderflowFeatureExtractor trade and volume eviction
+    gold_extractor = GoldOrderflowFeatureExtractor(target_depth=15)
+    for i in range(120):
+        evt = TradeEvent(
+            trade_id=f"gt-{i}",
+            market_ticker="KXGOLD15M-T2000",
+            yes_price=Decimal("0.50"),
+            no_price=Decimal("0.50"),
+            count=Decimal(str(float(i + 1))),
+            taker_side="buy",
+            timestamp=datetime.now(timezone.utc),
+        )
+        gold_extractor.process_trade(evt)
+
+    assert len(gold_extractor.rolling_trade_quantities) == 100
+    assert len(gold_extractor.sorted_rolling_trade_quantities) == 100
+    assert gold_extractor.sorted_rolling_trade_quantities == sorted(gold_extractor.rolling_trade_quantities)
+
+    for _ in range(120):
+        vec_gold = gold_extractor.extract_features(book)
+        assert vec_gold.shape == (32,)
+
+    assert len(gold_extractor.rolling_volumes) == 100
+    assert len(gold_extractor.sorted_rolling_volumes) == 100
+    assert gold_extractor.sorted_rolling_volumes == sorted(gold_extractor.rolling_volumes)
