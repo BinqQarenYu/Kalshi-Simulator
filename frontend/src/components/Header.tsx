@@ -149,41 +149,26 @@ export const Header: React.FC<HeaderProps> = ({
                 })}
               </div>
 
-              <span className="text-[#484f58]">/</span>
-
-              <div role="group" aria-label="Timeframe selection" className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d]">
-                {['5m', '15m', '1h'].map((tf) => {
-                  const is5m = tf === '5m';
-                  const isSel = timeframe === tf;
-                  return (
-                    <button
-                      key={tf}
-                      type="button"
-                      aria-pressed={isSel}
-                      onClick={() => {
-                        soundFX.playClickSound();
-                        onSelectTimeframe(tf);
-                      }}
-                      className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
-                        isSel
-                          ? is5m
-                            ? 'bg-amber-500 text-black shadow-sm font-extrabold'
-                            : 'bg-[#f7931a] text-black shadow-sm font-bold'
-                          : 'text-[#8b949e] hover:text-white'
-                      }`}
-                      title={is5m ? '5M Expansion Sprint Cycle (Exclusive to Mother Dash Paper Live)' : `${tf.toUpperCase()} Market`}
-                    >
-                      <span>{tf.toUpperCase()}</span>
-                      {is5m && (
-                        <span className={`px-1 py-0.1 text-[8px] font-mono uppercase tracking-wider rounded ${
-                          isSel ? 'bg-black/25 text-black font-black' : 'bg-amber-500/20 text-amber-300 font-bold'
-                        }`}>
-                          PAPER
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+              {/* Timeframe Selector Pills */}
+              <div className="flex gap-1 bg-[#161b22] p-0.5 rounded-lg border border-[#30363d] ml-2">
+                {['5m', '15m', '1h'].map((tf) => (
+                  <button
+                    key={tf}
+                    onClick={() => {
+                      soundFX.playClickSound();
+                      onSelectTimeframe(tf);
+                    }}
+                    aria-label={`Switch timeframe to ${tf === '15m' ? '15 minute' : tf === '5m' ? '5 minute' : '1 hour'}`}
+                    aria-pressed={timeframe === tf}
+                    className={`px-2 py-0.5 text-[11px] font-semibold rounded-md transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
+                      timeframe === tf
+                        ? 'bg-[#f7931a] text-black shadow-sm font-bold'
+                        : 'text-[#8b949e] hover:text-white'
+                    }`}
+                  >
+                    {tf.toUpperCase()}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -579,8 +564,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Audio SoundFX Toggle Button */}
           <button
             onClick={handleToggleSound}
-            aria-label="Sound effects"
-            aria-pressed={!isMuted}
+            aria-label={isMuted ? 'Unmute sound effects' : 'Mute sound effects'}
             className={`p-2 rounded-xl border transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
               isMuted
                 ? 'bg-[#161b22] border-[#30363d] text-[#8b949e] hover:text-white'
@@ -588,7 +572,7 @@ export const Header: React.FC<HeaderProps> = ({
             }`}
             title={isMuted ? 'Unmute Sound Effects' : 'Mute Sound Effects'}
           >
-            {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            {isMuted ? <VolumeX className="h-4 w-4" aria-hidden="true" /> : <Volume2 className="h-4 w-4" aria-hidden="true" />}
           </button>
 
           {/* Connection Status Indicator */}
