@@ -4,9 +4,9 @@ import { ArrowDownUp } from 'lucide-react';
 
 interface ChanceBannerProps {
   market: MarketState;
-  activeTab: 'trade_up' | 'trade_down' | 'graph' | 'orderbook' | 'ai';
+  activeTab: 'trade_up' | 'trade_down' | 'graph' | 'orderbook' | 'ai' | 'tape' | 'positions';
   tradingMode?: 'paper' | 'live';
-  onSelectTab: (tab: 'trade_up' | 'trade_down' | 'graph' | 'orderbook' | 'ai') => void;
+  onSelectTab: (tab: 'trade_up' | 'trade_down' | 'graph' | 'orderbook' | 'ai' | 'tape' | 'positions') => void;
   onQuickTrade: (side: 'yes' | 'no') => void;
 }
 
@@ -32,7 +32,10 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
             <span className="text-xl sm:text-2xl font-black text-white">
               {(market?.market_chance_pct ?? 0).toFixed(1)}%
             </span>
-            <span className="text-xs font-bold text-[#ff4d4d] flex items-center">
+            <span
+              className="text-xs font-bold text-[#ff4d4d] flex items-center"
+              aria-label="Market chance decreased by 45.1 percentage points"
+            >
               ▼ 45.1
             </span>
           </div>
@@ -59,6 +62,7 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
             Down {market.no_cents_str}
           </button>
           <button
+            type="button"
             className="p-1 text-[#8b949e] hover:text-white transition-colors rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8b949e]"
             title="Sort or filter options"
             aria-label="Sort or filter options"
@@ -73,6 +77,8 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
         <button
           type="button"
           role="tab"
+          id="tab-orderbook"
+          aria-controls="panel-orderbook"
           aria-selected={activeTab === 'orderbook'}
           onClick={() => onSelectTab('orderbook')}
           className={`pb-1 border-b-2 transition-all rounded-sm flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f7931a] ${
@@ -86,10 +92,12 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
         <button
           type="button"
           role="tab"
-          aria-selected={activeTab === ('tape' as any)}
-          onClick={() => onSelectTab('tape' as any)}
+          id="tab-tape"
+          aria-controls="panel-tape"
+          aria-selected={activeTab === 'tape'}
+          onClick={() => onSelectTab('tape')}
           className={`pb-1 border-b-2 transition-all rounded-sm flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
-            activeTab === ('tape' as any)
+            activeTab === 'tape'
               ? 'border-[#00d084] text-[#00d084] font-bold'
               : 'border-transparent text-[#8b949e] hover:text-white'
           }`}
@@ -99,10 +107,12 @@ export const ChanceBanner: React.FC<ChanceBannerProps> = React.memo(({
         <button
           type="button"
           role="tab"
-          aria-selected={activeTab === ('positions' as any)}
-          onClick={() => onSelectTab('positions' as any)}
+          id="tab-positions"
+          aria-controls="panel-positions"
+          aria-selected={activeTab === 'positions'}
+          onClick={() => onSelectTab('positions')}
           className={`pb-1 border-b-2 transition-all rounded-sm flex items-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6] ${
-            activeTab === ('positions' as any)
+            activeTab === 'positions'
               ? 'border-[#3b82f6] text-[#3b82f6] font-bold'
               : 'border-transparent text-[#8b949e] hover:text-white'
           }`}
