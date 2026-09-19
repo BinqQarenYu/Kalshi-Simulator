@@ -297,7 +297,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   const handleSelectBot = async (botId: string) => {
     soundFX.playClickSound();
     setSelectedBotId(botId);
-    if (onSelectStrategy && ['3_step_domination_bot', 'macro_onnx', 'macro_trend_dominion', 'onnx_microstructure_bot'].includes(botId)) {
+    if (onSelectStrategy && ['3_step_domination_bot', 'bot1_ver_4', 'macro_onnx', 'macro_trend_dominion', 'onnx_microstructure_bot'].includes(botId)) {
       try {
         await onSelectStrategy(botId);
       } catch (e) {
@@ -364,6 +364,26 @@ export const ParentHub: React.FC<ParentHubProps> = ({
         sealLabel: '🏆 SEALED EXCELLENT',
         sealColor: 'text-amber-400 bg-amber-500/15 border-amber-500/40',
         liveAuthorized: true,
+        canPromote: false,
+      },
+      {
+        id: 'bot1_ver_4',
+        name: 'Bot 1 Ver 4 (3-Step Dominion)',
+        subName: 'Next-Gen Incubator (Lane 2 Shadow)',
+        asset: 'BTC-15M',
+        lane: 'Lane 2 (Shadow Paper)',
+        events: 0,
+        winRate: '—',
+        profitFactor: '—',
+        drawdown: '—',
+        vpinPass: '100%',
+        status: 'LANE 2 INCUBATOR (PAPER)',
+        statusColor: 'text-amber-400 bg-amber-500/15 border-amber-500/30',
+        sealStatus: 'IN_INCUBATION',
+        sealToken: 'PENDING-INCUBATION-V4',
+        sealLabel: '⏳ INCUBATING (0/30)',
+        sealColor: 'text-amber-300 bg-amber-500/15 border-amber-500/30',
+        liveAuthorized: false,
         canPromote: false,
       },
       {

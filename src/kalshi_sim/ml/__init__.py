@@ -1,5 +1,6 @@
 """Machine Learning & ONNX Inference Package for Kalshi Simulator."""
 
+from kalshi_sim.ml.domination_bot_v4 import ThreeStepDominationBotV4
 from kalshi_sim.ml.dual_onnx_gateway import DualONNXGateway
 from kalshi_sim.ml.dual_onnx_schemas import DualONNXDecision, DualONNXRegime
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
@@ -13,4 +14,5 @@ __all__ = [
     "DualONNXRegime",
     "KalshiONNXEngine",
     "KalshiOrderflowFeatureExtractor",
+    "ThreeStepDominationBotV4",
 ]

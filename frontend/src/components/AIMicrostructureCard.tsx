@@ -84,6 +84,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   const isMacroOnnx = !isDualOnnx && (activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion');
   const isMacroTrend = !isDualOnnx && !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend');
   const is3StepBot = activeStrategy === '3_step_domination_bot';
+  const isBot1V4 = activeStrategy === 'bot1_ver_4' || activeStrategy === '3_step_domination_bot_v4';
   const isDominion2 = false; // Deprecated and unregistered
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';
   const isSealed = is3StepBot || isMacroTrend || Boolean(signals?.is_sealed || signals?.bot_sealed);
@@ -223,6 +224,10 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               <div className="h-5 w-5 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
                 <Zap className="h-3.5 w-3.5 text-amber-400" />
               </div>
+            ) : isBot1V4 ? (
+              <div className="h-5 w-5 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                <Zap className="h-3.5 w-3.5 text-amber-300" />
+              </div>
             ) : (
               <div className="h-5 w-5 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center">
                 <Cpu className="h-3.5 w-3.5 text-blue-400" />
@@ -231,7 +236,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
             <div className="text-left">
               <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                <span>{isDualOnnx ? 'Dual-ONNX Arbitrage' : isMacroOnnx ? 'Macro ONNX Bot' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2 Bot' : is3StepBot ? '3-Step Domination Bot' : 'ONNX Microstructure Bot'}</span>
+                <span>{isDualOnnx ? 'Dual-ONNX Arbitrage' : isMacroOnnx ? 'Macro ONNX Bot' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2 Bot' : is3StepBot ? '3-Step Domination Bot' : isBot1V4 ? 'Bot 1 Ver 4' : 'ONNX Microstructure Bot'}</span>
                 <ChevronDown className={`h-3 w-3 text-gray-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
               </div>
             </div>
@@ -375,6 +380,38 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                   </div>
                 </div>
                 {is3StepBot && <Check className="h-4 w-4 text-amber-400 shrink-0 mt-1" aria-hidden="true" />}
+              </button>
+
+              {/* Bot 1 v4: Bot 1 Ver 4 (3-Step Dominion) */}
+              <button
+                type="button"
+                role="option"
+                aria-selected={isBot1V4}
+                aria-label="Select Bot 1 Ver 4 strategy"
+                onClick={() => handleStrategyChange('bot1_ver_4')}
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                  isBot1V4
+                    ? 'bg-amber-500/15 border border-amber-500/40'
+                    : 'hover:bg-[#21262d] border border-transparent'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="h-7 w-7 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                    <Zap className="h-4 w-4 text-amber-300" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>Bot 1 Ver 4 (3-Step Dominion)</span>
+                      <span className="px-1.5 py-0.2 text-[9px] font-mono bg-amber-500/20 text-amber-300 rounded-full font-bold">
+                        Incubator v4
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
+                      Every-Cycle Engagement • +45% Harvest • -35% Stop • [18¢, 48¢] Corridor
+                    </p>
+                  </div>
+                </div>
+                {isBot1V4 && <Check className="h-4 w-4 text-amber-300 shrink-0 mt-1" aria-hidden="true" />}
               </button>
 
               {/* Bot 2: ONNX Microstructure Bot */}
@@ -647,6 +684,73 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               {signals.order_type === 'limit' && signals.limit_price
                 ? `Resting Maker Limit armed at $${signals.limit_price.toFixed(2)} (${signals.recommended_side?.toUpperCase()}). Auto-cancels at T<=45s.`
                 : `Sniper will rest limit order at ≤$${localDiscount.toFixed(2)} with $0.00 fee when edge triggers.`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* 🚀 Bot 1 Ver 4: Every-Cycle Engagement & +45% Harvest Engine */}
+      {isBot1V4 && (
+        <div className="bg-[#161b22] border border-amber-500/40 rounded-xl p-3.5 flex flex-col gap-3 shadow-inner">
+          <div className="flex items-center justify-between border-b border-[#21262d] pb-2">
+            <div className="flex items-center gap-2">
+              <div className="h-6 w-6 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center">
+                <Zap className="h-3.5 w-3.5 text-amber-300" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>BOT 1 VER 4 HARVEST ENGINE</span>
+                  <span className="px-1.5 py-0.2 text-[9px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full font-bold">
+                    +45% HARVEST
+                  </span>
+                  <span className="px-1.5 py-0.2 text-[9px] font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-full font-bold">
+                    -35% STOP
+                  </span>
+                </div>
+                <div className="text-[10px] text-gray-400">
+                  Every-Cycle Engagement • [18¢, 48¢] Corridor • Cheapest Ask Execution
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs font-mono font-bold text-amber-300">
+                18¢–48¢
+              </div>
+              <div className="text-[9px] font-mono text-gray-500">
+                Corridor
+              </div>
+            </div>
+          </div>
+
+          {/* Key V4 Telemetry Triad */}
+          <div className="grid grid-cols-3 gap-2 bg-[#0d1117] border border-[#30363d] rounded-lg p-2 text-center text-xs font-mono">
+            <div>
+              <div className="text-[9px] text-gray-400 font-medium uppercase">Brain Decision</div>
+              <div className={`text-xs font-bold mt-0.5 ${
+                signals.recommended_side === 'yes' ? 'text-emerald-400' : signals.recommended_side === 'no' ? 'text-rose-400' : 'text-amber-300'
+              }`}>
+                {signals.recommended_side ? signals.recommended_side.toUpperCase() : 'WAIT'} ({((signals.onnx_confidence ?? 0.74) * 100).toFixed(0)}%)
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] text-gray-400 font-medium uppercase">Profit Harvest</div>
+              <div className="text-xs font-bold text-emerald-400 mt-0.5">
+                +45% Target
+              </div>
+            </div>
+            <div>
+              <div className="text-[9px] text-gray-400 font-medium uppercase">Playbook Freeze</div>
+              <div className="text-xs font-bold text-cyan-300 mt-0.5">
+                T &le; 240s Cutoff
+              </div>
+            </div>
+          </div>
+
+          {/* V4 Status Pill Banner */}
+          <div className="text-[10px] text-gray-300 bg-amber-500/10 border border-amber-500/20 rounded-lg p-2 flex items-center gap-2">
+            <Target className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+            <span className="leading-tight">
+              <b>Every-Cycle Active:</b> Brain evaluates dominant side each event. Buys cheapest available ask in 18¢–48¢ corridor, locks in fast +45% gains, and salves risk at -35% stop.
             </span>
           </div>
         </div>

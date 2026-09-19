@@ -116,6 +116,21 @@ export const BOT_PROFILES: Record<string, BotProfile> = {
     discountCeiling: 0.48,
     playbook: 'Playbook 2: OFI Trend Drift · Resting $0.48 Limit',
   },
+  'bot1_ver_4': {
+    id: 'bot1_ver_4',
+    name: 'Bot 1 Ver 4 (3-Step Dominion)',
+    shortName: 'Bot 1 v4',
+    version: 'v4.0 (Harvest Engine)',
+    lane: 'LANE 2 (SHADOW PAPER)',
+    laneBadge: 'shadow',
+    asset: 'BTC',
+    timeframe: '15m',
+    telemetryType: 'dominion',
+    description: 'Every-Cycle Engagement: Brain Directional Conviction · Cheapest Available Ask (18¢–48¢) · +45% Profit Harvest · -35% Stop Loss',
+    hardCapContracts: 1,
+    discountCeiling: 0.48,
+    playbook: 'Every-Cycle Engagement · +45% Profit Harvest · -35% Stop Loss · T<=240s Freeze',
+  },
   'macro_onnx': {
     id: 'macro_onnx',
     name: 'ONNX Macro Net v2',
@@ -332,6 +347,15 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     volatility_moat_multiplier: 1.20,
     enable_mistake_learning: true,
     brier_shrinkage_factor: 0.15,
+    // Bot 1 Ver 4 (3-Step Dominion) Dials
+    enable_every_cycle_engagement: true,
+    profit_harvest_pct: 0.45,
+    enable_stop_loss: true,
+    stop_loss_pct: 0.35,
+    min_entry_price: 0.18,
+    entry_cutoff_seconds: 240.0,
+    brain_high_conviction_threshold: 0.70,
+    brain_min_conviction_threshold: 0.52,
   });
   const [isSavingParams, setIsSavingParams] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
@@ -458,7 +482,25 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     const activeAssetKey = (market?.active_asset || activeProfile.asset || 'BTC').toUpperCase();
     const assetMoat = moatByAsset[activeAssetKey] ?? 28.0;
 
-    if (activeProfile.telemetryType === 'macro_dominion' || activeProfile.id === 'macro_trend_dominion') {
+    if (activeProfile.id === 'bot1_ver_4' || activeProfile.id === '3_step_domination_bot_v4') {
+      setBotParams((prev) => ({
+        ...prev,
+        enable_every_cycle_engagement: true,
+        profit_harvest_pct: 0.45,
+        enable_stop_loss: true,
+        stop_loss_pct: 0.35,
+        min_entry_price: 0.18,
+        momentum_max_price: 0.48,
+        discount_limit_price: 0.48,
+        entry_cutoff_seconds: 240.0,
+        brain_high_conviction_threshold: 0.70,
+        brain_min_conviction_threshold: 0.52,
+        min_spot_diff: assetMoat,
+        max_contracts: 1,
+      }));
+      setSaveSuccessMsg('🎯 Bot 1 v4 (+45% Harvest) preset loaded');
+      setTimeout(() => setSaveSuccessMsg(null), 2500);
+    } else if (activeProfile.telemetryType === 'macro_dominion' || activeProfile.id === 'macro_trend_dominion') {
       setBotParams((prev) => ({
         ...prev,
         min_macro_agreement: true,
@@ -606,6 +648,15 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         volatility_moat_multiplier: botParams.volatility_moat_multiplier ?? botParams.dynamic_moat_multiplier,
         enable_mistake_learning: botParams.enable_mistake_learning,
         brier_shrinkage_factor: botParams.brier_shrinkage_factor,
+        // Bot 1 Ver 4 (3-Step Dominion) Dials
+        enable_every_cycle_engagement: botParams.enable_every_cycle_engagement,
+        profit_harvest_pct: botParams.profit_harvest_pct,
+        enable_stop_loss: botParams.enable_stop_loss,
+        stop_loss_pct: botParams.stop_loss_pct,
+        min_entry_price: botParams.min_entry_price,
+        entry_cutoff_seconds: botParams.entry_cutoff_seconds,
+        brain_high_conviction_threshold: botParams.brain_high_conviction_threshold,
+        brain_min_conviction_threshold: botParams.brain_min_conviction_threshold,
         max_contracts: 1, // Institutional 1-contract invariant
       };
       const cleaned = Object.fromEntries(
@@ -699,8 +750,9 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     return `Awaiting high-confidence orderflow impulse. Both models filtering noise below ${((botParams.min_confidence || 0.81) * 100).toFixed(0)}% threshold.`;
   }, [dualOnnxTelemetry?.rationale, dualRegime, vpin, botParams, quolasSignal, quolasConfidence, kalshiSignal, kalshiConfidence]);
 
-  // Macro Trend Dominion (Bot 3) Telemetry
+  // Bot Profiles & Telemetry Flags
   const isMacroDominion = activeProfile.id === 'macro_trend_dominion' || activeProfile.telemetryType === 'macro_dominion';
+  const isBot1V4 = activeProfile.id === 'bot1_ver_4' || activeProfile.id === '3_step_domination_bot_v4' || selectedBotId === 'bot1_ver_4';
   const macroAction = (macroDominionTelemetry?.call || 
     (aiSignals?.recommended_side === 'yes' ? 'YES' : aiSignals?.recommended_side === 'no' ? 'NO' : 'DONT')).toUpperCase();
   const macroRawConf = Math.round((macroDominionTelemetry?.spot_confidence ? macroDominionTelemetry.spot_confidence * 100 : (aiSignals?.onnx_confidence ? aiSignals.onnx_confidence * 100 : 76)));
@@ -850,6 +902,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         </span>
         {[
           BOT_PROFILES['3_step_domination_bot'],
+          BOT_PROFILES['bot1_ver_4'],
           BOT_PROFILES['dual_onnx'] || BOT_PROFILES['the_onnx_strategy'] || BOT_PROFILES['macro_onnx'],
           BOT_PROFILES['macro_trend_dominion'],
         ].filter(Boolean).map((profile) => {
@@ -1530,6 +1583,114 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
             <div className="p-2 rounded bg-[#13171c] border border-[#1f262d]">
               <span className="text-[#8c9ba5]">SETTLEMENT FREEZE:</span>
               <div className="text-sm font-bold text-amber-300 mt-0.5">T-60s Hard Sweep</div>
+            </div>
+          </div>
+        </div>
+      ) : isBot1V4 ? (
+        // --- Bot 1 Ver 4: Every-Cycle Engagement & +45% Harvest Telemetry Deck ---
+        <div className="p-3.5 bg-[#0a0d12] border-b border-[#262d35] space-y-3 font-mono">
+          {/* Header Bar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-300" />
+              <span className="text-xs font-bold text-white uppercase tracking-wider">
+                Bot 1 Ver 4 Harvest Engine
+              </span>
+              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                EVERY-CYCLE
+              </span>
+            </div>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded border text-emerald-400 bg-emerald-500/15 border-emerald-500/30">
+              HARVEST TARGET: +{Math.round(((botParams.profit_harvest_pct ?? 0.45)) * 100)}%
+            </span>
+          </div>
+
+          {/* Brain Decision Hero Card */}
+          <div className={`p-3 rounded-xl border flex flex-col gap-2 ${
+            (aiSignals?.recommended_side || 'yes') === 'yes'
+              ? 'bg-emerald-950/25 border-emerald-500/40 shadow-lg shadow-emerald-500/10 ring-1 ring-emerald-500/30'
+              : 'bg-rose-950/25 border-rose-500/40 shadow-lg shadow-rose-500/10 ring-1 ring-rose-500/30'
+          }`}>
+            <div className="flex items-center justify-between border-b border-[#1f2833] pb-2">
+              <div className="flex items-center gap-2">
+                <span className={`text-xl font-black tracking-tight ${
+                  (aiSignals?.recommended_side || 'yes') === 'yes' ? 'text-emerald-400' : 'text-rose-400'
+                }`}>
+                  BUY {(aiSignals?.recommended_side || 'yes').toUpperCase()}
+                </span>
+                <span className="text-[10px] text-slate-400">@ 15M Active Cycle</span>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-black font-mono text-amber-300">
+                  {Math.round(((botParams.min_entry_price ?? 0.18)) * 100)}¢–{Math.round(((botParams.momentum_max_price ?? botParams.discount_limit_price ?? 0.48)) * 100)}¢ Ask Corridor
+                </div>
+                <div className="text-[9px] text-emerald-400/90 font-bold">
+                  Cheapest Available Ask
+                </div>
+              </div>
+            </div>
+
+            {/* Metrics Triad: Brain Conviction, Profit Target, Stop Loss */}
+            <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+              <div className="bg-[#0b1017] p-1.5 rounded border border-[#1e2530]">
+                <div className="text-[8px] uppercase text-slate-400">Brain Conviction</div>
+                <div className="text-xs font-black text-cyan-300 mt-0.5">
+                  {Math.round(((aiSignals?.onnx_confidence ?? 0.74)) * 100)}%
+                </div>
+                <div className="text-[8px] text-emerald-400">
+                  Dominant Side
+                </div>
+              </div>
+              <div className="bg-[#0b1017] p-1.5 rounded border border-[#1e2530]">
+                <div className="text-[8px] uppercase text-slate-400">Harvest Price (+45%)</div>
+                <div className="text-xs font-black text-emerald-400 mt-0.5">
+                  {activePosition && activePosition.size > 0
+                    ? `${Math.round(activePosition.entry_price * 100 * (1 + (botParams.profit_harvest_pct ?? 0.45)))}¢`
+                    : `+${Math.round(((botParams.profit_harvest_pct ?? 0.45)) * 100)}% ROI`}
+                </div>
+                <div className="text-[8px] text-slate-400">
+                  {activePosition && activePosition.size > 0 ? `Entry: ${Math.round(activePosition.entry_price * 100)}¢` : 'Auto Take-Profit'}
+                </div>
+              </div>
+              <div className="bg-[#0b1017] p-1.5 rounded border border-[#1e2530]">
+                <div className="text-[8px] uppercase text-slate-400">Stop-Loss (-35%)</div>
+                <div className="text-xs font-black text-rose-400 mt-0.5">
+                  {activePosition && activePosition.size > 0
+                    ? `${Math.round(activePosition.entry_price * 100 * (1 - (botParams.stop_loss_pct ?? 0.35)))}¢`
+                    : `-${Math.round(((botParams.stop_loss_pct ?? 0.35)) * 100)}% Max`}
+                </div>
+                <div className="text-[8px] text-slate-400">
+                  Jackal Defense
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* V4 Playbook Stages Indicator */}
+          <div className="grid grid-cols-3 gap-1.5 text-[9px] text-center">
+            <div className={`p-1.5 rounded border transition-all ${
+              remSecs > 600
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 font-bold ring-1 ring-amber-500/30'
+                : 'bg-[#13171c] border-[#1f262d] text-[#8c9ba5]'
+            }`}>
+              <div>PLAYBOOK 1 (0–5m)</div>
+              <div className="font-bold text-white mt-0.5">Initial Trade Fill</div>
+            </div>
+            <div className={`p-1.5 rounded border transition-all ${
+              remSecs <= 600 && remSecs > 240
+                ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 font-bold ring-1 ring-emerald-500/30'
+                : 'bg-[#13171c] border-[#1f262d] text-[#8c9ba5]'
+            }`}>
+              <div>PLAYBOOK 2 (5–11m)</div>
+              <div className="font-bold text-white mt-0.5">★ Serial Recycling</div>
+            </div>
+            <div className={`p-1.5 rounded border transition-all ${
+              remSecs <= 240
+                ? 'bg-rose-500/20 border-rose-500/50 text-rose-300 font-bold ring-1 ring-rose-500/30 animate-pulse'
+                : 'bg-[#13171c] border-[#1f262d] text-[#8c9ba5]'
+            }`}>
+              <div>PLAYBOOK 3 (T&le;240s)</div>
+              <div className="font-bold text-white mt-0.5">Gamma Freeze Cutoff</div>
             </div>
           </div>
         </div>
@@ -2615,6 +2776,245 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   </div>
                 </div>
               </div>
+            ) : isBot1V4 ? (
+              /* BOT 1 VER 4 — 5 STRATEGY DIALS COCKPIT MATRIX */
+              <div className="space-y-3.5">
+                {/* Header Banner */}
+                <div className="p-2.5 rounded-lg bg-gradient-to-r from-amber-950/40 via-yellow-950/30 to-slate-900 border border-amber-500/30 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-300" />
+                    <div>
+                      <div className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <span>BOT 1 VER 4 (3-STEP DOMINION)</span>
+                        <span className="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
+                          HARVEST COCKPIT
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-slate-400">
+                        Every-Cycle Engagement · +45% Harvest · -35% Stop Loss · T&le;240s Freeze
+                      </div>
+                    </div>
+                  </div>
+                  <span className="text-[9px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    DIALS ACTIVE
+                  </span>
+                </div>
+
+                {/* DIAL 1: Every-Cycle Engagement Toggle */}
+                <div className="space-y-1.5 p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d]">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-amber-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-400 inline-block animate-pulse" />
+                      Dial 1: Every-Cycle Engagement Mode
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-amber-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Brain Decision Maker:</b><br />
+                          • <b>Enabled:</b> Evaluates market on every 15m cycle, picking dominant side (YES vs NO) based on directional conviction.<br />
+                          • Buys cheapest available ask inside corridor.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-[9px] font-mono text-amber-300 font-bold">
+                      {botParams.enable_every_cycle_engagement !== false ? 'EVERY-CYCLE ACTIVE' : 'PASSIVE MODE'}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { val: true, label: 'Every-Cycle On', badge: 'Active', desc: 'Trade dominant side each event' },
+                      { val: false, label: 'Selective Only', badge: 'Passive', desc: 'Only trade on large breakouts' },
+                    ].map((opt) => {
+                      const isActive = (botParams.enable_every_cycle_engagement !== false) === opt.val;
+                      return (
+                        <button
+                          key={String(opt.val)}
+                          type="button"
+                          onClick={() => {
+                            soundFX.playClickSound();
+                            setBotParams({ ...botParams, enable_every_cycle_engagement: opt.val });
+                          }}
+                          className={`p-2 rounded border text-left transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-amber-500/15 border-amber-400 text-white shadow-lg shadow-amber-500/10 ring-1 ring-amber-400/40'
+                              : 'bg-[#10141b] border-[#222933] text-slate-400 hover:border-slate-600 hover:text-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold">{opt.label}</span>
+                            <span className={`text-[8px] font-mono px-1 rounded ${
+                              isActive ? 'bg-amber-400/20 text-amber-300 font-semibold' : 'bg-slate-800 text-slate-400'
+                            }`}>
+                              {opt.badge}
+                            </span>
+                          </div>
+                          <div className="text-[8px] text-slate-400 mt-0.5 truncate">{opt.desc}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* DIAL 2: Profit Harvest Target % (+45%) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                      Dial 2: Gross Profit Harvest Target %
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-emerald-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Lock-In Engine (+45% Sweetspot):</b><br />
+                          When contract price increases by this ROI percentage above entry, the bot immediately sells to available bids, locking in cash and freeing risk for recycle trades.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-xs font-mono font-bold text-emerald-400">
+                      +{Math.round(((botParams.profit_harvest_pct ?? 0.45)) * 100)}% ROI
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <input
+                      type="range"
+                      min="0.20"
+                      max="1.00"
+                      step="0.05"
+                      value={botParams.profit_harvest_pct ?? 0.45}
+                      onChange={(e) => setBotParams({ ...botParams, profit_harvest_pct: parseFloat(e.target.value) })}
+                      className="w-full accent-emerald-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <span>+20% (Fast Scalp)</span>
+                      <span className="text-emerald-400 font-semibold">+45% (V4 Sweetspot)</span>
+                      <span>+100% (Full Settlement)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DIAL 3: Defensive Stop Loss (-35%) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-rose-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-rose-400 inline-block" />
+                      Dial 3: Defensive Stop-Loss Cutoff %
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-rose-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Jackal Loss Salvage:</b><br />
+                          Prevents holding losing trades to zero. If contract value declines by this percentage, bot executes emergency market exit to salvage capital.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-xs font-mono font-bold text-rose-400">
+                      -{Math.round(((botParams.stop_loss_pct ?? 0.35)) * 100)}% Max Loss
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <input
+                      type="range"
+                      min="0.15"
+                      max="0.60"
+                      step="0.05"
+                      value={botParams.stop_loss_pct ?? 0.35}
+                      onChange={(e) => setBotParams({ ...botParams, stop_loss_pct: parseFloat(e.target.value) })}
+                      className="w-full accent-rose-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <span>-15% (Tight)</span>
+                      <span className="text-rose-400 font-semibold">-35% (V4 Sweetspot)</span>
+                      <span>-60% (Deep Breath)</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DIAL 4: Entry Pricing Corridor [18¢, 48¢] */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-cyan-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" />
+                      Dial 4: Entry Pricing Corridor (Cheapest Ask Window)
+                    </label>
+                    <span className="text-xs font-mono font-bold text-cyan-300">
+                      {Math.round(((botParams.min_entry_price ?? 0.18)) * 100)}¢ Floor — {Math.round(((botParams.momentum_max_price ?? botParams.discount_limit_price ?? 0.48)) * 100)}¢ Ceiling
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-slate-400">Min Floor (Eliminates &lt;18¢ Junk)</span>
+                      <div className="flex items-center bg-[#10141a] border border-cyan-500/30 rounded px-2 py-1">
+                        <span className="text-cyan-400 mr-1">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.05"
+                          max="0.40"
+                          value={botParams.min_entry_price ?? 0.18}
+                          onChange={(e) => setBotParams({ ...botParams, min_entry_price: parseFloat(e.target.value) })}
+                          className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-slate-400">Max Ceiling (Asymmetric Limit)</span>
+                      <div className="flex items-center bg-[#10141a] border border-cyan-500/30 rounded px-2 py-1">
+                        <span className="text-cyan-400 mr-1">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.30"
+                          max="0.75"
+                          value={botParams.momentum_max_price ?? botParams.discount_limit_price ?? 0.48}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            setBotParams({ ...botParams, momentum_max_price: val, discount_limit_price: val });
+                          }}
+                          className="w-full bg-transparent text-white font-mono outline-none text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* DIAL 5: Playbook 3 Entry Cutoff Seconds (240s) */}
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" />
+                      Dial 5: Playbook 3 Gamma Freeze Cutoff
+                      <div className="group relative cursor-help">
+                        <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
+                        <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-indigo-500/40 z-50 shadow-2xl leading-snug">
+                          <b>Late-Cycle Quarantine:</b><br />
+                          Stops placing new entries when time to expiration $T \le 240$s to eliminate late-cycle pin risk and wide spreads.
+                        </div>
+                      </div>
+                    </label>
+                    <span className="text-xs font-mono font-bold text-indigo-300">
+                      T &le; {Math.round(botParams.entry_cutoff_seconds ?? 240)}s Freeze
+                    </span>
+                  </div>
+
+                  <div className="space-y-1">
+                    <input
+                      type="range"
+                      min="60"
+                      max="400"
+                      step="10"
+                      value={botParams.entry_cutoff_seconds ?? 240}
+                      onChange={(e) => setBotParams({ ...botParams, entry_cutoff_seconds: parseFloat(e.target.value) })}
+                      className="w-full accent-indigo-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
+                    />
+                    <div className="flex justify-between text-[8px] text-slate-500 font-mono">
+                      <span>60s (Late Entry)</span>
+                      <span className="text-indigo-400 font-semibold">240s (Sweetspot)</span>
+                      <span>360s (Early Freeze)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             ) : (
               /* Standard / 3-Step Dominion Parameter Grid */
               <div className="grid grid-cols-2 gap-2.5">
@@ -3119,7 +3519,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   className="px-2.5 py-1.5 rounded bg-[#171c22] hover:bg-[#222933] text-amber-300 hover:text-amber-200 border border-amber-500/30 text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1"
                 >
                   <span>🎯</span>
-                  <span>{activeProfile.telemetryType === 'macro_dominion' ? 'Reset Macro Sweetspots' : activeProfile.telemetryType === 'onnx' ? 'Reset Quant Sweetspots' : 'Sweetspots Preset'}</span>
+                  <span>{isBot1V4 ? 'Reset Bot 1 v4 Presets' : activeProfile.telemetryType === 'macro_dominion' ? 'Reset Macro Sweetspots' : activeProfile.telemetryType === 'onnx' ? 'Reset Quant Sweetspots' : 'Sweetspots Preset'}</span>
                 </button>
                 <button
                   onClick={handleSaveParameters}
@@ -3127,7 +3527,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#00bda5] text-black font-bold text-xs hover:bg-[#2dd4bf] transition-all shadow cursor-pointer disabled:opacity-50"
                 >
                   {isSavingParams ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                  <span>{activeProfile.telemetryType === 'macro_dominion' || activeProfile.telemetryType === 'onnx' ? 'Apply Strategy Dials' : 'Apply & Save as Default'}</span>
+                  <span>{isBot1V4 || activeProfile.telemetryType === 'macro_dominion' || activeProfile.telemetryType === 'onnx' ? 'Apply Strategy Dials' : 'Apply & Save as Default'}</span>
                 </button>
 
                 <button

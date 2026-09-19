@@ -27,6 +27,7 @@ from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditRepo
 from kalshi_sim.db import DatabaseWriter, get_db_writer
 from kalshi_sim.execution_logger import ExecutionLogger
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
+from kalshi_sim.ml.domination_bot_v4 import ThreeStepDominationBotV4
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
 from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
@@ -101,6 +102,7 @@ class SimulationAgent:
         self._portfolio_macro_trend = Portfolio(starting_balance=starting_capital)
         self._portfolio_dominion2 = Portfolio(starting_balance=starting_capital)
         self._portfolio_domination = Portfolio(starting_balance=starting_capital)
+        self._portfolio_domination_v4 = Portfolio(starting_balance=starting_capital)
         self._portfolio_onnx = Portfolio(starting_balance=starting_capital)
         self._portfolio_dual_onnx = Portfolio(starting_balance=starting_capital)
         self._simulator = OrderSimulator()
@@ -114,6 +116,7 @@ class SimulationAgent:
         )
         self._dominion2_bot = Dominion2Bot()
         self._domination_bot = ThreeStepDominationBot()
+        self._domination_bot_v4 = ThreeStepDominationBotV4()
         self._dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
         self.active_strategy_bot: str = "3_step_domination_bot"
         self.execution_mode: str = "simulated"
@@ -122,6 +125,8 @@ class SimulationAgent:
         # Run Pre-Deployment Audit Certification Gate on all candidate bots
         for b_id, b_inst in [
             ("3_step_domination_bot", self._domination_bot),
+            ("bot1_ver_4", self._domination_bot_v4),
+            ("3_step_domination_bot_v4", self._domination_bot_v4),
             ("dominion_2_bot", self._dominion2_bot),
             ("macro_trend_dominion", self._macro_trend_bot),
             ("macro_onnx", self._macro_trend_bot),
@@ -175,6 +180,8 @@ class SimulationAgent:
             "dual_onnx_arbitrage_bot",
         ):
             return self._portfolio_dual_onnx
+        elif self.active_strategy_bot in ("bot1_ver_4", "3_step_domination_bot_v4"):
+            return self._portfolio_domination_v4
         return self._portfolio_domination
 
     @property
@@ -252,6 +259,8 @@ class SimulationAgent:
             for ord, fill in filled_resting:
                 if any(k in ord.reasoning.lower() for k in ("dual_onnx", "onnx_strategy", "onnx_macro")):
                     target_p = self._portfolio_dual_onnx
+                elif any(k in ord.reasoning.lower() for k in ("bot1_ver_4", "v4", "ver_4")):
+                    target_p = self._portfolio_domination_v4
                 elif "domination" in ord.reasoning.lower() or "3_step" in ord.reasoning.lower():
                     target_p = self._portfolio_domination
                 else:
@@ -273,6 +282,8 @@ class SimulationAgent:
             return self._macro_trend_bot
         elif bot_id in ("dominion_2_bot", "dominion2", "dominion_v2"):
             return self._dominion2_bot
+        elif bot_id in ("bot1_ver_4", "3_step_domination_bot_v4"):
+            return self._domination_bot_v4
         elif bot_id == "3_step_domination_bot":
             return self._domination_bot
         elif bot_id == "onnx_microstructure_bot":
@@ -292,6 +303,8 @@ class SimulationAgent:
             target = "macro_trend_dominion"
         elif target in ("dominion2", "dominion_v2"):
             target = "dominion_2_bot"
+        elif target in ("bot1_ver_4", "3_step_domination_bot_v4"):
+            target = "bot1_ver_4"
 
         # Pre-Deployment Audit Certification Gate
         if hasattr(self, "bot_auditor"):
@@ -637,6 +650,148 @@ class SimulationAgent:
                     logger.debug("Domination bot evaluation error: %s", exc)
 
         # ===================================================================
+        # BOT 1 Ver 4: 3-Step Domination Bot v4 (Evaluated against _portfolio_domination_v4)
+        if self.active_strategy_bot in ("bot1_ver_4", "3_step_domination_bot_v4"):
+            current_v4_pos = self._portfolio_domination_v4.get_position(ticker)
+
+            if (
+                not self._portfolio_domination_v4.circuit_breaker_tripped
+                and (
+                    current_v4_pos is not None
+                    or len(self._portfolio_domination_v4.open_positions) < MAX_CONCURRENT_POSITIONS
+                )
+            ):
+                if not hasattr(self, "_last_dom_v4_eval_time"):
+                    self._last_dom_v4_eval_time: dict[str, float] = {}
+                _eval_now = time.monotonic()
+                if _eval_now - self._last_dom_v4_eval_time.get(ticker, 0.0) < 3.0:
+                    return
+                self._last_dom_v4_eval_time[ticker] = _eval_now
+                try:
+                    target_strike = float(market_info.target_strike if market_info else 78650.0)
+                    if self._spot_price_getter:
+                        try:
+                            spot_price = float(self._spot_price_getter())
+                        except Exception:
+                            spot_price = target_strike
+                    else:
+                        spot_price = float(market_info.target_strike if market_info else 78650.0)
+                    time_to_expiry_s = 600.0
+
+                    if market_info and market_info.expiration_time:
+                        now_utc = datetime.now(timezone.utc)
+                        rem_secs = (market_info.expiration_time - now_utc).total_seconds()
+                        if rem_secs <= 15.0:
+                            return
+                        time_to_expiry_s = rem_secs
+
+                    vpin_score = 0.15
+                    try:
+                        vpin_score = float(self._onnx_engine.extractor.compute_vpin())
+                    except Exception:
+                        pass
+
+                    decision = self._domination_bot_v4.evaluate(
+                        book=book,
+                        spot_price=spot_price,
+                        target_strike=target_strike,
+                        time_to_expiry_s=time_to_expiry_s,
+                        recent_trades=trades,
+                        total_equity=self._portfolio_domination_v4.equity,
+                        max_position_size=self._get_max_size_for_tf(timeframe),
+                        estimated_vpin=vpin_score,
+                        current_position=current_v4_pos,
+                    )
+
+                    # Handle V4 Dynamic Exit: +45% Profit Harvest or -35% Stop Loss
+                    if decision.action in ("harvest", "stop_loss") and current_v4_pos is not None:
+                        exit_price_val = Decimal(str(decision.limit_price if decision.limit_price is not None else 0.50))
+                        settle_res = self._portfolio_domination_v4.close_position(ticker, exit_price_val)
+                        if settle_res:
+                            # Release in-flight & cycle locks to allow serial recycling if cycle trades < max_trades_per_cycle
+                            self._guardrails.release_in_flight_intent(ticker)
+                            # Record cycle settlement to release cycle lock if needed
+                            self._guardrails.record_trade_settlement(
+                                ticker=ticker,
+                                pnl=settle_res.pnl,
+                                was_win=(settle_res.outcome == "win"),
+                                balance_after=self._portfolio_domination_v4.balance,
+                                cycle_id=ticker,
+                            )
+                            if self._exec_logger:
+                                self._exec_logger.log_settlement(settle_res)
+                            self._db_writer.enqueue_settlement(
+                                settlement_id=f"st_v4_{int(time.time()*1000)}_{ticker}",
+                                ticker=ticker,
+                                side=settle_res.side.value,
+                                size=settle_res.size,
+                                entry_price=float(settle_res.entry_price),
+                                settlement_price=float(settle_res.settlement_price),
+                                outcome=settle_res.outcome,
+                                pnl=float(settle_res.pnl),
+                                balance_after=float(self._portfolio_domination_v4.balance),
+                                bot_type="bot1_ver_4",
+                                execution_mode="simulated",
+                            )
+                            logger.info(
+                                "🎯 [BOT 1 V4 %s] Closed %s %s %d cts @ $%s | PnL: +$%s | Rationale: %s",
+                                decision.action.upper(),
+                                ticker,
+                                settle_res.side.value.upper(),
+                                settle_res.size,
+                                exit_price_val,
+                                settle_res.pnl,
+                                decision.rationale,
+                            )
+                        return
+
+                    now_mono = time.monotonic()
+                    if now_mono - self._last_pred_log_time.get(ticker, 0.0) >= 3.0:
+                        self._last_pred_log_time[ticker] = now_mono
+                        self._db_writer.enqueue_ai_prediction(
+                            ticker=ticker,
+                            p_up=decision.p_up,
+                            p_down=decision.p_down,
+                            p_wait=decision.p_wait,
+                            vpin=decision.vpin,
+                            ev_yes=decision.ev_yes,
+                            ev_no=decision.ev_no,
+                            recommended_side=decision.recommended_side,
+                            rationale=decision.rationale,
+                        )
+
+                    # Only proceed to enter if we don't already hold an active position
+                    if current_v4_pos is None and decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
+                        order_size = 1
+                        side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
+                        logger.info(
+                            "[%s] %-18s | %-3s (%s) | Edge=%+.1f%% | EV=+%s/ct | Size=%d cts",
+                            "LIVE BOT 1 V4" if is_live else "BOT 1 VER 4 (PAPER)",
+                            ticker,
+                            decision.recommended_side.upper(),
+                            decision.active_playbook,
+                            decision.edge_pct,
+                            f"${max(decision.ev_yes, decision.ev_no):.2f}",
+                            order_size,
+                        )
+                        order_type_val = getattr(decision, "order_type", "limit")
+                        limit_price_val = Decimal(str(getattr(decision, "limit_price", self._domination_bot_v4.discount_limit_price)))
+                        await self._place_virtual_order(
+                            book=book,
+                            ticker=ticker,
+                            side=side_enum,
+                            max_size=order_size,
+                            timeframe=timeframe,
+                            reasoning=decision.rationale,
+                            portfolio=self._portfolio_domination_v4,
+                            bot_type="bot1_ver_4",
+                            order_type=order_type_val,
+                            limit_price=limit_price_val,
+                        )
+                except Exception as exc:
+                    logger.debug("Domination bot v4 evaluation error: %s", exc)
+
+        # ===================================================================
         # BOT: The ONNX Strategy (Dual-Brain Spot Lead vs Kalshi Lag CLOB)
         # Evaluated against _portfolio_dual_onnx in Lane 2 Paper Trading on Live Market Ticks
         # ===================================================================
@@ -869,6 +1024,7 @@ class SimulationAgent:
         portfolios_to_settle = [
             (self._portfolio_macro_trend, active_macro_tag),
             (self._portfolio_domination, "3_step_domination_bot"),
+            (self._portfolio_domination_v4, "bot1_ver_4"),
             (self._portfolio_onnx, "onnx_microstructure_bot"),
         ]
         if hasattr(self, "_portfolio_dominion2") and self._portfolio_dominion2 is not None:
@@ -1542,6 +1698,7 @@ class SimulationAgent:
                     (self._portfolio_macro_trend, "macro_trend_dominion"),
                     (self._portfolio_dominion2, "dominion_2_bot"),
                     (self._portfolio_domination, "3_step_domination_bot"),
+                    (self._portfolio_domination_v4, "bot1_ver_4"),
                     (self._portfolio_onnx, "onnx_microstructure_bot"),
                 ]
                 if hasattr(self, "_portfolio_dual_onnx") and self._portfolio_dual_onnx is not None:

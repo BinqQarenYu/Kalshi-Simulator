@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import Any, Callable, Dict, List, Optional
 
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
+from kalshi_sim.ml.domination_bot_v4 import ThreeStepDominationBotV4
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_schemas import DualONNXRegime
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
@@ -51,6 +52,7 @@ class AIWorker:
             hmm_brain=self.hmm_brain,
         )
         self._domination_bot = ThreeStepDominationBot()
+        self._domination_bot_v4 = ThreeStepDominationBotV4()
         self._dominion2_bot = Dominion2Bot()
         self._dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
 
@@ -368,6 +370,52 @@ class AIWorker:
                                 "order_type": getattr(dec, "order_type", "limit"),
                                 "limit_price": getattr(dec, "limit_price", 0.48),
                                 "discount_limit_price": float(self._domination_bot.discount_limit_price),
+                                "compute_latency_ms": round(compute_duration, 2),
+                            }
+
+                        # 2b. Strategy: Bot 1 Ver 4 (3-Step Dominion v4)
+                        elif self.active_strategy_bot in ("bot1_ver_4", "3_step_domination_bot_v4"):
+                            vpin_val = 0.15
+                            try:
+                                vpin_val = float(self._sim_agent._onnx_engine.extractor.compute_vpin())
+                            except Exception:
+                                pass
+
+                            dec = self._domination_bot_v4.evaluate(
+                                book=book,
+                                spot_price=spot_price,
+                                target_strike=target_strike,
+                                time_to_expiry_s=time_to_expiry_s,
+                                recent_trades=trades,
+                                total_equity=equity,
+                                max_position_size=1,
+                                estimated_vpin=vpin_val,
+                            )
+
+                            compute_duration = (asyncio.get_event_loop().time() - start_t) * 1000.0
+                            self._last_compute_duration_ms = compute_duration
+
+                            self._cached_signals = {
+                                "strategy_id": dec.strategy_id,
+                                "strategy_name": dec.strategy_name,
+                                "active_playbook": dec.active_playbook,
+                                "playbook_stage": dec.playbook_stage,
+                                "p_up": dec.p_up,
+                                "p_down": dec.p_down,
+                                "p_wait": dec.p_wait,
+                                "vpin": dec.vpin,
+                                "vpin_is_safe": dec.vpin_is_safe,
+                                "ev_yes": dec.ev_yes,
+                                "ev_no": dec.ev_no,
+                                "edge_yes": dec.edge_yes,
+                                "edge_no": dec.edge_no,
+                                "kelly_f_yes": dec.kelly_f_yes,
+                                "kelly_f_no": dec.kelly_f_no,
+                                "recommended_side": dec.recommended_side,
+                                "rationale": dec.rationale,
+                                "order_type": getattr(dec, "order_type", "limit"),
+                                "limit_price": getattr(dec, "limit_price", 0.48),
+                                "discount_limit_price": float(self._domination_bot_v4.discount_limit_price),
                                 "compute_latency_ms": round(compute_duration, 2),
                             }
 

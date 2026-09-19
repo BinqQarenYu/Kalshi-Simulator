@@ -134,6 +134,7 @@ export type StrategyBotId =
   | 'macro_trend_dominion'
   | 'dominion_2_bot'
   | '3_step_domination_bot'
+  | 'bot1_ver_4'
   | 'onnx_microstructure_bot';
 
 export interface StrategyBotInfo {
