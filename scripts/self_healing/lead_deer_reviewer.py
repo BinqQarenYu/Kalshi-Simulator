@@ -94,10 +94,13 @@ RESPOND STRICTLY IN VALID JSON:
         # Execute invocation via DeerFlow backend runner
         try:
             from dotenv import load_dotenv
-            load_dotenv(self.deerflow_env_path)
-            api_key = os.getenv("GEMINI_API_KEY")
-            if not api_key:
-                return {"status": "ERROR", "reason": "No GEMINI_API_KEY found in .env"}
+            project_env = Path(__file__).resolve().parent.parent.parent / ".env"
+            load_dotenv(project_env)
+            if self.deerflow_env_path.exists():
+                load_dotenv(self.deerflow_env_path)
+            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            if not api_key or api_key.startswith("AQ.") or "your-" in api_key:
+                return {"status": "ERROR", "reason": "No valid GEMINI_API_KEY found in .env (Key must start with AIzaSy...)"}
 
             import urllib.request
             import urllib.error
