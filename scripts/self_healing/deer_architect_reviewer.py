@@ -7,6 +7,8 @@ Enforces Token-Armor: micro-payloads, strict JSON schema, max 2 calls/hour.
 import os
 import json
 import time
+import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -81,9 +83,7 @@ RESPOND STRICTLY IN VALID JSON:
             if not api_key or api_key.startswith("AQ.") or "your-" in api_key:
                 return {"status": "ERROR", "reason": "No valid GEMINI_API_KEY found in .env (Key must start with AIzaSy...)"}
 
-            import urllib.request
-            import urllib.error
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+            model_candidates = ["models/gemini-flash-lite-latest", "models/gemini-flash-latest"]
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {
@@ -93,40 +93,42 @@ RESPOND STRICTLY IN VALID JSON:
                 }
             }
             data_bytes = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(
-                url,
-                data=data_bytes,
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
 
             raw_text = ""
-            for attempt in range(3):
-                try:
-                    with urllib.request.urlopen(req, timeout=12.0) as resp:
-                        resp_json = json.loads(resp.read().decode("utf-8"))
-                        candidates = resp_json.get("candidates", [])
-                        if not candidates:
-                            return {"status": "ERROR", "reason": "No candidates returned from Gemini"}
-                        raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
-                        break
-                except urllib.error.HTTPError as he:
-                    if he.code in (503, 429) and attempt < 2:
-                        time.sleep(2.0 * (attempt + 1))
-                        continue
-                    return {"status": "ERROR", "reason": f"HTTP {he.code}: {he.reason}"}
-                except Exception as ex:
-                    if attempt < 2:
-                        time.sleep(1.0)
-                        continue
-                    return {"status": "ERROR", "reason": str(ex)}
+            for model_name in model_candidates:
+                url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={api_key}"
+                req = urllib.request.Request(
+                    url,
+                    data=data_bytes,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                for attempt in range(2):
+                    try:
+                        with urllib.request.urlopen(req, timeout=12.0) as resp:
+                            resp_json = json.loads(resp.read().decode("utf-8"))
+                            candidates = resp_json.get("candidates", [])
+                            if candidates:
+                                raw_text = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                                break
+                    except urllib.error.HTTPError as he:
+                        if he.code in (503, 429) and attempt < 1:
+                            time.sleep(1.5)
+                            continue
+                    except Exception:
+                        if attempt < 1:
+                            time.sleep(1.0)
+                            continue
+                if raw_text:
+                    break
 
-            if raw_text.startswith("```json"):
-                raw_text = raw_text[7:]
-            elif raw_text.startswith("```"):
-                raw_text = raw_text[3:]
-            if raw_text.endswith("```"):
-                raw_text = raw_text[:-3]
+            if not raw_text:
+                return {"status": "ERROR", "reason": "Gemini API unavailable or rate-limited across fallback models"}
+
+            s_idx = raw_text.find("{")
+            e_idx = raw_text.rfind("}")
+            if s_idx != -1 and e_idx != -1 and e_idx > s_idx:
+                raw_text = raw_text[s_idx:e_idx + 1]
 
             return json.loads(raw_text.strip())
         except Exception as e:
