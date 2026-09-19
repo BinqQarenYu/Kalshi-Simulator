@@ -286,7 +286,9 @@ class KalshiOrderflowFeatureExtractor:
             ask_sizes = [float(lv.quantity) for lv in asks]
 
         # 2. Spatial Volumes
-        total_visible_volume = sum(bid_sizes) + sum(ask_sizes) + 1e-9
+        sum_bids = sum(bid_sizes)
+        sum_asks = sum(ask_sizes)
+        total_visible_volume = sum_bids + sum_asks + 1e-9
         self.rolling_volumes.append(total_visible_volume)
         # Performance Optimization: Use statistics.median to calculate median without array allocation overhead
         median_volume = float(statistics.median(self.rolling_volumes))
@@ -356,7 +358,7 @@ class KalshiOrderflowFeatureExtractor:
 
         # Performance optimization: Unroll spatial decay vector assignment for default target_depth=15
         # to eliminate list comprehension allocations and loop iteration overhead (~18% total feature extraction speedup).
-        if target_depth == 15:
+        if self.target_depth == 15:
             buf[13] = decays[0] * (bid_sizes[0] - ask_sizes[0]) * inv_baseline
             buf[14] = decays[1] * (bid_sizes[1] - ask_sizes[1]) * inv_baseline
             buf[15] = decays[2] * (bid_sizes[2] - ask_sizes[2]) * inv_baseline
