@@ -85,9 +85,9 @@ class ThreeStepDominationBot:
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
         fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
-        max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
+        max_entry_price: Decimal = Decimal("0.68"),  # $0.68 standard entry price cap ($0.70+ hard kill wall)
         discount_limit_price: Decimal = Decimal("0.52"),  # Configurable discount sniper ceiling (48¢-52¢ sweetspot)
-        min_confidence: float = 0.81,  # 81% model conviction threshold (Historical best)
+        min_confidence: float = 0.68,  # 68% model conviction threshold (sweet spot for +12% to +20% EV edge)
         enable_trailing_ratchet: bool = True,  # High-water mark trailing profit ratchet and breakeven armor
         trailing_ratchet_buffer: Decimal = Decimal("0.08"),  # $0.08 pullback buffer below peak bid (Historical best)
         spot_delta_front_run_threshold: float = 28.0,  # $28.0 rolling 3s spot velocity base threshold (2.0σ winning sweetspot)
@@ -103,7 +103,7 @@ class ThreeStepDominationBot:
         twap_fading_quarantine_seconds: float = 15.0,  # 15s expiration quarantine (strict hold to $1.00)
         twap_fading_window_seconds: float = 60.0,  # 60s Silas TWAP fading evaluation window
         enable_dynamic_reversal_curve: bool = True,  # Time-adaptive reversal curve (decays 85% -> 50% as tau -> 0)
-        opening_quarantine_seconds: float = 90.0,  # Quarantine opening seconds of cycle to eliminate false breakouts
+        opening_quarantine_seconds: float = 30.0,  # Quarantine opening 30s of cycle to eliminate false breakouts
         onnx_engine: Optional[Any] = None,  # Brain 1 QuoLas Nano Microscope ONNX inference engine
         twap_immutability_sniper_cents: float = 0.75,  # 75¢ ceiling for Silas TWAP late-cycle arbitrage harvest
         max_queue_depth_ahead: int = 25000,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
@@ -968,7 +968,7 @@ class ThreeStepDominationBot:
                         ),
                     )
                 cfg = get_asset_config(self.asset)
-                deep_separation_diff = self.min_spot_diff * 2.3
+                deep_separation_diff = self.min_spot_diff * 1.4
                 # Tier 2: Standard cap ($0.62) unless spot diff is deep in-the-money
                 if target_ask > self.max_entry_price and abs(spot_diff) < deep_separation_diff:
                     deep_sep_str = cfg.format_price(deep_separation_diff)
