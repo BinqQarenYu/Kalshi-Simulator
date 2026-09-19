@@ -159,6 +159,29 @@ class Bot1V4DominationEngine:
         clamped_price = max(base_floor, min(dynamic_price, max_cap))
         return Decimal(str(round(clamped_price, 2)))
 
+    def update_parameters(
+        self,
+        min_confidence: Optional[float] = None,
+        min_spot_diff: Optional[float] = None,
+        discount_limit_price: Optional[float] = None,
+        max_entry_price: Optional[float] = None,
+        vpin_toxic_threshold: Optional[float] = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Dynamically update strategy parameters on the fly."""
+        if min_confidence is not None:
+            val = float(min_confidence)
+            self.min_confidence = val if val <= 1.0 else (val / 100.0)
+        if min_spot_diff is not None:
+            self.min_spot_diff = float(min_spot_diff)
+        if discount_limit_price is not None:
+            self.discount_limit_price = Decimal(str(discount_limit_price))
+        if max_entry_price is not None:
+            self.max_entry_price = Decimal(str(max_entry_price))
+        if vpin_toxic_threshold is not None:
+            self.vpin_toxic_threshold = float(vpin_toxic_threshold)
+        return {"status": "UPDATED", "min_confidence": self.min_confidence, "min_spot_diff": self.min_spot_diff}
+
     def evaluate_market_opportunity(
         self,
         spot_price: float,
@@ -171,6 +194,13 @@ class Bot1V4DominationEngine:
         spot_velocity_3s: float = 0.0,
     ) -> Bot1V4Decision:
         """Evaluate Bot 1 V4 Quantitative Signal with Turnover and EV Math coupling."""
+        # Auto-sync with Single Source of Truth on disk before evaluation
+        try:
+            from kalshi_sim.truth_synchronizer import truth_synchronizer
+            truth_synchronizer.sync_engine(self, asset=asset.value if hasattr(asset, "value") else str(asset))
+        except Exception:
+            pass
+
         spot_diff = spot_price - target_strike
         turnovers = self.get_completed_turnovers(cycle_id)
 

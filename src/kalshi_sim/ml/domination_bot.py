@@ -87,7 +87,7 @@ class ThreeStepDominationBot:
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
         max_entry_price: Decimal = Decimal("0.68"),  # $0.68 standard entry price cap ($0.70+ hard kill wall)
         discount_limit_price: Decimal = Decimal("0.52"),  # Configurable discount sniper ceiling (48¢-52¢ sweetspot)
-        min_confidence: float = 0.68,  # 68% model conviction threshold (sweet spot for +12% to +20% EV edge)
+        min_confidence: float = 0.52,  # 52% model conviction threshold (temporary relaxed test mode)
         enable_trailing_ratchet: bool = True,  # High-water mark trailing profit ratchet and breakeven armor
         trailing_ratchet_buffer: Decimal = Decimal("0.08"),  # $0.08 pullback buffer below peak bid (Historical best)
         spot_delta_front_run_threshold: float = 28.0,  # $28.0 rolling 3s spot velocity base threshold (2.0σ winning sweetspot)
@@ -443,6 +443,13 @@ class ThreeStepDominationBot:
         **kwargs: Any,
     ) -> DominationDecision:
         """Execute 3-step cycle analysis and determine optimal playbook execution."""
+        # Auto-sync with Single Source of Truth on disk before evaluation
+        try:
+            from kalshi_sim.truth_synchronizer import truth_synchronizer
+            truth_synchronizer.sync_engine(self, asset=self.asset.value if hasattr(self.asset, "value") else str(self.asset))
+        except Exception:
+            pass
+
         if not book or (not book.yes_book and not book.no_book) or spot_price <= 0 or target_strike <= 0:
             return self._build_wait_decision(
                 time_to_expiry_s=time_to_expiry_s,

@@ -868,6 +868,22 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
     payload = req.model_dump(exclude_none=True)
     res: dict[str, Any] = {}
 
+    # Persist updated parameters directly to Single Source of Truth on disk
+    try:
+        from pathlib import Path
+        import json
+        p_path = Path("data/bot_parameters_domination.json")
+        if p_path.exists():
+            disk_data = json.loads(p_path.read_text(encoding="utf-8"))
+            disk_data.update(payload)
+            if "assets" in disk_data and isinstance(disk_data["assets"], dict):
+                asset_key = payload.get("asset", "BTC").upper()
+                if asset_key in disk_data["assets"]:
+                    disk_data["assets"][asset_key].update(payload)
+            p_path.write_text(json.dumps(disk_data, indent=2), encoding="utf-8")
+    except Exception as exc:
+        logger.warning(f"[TRUTH PERSIST WARN] Could not update disk truth: {exc}")
+
     # Always keep dual_onnx_bot updated with strategy dials
     if hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
         state.dual_onnx_bot.update_parameters(**payload)
