@@ -286,21 +286,23 @@ export const Header: React.FC<HeaderProps> = ({
               : 'border-cyan-500/40 shadow-cyan-500/10'
           }`}
           title={`Active Strategy Bot: ${
-            activeStrategyBot === '3_step_domination_bot'
-              ? 'Bot 1: 3-Step Domination Bot (Port 8001 • Lane 1 LIVE)'
+            activeStrategyBot === 'bot1_v4_domination'
+              ? 'Bot 1 V4: Multi-Turnover Domination Bot (Port 8000 • Lane 1 LIVE)'
+              : activeStrategyBot === '3_step_domination_bot'
+              ? '3-Step Dominion v3.2 (Port 8000 • Lane 1 LIVE)'
               : activeStrategyBot === 'macro_onnx' || activeStrategyBot === 'onnx_microstructure_bot'
-              ? 'Bot 2: ONNX Strategy / Dual-Brain ONNX (Port 8002 • Lane 2 Shadow)'
-              : 'Bot 3: Macro Trend Dominion (Port 8003 • Lane 2 Shadow)'
+              ? 'Bot 2: ONNX Strategy / Dual-Brain ONNX (Port 8000 • Lane 2 Shadow)'
+              : 'Bot 3: Macro Trend Dominion (Port 8000 • Lane 1 LIVE)'
           }`}
         >
           <div className={`h-2 w-2 rounded-full animate-ping ${
-            activeStrategyBot === '3_step_domination_bot'
+            activeStrategyBot === 'bot1_v4_domination' || activeStrategyBot === '3_step_domination_bot'
               ? 'bg-amber-400'
               : activeStrategyBot === 'macro_onnx' || activeStrategyBot === 'onnx_microstructure_bot'
               ? 'bg-purple-400'
               : 'bg-cyan-400'
           }`} />
-          {activeStrategyBot === '3_step_domination_bot' ? (
+          {activeStrategyBot === 'bot1_v4_domination' || activeStrategyBot === '3_step_domination_bot' ? (
             <Zap className="h-3.5 w-3.5 text-amber-400" />
           ) : activeStrategyBot === 'gold_onnx_bot' || activeStrategyBot === 'gold_onnx' ? (
             <Crown className="h-3.5 w-3.5 text-amber-400" />
@@ -312,15 +314,17 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-1.5">
             <span className="text-[#8b949e] font-sans text-[11px] hidden sm:inline">Active Bot:</span>
             <span className="font-bold text-white text-[11px]">
-              {activeStrategyBot === '3_step_domination_bot'
-                ? 'Bot 1 (3-Step Dom)'
+              {activeStrategyBot === 'bot1_v4_domination'
+                ? 'Bot 1 V4 (Multi-Turnover)'
+                : activeStrategyBot === '3_step_domination_bot'
+                ? '3-Step Dominion v3.2'
                 : activeStrategyBot === 'gold_onnx_bot' || activeStrategyBot === 'gold_onnx'
                 ? 'Bot 4 (Gold ONNX)'
                 : activeStrategyBot === 'macro_onnx' || activeStrategyBot === 'onnx_microstructure_bot'
                 ? 'Bot 2 (ONNX Dual-Brain)'
                 : 'Bot 3 (Macro Trend)'}
             </span>
-            {(activeStrategyBot === '3_step_domination_bot' || activeStrategyBot === 'macro_trend_dominion') && (
+            {(activeStrategyBot === 'bot1_v4_domination' || activeStrategyBot === '3_step_domination_bot' || activeStrategyBot === 'macro_trend_dominion') && (
               <span className="px-1.5 py-0.2 text-[9px] font-mono bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-full font-extrabold">
                 Lane 1 Live
               </span>

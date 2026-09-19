@@ -1,5 +1,5 @@
-import React from 'react';
-import { ExternalLink, Maximize2, Minimize2, PanelRightClose } from 'lucide-react';
+import React, { useState } from 'react';
+import { Columns, ExternalLink, Maximize2, Minimize2, PanelRightClose, Square } from 'lucide-react';
 import { BabyBotConsole } from '../BabyBotConsole';
 import {
   AISignals,
@@ -72,6 +72,8 @@ export const BabyBotRightRail: React.FC<BabyBotRightRailProps> = ({
   selectedTag,
   setSelectedTag,
 }) => {
+  const [railMode, setRailMode] = useState<'single' | 'dual_split'>('single');
+
   return (
     <aside className="w-full h-full bg-[#12161a] flex flex-col shrink-0 overflow-y-auto select-none">
       {/* If Baby Bot is docked (not popped out into standalone window), render here */}
@@ -84,7 +86,7 @@ export const BabyBotRightRail: React.FC<BabyBotRightRailProps> = ({
                 {selectedBotId === 'macro_onnx' || selectedBotId === 'onnx_microstructure_bot'
                   ? 'Bot 2 (ONNX Macro v2)'
                   : selectedBotId === '3_step_domination_bot'
-                  ? 'Bot 1 (3-Step Dom)'
+                  ? 'Bot 1 V4 (3-Step Dom)'
                   : selectedBotId === 'macro_trend_dominion'
                   ? 'Bot 3 (Macro Trend)'
                   : selectedBotId === 'gold_onnx_bot'
@@ -93,6 +95,32 @@ export const BabyBotRightRail: React.FC<BabyBotRightRailProps> = ({
               </span>
             </span>
             <div className="flex items-center gap-1 shrink-0">
+              {/* Dual Split Pane Layout Toggle */}
+              <button
+                onClick={() => {
+                  soundFX.playClickSound();
+                  setRailMode(railMode === 'single' ? 'dual_split' : 'single');
+                }}
+                title={railMode === 'dual_split' ? 'Single Column View' : 'Dual-Pane Split Multi-Bot View'}
+                className={`p-1 rounded transition flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 border ${
+                  railMode === 'dual_split'
+                    ? 'bg-[#00bda5]/20 text-[#00bda5] border-[#00bda5]/50 font-bold'
+                    : 'text-[#8c9ba5] hover:text-white border-[#262d35] hover:bg-[#17202d]'
+                }`}
+              >
+                {railMode === 'dual_split' ? (
+                  <>
+                    <Columns className="w-3 h-3 text-[#00bda5]" />
+                    <span>2-Pane</span>
+                  </>
+                ) : (
+                  <>
+                    <Square className="w-3 h-3" />
+                    <span>Split</span>
+                  </>
+                )}
+              </button>
+
               {/* Minimize / Expand Console button */}
               <button
                 onClick={() => {
@@ -133,8 +161,78 @@ export const BabyBotRightRail: React.FC<BabyBotRightRailProps> = ({
             </div>
           </div>
 
-          {/* Minimized Docked Console Summary Strip */}
-          {isBabyBotConsoleMinimized ? (
+          {/* Docked Console Content: Single or Dual Split */}
+          {railMode === 'dual_split' ? (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 w-full">
+              {/* Pane A: Active Bot Console */}
+              <div className="border-r border-[#262d35] pr-2">
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#00bda5] mb-2 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#00bda5] animate-ping" />
+                  <span>Pane A: Active Execution HUD</span>
+                </div>
+                <BabyBotConsole
+                  market={market}
+                  aiSignals={aiSignals}
+                  livePortfolio={livePortfolio}
+                  activePosition={activePosition}
+                  tradingMode={tradingMode}
+                  timeframe={timeframe}
+                  isPoppedOut={false}
+                  onTogglePopOut={() => onTogglePopOutBabyBot(selectedBotId)}
+                  onFlattenHalt={onFlattenHalt}
+                  onQuickTrade={onQuickTrade}
+                  reportsCount={reportsCount}
+                  consecutiveLosses={consecutiveLosses}
+                  selectedBotId={selectedBotId}
+                  onSelectBot={handleSelectBot}
+                  dualOnnxTelemetry={dualOnnxTelemetry}
+                  preflightGates={preflightGates}
+                  macroDominionTelemetry={macroDominionTelemetry}
+                  hmmMacroRegime={hmmMacroRegime}
+                  onOpenReports={() => setWorkbenchTab('reports')}
+                  sealOfExcellence={sealOfExcellence}
+                />
+              </div>
+
+              {/* Pane B: Multi-Bot Fleet Matrix */}
+              <div className="pl-1 space-y-3 font-mono text-xs">
+                <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#38bdf8] mb-2 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#38bdf8]" />
+                  <span>Pane B: Multi-Bot Fleet Matrix</span>
+                </div>
+                {[
+                  { id: '3_step_domination_bot', name: '3-Step Dominion v3.2', lane: 'Lane 1 Live', winRate: '62.5%', pf: '1.45', status: 'SEALED_EXCELLENT', active: selectedBotId === '3_step_domination_bot' },
+                  { id: 'bot1_v4_domination', name: 'Bot 1 V4 (Multi-Turnover)', lane: 'Lane 1 Live', winRate: '68.5%', pf: '1.82', status: 'SEALED_EXCELLENT', active: selectedBotId === 'bot1_v4_domination' },
+                  { id: 'macro_onnx', name: 'Bot 2 (ONNX Macro v2)', lane: 'Lane 2 Incubator', winRate: '55.6%', pf: '1.12', status: 'IN_INCUBATION', active: selectedBotId === 'macro_onnx' },
+                  { id: 'macro_trend_dominion', name: 'Bot 3 (Macro Trend)', lane: 'Lane 1 Live', winRate: '88.3%', pf: '4.63', status: 'SEALED_EXCELLENT', active: selectedBotId === 'macro_trend_dominion' },
+                  { id: 'gold_onnx_bot', name: 'Bot 4 (Gold ONNX)', lane: 'Lane 2 Incubator', winRate: '0.0%', pf: '0.00', status: 'IN_INCUBATION', active: selectedBotId === 'gold_onnx_bot' },
+                ].map((b) => (
+                  <div
+                    key={b.id}
+                    onClick={() => handleSelectBot(b.id)}
+                    className={`p-2.5 rounded-lg border transition cursor-pointer flex flex-col gap-1.5 ${
+                      b.active
+                        ? 'bg-[#00bda5]/10 border-[#00bda5] text-white'
+                        : 'bg-[#13171c] border-[#262d35] hover:border-[#00bda5]/50 text-[#8c9ba5]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-xs text-white">{b.name}</span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                        b.status === 'SEALED_EXCELLENT' ? 'bg-[#00c978]/20 text-[#00c978]' : 'bg-amber-500/20 text-amber-300'
+                      }`}>
+                        {b.status === 'SEALED_EXCELLENT' ? 'SEALED' : 'INCUBATOR'}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] text-[#8c9ba5]">
+                      <span>{b.lane}</span>
+                      <span>WR: <strong className="text-white">{b.winRate}</strong> │ PF: <strong className="text-white">{b.pf}</strong></span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : isBabyBotConsoleMinimized ? (
             <div
               onClick={() => {
                 soundFX.playClickSound();

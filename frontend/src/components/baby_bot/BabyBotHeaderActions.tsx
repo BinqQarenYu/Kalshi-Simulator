@@ -107,13 +107,14 @@ export const BabyBotHeaderActions: React.FC<BabyBotHeaderActionsProps> = ({
         </span>
         {[
           BOT_PROFILES['3_step_domination_bot'],
+          BOT_PROFILES['bot1_v4_domination'],
           BOT_PROFILES['dual_onnx'] || BOT_PROFILES['the_onnx_strategy'] || BOT_PROFILES['macro_onnx'],
           BOT_PROFILES['macro_trend_dominion'],
           BOT_PROFILES['gold_onnx_bot'],
         ].filter(Boolean).map((profile) => {
           const profileSeal =
             sealOfExcellence?.seals?.[profile.id] ||
-            (profile.id === '3_step_domination_bot'
+            (profile.id === '3_step_domination_bot' || profile.id === 'bot1_v4_domination'
               ? { seal_status: 'SEALED_EXCELLENT', live_trading_authorized: true }
               : profile.id === 'macro_trend_dominion'
               ? { seal_status: 'SEALED_EXCELLENT', live_trading_authorized: true }

@@ -462,16 +462,78 @@ export const BabyBotTelemetryDeck: React.FC<BabyBotTelemetryDeckProps> = ({
             </div>
           </div>
         </div>
+      ) : activeProfile.id === 'bot1_v4_domination' ? (
+        // --- Bot 1 V4: Multi-Turnover Domination Engine Deck ---
+        <div className="p-3.5 bg-[#0b1017] border-b border-[#262d35] space-y-3 font-mono">
+          {/* Header Bar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-bold text-white uppercase tracking-wider">
+                Bot 1 V4 Multi-Turnover Engine
+              </span>
+              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                15M V4.0
+              </span>
+            </div>
+            <span className="text-[10px] text-amber-400 font-bold px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30">
+              MAKER LIMIT: ≤ ${botParams.discount_limit_price?.toFixed(2) || '0.59'}
+            </span>
+          </div>
+
+          {/* Turnover Progress Gauge & EV Coupling Bar */}
+          <div className="grid grid-cols-2 gap-2 text-[10px]">
+            {/* Gauge A: Turnover Counter */}
+            <div className="p-2.5 rounded bg-[#13171c] border border-amber-500/30 space-y-1 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-[#8c9ba5] text-[9px] uppercase font-bold">Turnover Cap:</span>
+                <span className="text-amber-400 font-bold text-xs">
+                  {botParams.turnovers_completed ?? 0} / {botParams.max_turnover_per_event ?? 4}
+                </span>
+              </div>
+              <div className="w-full h-1.5 rounded-full bg-[#1e252e] overflow-hidden">
+                <div
+                  className="h-full bg-amber-400 transition-all duration-300"
+                  style={{ width: `${Math.min(100, ((botParams.turnovers_completed ?? 0) / (botParams.max_turnover_per_event ?? 4)) * 100)}%` }}
+                />
+              </div>
+              <div className="text-[8px] text-[#6e7d8b] flex justify-between pt-0.5">
+                <span>Micro-Bankroll: 1 Lot Cap</span>
+                <span className="text-amber-300">Sequential</span>
+              </div>
+            </div>
+
+            {/* Gauge B: EV Math Coupling */}
+            <div className="p-2.5 rounded bg-[#13171c] border border-emerald-500/30 space-y-1 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-[#8c9ba5] text-[9px] uppercase font-bold">EV Math Coupling:</span>
+                <span className="text-emerald-400 font-bold text-xs">
+                  +${(botParams.min_ev_hurdle_dollars ?? 0.02).toFixed(2)} EV
+                </span>
+              </div>
+              <div className="text-[9px] text-white font-bold flex justify-between pt-0.5">
+                <span>P_win Req:</span>
+                <span className="text-emerald-300 font-extrabold">
+                  {(((botParams.discount_limit_price ?? 0.59) + (botParams.min_ev_hurdle_dollars ?? 0.02)) * 100).toFixed(1)}%
+                </span>
+              </div>
+              <div className="text-[8px] text-[#6e7d8b] flex justify-between">
+                <span>P_entry: {((botParams.discount_limit_price ?? 0.59) * 100).toFixed(0)}¢</span>
+                <span className="text-emerald-400">$0.00 Fee</span>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : (
         // --- 3-Step Dominion Playbook Telemetry ---
         <div className="p-3.5 bg-[#0e1117] border-b border-[#262d35] space-y-2 font-mono">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-emerald-400" />
-              <span className="text-xs font-bold text-white uppercase tracking-wider">3-Step Playbook Stage</span>
+              <span className="text-xs font-bold text-white uppercase tracking-wider">3-Step Dominion v3.2</span>
             </div>
             <span className="text-[10px] text-emerald-400 font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30">
-              MAKER CEILING: ${botParams.discount_limit_price?.toFixed(2) || '0.52'}
+              MAKER CEILING: ${botParams.discount_limit_price?.toFixed(2) || '0.51'}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-1.5 text-[9px] text-center">

@@ -281,12 +281,13 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   };
 
   const formatBotDisplayName = (botType?: string): string => {
-    if (!botType) return '3-Step Dom';
+    if (!botType) return 'Bot 1 V4';
+    if (botType.includes('v3.2')) return '3-Step Dominion v3.2';
     if (botType.includes('gold_onnx')) return 'Gold ONNX (B4)';
     if (botType.includes('macro_onnx')) return 'ONNX Macro';
     if (botType.includes('macro_trend')) return 'Macro Trend';
     if (botType.includes('dominion_2')) return 'Dominion 2';
-    if (botType.includes('3_step') || botType.includes('domination')) return '3-Step Dom';
+    if (botType.includes('3_step') || botType.includes('domination')) return 'Bot 1 V4';
     if (botType.includes('onnx')) return 'ONNX Net';
     return botType.replace(/_/g, ' ');
   };
@@ -597,8 +598,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
         storageKey="kalshi_parenthub_layout_sizes"
         defaultSizes={[20, 48, 32]}
         minPixelSizes={[260, 380, 320]}
-        minPercentageSizes={[14, 25, 20]}
-        maxPercentageSizes={[35, 70, 60]}
+        minPercentageSizes={[14, 20, 18]}
+        maxPercentageSizes={[40, 75, 68]}
         panelClassNames={['h-full overflow-hidden', 'h-full overflow-hidden', 'h-full overflow-hidden']}
         className="w-full h-full"
         isRightPanelHidden={isBabyBotRailHidden}

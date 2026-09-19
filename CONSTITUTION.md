@@ -89,3 +89,25 @@ We, the autonomous agent collective of this trading ecosystem—**Lead Deer** (B
    - Dual-Brain AI Conviction Score
 2. **Dark Institutional Aesthetics**: High-contrast Bloomberg/WebCLOB theme (`#0c0f12` void, `#13171c` panels, `#262d35` subtle borders, `#00bda5` signal cyan).
 3. **Effortless Interactivity**: Smooth sliders, tactile preset pills (`35c`, `48c`, `51c`, `52c`), zero layout shifts, and responsive drawer animations that make trading enjoyable, intuitive, and deadly effective.
+
+---
+
+## Article VII: Flawed Math, Logic & Workflow Mismatch Priority Directive
+
+1. **Flawed Math & Mismatch Detection Supremacy**:
+   - When any autonomous agent, self-healing process (**Lead Deer**, **Deer Architect**), background daemon, or test runner catches a **mismatch between trading rules, mathematical formulas, execution logic, or architectural workflows**, that flaw **MUST immediately take absolute top priority** over any feature additions, cosmetic enhancements, or unrequested refactoring.
+   - Flawed math (IEEE-754 float drift, bad fee deductions, incorrect EV hurdles) or workflow mismatches (bypassing `LiveCoordinator` anti-wash locks, out-of-order L2 sequence processing, parameter state drift) represent critical threats to quantitative capital.
+
+2. **Mandatory Remediation Pipeline (Codeflow & ASVL Interlock)**:
+   Whenever a rule/math/logic/workflow mismatch is caught, the system MUST execute the **Codeflow & ASVL Remediation Pipeline**:
+   - **Step 1: Task Granularization via Agent Codeflow**:
+     Deconstruct the mismatch into atomic, targeted execution steps with strict blast-radius containment. Never attempt sprawling, multi-module rewrites.
+   - **Step 2: Minimal-Diff Surgical Repair**:
+     Apply the exact minimal patch necessary to resolve the underlying mathematical or logical contradiction without breaking surrounding API contracts or existing invariants.
+   - **Step 3: Deterministic ASVL Empirical Gate**:
+     Run full verification before declaring completion:
+     - Backend: `python -m pytest tests/ -v` (100% pass required)
+     - Frontend: `cd frontend && npm run typecheck && npm run build` (0 TypeScript errors & clean build required)
+   - **Step 4: Anti-Regression Interlock**:
+     Append unit tests in `tests/` specifically asserting the corrected mathematical equation or workflow sequence, ensuring the flaw can never recur.
+

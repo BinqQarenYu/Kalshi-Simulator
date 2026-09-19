@@ -64,10 +64,10 @@ class DominationDecision:
 
 
 class ThreeStepDominationBot:
-    """Institutional Cycle-Aware 3-Step Quantitative Strategy Bot."""
+    """Institutional Cycle-Aware 3-Step Quantitative Strategy Bot (v3.2 Baseline)."""
 
     STRATEGY_ID = "3_step_domination_bot"
-    STRATEGY_NAME = "3-Step Domination Bot"
+    STRATEGY_NAME = "3-Step Dominion v3.2"
 
     def __init__(
         self,
@@ -233,6 +233,20 @@ class ThreeStepDominationBot:
         scaled = 0.50 + 0.035 * tau_mins
         return min(self.reverse_indicator_threshold, scaled)
 
+    def compute_dynamic_limit_price(self, win_prob: float) -> Decimal:
+        """Dynamic EV Math Coupling:
+        Entry Limit = min(win_prob - EV_hurdle, max_entry_price)
+        Dynamically scales entry ceiling up to max_entry_price ($0.62) when model conviction is high,
+        while maintaining at least min_ev_dollars ($0.02) net EV edge.
+        """
+        ev_hurdle = float(self.min_ev_dollars)
+        max_cap = float(self.max_entry_price)
+        base_floor = float(self.discount_limit_price)
+
+        dynamic_price = win_prob - ev_hurdle
+        clamped_price = max(base_floor, min(dynamic_price, max_cap))
+        return Decimal(str(round(clamped_price, 2)))
+
     def update_parameters(
         self,
         asset: Optional[str | CryptoAsset] = None,
@@ -368,8 +382,8 @@ class ThreeStepDominationBot:
         baseline_vol = float(cfg.typical_1m_volatility)
         live_vol = self.typical_1m_volatility if self.typical_1m_volatility > 0 else baseline_vol
 
-        floor_moat = self.min_spot_diff * 1.15
-        ceiling_moat = self.min_spot_diff * 2.15
+        floor_moat = max(4.0, self.min_spot_diff * 0.80)
+        ceiling_moat = max(12.0, self.min_spot_diff * 1.50)
 
         expected_full_cycle_noise = baseline_vol * math.sqrt(cycle_mins)
         if expected_full_cycle_noise > 1e-9:

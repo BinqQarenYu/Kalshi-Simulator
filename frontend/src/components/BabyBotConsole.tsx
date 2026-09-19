@@ -112,8 +112,14 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [killHoldProgress, setKillHoldProgress] = useState(0);
   const [isArmingKill, setIsArmingKill] = useState(false);
-  const [isHalted, setIsHalted] = useState(false);
+  const [botHaltMap, setBotHaltMap] = useState<Record<string, boolean>>({});
   const [isParamsOpen, setIsParamsOpen] = useState(false);
+
+  const serverBotArmStates = (aiSignals as any)?.settings?.bot_arm_states || (aiSignals as any)?.bot_arm_states;
+  const isCurrentBotHalted = Boolean(
+    botHaltMap[selectedBotId] ||
+    (serverBotArmStates && serverBotArmStates[selectedBotId] === false)
+  );
 
   // Dedicated Bot Micro-Report State (Live vs Paper Segregated)
   const [reportMode, setReportMode] = useState<'live' | 'paper'>(tradingMode);
@@ -213,7 +219,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       if (selectedBotId === '3_step_domination_bot') {
         return {
           bot_id: '3_step_domination_bot',
-          bot_name: '3-Step Domination Bot',
+          bot_name: 'Bot 1 V4 (3-Step Domination Bot)',
           seal_status: 'SEALED_EXCELLENT' as const,
           seal_token: 'SEAL-DOM1-D07ADE18D284',
           live_trading_authorized: true,
@@ -575,9 +581,28 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const macroTotalCycles = Math.max(1, (botPerformance?.total_events ?? 0));
   const macroAccuracy = macroTotalCycles > 0 ? (((macroTotalCycles - macroMistakes) / macroTotalCycles) * 100).toFixed(1) : '100.0';
 
+  const handleBotArmToggle = async () => {
+    const nextHalted = !isCurrentBotHalted;
+    setBotHaltMap(prev => ({ ...prev, [selectedBotId]: nextHalted }));
+    soundFX.playClickSound();
+    try {
+      if (nextHalted) {
+        await fetch(`/api/bot/disarm?bot_id=${selectedBotId}`, { method: 'POST' });
+        onFlattenHalt?.();
+      } else {
+        await fetch(`/api/bot/arm?bot_id=${selectedBotId}`, { method: 'POST' });
+      }
+    } catch (err) {
+      console.error("Failed to update bot arm status:", err);
+    }
+  };
+
   // Hold-to-arm kill switch logic
   const handleHoldStart = () => {
-    if (isHalted) return;
+    if (isCurrentBotHalted) {
+      handleBotArmToggle();
+      return;
+    }
     setIsArmingKill(true);
     const startTime = Date.now();
     const duration = 1500; // 1.5 seconds
@@ -591,9 +616,8 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
         setIsArmingKill(false);
         setKillHoldProgress(100);
-        setIsHalted(true);
         soundFX.playLossSound();
-        onFlattenHalt?.();
+        handleBotArmToggle();
       }
     }, 30);
   };
@@ -604,7 +628,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       holdIntervalRef.current = null;
     }
     setIsArmingKill(false);
-    if (!isHalted) {
+    if (!isCurrentBotHalted) {
       setKillHoldProgress(0);
     }
   };
@@ -794,8 +818,8 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         <button
           type="button"
           aria-label={
-            isHalted
-              ? 'Bot emergency halted. All resting orders cancelled.'
+            isCurrentBotHalted
+              ? 'Bot emergency halted. Click to re-arm.'
               : 'Flatten all positions and halt bot. Hold mouse button or press and hold Space or Enter for 1.5 seconds'
           }
           onMouseDown={handleHoldStart}
@@ -807,12 +831,12 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           onKeyUp={handleKeyUp}
           onBlur={handleHoldEnd}
           className={`w-full relative overflow-hidden py-3.5 px-4 rounded-lg font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f43f5e] ${
-            isHalted
-              ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+            isCurrentBotHalted
+              ? 'bg-amber-950/40 text-amber-300 border border-amber-500/50 hover:bg-amber-900/60'
               : 'border-2 border-[#d31a38] text-[#f43f5e] hover:bg-[#d31a38]/10 active:scale-[0.99]'
           }`}
           style={{
-            backgroundImage: isHalted
+            backgroundImage: isCurrentBotHalted
               ? 'none'
               : 'repeating-linear-gradient(45deg, rgba(211,26,56,0.08), rgba(211,26,56,0.08) 10px, transparent 10px, transparent 20px)',
           }}
@@ -826,10 +850,10 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           )}
 
           <div className="relative z-10 flex items-center justify-center gap-2">
-            <AlertOctagon className={`w-4 h-4 ${isHalted ? 'text-slate-500' : 'text-[#f43f5e]'}`} />
+            <AlertOctagon className={`w-4 h-4 ${isCurrentBotHalted ? 'text-amber-400' : 'text-[#f43f5e]'}`} />
             <span>
-              {isHalted
-                ? '★ BOT EMERGENCY HALTED · RESTING CANCELLED ★'
+              {isCurrentBotHalted
+                ? '★ BOT HALTED · CLICK TO RE-ARM ★'
                 : isArmingKill
                 ? `ARMING KILL SWITCH (${(1.5 - (killHoldProgress * 1.5) / 100).toFixed(1)}s)...`
                 : '★ FLATTEN ALL & HALT BOT (HOLD 1.5s) ★'}

@@ -498,6 +498,10 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
     if not state.sim_agent:
         raise HTTPException(status_code=503, detail="Simulation agent is not running")
 
+    execution_mode = req.execution_mode or (state.mode if hasattr(state, "mode") and state.mode == "live" else "paper")
+    if hasattr(req, "execution_mode"):
+        req.execution_mode = execution_mode
+
     side = OrderSide.YES if req.side.lower() == "yes" else OrderSide.NO
     order_type = OrderType.LIMIT if req.order_type.lower() == "limit" else OrderType.MARKET
     limit_price = Decimal(str(req.limit_price)) if req.limit_price is not None else None
@@ -507,8 +511,20 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
     if not book:
         # Create a fallback default book for the active ticker with realistic levels
         book = L2BookState(ticker)
-        book.yes_book = {Decimal("0.034"): Decimal("500"), Decimal("0.031"): Decimal("1000")}
-        book.no_book = {Decimal("0.966"): Decimal("500"), Decimal("0.969"): Decimal("1000")}
+        book.yes_book = {
+            Decimal("0.48"): Decimal("1000"),
+            Decimal("0.52"): Decimal("1000"),
+            Decimal("0.55"): Decimal("1000"),
+            Decimal("0.59"): Decimal("1000"),
+            Decimal("0.62"): Decimal("1000"),
+        }
+        book.no_book = {
+            Decimal("0.48"): Decimal("1000"),
+            Decimal("0.52"): Decimal("1000"),
+            Decimal("0.55"): Decimal("1000"),
+            Decimal("0.59"): Decimal("1000"),
+            Decimal("0.62"): Decimal("1000"),
+        }
         state.orderbook._books[ticker] = book
 
     sim = state.sim_agent._simulator

@@ -421,7 +421,7 @@ def test_supported_assets_endpoint(client: TestClient) -> None:
     assert btc_item["series_15m"] == "KXBTC15M"
     assert btc_item["cf_index_id"] == "BRTI"
     assert btc_item["strike_step"] == 25.0
-    assert btc_item["min_spot_diff"] == 35.0
+    assert btc_item["min_spot_diff"] == 10.0
 
 
 def test_select_active_asset_endpoint(client: TestClient) -> None:

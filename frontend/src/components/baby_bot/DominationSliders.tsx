@@ -68,8 +68,8 @@ export const DominationSliders: React.FC<DominationSlidersProps> = ({
                   <div className="flex items-center gap-1">
                     <span className="text-[8px] font-mono text-slate-500 uppercase mr-1">PRESETS:</span>
                     <div className="grid grid-cols-6 gap-1 flex-1">
-                      {[0.35, 0.40, 0.45, 0.48, 0.51, 0.52].map((preset) => {
-                        const isCurrent = Math.abs((botParams.discount_limit_price ?? 0.51) - preset) < 0.005;
+                      {[0.48, 0.52, 0.57, 0.62, 0.65, 0.68].map((preset) => {
+                        const isCurrent = Math.abs((botParams.discount_limit_price ?? 0.48) - preset) < 0.005;
                         return (
                           <button
                             key={preset}
@@ -102,9 +102,9 @@ export const DominationSliders: React.FC<DominationSlidersProps> = ({
                     <input
                       type="range"
                       min="0.15"
-                      max="0.65"
+                      max="0.68"
                       step="0.01"
-                      value={botParams.discount_limit_price ?? 0.51}
+                      value={botParams.discount_limit_price ?? 0.48}
                       onChange={(e) => {
                         const val = parseFloat(e.target.value);
                         setBotParams({
@@ -118,9 +118,9 @@ export const DominationSliders: React.FC<DominationSlidersProps> = ({
                       className="w-full accent-emerald-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
                     />
                     <div className="flex justify-between text-[8px] text-slate-500 font-mono">
-                      <span>$0.15 (Deep Value · +567% ROI)</span>
-                      <span className="text-emerald-400 font-semibold">$0.51–$0.52 (Winning Sweetspot · +96% ROI)</span>
-                      <span>$0.65 (Momentum Cap · +54% ROI)</span>
+                      <span>$0.15 (Deep Value)</span>
+                      <span className="text-emerald-400 font-semibold">$0.48–$0.57 (Winning Sweetspot)</span>
+                      <span className="text-amber-400 font-bold">$0.68 Max Cap ($0.70 Hard Veto Wall)</span>
                     </div>
                   </div>
 
@@ -154,22 +154,42 @@ export const DominationSliders: React.FC<DominationSlidersProps> = ({
                 </div>
 
                 {/* DIAL 2: Net Expected Value Hurdle (min_ev_dollars) */}
-                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2">
+                <div className="p-2.5 rounded-lg bg-[#0a0d12] border border-[#1e242d] space-y-2 relative">
                   <div className="flex items-center justify-between">
                     <label className="text-[10px] text-indigo-300 font-bold uppercase tracking-wider flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block" />
+                      <span className="w-2 h-2 rounded-full bg-indigo-400 inline-block animate-pulse" />
                       Dial 2: Min Net Expected Value Hurdle ($/ct)
                       <div className="group relative cursor-help">
                         <span className="w-3.5 h-3.5 rounded-full bg-slate-800 text-slate-300 text-[9px] flex items-center justify-center font-bold border border-slate-600">i</span>
                         <div className="absolute bottom-full left-0 mb-1 hidden group-hover:block w-64 p-2.5 bg-slate-900 text-slate-200 text-[10px] rounded-lg border border-indigo-500/40 z-50 shadow-2xl leading-snug">
                           <b>Statistical Profit Gate:</b><br />
                           • EV = P(win) × ($1.00 - Price) - P(loss) × Price - Fees.<br />
-                          • <b>+$0.02 to +$0.03 Sweetspot:</b> Requires a net expected edge before risking capital. Rejects coin flips and low-margin noise bets.
+                          • <b>+$0.02 to +$0.03 Sweetspot:</b> Requires a net expected edge before risking capital. Rejects coin flips and low-margin noise bets.<br />
+                          • <b>Dynamic Scaling:</b> Entry Ceiling dynamically scales up to $0.62 when model conviction exceeds required P_win!
                         </div>
                       </div>
                     </label>
-                    <span className="text-xs font-mono font-bold text-indigo-300">
-                      +${(botParams.min_ev_dollars ?? 0.02).toFixed(2)} / ct
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-bold">
+                        LINKED TO DIAL 1
+                      </span>
+                      <span className="text-xs font-mono font-bold text-indigo-300">
+                        +${(botParams.min_ev_dollars ?? botParams.min_ev_hurdle_dollars ?? 0.02).toFixed(2)} / ct
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Dynamic Linked EV Math Formula Banner */}
+                  <div className="p-2 rounded bg-indigo-950/40 border border-indigo-500/30 flex items-center justify-between text-[9px] font-mono">
+                    <div className="flex items-center gap-1.5 text-indigo-300">
+                      <span className="text-amber-400 font-bold">⚡ LINKED MATH:</span>
+                      <span className="text-slate-300">P_win Req:</span>
+                      <span className="text-emerald-300 font-extrabold text-[10px]">
+                        {(((botParams.discount_limit_price ?? 0.51) + (botParams.min_ev_dollars ?? botParams.min_ev_hurdle_dollars ?? 0.02)) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <span className="text-indigo-400 font-bold text-[8px]">
+                      (Dynamic Ceiling = P_win - ${(botParams.min_ev_dollars ?? botParams.min_ev_hurdle_dollars ?? 0.02).toFixed(2)})
                     </span>
                   </div>
 
@@ -179,8 +199,15 @@ export const DominationSliders: React.FC<DominationSlidersProps> = ({
                       min="0.01"
                       max="0.20"
                       step="0.01"
-                      value={botParams.min_ev_dollars ?? 0.02}
-                      onChange={(e) => setBotParams({ ...botParams, min_ev_dollars: parseFloat(e.target.value) })}
+                      value={botParams.min_ev_dollars ?? botParams.min_ev_hurdle_dollars ?? 0.02}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        setBotParams({
+                          ...botParams,
+                          min_ev_dollars: val,
+                          min_ev_hurdle_dollars: val,
+                        });
+                      }}
                       className="w-full accent-indigo-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
                     />
                     <div className="flex justify-between text-[8px] text-slate-500 font-mono">

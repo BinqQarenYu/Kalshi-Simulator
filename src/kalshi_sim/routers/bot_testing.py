@@ -302,7 +302,7 @@ def test_bot_trade_endpoint(
         created_reports.append(rep_d2)
 
     # 1. Generate Domination Bot Report if requested
-    if bot_type in ("3_step_domination_bot", "domination", "dominion", "both"):
+    if bot_type in ("3_step_domination_bot", "domination", "dominion", "bot1_v4", "bot1_v4_domination", "both"):
         p_dom = getattr(state.sim_agent, "_portfolio_domination", state.sim_agent._portfolio)
         try:
             dom_dec = state.sim_agent._domination_bot.evaluate(

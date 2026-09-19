@@ -441,6 +441,7 @@ def _build_full_state_payload() -> dict[str, Any]:
         "settings": {
             "ai_auto_trade": state.ai_auto_trade,
             "active_strategy_bot": state.active_strategy_bot,
+            "bot_arm_states": getattr(state, "bot_arm_states", {}),
             "bot_certified": state.bot_auditor.is_certified(state.active_strategy_bot),
             "bot_sealed": state.bot_auditor.has_seal_of_excellence(state.active_strategy_bot),
             "mode": state.mode,

@@ -191,6 +191,12 @@ def resolve_bot_instance(bot_id: str) -> Any:
             return state.dual_onnx_bot
         state.dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=getattr(state, "hmm_brain", None))
         return state.dual_onnx_bot
+    elif bot_id in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
+        if hasattr(state, "bot1_v4_engine") and state.bot1_v4_engine:
+            return state.bot1_v4_engine
+        from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
+        state.bot1_v4_engine = Bot1V4DominationEngine()
+        return state.bot1_v4_engine
     return None
 
 
@@ -279,6 +285,13 @@ class ServerState:
         self.ai_worker_task: asyncio.Task | None = None
         self.ai_auto_trade: bool = True
         self.active_strategy_bot: str = "3_step_domination_bot"
+        self.bot_arm_states: dict[str, bool] = {
+            "3_step_domination_bot": True,
+            "bot1_v4_domination": True,
+            "macro_trend_dominion": True,
+            "dual_onnx": True,
+            "dominion_2_bot": True,
+        }
         self.domination_discount_price: Decimal = Decimal("0.52")
         self.mode: Literal["mock", "live"] = "live"
         self.market_expiry_seconds: int = 900
@@ -479,6 +492,14 @@ class ServerState:
             tmp_file.replace(reports_file)
         except Exception as exc:
             logger.warning("Failed to persist win/loss reports: %s", exc)
+
+    def is_bot_armed(self, bot_id: str | None = None) -> bool:
+        if not self.ai_auto_trade:
+            return False
+        if not bot_id:
+            return True
+        norm = str(bot_id).lower()
+        return self.bot_arm_states.get(norm, True)
 
     @property
     def is_connected(self) -> bool:
@@ -1312,6 +1333,23 @@ init_strategies_router(
     build_full_state_payload_fn=_build_full_state_payload,
 )
 app.include_router(strategies_router)
+
+from kalshi_sim.routers.bot_testing import (
+    router as bot_testing_router,
+    init_bot_testing_router,
+)
+init_bot_testing_router(
+    state_getter=lambda: state,
+    record_win_loss_fn=record_win_loss_event_report,
+)
+app.include_router(bot_testing_router)
+
+from kalshi_sim.routers.presets import (
+    router as presets_router,
+    init_presets_router,
+)
+init_presets_router(state_getter=lambda: state)
+app.include_router(presets_router)
 
 # ---------------------------------------------------------------------------
 # Frontend Static Mount (if built)

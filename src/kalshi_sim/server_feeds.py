@@ -281,15 +281,20 @@ async def stop_current_feed() -> None:
     if state.ingestion_agent:
         await state.ingestion_agent._shutdown()
         state.ingestion_agent = None
-    if state.feed_task and not state.feed_task.done():
-        state.feed_task.cancel()
+    if state.feed_task:
         try:
-            await state.feed_task
-        except asyncio.CancelledError:
-            logger.debug("Feed task cancelled successfully.")
+            current_loop = asyncio.get_running_loop()
+            task_loop = state.feed_task.get_loop()
+            if task_loop == current_loop and not task_loop.is_closed():
+                if not state.feed_task.done():
+                    state.feed_task.cancel()
+                    await state.feed_task
+        except (asyncio.CancelledError, ValueError, RuntimeError):
+            logger.debug("Feed task cancelled or belongs to different loop.")
         except Exception as exc:
             logger.warning("Unexpected error awaiting feed task: %s", exc)
-        state.feed_task = None
+        finally:
+            state.feed_task = None
 
 
 

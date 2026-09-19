@@ -24,3 +24,17 @@
 ### [2026-09-18 13:48:04 ET] **Deer Architect (UI/UX)** on `BabyBotConsole.tsx:2100`: Financial multiplier and dollar values lack required font-mono and tabular-nums utility classes for glanceable telemetry.
 
 ### [2026-09-18 14:09:41 ET] **Deer Architect (UI/UX)** on `BabyBotConsole.tsx:2100`: Financial multiplier and dollar amount telemetry lack monospaced typography and tabular numerals required by Article VI.
+
+### [2026-09-19 10:33:38 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL metrics lack tabular monospace numerals, causing alignment jitter and violating Glanceable Telemetry standards.
+
+### [2026-09-19 10:53:56 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: PnL numerical values require monospace styling and tabular numerals to prevent layout jitter and maintain glanceable telemetry alignment.
+
+### [2026-09-19 11:35:17 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL telemetry must utilize tabular numerals and a monospace font to prevent layout jitter and ensure glanceability.
+
+### [2026-09-19 12:36:08 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL telemetry values must enforce font-mono tabular-nums to eliminate layout shift and uphold institutional glanceability standards.
+
+### [2026-09-19 13:17:31 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL telemetry lacks mandatory monospace alignment and tabular numeral formatting.
+
+### [2026-09-19 13:37:49 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL values require tabular monospace numerals (`font-mono tabular-nums`) to prevent layout jitter and ensure glanceable telemetry.
+
+### [2026-09-19 14:18:45 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL telemetry lacks mandatory monospace tabular alignment ('font-mono tabular-nums') required for glanceable institutional monitoring.

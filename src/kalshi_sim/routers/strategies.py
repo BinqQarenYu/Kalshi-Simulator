@@ -192,6 +192,9 @@ class DominationConfigRequest(BaseModel):
 class StrategySelectRequest(BaseModel):
     strategy_id: str
 
+class BotControlRequest(BaseModel):
+    bot_id: str | None = None
+
 class ResetRequest(BaseModel):
     capital: float = Field(default=100.0, ge=1.0)
 
@@ -200,25 +203,6 @@ class ResetRequest(BaseModel):
 
 @router.post("/api/settings")
 async def update_settings(req: SettingsRequest) -> dict[str, Any]:
-    if req.ai_auto_trade is not None:
-        strat = state.active_strategy_bot or "3_step_domination_bot"
-        auth_on_disk, _ = BotDeploymentAuditor.check_live_authorization_on_disk(strat)
-        is_live_request = (
-            state.mode == "live"
-            and (
-                getattr(state.sim_agent, "execution_mode", "simulated") == "live"
-                or auth_on_disk
-                or strat in ("3_step_domination_bot", "domination_bot", "domination", "macro_trend_dominion", "macro_trend")
-            )
-        )
-        if req.ai_auto_trade and is_live_request:
-            holder = _get_active_lock_holder()
-            if holder and holder[1] != os.getpid():
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Cannot enable Live AI Auto-Trade: 24/7 Standalone Bot ({holder[0]}, PID: {holder[1]}) holds active trading lock."
-                )
-        state.ai_auto_trade = req.ai_auto_trade
     if req.active_strategy_bot is not None:
         cand_bot = req.active_strategy_bot
         if cand_bot in ("dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "the_onnx_strategy", "onnx_macro_v2"):
@@ -229,8 +213,10 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
             cand_bot = "macro_trend_dominion"
         elif cand_bot in ("dominion2", "dominion_v2"):
             cand_bot = "dominion_2_bot"
+        elif cand_bot in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
+            cand_bot = "bot1_v4_domination"
 
-        if cand_bot in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
+        if cand_bot in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot"):
             # Enforce Pre-Deployment Audit Certification Gate
             if not state.bot_auditor.is_certified(cand_bot):
                 bot_inst = resolve_bot_instance(cand_bot)
@@ -250,6 +236,26 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
                 state.ai_worker.set_active_strategy(cand_bot)
             if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):
                 state.sim_agent.set_active_strategy(cand_bot)
+
+    if req.ai_auto_trade is not None:
+        strat = state.active_strategy_bot or "3_step_domination_bot"
+        auth_on_disk, _ = BotDeploymentAuditor.check_live_authorization_on_disk(strat)
+        is_live_request = (
+            state.mode == "live"
+            and (
+                getattr(state.sim_agent, "execution_mode", "simulated") == "live"
+                or auth_on_disk
+                or strat in ("3_step_domination_bot", "domination_bot", "domination", "macro_trend_dominion", "macro_trend", "bot1_v4_domination")
+            )
+        )
+        if req.ai_auto_trade and is_live_request:
+            holder = _get_active_lock_holder()
+            if holder and holder[0] != "mother_server" and holder[1] != os.getpid():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Cannot enable Live AI Auto-Trade: 24/7 Standalone Bot ({holder[0]}, PID: {holder[1]}) holds active trading lock."
+                )
+        state.ai_auto_trade = req.ai_auto_trade
     if req.mode is not None:
         # Strict 5M Live Mode Prohibition
         if req.mode == "live" and (state.active_timeframe == Timeframe.FIVE_MIN or (req.active_timeframe and req.active_timeframe.lower() == "5m")):
@@ -558,32 +564,113 @@ async def select_active_asset(req: AssetSelectRequest) -> dict[str, Any]:
 
 
 @router.post("/api/bot/arm")
-async def arm_bot() -> dict[str, Any]:
-    """Arm the bot for automated live/paper execution directly within the unified engine."""
-    state.ai_auto_trade = True
+async def arm_bot(req: BotControlRequest | None = None, bot_id: str | None = Query(default=None)) -> dict[str, Any]:
+    """Arm a specific bot independently or all bots globally for automated execution."""
+    target_bot = (req.bot_id if req and req.bot_id else bot_id)
+    if not hasattr(state, "bot_arm_states") or not isinstance(getattr(state, "bot_arm_states", None), dict):
+        state.bot_arm_states = {
+            "3_step_domination_bot": True,
+            "bot1_v4_domination": True,
+            "macro_trend_dominion": True,
+            "dual_onnx": True,
+            "dominion_2_bot": True,
+        }
+
+    if target_bot:
+        norm_bot = target_bot.lower()
+        state.bot_arm_states[norm_bot] = True
+        state.ai_auto_trade = True
+        logger.info("🟢 [BOT ARMED] Strategy '%s' independently armed by user.", norm_bot)
+        res_bot = norm_bot
+    else:
+        state.ai_auto_trade = True
+        for bid in list(state.bot_arm_states.keys()):
+            state.bot_arm_states[bid] = True
+        logger.info("🟢 [ALL BOTS ARMED] Order execution activated globally.")
+        res_bot = "GLOBAL"
+
     state.is_dirty = True
-    logger.info("🟢 [BOT ARMED] Order execution activated by user in unified engine.")
     if state.connected_websockets:
         asyncio.create_task(trigger_instant_broadcast())
-    return {"status": "ARMED", "armed": True}
+    return {"status": "ARMED", "armed": True, "bot_id": res_bot, "bot_arm_states": state.bot_arm_states}
 
 
 @router.post("/api/bot/disarm")
-async def disarm_bot() -> dict[str, Any]:
-    """Disarm the bot into standby mode directly within the unified engine."""
-    state.ai_auto_trade = False
+async def disarm_bot(req: BotControlRequest | None = None, bot_id: str | None = Query(default=None)) -> dict[str, Any]:
+    """Disarm a specific bot independently or all bots globally into standby mode."""
+    target_bot = (req.bot_id if req and req.bot_id else bot_id)
+    if not hasattr(state, "bot_arm_states") or not isinstance(getattr(state, "bot_arm_states", None), dict):
+        state.bot_arm_states = {
+            "3_step_domination_bot": True,
+            "bot1_v4_domination": True,
+            "macro_trend_dominion": True,
+            "dual_onnx": True,
+            "dominion_2_bot": True,
+        }
+
+    if target_bot:
+        norm_bot = target_bot.lower()
+        state.bot_arm_states[norm_bot] = False
+        logger.info("⏸️ [BOT DISARMED] Strategy '%s' independently halted. Other bots remain active.", norm_bot)
+        res_bot = norm_bot
+    else:
+        state.ai_auto_trade = False
+        for bid in list(state.bot_arm_states.keys()):
+            state.bot_arm_states[bid] = False
+        logger.info("⏸️ [ALL BOTS DISARMED] Standby mode activated globally.")
+        res_bot = "GLOBAL"
+
     state.is_dirty = True
-    logger.info("⏸️ [BOT DISARMED] Standby mode activated by user in unified engine.")
     if state.connected_websockets:
         asyncio.create_task(trigger_instant_broadcast())
-    return {"status": "DISARMED", "armed": False}
+    return {"status": "DISARMED", "armed": False, "bot_id": res_bot, "bot_arm_states": state.bot_arm_states}
 
 
 @router.post("/api/bot/panic")
-async def panic_halt() -> dict[str, Any]:
-    """Emergency halt: disarm bot and cancel all resting orders directly within the unified engine."""
-    res = await trigger_emergency_kill_switch()
-    return {"status": "PANIC_EXECUTED", "cancelled_orders": res.get("cancelled_orders", 0), "armed": False}
+async def panic_halt(req: BotControlRequest | None = None, bot_id: str | None = Query(default=None)) -> dict[str, Any]:
+    """Emergency halt: disarm a specific bot independently or all bots globally and cancel resting orders."""
+    target_bot = (req.bot_id if req and req.bot_id else bot_id)
+    if not hasattr(state, "bot_arm_states") or not isinstance(getattr(state, "bot_arm_states", None), dict):
+        state.bot_arm_states = {
+            "3_step_domination_bot": True,
+            "bot1_v4_domination": True,
+            "macro_trend_dominion": True,
+            "dual_onnx": True,
+            "dominion_2_bot": True,
+        }
+
+    cancelled = 0
+    if target_bot:
+        norm_bot = target_bot.lower()
+        state.bot_arm_states[norm_bot] = False
+        client = state.order_client or (state.sim_agent._order_client if state.sim_agent and hasattr(state.sim_agent, "_order_client") else None)
+        if client and hasattr(client, "cancel_all_orders"):
+            try:
+                res = client.cancel_all_orders(ticker=state.active_ticker)
+                cancelled = res.get("cancelled_orders", 0) if isinstance(res, dict) else 0
+            except Exception as exc:
+                logger.warning("[PANIC] Error cancelling orders for %s: %s", norm_bot, exc)
+        logger.warning("🚨 [INDEPENDENT BOT PANIC] Bot '%s' halted & resting orders cancelled.", norm_bot)
+        res_bot = norm_bot
+    else:
+        state.ai_auto_trade = False
+        for bid in list(state.bot_arm_states.keys()):
+            state.bot_arm_states[bid] = False
+        res = await trigger_emergency_kill_switch()
+        cancelled = res.get("cancelled_orders", 0)
+        logger.warning("🚨 [GLOBAL PANIC] All trading halted & all resting orders cancelled.")
+        res_bot = "GLOBAL"
+
+    state.is_dirty = True
+    if state.connected_websockets:
+        asyncio.create_task(trigger_instant_broadcast())
+    return {
+        "status": "PANIC_EXECUTED",
+        "cancelled_orders": cancelled,
+        "armed": False,
+        "bot_id": res_bot,
+        "bot_arm_states": state.bot_arm_states,
+    }
 
 
 @router.post("/api/bot/sweep-orders")
