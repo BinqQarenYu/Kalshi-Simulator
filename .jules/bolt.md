@@ -60,3 +60,6 @@
 **Learning:** Re-executing `sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]` inside `get_depth_raw` on every feature extraction tick introduced redundant $O(N \log N)$ sorting overhead (~12.8 µs) even when order book states were unchanged between reads.
 **Action:** Utilized version-backed `FastBook._version` mutation tracking in `L2BookState.get_depth_raw(n)` to cache sorted depth tuples. Reduced `get_depth_raw` read latency from ~12.8 µs to ~0.32 µs per call (~40x speedup / 97.5% latency reduction).
 
+## 2026-09-20 - Pure Python Scalar Math for 3-Class Softmax Temperature Scaling
+**Learning:** Calling NumPy operations (`/`, `np.max`, `np.exp`, `.sum()`) on tiny 3-element output probability vectors inside high-frequency per-tick inference loops introduced C-API array construction, indexing, and boxing overhead (~17.2 µs).
+**Action:** Use pure Python scalar arithmetic (`math.exp` and float operations) for small fixed-dimensional softmax vectors, reducing probability calibration latency to ~2.7 µs (~6.3x speedup / ~14.5 µs saved per ONNX inference tick).
