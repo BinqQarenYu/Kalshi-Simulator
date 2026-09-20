@@ -1353,6 +1353,13 @@ from kalshi_sim.routers.presets import (
 init_presets_router(state_getter=lambda: state)
 app.include_router(presets_router)
 
+from kalshi_sim.routers.perpetuals import (
+    router as perpetuals_router,
+    init_perpetuals_router,
+)
+init_perpetuals_router(state_getter=lambda: state)
+app.include_router(perpetuals_router)
+
 # ---------------------------------------------------------------------------
 # Frontend Static Mount (if built)
 # ---------------------------------------------------------------------------

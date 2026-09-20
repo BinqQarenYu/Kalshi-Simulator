@@ -339,7 +339,7 @@ export const PerpetualTradingProvider: React.FC<{ children: React.ReactNode }> =
   }, []);
 
   const openPosition = useCallback(
-    (side: 'long' | 'short', size: number, leverage: number, orderType: 'market' | 'limit' = 'market', limitPrice?: number) => {
+    async (side: 'long' | 'short', size: number, leverage: number, orderType: 'market' | 'limit' = 'market', limitPrice?: number) => {
       const entry = orderType === 'limit' && limitPrice ? limitPrice : currentPrice;
       const notional = size * entry;
       const margin = notional / leverage;
@@ -354,8 +354,9 @@ export const PerpetualTradingProvider: React.FC<{ children: React.ReactNode }> =
       const liqBuffer = entry * (1 / leverage) * 0.9;
       const liqPrice = side === 'long' ? entry - liqBuffer : entry + liqBuffer;
 
+      const fallbackId = `perp-${Date.now()}`;
       const newPos: PerpPosition = {
-        id: `perp-${Date.now()}`,
+        id: fallbackId,
         asset: selectedAsset,
         side,
         size,
@@ -370,11 +371,37 @@ export const PerpetualTradingProvider: React.FC<{ children: React.ReactNode }> =
       };
 
       setPositions((prev) => [newPos, ...prev]);
+
+      try {
+        const res = await fetch('/api/perpetuals/order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            asset: selectedAsset,
+            side,
+            order_type: orderType,
+            size,
+            leverage,
+            price: limitPrice,
+            bot_id: activeBotId,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.position && data.position.id) {
+            setPositions((prev) =>
+              prev.map((p) => (p.id === fallbackId ? { ...p, id: data.position.id } : p))
+            );
+          }
+        }
+      } catch (err) {
+        // Optimistic offline execution continues seamlessly
+      }
     },
-    [balance, currentPrice, selectedAsset]
+    [activeBotId, balance, currentPrice, selectedAsset]
   );
 
-  const closePosition = useCallback((positionId: string) => {
+  const closePosition = useCallback(async (positionId: string) => {
     setPositions((prev) => {
       const target = prev.find((p) => p.id === positionId);
       if (target) {
@@ -382,6 +409,16 @@ export const PerpetualTradingProvider: React.FC<{ children: React.ReactNode }> =
       }
       return prev.filter((p) => p.id !== positionId);
     });
+
+    try {
+      await fetch('/api/perpetuals/position/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ position_id: positionId }),
+      });
+    } catch (err) {
+      // Offline fallback
+    }
   }, []);
 
   const value = useMemo(
