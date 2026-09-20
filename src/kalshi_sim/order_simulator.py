@@ -68,8 +68,21 @@ class OrderSimulator:
     No real orders are placed — fills are computed locally from book state.
     """
 
-    def __init__(self, fee_per_contract: Decimal = Decimal("0.01")) -> None:
+    def __init__(
+        self,
+        fee_per_contract: Decimal = Decimal("0.01"),
+        wire_latency_ms: float = 0.0,
+        quote_cancel_rate: float = 0.0,
+        strict_queue_matching: bool = False,
+        enable_adverse_selection_fills: bool = True,
+        realistic_mode: bool = False,
+    ) -> None:
         self.fee_per_contract = fee_per_contract
+        self.wire_latency_ms = 250.0 if (realistic_mode and wire_latency_ms == 0.0) else wire_latency_ms
+        self.quote_cancel_rate = 0.45 if (realistic_mode and quote_cancel_rate == 0.0) else quote_cancel_rate
+        self.strict_queue_matching = True if realistic_mode else strict_queue_matching
+        self.enable_adverse_selection_fills = enable_adverse_selection_fills
+        self.realistic_mode = realistic_mode
         self._resting_orders: dict[str, list[SimulatedOrder]] = {}
 
     @staticmethod
@@ -110,12 +123,14 @@ class OrderSimulator:
         order_id = os.urandom(4).hex()
         now = datetime.now(timezone.utc)
 
-        # Track institutional FIFO queue depth ahead at this price level
+        # Track institutional FIFO queue depth ahead at this price level with quote cancellation discount
         initial_queue = 0
         if side == OrderSide.YES and limit_price in book.yes_book:
             initial_queue = int(book.yes_book[limit_price])
         elif side == OrderSide.NO and limit_price in book.no_book:
             initial_queue = int(book.no_book[limit_price])
+
+        effective_queue = int(round(initial_queue * (1.0 - self.quote_cancel_rate))) if (initial_queue > 0 and self.quote_cancel_rate > 0.0) else initial_queue
 
         order = SimulatedOrder(
             order_id=order_id,
@@ -128,7 +143,7 @@ class OrderSimulator:
             reasoning=reasoning,
             created_at=now,
             status=OrderStatus.RESTING,
-            queue_ahead=initial_queue,
+            queue_ahead=effective_queue,
             filled_size=0,
         )
 
@@ -137,8 +152,8 @@ class OrderSimulator:
         self._resting_orders[book.market_ticker].append(order)
 
         logger.info(
-            "RESTING ORDER PLACED: %s %s %d @ $%s on %s (ID: %s, Queue Ahead: %d)",
-            side.value.upper(), "LIMIT", size, limit_price, book.market_ticker, order_id, initial_queue,
+            "RESTING ORDER PLACED: %s %s %d @ $%s on %s (ID: %s, Queue Ahead: %d, Raw: %d)",
+            side.value.upper(), "LIMIT", size, limit_price, book.market_ticker, order_id, effective_queue, initial_queue,
         )
         return order
 
@@ -214,6 +229,13 @@ class OrderSimulator:
         now = datetime.now(timezone.utc)
 
         for ord in orders:
+            # Institutional wire latency gate: orders in-flight have not arrived at matching engine yet
+            if ord.created_at is not None and self.wire_latency_ms > 0.0:
+                elapsed_ms = (now - ord.created_at).total_seconds() * 1000.0
+                if elapsed_ms < self.wire_latency_ms:
+                    remaining.append(ord)
+                    continue
+
             is_filled = False
             fill_price = ord.limit_price or Decimal("0.50")
 
@@ -221,8 +243,16 @@ class OrderSimulator:
                 best_ask = book.best_yes_ask
                 # 1. Price touch / cross (market crossed limit)
                 if best_ask is not None and ord.limit_price is not None and ord.limit_price >= best_ask:
-                    is_filled = True
-                    fill_price = min(ord.limit_price, best_ask)
+                    if ord.limit_price > best_ask:
+                        # Swept cleanly through our limit price level: instant fill
+                        is_filled = True
+                        fill_price = min(ord.limit_price, best_ask)
+                    else:
+                        # Market is touching our exact limit price level:
+                        # In strict realistic queue mode, cannot fill until queue ahead is exhausted
+                        if not self.strict_queue_matching or ord.queue_ahead <= 0:
+                            is_filled = True
+                            fill_price = ord.limit_price
                 # 2. Passive queue execution: trade occurred on the public tape
                 elif latest_trades and ord.limit_price is not None:
                     for tr in latest_trades:
@@ -254,8 +284,13 @@ class OrderSimulator:
             else:
                 best_no_ask = Decimal("1") - book.best_yes_bid if book.best_yes_bid else None
                 if best_no_ask is not None and ord.limit_price is not None and ord.limit_price >= best_no_ask:
-                    is_filled = True
-                    fill_price = min(ord.limit_price, best_no_ask)
+                    if ord.limit_price > best_no_ask:
+                        is_filled = True
+                        fill_price = min(ord.limit_price, best_no_ask)
+                    else:
+                        if not self.strict_queue_matching or ord.queue_ahead <= 0:
+                            is_filled = True
+                            fill_price = ord.limit_price
                 elif latest_trades and ord.limit_price is not None:
                     for tr in latest_trades:
                         if tr.market_ticker == ord.ticker and tr.no_price is not None:
@@ -615,12 +650,13 @@ class OrderSimulator:
         # If market momentum is running strongly in trade direction,
         # by the time the order arrives (75-150ms), price has drifted adversely
         adverse_penalty = _DEC_0_00
-        if spot_velocity != 0.0:
+        if spot_velocity != 0.0 and self.enable_adverse_selection_fills:
             vel_threshold = self.get_adverse_velocity_threshold(asset_or_ticker)
             if order_side == OrderSide.YES and spot_velocity > vel_threshold:
-                adverse_penalty = _DEC_0_01
+                # Under realistic_mode, high momentum can drift up to 2 cents if velocity is more than double the threshold
+                adverse_penalty = _DEC_0_02 if (self.realistic_mode and spot_velocity > vel_threshold * 2.0) else _DEC_0_01
             elif order_side == OrderSide.NO and spot_velocity < -vel_threshold:
-                adverse_penalty = _DEC_0_01
+                adverse_penalty = _DEC_0_02 if (self.realistic_mode and spot_velocity < -vel_threshold * 2.0) else _DEC_0_01
 
         # Performance optimization: vwap, adjusted_slippage, and adverse_penalty are already
         # exact to 4 decimal places (_DEC_0_0001), avoiding a redundant 3rd quantize() call per fill.

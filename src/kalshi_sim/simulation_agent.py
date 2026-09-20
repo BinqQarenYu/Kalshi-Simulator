@@ -79,6 +79,8 @@ class SimulationAgent:
         btc_orderflow_feed: Optional[BtcOrderflowFeed] = None,
         bot_auditor: Optional[BotDeploymentAuditor] = None,
         hmm_brain: Optional[Any] = None,
+        simulator: Optional[OrderSimulator] = None,
+        realistic_simulation: bool = False,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
@@ -96,7 +98,12 @@ class SimulationAgent:
         self._portfolio_domination = Portfolio(starting_balance=starting_capital)
         self._portfolio_onnx = Portfolio(starting_balance=starting_capital)
         self._portfolio_dual_onnx = Portfolio(starting_balance=starting_capital)
-        self._simulator = OrderSimulator()
+        if simulator is not None:
+            self._simulator = simulator
+        elif realistic_simulation:
+            self._simulator = OrderSimulator(realistic_mode=True)
+        else:
+            self._simulator = OrderSimulator()
         self._exec_logger = ExecutionLogger(data_dir=data_dir)
         self._onnx_engine = KalshiONNXEngine(model_path=model_path)
         self._ev_engine = StatisticalEVEngine()
@@ -231,10 +238,18 @@ class SimulationAgent:
     async def stop(self) -> None:
         """Shutdown and print final P&L."""
         self._shutdown.set()
-        for task in self._tasks:
-            task.cancel()
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop:
+            valid_tasks = [t for t in self._tasks if t.get_loop() == current_loop]
+            for task in valid_tasks:
+                task.cancel()
+            if valid_tasks:
+                await asyncio.gather(*valid_tasks, return_exceptions=True)
+        self._tasks.clear()
 
         await self._db_writer.stop()
 
@@ -294,7 +309,7 @@ class SimulationAgent:
             return self._macro_trend_bot
         elif bot_id in ("dominion_2_bot", "dominion2", "dominion_v2"):
             return self._dominion2_bot
-        elif bot_id == "3_step_domination_bot":
+        elif bot_id in ("3_step_domination_bot", "bot1_v4_domination", "bot1_v4", "domination_bot", "domination"):
             return self._domination_bot
         elif bot_id == "onnx_microstructure_bot":
             return self._onnx_engine
@@ -313,6 +328,8 @@ class SimulationAgent:
             target = "macro_trend_dominion"
         elif target in ("dominion2", "dominion_v2"):
             target = "dominion_2_bot"
+        elif target in ("3_step_domination_bot", "domination_bot", "domination", "bot1_v4"):
+            target = "bot1_v4_domination"
 
         # Pre-Deployment Audit Certification Gate
         if hasattr(self, "bot_auditor"):
@@ -434,6 +451,7 @@ class SimulationAgent:
         bot_type: Optional[str] = None,
         order_type: str = "market",
         limit_price: Optional[Decimal] = None,
+        action: str = "buy",
     ) -> None:
         """Submit a virtual market or resting limit order against the L2 book or live exchange."""
         active_p = portfolio or self.portfolio
@@ -454,6 +472,7 @@ class SimulationAgent:
             market_info=market_info,
             mid_price_history=self._mid_price_history,
             active_strategy_bot=self.active_strategy_bot,
+            action=action,
         )
 
     # -- Background loops ----------------------------------------------------

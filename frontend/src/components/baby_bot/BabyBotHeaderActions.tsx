@@ -114,13 +114,13 @@ export const BabyBotHeaderActions: React.FC<BabyBotHeaderActionsProps> = ({
         ].filter(Boolean).map((profile) => {
           const profileSeal =
             sealOfExcellence?.seals?.[profile.id] ||
-            (profile.id === '3_step_domination_bot' || profile.id === 'bot1_v4_domination'
-              ? { seal_status: 'SEALED_EXCELLENT', live_trading_authorized: true }
-              : profile.id === 'macro_trend_dominion'
+            (profile.id === 'bot1_v4_domination'
+              ? { seal_status: 'SEALED_BRAVE', live_trading_authorized: true }
+              : profile.id === '3_step_domination_bot' || profile.id === 'macro_trend_dominion'
               ? { seal_status: 'SEALED_EXCELLENT', live_trading_authorized: true }
               : null);
           const profileIsSealed = Boolean(
-            profileSeal?.seal_status === 'SEALED_EXCELLENT' && profileSeal?.live_trading_authorized
+            (profileSeal?.seal_status === 'SEALED_EXCELLENT' || profileSeal?.seal_status === 'SEALED_BRAVE') && profileSeal?.live_trading_authorized
           );
           const isActive =
             activeProfile.id === profile.id ||
@@ -174,11 +174,17 @@ export const BabyBotHeaderActions: React.FC<BabyBotHeaderActionsProps> = ({
           <div className="flex flex-col">
             <div className="flex items-center gap-1.5">
               <span className="font-extrabold text-[11px] uppercase tracking-wider text-white">
-                {isBotSealed ? '🏆 SEAL OF EXCELLENCE' : '⏳ INCUBATOR SHADOW'}
+                {activeSeal?.seal_status === 'SEALED_BRAVE'
+                  ? '🦁 SEAL OF THE BRAVE'
+                  : isBotSealed
+                  ? '🏆 SEAL OF EXCELLENCE'
+                  : '⏳ INCUBATOR SHADOW'}
               </span>
               <span
                 className={`text-[9px] px-1.5 py-0.5 rounded font-mono font-bold border ${
-                  isBotSealed
+                  activeSeal?.seal_status === 'SEALED_BRAVE'
+                    ? 'bg-cyan-500/25 text-cyan-200 border-cyan-500/50'
+                    : isBotSealed
                     ? 'bg-amber-500/25 text-amber-200 border-amber-500/50'
                     : 'bg-purple-500/20 text-purple-200 border-purple-500/40'
                 }`}
@@ -187,7 +193,9 @@ export const BabyBotHeaderActions: React.FC<BabyBotHeaderActionsProps> = ({
               </span>
             </div>
             <span className="text-[10px] text-[#8c9ba5]">
-              {isBotSealed
+              {activeSeal?.seal_status === 'SEALED_BRAVE'
+                ? 'Brave multi-turnover explorer · Lane 1 Live trading authorized'
+                : isBotSealed
                 ? 'Shadow paper trading removed · Lane 1 Live trading authorized'
                 : 'Cooking in Lane 2 Shadow · Live trading blocked'}
             </span>

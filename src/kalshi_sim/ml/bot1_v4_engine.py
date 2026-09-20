@@ -20,6 +20,7 @@ from kalshi_sim.ml.domination_exit_evaluator import (
     DominationExitDecision,
     DominationExitEvaluator,
 )
+from kalshi_sim.ml.lead_deer_quant_brain import LeadDeerQuantBrain
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
 from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, get_asset_config
 
@@ -55,6 +56,9 @@ class Bot1V4Decision:
     turnovers_completed: int = 0
     max_turnovers: int = 3
     ev_hurdle_dollars: float = 0.02
+    onnx_signal: str = "WAIT"
+    onnx_confidence: float = 0.0
+    fused_source: str = "macro_erf"
 
 
 class Bot1V4DominationEngine:
@@ -90,6 +94,12 @@ class Bot1V4DominationEngine:
         enable_dynamic_spot_velocity: bool = True,
         velocity_z_score_threshold: float = 2.50,
         reentry_cooldown_seconds: float = 15.0,
+        enable_doubt_harvest: bool = True,
+        doubt_threshold: float = 0.55,
+        upside_capture_ratio_threshold: float = 0.50,
+        asymmetric_peak_bid: Decimal = Decimal("0.88"),
+        onnx_engine: Optional[Any] = None,
+        fusion_weight_micro: float = 0.40,
     ) -> None:
         self.max_turnover_per_event = max_turnover_per_event
         self.min_ev_hurdle_dollars = min_ev_hurdle_dollars
@@ -116,6 +126,19 @@ class Bot1V4DominationEngine:
         self.enable_dynamic_spot_velocity = enable_dynamic_spot_velocity
         self.velocity_z_score_threshold = velocity_z_score_threshold
         self.reentry_cooldown_seconds = reentry_cooldown_seconds
+        self.enable_doubt_harvest = enable_doubt_harvest
+        self.doubt_threshold = doubt_threshold
+        self.upside_capture_ratio_threshold = upside_capture_ratio_threshold
+        self.asymmetric_peak_bid = asymmetric_peak_bid
+        self.twap_fading_quarantine_seconds: float = 15.0
+        self.onnx_engine = onnx_engine
+        self.fusion_weight_micro = fusion_weight_micro
+        self.enable_lead_deer_peak_harvester: bool = True
+        self.lead_deer_brain = LeadDeerQuantBrain(
+            min_confidence=float(self.min_confidence),
+            min_ev_dollars=float(self.min_ev_hurdle_dollars),
+            maker_discount_ceiling=float(self.discount_limit_price),
+        )
 
         self.ev_engine = StatisticalEVEngine()
         self.exit_evaluator = DominationExitEvaluator(self)
@@ -158,6 +181,108 @@ class Bot1V4DominationEngine:
         dynamic_price = win_prob - ev_hurdle
         clamped_price = max(base_floor, min(dynamic_price, max_cap))
         return Decimal(str(round(clamped_price, 2)))
+
+    def compute_fused_probabilities(
+        self,
+        spot_diff: float,
+        time_to_expiry_s: float,
+        l2_book: Optional[L2BookState] = None,
+    ) -> Tuple[float, float, float, Optional[Dict[str, Any]]]:
+        """Compute Bayesian fused win probabilities combining macro Gaussian drift and ONNX orderflow.
+
+        Returns:
+            (p_up, p_down, p_wait, onnx_telemetry)
+        """
+        vol = max(1.0, self.default_btc_1m_volatility)
+        t_factor = math.sqrt(max(1.0, time_to_expiry_s / 60.0))
+        p_up_macro = 0.5 * (1.0 + math.erf(spot_diff / (vol * t_factor)))
+        p_down_macro = 1.0 - p_up_macro
+
+        if self.onnx_engine is None or l2_book is None:
+            return p_up_macro, p_down_macro, 0.0, None
+
+        try:
+            onnx_res = self.onnx_engine.process_orderbook_tick(l2_book)
+            if not isinstance(onnx_res, dict):
+                return p_up_macro, p_down_macro, 0.0, None
+
+            p_long_micro = float(onnx_res.get("prob_long", 0.333))
+            p_short_micro = float(onnx_res.get("prob_short", 0.333))
+            p_wait_micro = float(onnx_res.get("prob_wait", 0.334))
+
+            micro_dir_sum = p_long_micro + p_short_micro
+            if micro_dir_sum > 0.001:
+                p_up_micro = p_long_micro / micro_dir_sum
+                p_down_micro = p_short_micro / micro_dir_sum
+            else:
+                p_up_micro, p_down_micro = 0.5, 0.5
+
+            # Dynamic time decay weighting
+            # T_rem > 300s: orderflow micro has maximum weight
+            # T_rem <= 60s: settlement TWAP moneyness dictates near 100%
+            decay = min(1.0, max(0.0, time_to_expiry_s / 900.0))
+            w_micro = self.fusion_weight_micro * decay
+            w_macro = 1.0 - w_micro
+
+            p_up = float((w_macro * p_up_macro) + (w_micro * p_up_micro))
+            p_down = float((w_macro * p_down_macro) + (w_micro * p_down_micro))
+
+            total = p_up + p_down
+            if total > 0.0:
+                p_up /= total
+                p_down /= total
+
+            return p_up, p_down, p_wait_micro, onnx_res
+        except Exception as exc:
+            logger.warning("[BOT1_V4] ONNX inference fallback to macro drift: %s", exc)
+            return p_up_macro, p_down_macro, 0.0, None
+
+    def compute_market_probabilities(
+        self,
+        book: Optional[L2BookState] = None,
+        spot_price: float = 0.0,
+        target_strike: float = 0.0,
+        time_to_expiry_s: float = 300.0,
+    ) -> Tuple[float, float]:
+        """Compute market probabilities with Bayesian ONNX fusion for exit evaluator."""
+        spot_diff = spot_price - target_strike if spot_price > 0.0 and target_strike > 0.0 else 0.0
+        p_up, p_down, _, _ = self.compute_fused_probabilities(
+            spot_diff=spot_diff,
+            time_to_expiry_s=time_to_expiry_s,
+            l2_book=book,
+        )
+        return p_up, p_down
+
+    def evaluate_exit(
+        self,
+        side: OrderSide | str,
+        entry_price: Decimal,
+        size: int,
+        book: Optional[L2BookState],
+        time_to_expiry_s: float,
+        spot_price: float = 0.0,
+        target_strike: float = 0.0,
+        peak_bid: Optional[Decimal] = None,
+        spot_velocity_3s: float = 0.0,
+        twap_60s: Optional[float] = None,
+        rolling_vol_1m: Optional[float] = None,
+        **kwargs: Any,
+    ) -> DominationExitDecision:
+        """Evaluate open position against quantitative Take-Profit and Early Liquidation rules using upgraded Doubt Harvest math."""
+        return self.exit_evaluator.evaluate_exit(
+            side=side,
+            entry_price=entry_price,
+            size=size,
+            book=book,
+            time_to_expiry_s=time_to_expiry_s,
+            spot_price=spot_price,
+            target_strike=target_strike,
+            peak_bid=peak_bid,
+            spot_velocity_3s=spot_velocity_3s,
+            twap_60s=twap_60s,
+            rolling_vol_1m=rolling_vol_1m,
+            **kwargs,
+        )
 
     def update_parameters(
         self,
@@ -223,31 +348,122 @@ class Bot1V4DominationEngine:
                 ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
             )
 
-        # 2. VPIN Toxicity Veto
-        vpin_safe = vpin < self.vpin_toxic_threshold
+        # 2. Bayesian Fused Win Probability & VPIN Check
+        p_up, p_down, p_wait_micro, onnx_res = self.compute_fused_probabilities(
+            spot_diff=spot_diff,
+            time_to_expiry_s=time_to_expiry_s,
+            l2_book=l2_book,
+        )
+        onnx_sig = str(onnx_res.get("signal", "WAIT")) if onnx_res else "NONE"
+        onnx_conf = float(onnx_res.get("confidence", 0.0)) if onnx_res else 0.0
+        fused_source = "bayesian_fusion" if onnx_res is not None else "macro_erf"
+
+        # Check VPIN Toxicity Veto (from book VPIN or ONNX VPIN)
+        vpin_eval = float(onnx_res.get("vpin_score", vpin)) if onnx_res else vpin
+        onnx_vpin_veto = bool(onnx_res.get("vpin_veto", False)) if onnx_res else False
+        vpin_safe = (vpin_eval < self.vpin_toxic_threshold) and not onnx_vpin_veto
         if not vpin_safe:
             return Bot1V4Decision(
                 strategy_id=self.STRATEGY_ID,
                 strategy_name=self.STRATEGY_NAME,
                 active_playbook="vpin_toxicity_veto",
                 playbook_stage="none",
-                p_up=0.5, p_down=0.5, p_wait=1.0,
-                vpin=vpin, vpin_is_safe=False,
+                p_up=p_up, p_down=p_down, p_wait=1.0,
+                vpin=vpin_eval, vpin_is_safe=False,
                 ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
                 kelly_f_yes=0.0, kelly_f_no=0.0,
                 recommended_side="wait", recommended_contracts=0,
-                rationale=f"VPIN Toxicity Veto (VPIN {vpin:.2f} >= {self.vpin_toxic_threshold:.2f})",
+                rationale=f"VPIN Toxicity Veto (VPIN {vpin_eval:.2f} >= {self.vpin_toxic_threshold:.2f})",
                 edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
                 limit_price=float(self.discount_limit_price),
                 turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
                 ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                onnx_signal=onnx_sig,
+                onnx_confidence=onnx_conf,
+                fused_source=fused_source,
+            )
+
+        # 2.5 First 10-Second Cycle Boundary Entry Window (T_rem >= 890s out of 900s)
+        if time_to_expiry_s >= 890.0 and turnovers == 0:
+            if time_to_expiry_s > 895.0:
+                # First 5s: Feature Buffer Warmup Gate
+                return Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="initial_cycle_warmup",
+                    playbook_stage="breakout",
+                    p_up=p_up, p_down=p_down, p_wait=1.0,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale="Bot 1 V4 First 5s Feature Buffer Warmup (CME CF 5Hz index streaming)",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=0.55,
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig,
+                    onnx_confidence=onnx_conf,
+                    fused_source=fused_source,
+                )
+
+            # Seconds 5..10 (890s <= T_rem <= 895s): Park Initial Maker Limit Order @ $0.55 IF Spot Moat >= $25.00
+            chosen_side = "yes" if p_up >= p_down else "no"
+            win_prob = p_up if chosen_side == "yes" else p_down
+            ev_val = win_prob - 0.55
+
+            min_moat = max(25.0, float(self.min_spot_diff or 25.0))
+            if abs(spot_diff) < min_moat or win_prob < 0.59:
+                return Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="initial_spot_moat_veto",
+                    playbook_stage="breakout",
+                    p_up=p_up, p_down=p_down, p_wait=1.0 - win_prob,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale=f"Opening Spot Moat Veto: |Diff| ${abs(spot_diff):.2f} < ${min_moat:.2f} moat (P_win {win_prob:.1%} < 59.0% hurdle for $0.55 limit). Awaiting real momentum.",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=0.55,
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig,
+                    onnx_confidence=onnx_conf,
+                    fused_source=fused_source,
+                )
+
+            return Bot1V4Decision(
+                strategy_id=self.STRATEGY_ID,
+                strategy_name=self.STRATEGY_NAME,
+                active_playbook="initial_10s_maker_park",
+                playbook_stage="breakout",
+                p_up=p_up, p_down=p_down, p_wait=1.0 - win_prob,
+                vpin=vpin_eval, vpin_is_safe=True,
+                ev_yes=ev_val if chosen_side == "yes" else 0.0,
+                ev_no=ev_val if chosen_side == "no" else 0.0,
+                edge_yes=p_up - 0.55,
+                edge_no=p_down - 0.55,
+                kelly_f_yes=0.25 if chosen_side == "yes" else 0.0,
+                kelly_f_no=0.25 if chosen_side == "no" else 0.0,
+                recommended_side=chosen_side,
+                recommended_contracts=1,
+                rationale=f"Bot 1 V4 First 10s Initial Entry: Park Maker Limit @ $0.55 on {chosen_side.upper()} (P_win {win_prob:.1%}, Moat ${abs(spot_diff):.2f})",
+                edge_pct=win_prob - 0.55,
+                time_to_expiry_s=time_to_expiry_s,
+                spot_diff=spot_diff,
+                limit_price=0.55,
+                turnovers_completed=turnovers,
+                max_turnovers=self.max_turnover_per_event,
+                ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                onnx_signal=onnx_sig,
+                onnx_confidence=onnx_conf,
+                fused_source=fused_source,
             )
 
         # 3. Dynamic EV & Win Probability Coupling
         req_p_win_base = self.compute_required_win_probability(self.discount_limit_price)
-        p_up = 0.5 * (1.0 + math.erf(spot_diff / (self.default_btc_1m_volatility * math.sqrt(max(1.0, time_to_expiry_s / 60.0)))))
-        p_down = 1.0 - p_up
-
         dynamic_limit_yes = self.compute_dynamic_limit_price(p_up)
         dynamic_limit_no = self.compute_dynamic_limit_price(p_down)
 
@@ -258,16 +474,17 @@ class Bot1V4DominationEngine:
         ev_yes = p_up * 1.0 - float(dynamic_limit_yes)
         ev_no = p_down * 1.0 - float(dynamic_limit_no)
 
+        ai_tag = f" [AI Conf {onnx_conf*100:.0f}%]" if fused_source == "bayesian_fusion" else ""
         if p_up >= (float(dynamic_limit_yes) + float(self.min_ev_hurdle_dollars)) or ev_yes >= float(self.min_ev_hurdle_dollars):
             if p_up >= req_p_win_base:
                 recommended_side = "yes"
                 chosen_limit_price = float(dynamic_limit_yes)
-                rationale = f"Bot 1 V4 YES Signal: P_win {p_up:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_yes:.3f})"
+                rationale = f"Bot 1 V4 YES Signal{ai_tag}: P_win {p_up:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_yes:.3f})"
         elif p_down >= (float(dynamic_limit_no) + float(self.min_ev_hurdle_dollars)) or ev_no >= float(self.min_ev_hurdle_dollars):
             if p_down >= req_p_win_base:
                 recommended_side = "no"
                 chosen_limit_price = float(dynamic_limit_no)
-                rationale = f"Bot 1 V4 NO Signal: P_win {p_down:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_no:.3f})"
+                rationale = f"Bot 1 V4 NO Signal{ai_tag}: P_win {p_down:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_no:.3f})"
 
         return Bot1V4Decision(
             strategy_id=self.STRATEGY_ID,
@@ -275,7 +492,7 @@ class Bot1V4DominationEngine:
             active_playbook="playbook2_drift",
             playbook_stage="drift",
             p_up=p_up, p_down=p_down, p_wait=1.0 - max(p_up, p_down),
-            vpin=vpin, vpin_is_safe=True,
+            vpin=vpin_eval, vpin_is_safe=True,
             ev_yes=ev_yes, ev_no=ev_no,
             edge_yes=p_up - chosen_limit_price,
             edge_no=p_down - chosen_limit_price,
@@ -291,4 +508,7 @@ class Bot1V4DominationEngine:
             turnovers_completed=turnovers,
             max_turnovers=self.max_turnover_per_event,
             ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+            onnx_signal=onnx_sig,
+            onnx_confidence=onnx_conf,
+            fused_source=fused_source,
         )

@@ -9,7 +9,12 @@ Provides full order management for Kalshi's Demo (Paper Trading) environment:
 
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timezone
+import json
 import logging
+from pathlib import Path
+import time
 import uuid
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -52,6 +57,101 @@ class KalshiLiveOrderClient:
         self._session: Optional[aiohttp.ClientSession] = None
         self._primary_exchange_index: int = 0
         self.shard_balances: Dict[int, Decimal] = {}
+        self.is_in_maintenance: bool = False
+        self.maintenance_reason: str = "Online"
+        self.last_maintenance_check_ts: float = 0.0
+        self._maintenance_task: Optional[asyncio.Task] = None
+        self._maintenance_file = Path("data") / "kalshi_maintenance.json"
+        self._maintenance_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def set_maintenance_state(self, active: bool, reason: str = "Exchange Maintenance Active") -> None:
+        """Update exchange maintenance state and write disk telemetry for cross-process coordination."""
+        was_active = self.is_in_maintenance
+        self.is_in_maintenance = active
+        self.maintenance_reason = reason if active else "Online"
+        now_ts = time.time()
+        self.last_maintenance_check_ts = now_ts
+
+        payload = {
+            "active": active,
+            "reason": self.maintenance_reason,
+            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "updated_ts": now_ts,
+        }
+        try:
+            temp_file = self._maintenance_file.with_suffix(".tmp")
+            temp_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            temp_file.replace(self._maintenance_file)
+        except Exception as exc:
+            logger.error("Failed to write kalshi_maintenance.json: %s", exc)
+
+        if active and not was_active:
+            logger.warning(
+                "⚠️ [KALSHI MAINTENANCE DETECTED] Exchange maintenance active (%s). "
+                "AUTOMATICALLY PAUSING ALL LIVE TRADES.",
+                reason,
+            )
+            self._start_maintenance_monitor()
+        elif not active and was_active:
+            logger.info(
+                "✅ [KALSHI MAINTENANCE COMPLETED] Exchange is online and healthy. "
+                "AUTOMATICALLY RESUMING AUTOMATED LIVE TRADING."
+            )
+
+    def _start_maintenance_monitor(self) -> None:
+        """Launch background health polling loop while exchange is in maintenance."""
+        if self._maintenance_task is None or self._maintenance_task.done():
+            try:
+                loop = asyncio.get_running_loop()
+                self._maintenance_task = loop.create_task(self._maintenance_monitor_loop())
+            except RuntimeError:
+                pass
+
+    async def _maintenance_monitor_loop(self) -> None:
+        """Poll Kalshi exchange status every 10 seconds until maintenance completes."""
+        logger.info("[KALSHI MAINTENANCE MONITOR] Polling exchange health every 10s for auto-resume...")
+        while self.is_in_maintenance:
+            await asyncio.sleep(10.0)
+            try:
+                status_res = await self.get_exchange_status()
+                if status_res.get("exchange_active", False) and status_res.get("trading_active", False):
+                    self.set_maintenance_state(False, reason="Online")
+                    break
+            except Exception as exc:
+                logger.debug("[KALSHI MAINTENANCE MONITOR] Exchange still unavailable: %s", exc)
+
+    async def get_exchange_status(self) -> Dict[str, Any]:
+        """Fetch official Kalshi exchange status endpoint (/trade-api/v2/exchange/status)."""
+        endpoint = "/trade-api/v2/exchange/status"
+        url = f"{self.base_url}/exchange/status"
+        session = await self._get_session()
+
+        try:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    ex_active = data.get("exchange_active", True)
+                    tr_active = data.get("trading_active", True)
+
+                    if not ex_active or not tr_active:
+                        self.set_maintenance_state(
+                            True,
+                            reason=f"Kalshi API reported exchange_active={ex_active}, trading_active={tr_active}",
+                        )
+                    elif self.is_in_maintenance:
+                        self.set_maintenance_state(False, reason="Online")
+
+                    return data
+                elif resp.status in (502, 503, 504):
+                    err_text = await resp.text()
+                    self.set_maintenance_state(True, reason=f"Kalshi maintenance HTTP {resp.status}: {err_text[:100]}")
+                    return {"exchange_active": False, "trading_active": False, "status": resp.status, "error": err_text}
+                else:
+                    err_text = await resp.text()
+                    return {"exchange_active": True, "trading_active": True, "status": resp.status, "error": err_text}
+        except Exception as exc:
+            logger.warning("Error checking Kalshi exchange status: %s", exc)
+            return {"exchange_active": not self.is_in_maintenance, "trading_active": not self.is_in_maintenance, "error": str(exc)}
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or lazily initialize a connection-pooled aiohttp session."""
@@ -279,6 +379,15 @@ class KalshiLiveOrderClient:
         Returns:
             Dict containing order response and fill details, or None on failure.
         """
+        if self.is_in_maintenance:
+            logger.warning(
+                "🛡️ [KALSHI MAINTENANCE VETO] Cannot place order on %s: Exchange maintenance window active (%s). "
+                "Order submission paused.",
+                ticker,
+                self.maintenance_reason,
+            )
+            return None
+
         side_val = side.value if hasattr(side, "value") else str(side).lower()
         endpoint = "/trade-api/v2/portfolio/events/orders"
         url = f"{self.base_url}/portfolio/events/orders"
@@ -353,6 +462,14 @@ class KalshiLiveOrderClient:
                             target_shard,
                         )
                         return order_data
+                    elif resp.status in (502, 503, 504):
+                        err_text = await resp.text()
+                        logger.warning(
+                            "Kalshi exchange maintenance window active (HTTP %d). Pausing live trades: %s",
+                            resp.status, err_text,
+                        )
+                        self.set_maintenance_state(True, reason=f"HTTP {resp.status} - {err_text[:100]}")
+                        return None
                     elif resp.status == 429:
                         err_text = await resp.text()
                         logger.warning(
@@ -364,6 +481,8 @@ class KalshiLiveOrderClient:
                         continue
                     else:
                         err_text = await resp.text()
+                        if "maintenance" in err_text.lower() or "trading_active" in err_text.lower():
+                            self.set_maintenance_state(True, reason=f"Maintenance response: {err_text[:100]}")
                         logger.error(
                             "Order rejected by Kalshi (HTTP %d): %s | Payload: %s",
                             resp.status, err_text, payload,

@@ -79,11 +79,11 @@ class DominationExitEvaluator:
             return False, f"Favorable drift ({spot_velocity_3s:+.2f})"
 
         # Regime 4: Expiration Quarantine Zone (T_rem <= 15s)
-        # Lock out front-run sells to prevent giving away EV into widening spreads right before $1.00 settlement
-        if time_to_expiry_s <= bot.twap_fading_quarantine_seconds:
+        quarantine_s = getattr(bot, "twap_fading_quarantine_seconds", 15.0)
+        if time_to_expiry_s <= quarantine_s:
             return (
                 False,
-                f"EXPIRATION QUARANTINE: T={time_to_expiry_s:.1f}s <= {bot.twap_fading_quarantine_seconds:.0f}s. "
+                f"EXPIRATION QUARANTINE: T={time_to_expiry_s:.1f}s <= {quarantine_s:.0f}s. "
                 f"Sells strictly locked out to protect EV and hold for $1.00 settlement."
             )
 
@@ -165,22 +165,41 @@ class DominationExitEvaluator:
 
     def evaluate_exit(
         self,
-        side: OrderSide | str,
-        entry_price: Decimal,
-        size: int,
-        book: Optional[L2BookState],
-        time_to_expiry_s: float,
+        side: Optional[OrderSide | str] = None,
+        entry_price: Optional[Decimal] = None,
+        size: Optional[int] = None,
+        book: Optional[L2BookState] = None,
+        time_to_expiry_s: float = 600.0,
         spot_price: float = 0.0,
         target_strike: float = 0.0,
         peak_bid: Optional[Decimal] = None,
         spot_velocity_3s: float = 0.0,
         twap_60s: Optional[float] = None,
         rolling_vol_1m: Optional[float] = None,
+        position: Optional[Any] = None,
         **kwargs: Any,
     ) -> DominationExitDecision:
         """Evaluate open position against quantitative Take-Profit and Early Liquidation rules."""
         bot = self.bot
-        if not book or size <= 0:
+
+        # Handle position object if passed directly or via kwargs
+        pos_obj = position or kwargs.get("position")
+        if pos_obj is not None:
+            if side is None:
+                side = getattr(pos_obj, "side", OrderSide.YES)
+            if entry_price is None:
+                entry_price = getattr(pos_obj, "entry_price", Decimal("0.55"))
+            if size is None or size == 0:
+                size = getattr(pos_obj, "size", 1)
+
+        if side is None:
+            side = OrderSide.YES
+        if entry_price is None:
+            entry_price = Decimal("0.55")
+        if size is None or size <= 0:
+            size = 1
+
+        if not book:
             return DominationExitDecision(
                 should_exit=False,
                 exit_reason="NONE",
@@ -210,14 +229,31 @@ class DominationExitEvaluator:
         roi = float(gross_pnl_per_ct / safe_entry)
 
         # Compute indicator probabilities and reverse direction conviction
-        prob_yes, prob_no = bot.compute_market_probabilities(
-            book=book,
-            spot_price=spot_price,
-            target_strike=target_strike,
-            time_to_expiry_s=time_to_expiry_s,
-        )
+        if hasattr(bot, "compute_market_probabilities"):
+            prob_yes, prob_no = bot.compute_market_probabilities(
+                book=book,
+                spot_price=spot_price,
+                target_strike=target_strike,
+                time_to_expiry_s=time_to_expiry_s,
+            )
+        else:
+            if spot_price > 0.0 and target_strike > 0.0:
+                tau_mins = max(0.1, time_to_expiry_s / 60.0)
+                vol = max(4.0, getattr(bot, "default_btc_1m_volatility", 14.0) * math.sqrt(tau_mins))
+                z = (spot_price - target_strike) / vol
+                prob_yes = max(0.001, min(0.999, standard_normal_cdf(z)))
+                prob_no = 1.0 - prob_yes
+            elif book and book.best_yes_bid is not None:
+                prob_yes = float(book.best_yes_bid)
+                prob_no = 1.0 - prob_yes
+            else:
+                prob_yes, prob_no = 0.50, 0.50
+
         reverse_prob = prob_no if side_is_yes else prob_yes
-        dyn_reversal_threshold = bot.compute_dynamic_reversal_threshold(time_to_expiry_s)
+        if hasattr(bot, "compute_dynamic_reversal_threshold"):
+            dyn_reversal_threshold = bot.compute_dynamic_reversal_threshold(time_to_expiry_s)
+        else:
+            dyn_reversal_threshold = getattr(bot, "reverse_indicator_threshold", 0.70)
 
         # Rule 1: Asymmetric Tail Risk Ceiling (e.g. Bid >= $0.94 or $0.90)
         # Exits if ceiling reached AND either require_reversal_for_tp_ceiling is False OR reverse_prob >= dyn_reversal_threshold
@@ -311,12 +347,12 @@ class DominationExitEvaluator:
 
         # Rule 4: Late-Cycle Expiration Defense (15s < T <= 120s, Bid >= $0.85, ROI >= 15%)
         # In final 2 minutes, binary gamma risk explodes; lock in gains before unpredictable settlement
-        # In final 15 seconds, quarantined to hold for $1.00 settlement
+        quarantine_s = getattr(bot, "twap_fading_quarantine_seconds", 15.0)
         if (
-            time_to_expiry_s > bot.twap_fading_quarantine_seconds
+            time_to_expiry_s > quarantine_s
             and time_to_expiry_s <= 120.0
             and best_bid >= Decimal("0.85")
-            and roi >= bot.late_cycle_roi
+            and roi >= getattr(bot, "late_cycle_roi", 0.15)
             and net_pnl_per_ct > Decimal("0.00")
         ):
             return DominationExitDecision(
@@ -352,6 +388,78 @@ class DominationExitEvaluator:
                     f"Net profit +${total_net_pnl:.2f} | Securing banked returns before reversal destroys gains."
                 ),
             )
+
+        # Rule 5.1: The Council Doubt-Harvest Engine (Horizon-Proportional 50% Profit & Inversion Doubt)
+        max_possible_gain = Decimal("1.00") - safe_entry
+        upside_capture_ratio = float(gross_pnl_per_ct / max_possible_gain) if max_possible_gain > Decimal("0.00") else 0.0
+
+        our_prob = prob_yes if side_is_yes else prob_no
+
+        # 1. Horizon-proportional time metrics
+        tau_rem = max(0.0, min(1.0, time_to_expiry_s / 900.0))
+        tau_mins = max(0.25, time_to_expiry_s / 60.0)
+
+        # 2. Time-adaptive conviction hurdle: early in cycle (e.g. 9 min) P_req ~ 0.56; late (1 min) P_req ~ 0.76
+        p_req = 0.52 + 0.28 * ((1.0 - tau_rem) ** 2)
+        if our_prob >= p_req:
+            doubt_brain = 0.0
+        else:
+            doubt_brain = min(1.0, (p_req - our_prob) / max(0.10, p_req - 0.50))
+
+        # 3. Horizon-proportional adverse velocity threat threshold:
+        # At 9 min, Brownian noise envelope is wide ($25+), so minor dips do not panic
+        # At 1.5 min, noise envelope collapses ($12), so adverse drift is an acute threat
+        adverse_vel = -spot_velocity_3s if side_is_yes else spot_velocity_3s
+        moneyness = (spot_price - target_strike) if side_is_yes else (target_strike - spot_price) if (spot_price > 0.0 and target_strike > 0.0) else 0.0
+        sigma_1 = rolling_vol_1m if (rolling_vol_1m is not None and rolling_vol_1m > 0.001) else getattr(bot, "typical_1m_volatility", getattr(bot, "default_btc_1m_volatility", 14.0))
+        v_threat = max(6.0, (max(0.0, moneyness) / math.sqrt(tau_mins)) * 0.35 + 0.80 * sigma_1)
+        doubt_vel = max(0.0, min(1.0, adverse_vel / v_threat)) if adverse_vel > 0.0 else 0.0
+
+        # 4. Quadratic horizon-aware doubt weight acceleration
+        omega_t = 0.50 + 0.50 * ((1.0 - tau_rem) ** 1.5)
+        doubt_score = min(1.0, (0.55 * doubt_brain + 0.45 * doubt_vel) * (1.0 + omega_t))
+
+        enable_doubt_harvest = getattr(bot, "enable_doubt_harvest", False)
+        doubt_thresh = getattr(bot, "doubt_threshold", 0.55)
+        upside_thresh = getattr(bot, "upside_capture_ratio_threshold", 0.50)
+        asymmetric_peak = getattr(bot, "asymmetric_peak_bid", Decimal("0.88"))
+
+        twap_safe_itm = False
+        if time_to_expiry_s <= 30.0 and twap_60s is not None and twap_60s > 0.0 and target_strike > 0.0:
+            delta_twap = (twap_60s - target_strike) if side_is_yes else (target_strike - twap_60s)
+            if delta_twap >= 10.0:
+                twap_safe_itm = True
+
+        if enable_doubt_harvest and net_pnl_per_ct > Decimal("0.04") and not twap_safe_itm:
+            # Condition A: 50% Profit reached AND Directional Reversal Doubt confirmed
+            if (upside_capture_ratio >= upside_thresh or best_bid >= Decimal("0.75")) and doubt_score >= doubt_thresh:
+                return DominationExitDecision(
+                    should_exit=True,
+                    exit_reason="DOUBT_PROFIT_HARVEST",
+                    exit_price=best_bid,
+                    profit_pct=round(roi * 100.0, 2),
+                    unrealized_pnl=round(total_net_pnl, 4),
+                    rationale=(
+                        f"🧠 [DOUBT-HARVEST TRIGGERED] Upside captured {upside_capture_ratio*100:.1f}% (Bid ${best_bid:.2f}) | "
+                        f"Doubt Score {doubt_score:.2f} >= {doubt_thresh:.2f} (Brain prob {our_prob*100:.1f}%, AdvVel {adverse_vel:+.1f}) | "
+                        f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | Locking in realized gains before reversal."
+                    ),
+                )
+
+            # Condition B: Asymmetric Peak Floor (Risking 88c for 12c upside is mathematically negative EV)
+            if best_bid >= asymmetric_peak:
+                return DominationExitDecision(
+                    should_exit=True,
+                    exit_reason="ASYMMETRIC_PEAK_HARVEST",
+                    exit_price=best_bid,
+                    profit_pct=round(roi * 100.0, 2),
+                    unrealized_pnl=round(total_net_pnl, 4),
+                    rationale=(
+                        f"⛰️ [ASYMMETRIC PEAK HARVEST] Bid ${best_bid:.2f} >= ${asymmetric_peak:.2f} ceiling reached | "
+                        f"Remaining upside only +${(Decimal('1.00')-best_bid):.2f} vs -${best_bid:.2f} downside | "
+                        f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | Harvesting optimal EV peak."
+                    ),
+                )
 
         # Rule 5.5: Lead Deer Quant Horizon Bag Evaluator (Peak Harvester)
         if getattr(bot, "enable_lead_deer_peak_harvester", False) and hasattr(bot, "lead_deer_brain") and bot.lead_deer_brain is not None:

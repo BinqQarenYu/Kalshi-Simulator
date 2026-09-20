@@ -258,3 +258,17 @@ def test_server_bot_seal_status_endpoint():
     assert "3_step_domination_bot" in data["seals"]
     assert data["seals"]["3_step_domination_bot"]["live_trading_authorized"] is True
 
+
+def test_seal_of_the_brave_live_authorization():
+    auth, msg = BotDeploymentAuditor.check_live_authorization_on_disk("bot1_v4_domination")
+    assert auth is True
+    assert "AUTHORIZED" in msg
+
+    auditor = BotDeploymentAuditor()
+    assert auditor.has_seal_of_excellence("bot1_v4_domination") is True
+    seal = auditor.get_seal("bot1_v4_domination")
+    assert seal is not None
+    assert seal.seal_status in ("SEALED_BRAVE", "SEALED_EXCELLENT")
+    assert seal.live_trading_authorized is True
+
+

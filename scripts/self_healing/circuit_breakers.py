@@ -11,12 +11,26 @@ from typing import Tuple, Dict, Any
 
 QUARANTINE_FILE = Path("docs/audits/quarantined_files.json")
 
+# Sealed Live Bots are Constitutionally Sacred and Inviolable.
+# Automated self-healing, Lead Deer, and Sentinel Daemon may NEVER touch these files.
+SEALED_BOT_FILES = {
+    "domination_bot.py",
+    "bot1_v4_engine.py",
+    "macro_trend_dominion_bot.py",
+    "seal_of_excellence.json",
+}
+
 
 class CircuitBreakerManager:
     def __init__(self, port: int = 8000, blackout_seconds: int = 240):
         self.status_url = f"http://localhost:{port}/api/state"
         self.blackout_seconds = blackout_seconds
         self._ensure_quarantine_db()
+
+    def is_sealed_bot_file(self, file_path: str) -> bool:
+        """Constitutional Invariant: Never touch a sealed live bot file."""
+        p_name = Path(file_path).name.lower()
+        return any(sealed.lower() in p_name for sealed in SEALED_BOT_FILES)
 
     def _ensure_quarantine_db(self):
         if not QUARANTINE_FILE.parent.exists():
@@ -34,7 +48,11 @@ class CircuitBreakerManager:
         QUARANTINE_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     def is_file_quarantined(self, file_path: str) -> bool:
-        """Circuit Breaker 5: 3-Strike Poison Pill Check."""
+        """Circuit Breaker 5: 3-Strike Poison Pill Check & Absolute Sealed Bot Immunity."""
+        # Absolute Constitutional Protection: Sealed Live Bots are permanently quarantined from touch
+        if self.is_sealed_bot_file(file_path):
+            return True
+
         db = self._load_quarantine()
         if file_path in db:
             record = db[file_path]

@@ -365,7 +365,7 @@ export interface SystemResourceMetrics {
 export interface SealOfExcellenceRecord {
   bot_id: string;
   bot_name: string;
-  seal_status: 'SEALED_EXCELLENT' | 'IN_INCUBATION' | 'SEAL_DENIED';
+  seal_status: 'SEALED_EXCELLENT' | 'SEALED_BRAVE' | 'IN_INCUBATION' | 'SEAL_DENIED';
   seal_token: string;
   live_trading_authorized: boolean;
   granted_at: string;

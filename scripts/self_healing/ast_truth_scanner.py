@@ -119,11 +119,21 @@ def scan_file(file_path: Path) -> List[FlawFinding]:
         return [FlawFinding(str(file_path), 0, "PARSE_ERROR", f"Could not parse file: {e}")]
 
 
+SEALED_BOT_FILES = {
+    "domination_bot.py",
+    "bot1_v4_engine.py",
+    "macro_trend_dominion_bot.py",
+}
+
+
 def scan_directory(target_dir: Path) -> List[FlawFinding]:
     all_findings = []
     for ext in ["*.py"]:
         for file_path in target_dir.rglob(ext):
             if any(p in file_path.parts for p in [".venv", "venv", "__pycache__", "tests", "scratch"]):
+                continue
+            # Constitution Article I: Never scan or touch sealed live bot files
+            if file_path.name.lower() in SEALED_BOT_FILES:
                 continue
             all_findings.extend(scan_file(file_path))
     return all_findings

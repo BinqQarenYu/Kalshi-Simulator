@@ -87,7 +87,7 @@ class ThreeStepDominationBot:
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
         max_entry_price: Decimal = Decimal("0.68"),  # $0.68 standard entry price cap ($0.70+ hard kill wall)
         discount_limit_price: Decimal = Decimal("0.52"),  # Configurable discount sniper ceiling (48¢-52¢ sweetspot)
-        min_confidence: float = 0.52,  # 52% model conviction threshold (temporary relaxed test mode)
+        min_confidence: float = 0.81,  # 81% model conviction threshold
         enable_trailing_ratchet: bool = True,  # High-water mark trailing profit ratchet and breakeven armor
         trailing_ratchet_buffer: Decimal = Decimal("0.08"),  # $0.08 pullback buffer below peak bid (Historical best)
         spot_delta_front_run_threshold: float = 28.0,  # $28.0 rolling 3s spot velocity base threshold (2.0σ winning sweetspot)
@@ -96,18 +96,19 @@ class ThreeStepDominationBot:
         
         # [FROZEN] The following 3 parameters were historically paralyzing the bot.
         # FROZEN_OLD_min_edge_pct = 0.06 (6.0%) -> Now 0.015 (1.5%)
-        # FROZEN_OLD_max_queue_depth_ahead = 250 -> Now 25000
         # FROZEN_OLD_moneyness_moat_multiplier = 2.0 -> Now 1.36
         moneyness_moat_multiplier: float = 1.36,  # 1.36x sigma*sqrt(t) deep ITM protection moat (sweet spot)
         
         twap_fading_quarantine_seconds: float = 15.0,  # 15s expiration quarantine (strict hold to $1.00)
         twap_fading_window_seconds: float = 60.0,  # 60s Silas TWAP fading evaluation window
         enable_dynamic_reversal_curve: bool = True,  # Time-adaptive reversal curve (decays 85% -> 50% as tau -> 0)
-        opening_quarantine_seconds: float = 30.0,  # Quarantine opening 30s of cycle to eliminate false breakouts
+        opening_quarantine_seconds: float = 90.0,  # Quarantine opening 90s of cycle to eliminate false breakouts
         onnx_engine: Optional[Any] = None,  # Brain 1 QuoLas Nano Microscope ONNX inference engine
         twap_immutability_sniper_cents: float = 0.75,  # 75¢ ceiling for Silas TWAP late-cycle arbitrage harvest
-        max_queue_depth_ahead: int = 25000,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
+        max_queue_depth_ahead: int = 250,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
         max_clob_spread_cents: float = 0.05,  # Max allowable bid-ask spread corridor cap ($0.05)
+        enable_lead_deer_peak_harvester: bool = False,
+        enable_doubt_harvest: bool = False,
         asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
@@ -151,7 +152,11 @@ class ThreeStepDominationBot:
         self.twap_immutability_sniper_cents = float(twap_immutability_sniper_cents)
         self.max_queue_depth_ahead = int(max_queue_depth_ahead)
         self.max_clob_spread_cents = float(max_clob_spread_cents)
-        self.enable_lead_deer_peak_harvester = True
+        self.enable_lead_deer_peak_harvester = bool(enable_lead_deer_peak_harvester)
+        self.enable_doubt_harvest = bool(enable_doubt_harvest)
+        self.doubt_threshold = 0.55
+        self.upside_capture_ratio_threshold = 0.50
+        self.asymmetric_peak_bid = Decimal("0.88")
 
         # Lead Deer Quant Brain & Continuous Experience Buffer (Council Weapon)
         self.lead_deer_brain = LeadDeerQuantBrain(
@@ -382,8 +387,8 @@ class ThreeStepDominationBot:
         baseline_vol = float(cfg.typical_1m_volatility)
         live_vol = self.typical_1m_volatility if self.typical_1m_volatility > 0 else baseline_vol
 
-        floor_moat = max(4.0, self.min_spot_diff * 0.80)
-        ceiling_moat = max(12.0, self.min_spot_diff * 1.50)
+        floor_moat = self.min_spot_diff * 1.15
+        ceiling_moat = self.min_spot_diff * 2.15
 
         expected_full_cycle_noise = baseline_vol * math.sqrt(cycle_mins)
         if expected_full_cycle_noise > 1e-9:
@@ -680,6 +685,80 @@ class ThreeStepDominationBot:
         # -------------------------------------------------------------------
         # PLAYBOOK 1: Early Momentum Breakout (with Opening Quarantine & ONNX Veto)
         # -------------------------------------------------------------------
+        elif time_to_expiry_s >= cycle_duration_s - 10.0:
+            if time_to_expiry_s > cycle_duration_s - 5.0:
+                diff_str = cfg.format_diff(spot_diff)
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=estimated_vpin,
+                    rationale=(
+                        f"[Playbook 1: Early Momentum Breakout] First 5s Feature Buffer Warmup | "
+                        f"T={int(time_to_expiry_s)}s left | Spot Diff: {diff_str} | "
+                        f"Warming 5Hz index & spot velocity buffers before initial 10s entry."
+                    ),
+                )
+            else:
+                # Seconds 5..10 (cycle_duration - 10s <= T <= cycle_duration - 5s): Park Initial Maker Limit Order @ $0.55
+                tau_sqrt = math.sqrt(tau_mins)
+                vol_floor_p1 = 1.285 * self.typical_1m_volatility
+                expected_vol = max(vol_floor_p1, self.typical_1m_volatility * tau_sqrt)
+                z_score = spot_diff / expected_vol
+
+                prob_yes_raw = _standard_normal_cdf(z_score)
+                prob_yes = max(0.001, min(0.999, prob_yes_raw))
+                prob_no = 1.0 - prob_yes
+                chosen_side = OrderSide.YES if prob_yes >= prob_no else OrderSide.NO
+                win_prob = prob_yes if chosen_side == OrderSide.YES else prob_no
+                ev_val = win_prob - 0.55
+                min_moat = max(25.0, float(self.min_spot_diff or 25.0))
+                if abs(spot_diff) < min_moat or win_prob < 0.59:
+                    diff_str = cfg.format_diff(spot_diff)
+                    return self._build_wait_decision(
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_diff=spot_diff,
+                        vpin=estimated_vpin,
+                        rationale=(
+                            f"[Playbook 1: Early Momentum Breakout] Opening Spot Moat Veto | "
+                            f"|Diff|={diff_str} < ${min_moat:.2f} moat (P_win {win_prob*100:.1f}% < 59.0% hurdle for $0.55 limit). "
+                            f"Awaiting real directional momentum before entry."
+                        ),
+                    )
+
+                actual_ask = self._safe_market_ask(chosen_side, best_yes_ask, best_no_ask)
+                q_ahead = self._get_queue_ahead(book, chosen_side, Decimal("0.55"))
+
+                ev_dummy = ExpectedValueResult(
+                    has_positive_edge=True,
+                    recommended_side=chosen_side,
+                    ai_prob=win_prob,
+                    market_price=Decimal("0.55"),
+                    expected_value=Decimal(str(round(ev_val, 2))),
+                    net_expected_value=Decimal(str(round(ev_val, 2))),
+                    fee_per_contract=Decimal("0.00"),
+                    statistical_edge=win_prob - 0.55,
+                    kelly_fraction=0.25,
+                    recommended_contracts=1,
+                    rationale=f"First 10s Initial Entry @ $0.55 on {chosen_side.value.upper()}",
+                )
+
+                return self._build_decision(
+                    playbook_title="Playbook 1: Early Momentum Breakout (First 10s Initial Entry)",
+                    stage="breakout",
+                    p_up=prob_yes,
+                    p_down=prob_no,
+                    p_wait=1.0 - win_prob,
+                    vpin=estimated_vpin,
+                    vpin_is_safe=True,
+                    ev_res=ev_dummy,
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    rationale=f"[Playbook 1: Early Momentum Breakout] First 10s Initial Entry: Park Maker Limit @ $0.55 on {chosen_side.value.upper()} (P_win {win_prob*100:.1f}%)",
+                    actual_market_ask=actual_ask,
+                    cycle_duration_s=cycle_duration_s,
+                    queue_ahead=q_ahead,
+                )
+
         elif time_to_expiry_s > p1_max_s:
             # Opening Cycle Discovery Quarantine Gate (Anti-False Breakout Shield)
             diff_str = cfg.format_diff(spot_diff)
@@ -1042,20 +1121,20 @@ class ThreeStepDominationBot:
         chosen_side_str = ev_res.recommended_side.value if ev_res.recommended_side else "wait"
         cfg = get_asset_config(self.asset)
 
-        if stage == "twap_sniper":
-            limit_px = actual_market_ask if actual_market_ask is not None else float(ev_res.market_price)
+        if stage in ("twap_sniper", "initial_10s_maker_park"):
+            limit_px = float(ev_res.market_price) if ev_res.market_price is not None else (actual_market_ask if actual_market_ask is not None else discount_price_val)
         else:
-            limit_px = discount_price_val
+            limit_px = float(ev_res.market_price) if (ev_res.market_price is not None and float(ev_res.market_price) > 0) else discount_price_val
             if (is_yes or is_no) and ev_res.recommended_contracts > 0:
                 target_side = chosen_side_str.upper()
-                potential_reward = 1.0 - discount_price_val
-                payoff_mult = potential_reward / discount_price_val if discount_price_val > 0 else 1.0
+                potential_reward = 1.0 - limit_px
+                payoff_mult = potential_reward / limit_px if limit_px > 0 else 1.0
                 target_prob = p_up if is_yes else p_down
                 diff_str = cfg.format_diff(spot_diff)
                 rationale = (
-                    f"[{playbook_title}] Discount Sniper | Resting Limit BUY {target_side} @ ${discount_price_val:.2f} ($0.00 Fee) | "
+                    f"[{playbook_title}] Discount Sniper | Resting Limit BUY {target_side} @ ${limit_px:.2f} ($0.00 Fee) | "
                     f"T={int(time_to_expiry_s)}s left | Spot Diff: {diff_str} | "
-                    f"Model Prob: {target_prob*100:.1f}% | Risk: ${discount_price_val:.2f} | "
+                    f"Model Prob: {target_prob*100:.1f}% | Risk: ${limit_px:.2f} | "
                     f"Reward: +${potential_reward:.2f} ({payoff_mult:.2f}x) | Kelly: {ev_res.recommended_contracts} cts"
                 )
 

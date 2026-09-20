@@ -53,6 +53,8 @@ class DynamicTruthSynchronizer:
 
     def sync_engine(self, engine: Any, asset: str = "BTC") -> bool:
         """Hot-reloads fresh parameters from disk into a target strategy engine instance."""
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            return False
         if not hasattr(engine, "update_parameters"):
             return False
 

@@ -319,10 +319,10 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   const b3Seal = seals?.['macro_trend_dominion'];
   const b4Seal = seals?.['gold_onnx_bot'];
 
-  const b1IsSealed = b1Seal ? (b1Seal.seal_status === 'SEALED_EXCELLENT' && b1Seal.live_trading_authorized) : true;
-  const b3IsSealed = b3Seal ? (b3Seal.seal_status === 'SEALED_EXCELLENT' && b3Seal.live_trading_authorized) : true;
-  const b2IsSealed = b2Seal ? (b2Seal.seal_status === 'SEALED_EXCELLENT' && b2Seal.live_trading_authorized) : false;
-  const b4IsSealed = b4Seal ? (b4Seal.seal_status === 'SEALED_EXCELLENT' && b4Seal.live_trading_authorized) : false;
+  const b1IsSealed = b1Seal ? ((b1Seal.seal_status === 'SEALED_EXCELLENT' || b1Seal.seal_status === 'SEALED_BRAVE') && b1Seal.live_trading_authorized) : true;
+  const b3IsSealed = b3Seal ? ((b3Seal.seal_status === 'SEALED_EXCELLENT' || b3Seal.seal_status === 'SEALED_BRAVE') && b3Seal.live_trading_authorized) : true;
+  const b2IsSealed = b2Seal ? ((b2Seal.seal_status === 'SEALED_EXCELLENT' || b2Seal.seal_status === 'SEALED_BRAVE') && b2Seal.live_trading_authorized) : false;
+  const b4IsSealed = b4Seal ? ((b4Seal.seal_status === 'SEALED_EXCELLENT' || b4Seal.seal_status === 'SEALED_BRAVE') && b4Seal.live_trading_authorized) : false;
 
   // Bot 1 Live Metrics (Port 8001 Live Production)
   const b1Events = livePortfolio?.settled_cycles ?? portfolio?.settled_cycles ?? 0;

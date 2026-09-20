@@ -11,6 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 import pytest
 
+from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide
 
@@ -178,5 +179,59 @@ def test_simsim_stream_ticks_replay() -> None:
         )
         assert dec is not None
         eval_count += 1
-
     assert eval_count == 100
+
+
+def test_simsim_bot1_v4_upgraded_doubt_harvest() -> None:
+    """Simsim Simulation 4: Replay Bot 1 Version 4 with Upgraded Horizon-Proportional Doubt Harvest.
+
+    Validates that:
+    1. At 9 minutes (T=540s), a -$10 adverse spot dip is classified as normal Brownian noise
+       and position is HELD.
+    2. At 90 seconds (T=90s), that exact same -$10 adverse spot dip triggers prompt
+       DOUBT_PROFIT_HARVEST exit at $0.75 bid, locking in profit before reversal.
+    """
+    bot1_v4 = Bot1V4DominationEngine(
+        enable_doubt_harvest=True,
+        doubt_threshold=0.55,
+        default_btc_1m_volatility=14.0,
+        enable_take_profit_ceiling=False,
+        enable_dynamic_spot_velocity=False,  # Isolate Rule 5 Doubt Harvest
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T85000")
+    book.yes_book = {Decimal("0.75"): Decimal("50")}
+    book.no_book = {Decimal("0.24"): Decimal("50")}
+
+    # 1. Early in cycle (T=540s / 9 min remaining):
+    early_exit = bot1_v4.evaluate_exit(
+        side=OrderSide.YES,
+        entry_price=Decimal("0.51"),
+        size=1,
+        book=book,
+        time_to_expiry_s=540.0,
+        spot_price=85040.0,  # +$40 moat early in cycle
+        target_strike=85000.0,
+        spot_velocity_3s=-10.0,  # -$10 dip in 3s
+    )
+    # At 9 minutes, noise envelope V_threat ~ $25-$32, doubt score ~ 0.31 < 0.55 hurdle -> HOLD
+    assert early_exit.should_exit is False
+    assert early_exit.exit_reason == "HOLD"
+
+    # 2. Late in cycle (T=90s / 1.5 min remaining):
+    late_exit = bot1_v4.evaluate_exit(
+        side=OrderSide.YES,
+        entry_price=Decimal("0.51"),
+        size=1,
+        book=book,
+        time_to_expiry_s=90.0,
+        spot_price=85010.0,  # +$10 thin moat late in cycle
+        target_strike=85000.0,
+        spot_velocity_3s=-10.0,  # Exact same -$10 dip
+    )
+    # At 90 seconds, noise envelope V_threat ~ $14, doubt score ~ 0.62 >= 0.55 hurdle -> DOUBT_PROFIT_HARVEST
+    assert late_exit.should_exit is True
+    assert late_exit.exit_reason == "DOUBT_PROFIT_HARVEST"
+    assert late_exit.exit_price == Decimal("0.75")
+    assert "DOUBT-HARVEST TRIGGERED" in late_exit.rationale
+

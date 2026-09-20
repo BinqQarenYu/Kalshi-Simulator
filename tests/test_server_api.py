@@ -103,7 +103,7 @@ def test_place_and_close_order_endpoint(client: TestClient) -> None:
     client.post("/api/reset", json={"capital": 10000.0})
     with client:
         # Place order
-        order_res = client.post("/api/orders", json={"side": "yes", "size": 10, "order_type": "market"})
+        order_res = client.post("/api/orders", json={"side": "yes", "size": 10, "order_type": "market", "execution_mode": "paper"})
         assert order_res.status_code == 200
         order_data = order_res.json()
         assert order_data["success"] is True
@@ -140,6 +140,7 @@ def test_resting_limit_order_lifecycle(client: TestClient) -> None:
                 "order_type": "limit",
                 "limit_price": 0.02,
                 "resting_only": True,
+                "execution_mode": "paper",
             },
         )
         assert resp.status_code == 200
@@ -421,7 +422,7 @@ def test_supported_assets_endpoint(client: TestClient) -> None:
     assert btc_item["series_15m"] == "KXBTC15M"
     assert btc_item["cf_index_id"] == "BRTI"
     assert btc_item["strike_step"] == 25.0
-    assert btc_item["min_spot_diff"] == 10.0
+    assert btc_item["min_spot_diff"] == 35.0
 
 
 def test_select_active_asset_endpoint(client: TestClient) -> None:

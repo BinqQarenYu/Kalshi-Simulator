@@ -48,6 +48,23 @@ class LiveCoordinator:
         except Exception as exc:
             logger.error("Failed to write coordination state: %s", exc)
 
+    def check_kalshi_maintenance(self) -> Tuple[bool, str]:
+        """Check if Kalshi exchange maintenance window is currently active."""
+        maint_path = Path("data") / "kalshi_maintenance.json"
+        if not maint_path.exists():
+            return False, "Online"
+        try:
+            content = maint_path.read_text(encoding="utf-8").strip()
+            if not content:
+                return False, "Online"
+            data = json.loads(content)
+            if data.get("active", False):
+                reason = data.get("reason", "Exchange Maintenance Active")
+                return True, reason
+        except Exception:
+            pass
+        return False, "Online"
+
     def check_trade_permission(
         self,
         ticker: str,
@@ -62,6 +79,14 @@ class LiveCoordinator:
         Returns:
             (is_permitted, rationale)
         """
+        # -1. Kalshi Exchange Maintenance Auto-Pause Gate
+        if is_live:
+            is_maint, maint_reason = self.check_kalshi_maintenance()
+            if is_maint:
+                veto_msg = f"KALSHI MAINTENANCE VETO: {maint_reason}. Live trading automatically paused until exchange reopens."
+                logger.warning("🛡️ [KALSHI MAINTENANCE VETO] %s rejected: %s", bot_id, veto_msg)
+                return False, veto_msg
+
         # 0. Seal of Excellence Pre-Flight Live Authorization Gate
         if is_live:
             from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor

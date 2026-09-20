@@ -71,9 +71,11 @@ class StrategyEvaluationCoordinator:
         # Cooldown and rate-limiting caches
         self._last_macro_eval_time: dict[str, float] = {}
         self._last_dom_eval_time: dict[str, float] = {}
+        self._last_dom_exit_eval_time: dict[str, float] = {}
         self._last_dual_onnx_eval_time: dict[str, float] = {}
         self._last_onnx_ts: dict[str, float] = {}
         self._last_pred_log_time: dict[str, float] = {}
+        self._spot_price_history: dict[str, list[tuple[float, float]]] = {}
         self._eval_count: int = 0
 
     async def evaluate_market(
@@ -161,7 +163,7 @@ class StrategyEvaluationCoordinator:
             )
 
         # BOT 1: 3-Step Domination Bot
-        if active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination"):
+        if active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination", "bot1_v4_domination", "bot1_v4"):
             await self._eval_domination(
                 ticker=ticker,
                 book=book,
@@ -392,10 +394,24 @@ class StrategyEvaluationCoordinator:
         is_live: bool,
         place_order_fn: Callable[..., Any],
     ) -> None:
+        pos = portfolio.get_position(ticker)
+        if pos is not None:
+            await self._eval_domination_exit(
+                ticker=ticker,
+                pos=pos,
+                book=book,
+                market_info=market_info,
+                trades=trades,
+                timeframe=timeframe,
+                portfolio=portfolio,
+                is_live=is_live,
+                place_order_fn=place_order_fn,
+            )
+            return
+
         if (
             not portfolio.circuit_breaker_tripped
             and len(portfolio.open_positions) < MAX_CONCURRENT_POSITIONS
-            and portfolio.get_position(ticker) is None
         ):
             _eval_now = time.monotonic()
             if _eval_now - self._last_dom_eval_time.get(ticker, 0.0) < 3.0:
@@ -480,6 +496,130 @@ class StrategyEvaluationCoordinator:
                     )
             except Exception as exc:
                 logger.debug("Domination bot evaluation error: %s", exc)
+
+    async def _eval_domination_exit(
+        self,
+        ticker: str,
+        pos: Any,
+        book: L2BookState,
+        market_info: Optional[MarketInfo],
+        trades: list[TradeEvent],
+        timeframe: Timeframe,
+        portfolio: Portfolio,
+        is_live: bool,
+        place_order_fn: Callable[..., Any],
+    ) -> None:
+        """Evaluate open position against 50%-75% take-profit scalping and quantitative exit rules."""
+        _eval_now = time.monotonic()
+        if _eval_now - self._last_dom_exit_eval_time.get(ticker, 0.0) < 1.0:
+            return
+        self._last_dom_exit_eval_time[ticker] = _eval_now
+
+        try:
+            target_strike = float(market_info.target_strike if market_info else 78650.0)
+            if self._spot_price_getter:
+                try:
+                    spot_price = float(self._spot_price_getter())
+                except Exception:
+                    spot_price = target_strike
+            else:
+                spot_price = float(market_info.target_strike if market_info else 78650.0)
+
+            time_to_expiry_s = 600.0
+            if market_info and market_info.expiration_time:
+                now_utc = datetime.now(timezone.utc)
+                rem_secs = (market_info.expiration_time - now_utc).total_seconds()
+                time_to_expiry_s = max(0.0, rem_secs)
+
+            vpin_score = 0.15
+            try:
+                vpin_score = float(self._onnx_engine.extractor.compute_vpin())
+            except Exception:
+                pass
+
+            # Track rolling spot price history to compute spot velocity over 3s
+            if ticker not in self._spot_price_history:
+                self._spot_price_history[ticker] = []
+            hist = self._spot_price_history[ticker]
+            hist.append((_eval_now, spot_price))
+            hist = [item for item in hist if _eval_now - item[0] <= 10.0]
+            self._spot_price_history[ticker] = hist
+
+            spot_velocity_3s = 0.0
+            if len(hist) >= 2:
+                oldest_in_window = hist[0]
+                dt = _eval_now - oldest_in_window[0]
+                if dt >= 0.5:
+                    spot_velocity_3s = (spot_price - oldest_in_window[1]) / dt * 3.0
+
+            # Retrieve active strategy engine for exit evaluation
+            bot_engine = getattr(self, "_bot1_v4_engine", None) or self._domination_bot
+            exit_eval = getattr(bot_engine, "exit_evaluator", None) or getattr(bot_engine, "_exit_evaluator", None)
+
+            if exit_eval:
+                exit_decision = exit_eval.evaluate_exit(
+                    position=pos,
+                    side=pos.side,
+                    entry_price=pos.entry_price,
+                    size=pos.size,
+                    book=book,
+                    spot_price=spot_price,
+                    target_strike=target_strike,
+                    time_to_expiry_s=time_to_expiry_s,
+                    vpin=vpin_score,
+                    spot_velocity_3s=spot_velocity_3s,
+                )
+
+                if exit_decision and exit_decision.should_exit:
+                    exit_price = Decimal(str(exit_decision.exit_price or "0.75"))
+                    logger.info(
+                        "🎯 [%s SCALP EXIT TRIGGERED] %-18s | Action: SELL %s 1 ct @ $%s | Reason: %s | Profit: %+.1f%% (%s)",
+                        "LIVE BOT 1 V4" if is_live else "BOT 1 V4",
+                        ticker,
+                        pos.side.value.upper() if hasattr(pos.side, "value") else str(pos.side).upper(),
+                        exit_price,
+                        exit_decision.exit_reason,
+                        exit_decision.profit_pct,
+                        exit_decision.rationale,
+                    )
+
+                    # In paper/simulated mode, execute immediate position close on portfolio
+                    if not is_live:
+                        res = portfolio.close_position(ticker, exit_price)
+                        if res:
+                            self._db_writer.enqueue_settlement_record(
+                                settlement_id=f"SCALP_{ticker}_{int(time.time())}",
+                                ticker=ticker,
+                                side=res.side.value if hasattr(res.side, "value") else str(res.side),
+                                count=res.size,
+                                price=float(res.settlement_price),
+                                final_pnl=float(res.pnl),
+                                outcome=res.outcome,
+                                ending_equity=float(portfolio.equity),
+                                bot_type="bot1_v4_domination",
+                                execution_mode="simulated",
+                            )
+                            if hasattr(bot_engine, "record_completed_turnover"):
+                                bot_engine.record_completed_turnover(ticker)
+                    else:
+                        # In Live Mode: place sell order on Kalshi live REST API
+                        await place_order_fn(
+                            book=book,
+                            ticker=ticker,
+                            side=pos.side,
+                            max_size=pos.size,
+                            timeframe=timeframe,
+                            reasoning=f"Scalp Take-Profit Exit: {exit_decision.exit_reason} ({exit_decision.rationale})",
+                            portfolio=portfolio,
+                            bot_type="bot1_v4_domination",
+                            order_type="limit",
+                            limit_price=exit_price,
+                            action="sell",
+                        )
+                        if hasattr(bot_engine, "record_completed_turnover"):
+                            bot_engine.record_completed_turnover(ticker)
+        except Exception as exc:
+            logger.debug("Domination bot exit evaluation error: %s", exc)
 
     async def _eval_dual_onnx(
         self,

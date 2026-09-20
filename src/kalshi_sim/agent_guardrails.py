@@ -62,6 +62,7 @@ class AgentGuardrails:
             "domination",
             "3step_dominion",
             "three_step_domination",
+            "bot1_v4_domination",
         }
 
         # Telemetry & Audit
@@ -272,13 +273,20 @@ class AgentGuardrails:
                 self._record_rejection("order_in_flight", msg, ticker, now_utc)
                 return False, msg, 0, {"cycle_key": cycle_key}
 
-        # 3. 1-Trade-Per-Cycle & Max-2-Contracts Exposure Lockout Check (Automated bots only)
+        # 3. 1-Trade-Per-Cycle & Multi-Turnover Explorer Check
         already_allocated = self._cycle_contracts_count.get(cycle_key, 0)
-        if is_bot and (cycle_key in self._cycle_locks or already_allocated >= 2):
+        is_brave_explorer = (bot_type == "bot1_v4_domination")
+        max_allowed_turnovers = 4 if is_brave_explorer else 1
+
+        if is_bot and not is_brave_explorer and (cycle_key in self._cycle_locks or already_allocated >= 2):
             locked_trade = self._cycle_locks.get(cycle_key, f"{already_allocated}_contracts")
             msg = f"1-TRADE-PER-CYCLE LOCKOUT: Cycle '{cycle_key}' already has active trade '{locked_trade}'. Further entries blocked until expiration."
             self._record_rejection("cycle_locked", msg, ticker, now_utc)
             return False, msg, 0, {"locked_trade": locked_trade, "already_allocated": already_allocated}
+        elif is_bot and is_brave_explorer and already_allocated >= max_allowed_turnovers:
+            msg = f"SEAL OF THE BRAVE MULTI-TURNOVER CAP REACHED: Cycle '{cycle_key}' reached max brave explorer turnover cap ({already_allocated}/{max_allowed_turnovers})."
+            self._record_rejection("cycle_locked", msg, ticker, now_utc)
+            return False, msg, 0, {"already_allocated": already_allocated, "max_allowed_turnovers": max_allowed_turnovers}
 
         # 4. Mandatory Execution Cooldown Throttle (Automated bots only)
         if is_bot:
@@ -517,6 +525,7 @@ class AgentGuardrails:
         now_mono = time.monotonic()
         self._last_order_ts = now_mono
         self._last_order_ts_by_ticker[ticker] = now_mono
+        self.release_in_flight_intent(ticker)
 
     # -------------------------------------------------------------------------
     # 3. Settlement & Cycle Unlocking

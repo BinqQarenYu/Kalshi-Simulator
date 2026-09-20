@@ -67,7 +67,7 @@ class SealOfExcellence:
         self,
         bot_id: str,
         bot_name: str,
-        seal_status: Literal["SEALED_EXCELLENT", "IN_INCUBATION", "SEAL_DENIED"],
+        seal_status: Literal["SEALED_EXCELLENT", "SEALED_BRAVE", "IN_INCUBATION", "SEAL_DENIED"],
         seal_token: str,
         live_trading_authorized: bool,
         granted_at: str,

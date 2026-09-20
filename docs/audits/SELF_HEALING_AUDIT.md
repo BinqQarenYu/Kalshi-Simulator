@@ -38,3 +38,13 @@
 ### [2026-09-19 13:37:49 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL values require tabular monospace numerals (`font-mono tabular-nums`) to prevent layout jitter and ensure glanceable telemetry.
 
 ### [2026-09-19 14:18:45 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL telemetry lacks mandatory monospace tabular alignment ('font-mono tabular-nums') required for glanceable institutional monitoring.
+
+### [2026-09-20 09:45:05 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL text lacks tabular numerals, violating Article VI Glanceable Telemetry invariants.
+
+### [2026-09-20 10:05:19 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:447`: Financial PnL telemetry lacks tabular numerals, violating institutional glanceability standards.
+
+### [2026-09-20 10:15:33 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:305`: Casting est_price to float inside the returned dictionary violates the strict decimal financial arithmetic invariant, introducing precision drift.
+
+### [2026-09-20 10:45:49 ET] **Deer Architect (UI/UX)** on `LiveTradeModal.tsx:102`: Financial price telemetry lacks mandatory tabular numerals causing layout jitter during rapid updates.
+
+### [2026-09-20 11:16:07 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:310`: Casting est_price to float violates the strict decimal financial arithmetic invariant, risking precision drift.

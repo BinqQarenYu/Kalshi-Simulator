@@ -154,8 +154,17 @@ class KalshiExchangeAdapter(BaseExchangeClient):
     async def check_health(self) -> Tuple[bool, float, str]:
         if not self.inner_client:
             return False, 0.0, "CLIENT_NOT_INITIALIZED"
+        if getattr(self.inner_client, "is_in_maintenance", False):
+            reason = getattr(self.inner_client, "maintenance_reason", "Maintenance Active")
+            self._connected = False
+            return False, 0.0, f"KALSHI_MAINTENANCE_PAUSED: {reason}"
         t0 = time.perf_counter()
         try:
+            if hasattr(self.inner_client, "get_exchange_status"):
+                await self.inner_client.get_exchange_status()
+            if getattr(self.inner_client, "is_in_maintenance", False):
+                self._connected = False
+                return False, 0.0, f"KALSHI_MAINTENANCE_PAUSED: {getattr(self.inner_client, 'maintenance_reason', 'Active')}"
             orders = await self.inner_client.get_open_orders()
             lat = (time.perf_counter() - t0) * 1000.0
             self._latency_ms = lat

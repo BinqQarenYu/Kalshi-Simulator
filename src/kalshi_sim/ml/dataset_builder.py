@@ -58,6 +58,8 @@ class DatasetBuilder:
         sample_stride: int = 1,
         max_frames_per_file: Optional[int] = None,
         max_wait_ratio: Optional[float] = 0.50,
+        labeling_mode: str = "standard",
+        turnover_roi_target: float = 0.40,
     ) -> None:
         self.horizon_steps = horizon_steps
         self.horizon_seconds = horizon_seconds
@@ -67,6 +69,8 @@ class DatasetBuilder:
         self.sample_stride = max(1, sample_stride)
         self.max_frames_per_file = max_frames_per_file
         self.max_wait_ratio = max_wait_ratio
+        self.labeling_mode = labeling_mode
+        self.turnover_roi_target = turnover_roi_target
 
     def parse_tick_file(self, file_path: Union[str, Path]) -> List[TickFrame]:
         """Stream and parse a single JSONL tick recording file."""
@@ -302,12 +306,21 @@ class DatasetBuilder:
             else:
                 diff = future.mid_price - current.mid_price
 
-            if diff >= self.price_diff_threshold:
-                label = 0  # UP
-            elif diff <= -self.price_diff_threshold:
-                label = 1  # DOWN
+            if self.labeling_mode == "turnover_sniper":
+                eff_threshold = max(self.price_diff_threshold, self.price_diff_threshold * (1.0 + self.turnover_roi_target))
+                if diff >= eff_threshold:
+                    label = 0  # UP (Sniper Profit Target Achieved)
+                elif diff <= -eff_threshold:
+                    label = 1  # DOWN (Adverse Movement / Stop Triggered)
+                else:
+                    label = 2  # WAIT (Chop / Dead Zone)
             else:
-                label = 2  # WAIT
+                if diff >= self.price_diff_threshold:
+                    label = 0  # UP
+                elif diff <= -self.price_diff_threshold:
+                    label = 1  # DOWN
+                else:
+                    label = 2  # WAIT
 
             x_list.append(current.features)
             y_list.append(label)

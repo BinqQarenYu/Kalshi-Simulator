@@ -252,9 +252,9 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     );
   }, [sealOfExcellence, selectedBotId]);
 
-  // Once a bot earns the Seal of Excellence, all shadow/paper status is removed & live is authorized
+  // Once a bot earns the Seal of Excellence or Seal of the Brave, shadow/paper status is removed & live is authorized
   const isBotSealed = Boolean(
-    activeSeal?.seal_status === 'SEALED_EXCELLENT' && activeSeal?.live_trading_authorized
+    (activeSeal?.seal_status === 'SEALED_EXCELLENT' || activeSeal?.seal_status === 'SEALED_BRAVE') && activeSeal?.live_trading_authorized
   );
   const effectiveLane = isBotSealed ? 'LANE 1 (LIVE)' : activeProfile.lane;
   const effectiveLaneBadge: 'live' | 'shadow' | 'sim' = isBotSealed ? 'live' : activeProfile.laneBadge;

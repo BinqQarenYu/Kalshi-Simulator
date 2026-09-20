@@ -28,6 +28,12 @@ if str(_SRC_DIR) not in sys.path:
 
 import time
 import uuid
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, AsyncIterator, Literal, Optional
@@ -195,7 +201,10 @@ def resolve_bot_instance(bot_id: str) -> Any:
         if hasattr(state, "bot1_v4_engine") and state.bot1_v4_engine:
             return state.bot1_v4_engine
         from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
-        state.bot1_v4_engine = Bot1V4DominationEngine()
+        onnx_eng = getattr(state, "onnx_engine", None)
+        if onnx_eng is None and hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
+            onnx_eng = getattr(state.dual_onnx_bot, "gateway", None)
+        state.bot1_v4_engine = Bot1V4DominationEngine(onnx_engine=onnx_eng)
         return state.bot1_v4_engine
     return None
 
@@ -935,19 +944,20 @@ async def start_background_simulation() -> None:
     state.data_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize live exchange execution client if credentials exist
-    # SECURITY: Do not use hardcoded fallback API key IDs or secrets in source code
     key_id = os.getenv("KALSHI_API_KEY_ID")
-    key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "./keys/kalshi_demo.pem")
-    if not os.path.exists(key_path) and os.path.exists("./kalshi_demo.pem"):
-        key_path = "./kalshi_demo.pem"
+    private_key_source = os.getenv("KALSHI_PRIVATE_KEY_PATH") or os.getenv("KALSHI_PRIVATE_KEY")
+    if not private_key_source and Path("kalshi_demo.pem").exists():
+        private_key_source = "kalshi_demo.pem"
 
-    order_client = None
-    if key_id and os.path.exists(key_path):
+    order_client = state.order_client
+    if order_client is None and key_id and private_key_source:
         try:
-            order_client = KalshiDemoOrderClient(
+            env = os.getenv("KALSHI_ENV", "live").lower()
+            base_url = DEMO_REST_BASE if env == "demo" else PROD_REST_BASE
+            order_client = KalshiLiveOrderClient(
                 api_key_id=key_id,
-                private_key_path=key_path,
-                base_url=os.getenv("KALSHI_API_HOST", "https://api.elections.kalshi.com/trade-api/v2"),
+                private_key_path=private_key_source,
+                base_url=base_url,
             )
             state.order_client = order_client
             logger.info("Attached Kalshi Live Production Order Client to SimulationAgent for live order routing.")

@@ -52,3 +52,9 @@ Thumbs.db
 # Large Archives & Ticks Dumps
 data/archives/
 *.tar.gz
+
+# Temporary runtime states & logs
+*.log
+temp_state.json
+state.json
+scratch_merge_jules.py

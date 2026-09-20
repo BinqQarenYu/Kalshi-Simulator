@@ -108,7 +108,7 @@ CRYPTO_ASSETS: dict[CryptoAsset, AssetConfig] = {
         series_ticker_15m="KXBTC15M",
         cf_index_id="BRTI",
         price_decimals=2,
-        min_spot_diff=Decimal("10.00"),
+        min_spot_diff=Decimal("35.00"),
         typical_strike_step=Decimal("25.00"),
         typical_1m_volatility=Decimal("14.00"),
     ),
