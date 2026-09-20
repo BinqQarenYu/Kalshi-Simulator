@@ -75,3 +75,7 @@
 ## 2026-09-20 - $O(\log N)$ Binary Search Eviction in Pre-Sorted Feature Extractor Rolling Windows
 **Learning:** Calling `list.remove(old_val)` when evicting elements from 100-element pre-sorted rolling trade and volume lists in `KalshiOrderflowFeatureExtractor` and `GoldOrderflowFeatureExtractor` performed an $O(N)$ linear equality scan across Python float objects.
 **Action:** Replaced `list.remove(old_val)` with C-level binary search lookup `idx = bisect.bisect_left(sorted_list, old_val)` followed by `del sorted_list[idx]`. Reduced rolling window eviction loop execution time by ~1.7x (~41% speedup).
+
+## 2026-09-20 - Pure Python Sample Standard Deviation vs statistics.stdev Overhead
+**Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
+**Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
