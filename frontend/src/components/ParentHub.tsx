@@ -90,8 +90,9 @@ import { SettingsView } from './parenthub/SettingsView';
 import { BotsBenchmarkingView } from './parenthub/BotsBenchmarkingView';
 import { TradeJournalView } from './parenthub/TradeJournalView';
 import { BabyBotRightRail } from './parenthub/BabyBotRightRail';
+import { PerpetualTerminalView } from './perpetual/PerpetualTerminalView';
 
-type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'engine' | 'clob_terminal' | 'omni' | 'arbitrage' | 'settings';
+type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'engine' | 'clob_terminal' | 'omni' | 'arbitrage' | 'perpetuals' | 'settings';
 type ClobTerminalSubNav = 'terminal' | 'heatmap' | 'event_book' | 'spot_book' | 'pine_editor';
 type SettingsSubNav =
   | 'account'
@@ -745,6 +746,24 @@ export const ParentHub: React.FC<ParentHubProps> = ({
             <button
               onClick={() => {
                 soundFX.playClickSound();
+                setPrimaryNav('perpetuals');
+              }}
+              className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
+                primaryNav === 'perpetuals'
+                  ? 'bg-purple-500/15 text-white border-l-2 border-purple-400 font-bold'
+                  : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
+              }`}
+            >
+              <TrendingUp className={`w-4 h-4 ${primaryNav === 'perpetuals' ? 'text-purple-400' : 'text-[#8c9ba5]'}`} />
+              <span>Perpetuals</span>
+              <span className="ml-auto text-[8px] font-mono px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
+                NEW
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                soundFX.playClickSound();
                 setPrimaryNav('settings');
               }}
               className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
@@ -773,6 +792,28 @@ export const ParentHub: React.FC<ParentHubProps> = ({
         <h3 className="text-[10px] font-mono font-bold uppercase tracking-wider text-[#8c9ba5] mb-3">
           {primaryNav.toUpperCase()} SECTIONS
         </h3>
+
+        {/* Sub-nav: Perpetuals */}
+        {primaryNav === 'perpetuals' && (
+          <nav className="flex flex-col gap-1 text-xs">
+            {[
+              { id: 'terminal', label: 'Continuous Terminal' },
+              { id: 'orderbook', label: 'Perp Order Depth' },
+              { id: 'funding', label: 'Funding & Arbitrage' },
+              { id: 'bots', label: 'Perpetual Bot Deck' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => {
+                  soundFX.playClickSound();
+                }}
+                className="w-full px-3 py-2 rounded-md transition-all text-left flex items-center justify-between bg-purple-500/10 text-white border-l-2 border-purple-400 font-bold"
+              >
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </nav>
+        )}
 
         {/* Sub-nav: Settings */}
         {primaryNav === 'settings' && (
@@ -972,6 +1013,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                   ? journalSubNav.toUpperCase()
                   : primaryNav === 'omni'
                   ? 'MULTI-EXCHANGE CAPITAL POOL & ARBITRAGE'
+                  : primaryNav === 'perpetuals'
+                  ? 'CONTINUOUS PERPETUAL TRADING & BOT TERMINAL'
                   : analyticsSubNav.toUpperCase()}
               </b>
             </div>
@@ -985,6 +1028,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               {primaryNav === 'journal' && "TRADE JOURNAL & TODAY'S TIMELINE"}
               {primaryNav === 'analytics' && 'LIVE WORKBENCH & MICROSTRUCTURE RADAR'}
               {primaryNav === 'omni' && 'THE UNIVERSAL MULTI-EXCHANGE TERMINAL & CAPITAL POOL'}
+              {primaryNav === 'perpetuals' && 'PERPETUAL TRADING TERMINAL / LEVERAGE & BOTS'}
             </h1>
           </div>
 
@@ -1077,6 +1121,9 @@ export const ParentHub: React.FC<ParentHubProps> = ({
 
           {/* ARBITRAGE RADAR VIEW */}
           {primaryNav === 'arbitrage' && <ArbitrageRadarView />}
+
+          {/* PERPETUAL TRADING TERMINAL */}
+          {primaryNav === 'perpetuals' && <PerpetualTerminalView />}
 
           {/* 1. SETTINGS VIEW (From HTML Proposal) */}
           {primaryNav === 'settings' && (
