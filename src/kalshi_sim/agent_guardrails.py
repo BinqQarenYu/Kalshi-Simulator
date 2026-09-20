@@ -349,6 +349,8 @@ class AgentGuardrails:
                 "macro_onnx",
                 "macro_trend",
                 "macro_trend_dominion_bot",
+                "bot1_ver_4",
+                "3_step_domination_bot_v4",
             )
         )
         if is_bot:

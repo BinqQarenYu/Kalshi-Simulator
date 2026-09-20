@@ -66,6 +66,7 @@ from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
 from kalshi_sim.ml.gold_continuous_trainer import GoldContinuousTrainer
 from kalshi_sim.shadow_gold_runner import Lane2GoldShadowRunner
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
+from kalshi_sim.ml.domination_bot_v4 import ThreeStepDominationBotV4
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
 from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
@@ -153,6 +154,10 @@ def resolve_bot_instance(bot_id: str) -> Any:
         if not hasattr(state, "domination_bot") or state.domination_bot is None:
             state.domination_bot = ThreeStepDominationBot()
         return state.domination_bot
+    elif bot_id in ("bot1_ver_4", "3_step_domination_bot_v4"):
+        if not hasattr(state, "domination_bot_v4") or state.domination_bot_v4 is None:
+            state.domination_bot_v4 = ThreeStepDominationBotV4()
+        return state.domination_bot_v4
     elif bot_id in ("dominion_2_bot", "dominion2", "dominion_v2"):
         if not hasattr(state, "dominion2_bot") or state.dominion2_bot is None:
             state.dominion2_bot = Dominion2Bot()
@@ -940,6 +945,8 @@ def record_win_loss_event_report(
         target_p = state.sim_agent._portfolio
         if bot_type_resolved in ("3_step_domination_bot", "domination", "dominion"):
             target_p = getattr(state.sim_agent, "_portfolio_domination", target_p)
+        elif bot_type_resolved in ("bot1_ver_4", "3_step_domination_bot_v4"):
+            target_p = getattr(state.sim_agent, "_portfolio_domination_v4", target_p)
         elif bot_type_resolved in ("macro_onnx", "macro_trend_dominion", "macro_trend"):
             target_p = getattr(state.sim_agent, "_portfolio_macro_trend", target_p)
         elif bot_type_resolved in ("dominion_2_bot", "dominion2", "dominion_v2"):
@@ -1675,6 +1682,7 @@ async def live_ticker_and_timer_loop() -> None:
                         active_macro_tag = "macro_onnx" if state.active_strategy_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion") else "macro_trend_dominion"
                         portfolios_to_check = [
                             (getattr(state.sim_agent, "_portfolio_domination", None), "3_step_domination_bot"),
+                            (getattr(state.sim_agent, "_portfolio_domination_v4", None), "bot1_ver_4"),
                             (getattr(state.sim_agent, "_portfolio_macro_trend", None), active_macro_tag),
                             (getattr(state.sim_agent, "_portfolio_dominion2", None), "dominion_2_bot"),
                             (getattr(state.sim_agent, "_portfolio_onnx", None), "onnx_microstructure_bot"),
@@ -3287,8 +3295,10 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
             cand_bot = "macro_trend_dominion"
         elif cand_bot in ("dominion2", "dominion_v2"):
             cand_bot = "dominion_2_bot"
+        elif cand_bot in ("bot1_ver_4", "3_step_domination_bot_v4"):
+            cand_bot = "bot1_ver_4"
 
-        if cand_bot in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
+        if cand_bot in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_ver_4", "onnx_microstructure_bot"):
             # Enforce Pre-Deployment Audit Certification Gate
             if not state.bot_auditor.is_certified(cand_bot):
                 bot_inst = resolve_bot_instance(cand_bot)
@@ -3657,6 +3667,15 @@ class ParametersUpdateRequest(BaseModel):
     macro_trend_window: Optional[str] = Field(default=None, description="Bot 3 macro trend lookback window ('15m+30m', '15m', '1h')")
     take_profit_harvest_cents: Optional[int] = Field(default=None, ge=80, le=98, description="Bot 3 dynamic profit harvest limit (80-98 cents)")
     adaptive_learning_rate: Optional[float] = Field(default=None, ge=0.0, le=0.50, description="Bot 3 error learning adaptation rate (0.0-0.50)")
+    # Bot 1 Ver 4 (3-Step Dominion) Dials
+    enable_every_cycle_engagement: Optional[bool] = Field(default=None, description="Bot 1 v4 Every-Cycle Engagement toggle")
+    profit_harvest_pct: Optional[float] = Field(default=None, ge=0.10, le=2.00, description="Bot 1 v4 Profit Harvest ROI % (+45% target)")
+    enable_stop_loss: Optional[bool] = Field(default=None, description="Bot 1 v4 Stop-Loss toggle")
+    stop_loss_pct: Optional[float] = Field(default=None, ge=0.10, le=0.90, description="Bot 1 v4 Defensive Stop Loss % (-35% target)")
+    min_entry_price: Optional[float] = Field(default=None, ge=0.05, le=0.50, description="Bot 1 v4 Minimum Entry Corridor Floor ($0.18)")
+    entry_cutoff_seconds: Optional[float] = Field(default=None, ge=30.0, le=600.0, description="Bot 1 v4 Entry Cutoff Seconds (240s Playbook 3 Freeze)")
+    brain_high_conviction_threshold: Optional[float] = Field(default=None, ge=0.50, le=0.99, description="Bot 1 v4 High Conviction Threshold (0.70)")
+    brain_min_conviction_threshold: Optional[float] = Field(default=None, ge=0.40, le=0.80, description="Bot 1 v4 Min Conviction Threshold (0.52)")
 
 
 @app.get("/api/bot/parameters")
@@ -3712,6 +3731,24 @@ async def get_bot_parameters() -> dict[str, Any]:
         ):
             if k not in res and k in macro_params:
                 res[k] = macro_params.get(k)
+
+    # Merge bot1_ver_4 strategy dials so client consoles always receive current dials
+    v4_inst = resolve_bot_instance("bot1_ver_4")
+    if v4_inst and hasattr(v4_inst, "get_parameters"):
+        v4_params = v4_inst.get_parameters()
+        for k in (
+            "enable_every_cycle_engagement",
+            "brain_high_conviction_threshold",
+            "brain_min_conviction_threshold",
+            "min_entry_price",
+            "profit_harvest_pct",
+            "enable_stop_loss",
+            "stop_loss_pct",
+            "entry_cutoff_seconds",
+            "max_trades_per_cycle",
+        ):
+            if k not in res and k in v4_params:
+                res[k] = v4_params.get(k)
     return res
 
 
@@ -3758,6 +3795,20 @@ async def update_bot_parameters(req: ParametersUpdateRequest) -> dict[str, Any]:
             m_res = macro_inst.update_parameters(**payload)
             if payload.get("bot_id") == "macro_trend_dominion" or state.active_strategy_bot == "macro_trend_dominion":
                 res.update(m_res)
+
+    # Always keep bot1_ver_4 updated with strategy dials
+    v4_inst = resolve_bot_instance("bot1_ver_4")
+    if v4_inst and hasattr(v4_inst, "update_parameters"):
+        v4_keys = {
+            "enable_every_cycle_engagement", "profit_harvest_pct", "enable_stop_loss",
+            "stop_loss_pct", "min_entry_price", "entry_cutoff_seconds",
+            "brain_high_conviction_threshold", "brain_min_conviction_threshold",
+            "max_trades_per_cycle", "momentum_max_price", "discount_limit_price",
+        }
+        if any(k in payload for k in v4_keys):
+            v4_res = v4_inst.update_parameters(**payload)
+            if payload.get("bot_id") in ("bot1_ver_4", "3_step_domination_bot_v4") or state.active_strategy_bot in ("bot1_ver_4", "3_step_domination_bot_v4"):
+                res.update(v4_res)
 
     target_bot = payload.get("bot_id") or state.active_strategy_bot
     inst = resolve_bot_instance(target_bot)
@@ -4022,6 +4073,22 @@ async def get_bot_strategies() -> dict[str, Any]:
                 ],
             },
             {
+                "id": "bot1_ver_4",
+                "name": "Bot 1 Ver 4 (3-Step Dominion)",
+                "description": "Next-Gen 3-Step Dominion Architecture in Lane 2 Incubator (Paper Mode)",
+                "active": state.active_strategy_bot in ("bot1_ver_4", "3_step_domination_bot_v4"),
+                "badge": "Lane 2 Incubator",
+                "icon": "Zap",
+                "features": [
+                    "3-Step Regime Execution Engine",
+                    "Adverse Selection & Dynamic Spot Drift",
+                    "Digital Option Moneyness CDF",
+                    "VPIN Toxicity Shield",
+                    "Isolated Shadow Portfolio",
+                    "Quarter-Kelly Sizing",
+                ],
+            },
+            {
                 "id": "onnx_microstructure_bot",
                 "name": "ONNX Microstructure Bot",
                 "description": "28-D Deep Feature Tensor + Neural Network Inference + Quarter-Kelly Sizing",
@@ -4053,8 +4120,10 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
         strat_id = "macro_trend_dominion"
     elif strat_id in ("dominion2", "dominion_v2"):
         strat_id = "dominion_2_bot"
+    elif strat_id in ("bot1_ver_4", "3_step_domination_bot_v4"):
+        strat_id = "bot1_ver_4"
 
-    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
+    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_ver_4", "onnx_microstructure_bot"):
         raise HTTPException(status_code=400, detail=f"Invalid strategy_id: {req.strategy_id}")
 
     # Enforce Pre-Deployment Audit Certification Gate
@@ -4828,10 +4897,16 @@ def _matches_bot_id(r: dict[str, Any], target_bot: str) -> bool:
             or "contradiction" in r_strat
             or "dual-brain" in r_strat
         )
+    elif target in ("bot1_ver_4", "3_step_domination_bot_v4", "bot1_v4", "domination_v4"):
+        return (
+            r_bot in ("bot1_ver_4", "3_step_domination_bot_v4", "bot1_v4", "domination_v4")
+            or "bot 1 ver 4" in r_strat
+            or "v4" in r_strat
+        )
     elif target in ("3_step_domination_bot", "domination_bot", "domination", "3_step_dom"):
         return (
             r_bot in ("3_step_domination_bot", "domination_bot", "domination")
-            or ("domination" in r_strat and "macro" not in r_strat and "dominion 2" not in r_strat and "contradiction" not in r_strat)
+            or ("domination" in r_strat and "macro" not in r_strat and "dominion 2" not in r_strat and "contradiction" not in r_strat and "v4" not in r_strat)
         )
     elif target in ("dominion_2_bot", "dominion2", "dominion_v2", "dominion_2"):
         return (
@@ -4938,6 +5013,8 @@ async def get_win_loss_reports_endpoint(
 
     BOT_NAMES = {
         "3_step_domination_bot": "3-Step Dominion v3.2",
+        "bot1_ver_4": "Bot 1 Ver 4 (3-Step Dominion)",
+        "3_step_domination_bot_v4": "Bot 1 Ver 4 (3-Step Dominion)",
         "onnx_macro_v2": "The ONNX Strategy (Dual-Brain)",
         "the_onnx_strategy": "The ONNX Strategy (Dual-Brain)",
         "dual_onnx": "The ONNX Strategy (Dual-Brain)",
@@ -5210,6 +5287,14 @@ async def reset_reports_manually(target: str = "all") -> dict[str, Any]:
             r for r in state.win_loss_reports if r.get("execution_mode") != "live" and r.get("mode") != "live"
         ]
         db_counts = await query_service.reset_history(execution_mode="live")
+    elif target_clean in ("bot1_ver_4", "3_step_domination_bot_v4", "bot1_v4"):
+        state.win_loss_reports = [
+            r
+            for r in state.win_loss_reports
+            if r.get("bot_type") not in ("bot1_ver_4", "3_step_domination_bot_v4")
+            and r.get("strategy_id") not in ("bot1_ver_4", "3_step_domination_bot_v4")
+        ]
+        db_counts = await query_service.reset_history(bot_type="bot1_ver_4")
     elif target_clean in ("3_step_domination_bot", "domination", "3_step"):
         state.win_loss_reports = [
             r
@@ -6369,6 +6454,8 @@ async def spawn_bot(req: BotSpawnRequest) -> dict[str, Any]:
         canonical_strat = "macro_trend_dominion"
     elif bot_id in ("dominion2", "dominion_v2", "dominion_2_bot"):
         canonical_strat = "dominion_2_bot"
+    elif bot_id in ("bot1_ver_4", "3_step_domination_bot_v4"):
+        canonical_strat = "bot1_ver_4"
     elif bot_id in ("3_step_domination_bot", "domination_bot", "domination"):
         canonical_strat = "3_step_domination_bot"
 

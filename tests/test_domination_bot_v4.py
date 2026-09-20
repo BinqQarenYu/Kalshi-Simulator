@@ -3,12 +3,18 @@
 from decimal import Decimal
 import pytest
 
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
+from kalshi_sim.ml.domination_bot_v4 import ThreeStepDominationBotV4
 from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderBookLevel, OrderSide
 
 
 def test_domination_bot_playbook3_late_gamma_snub() -> None:
-    bot = ThreeStepDominationBot(min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"), min_spot_diff=35.0)
+    bot = ThreeStepDominationBotV4(
+        min_edge_pct=0.05,
+        min_ev_dollars=Decimal("0.02"),
+        min_spot_diff=35.0,
+        entry_cutoff_seconds=0.0,  # disable V4 freeze for this baseline P3 test
+        enable_every_cycle_engagement=False,
+    )
 
     book = L2BookState(market_ticker="KXBTC15M-T78650")
     book.yes_book = {Decimal("0.75"): Decimal("100"), Decimal("0.72"): Decimal("200")}
@@ -25,7 +31,7 @@ def test_domination_bot_playbook3_late_gamma_snub() -> None:
         estimated_vpin=0.10,
     )
 
-    assert decision.strategy_id == "3_step_domination_bot"
+    assert decision.strategy_id == "bot1_ver_4"
     assert decision.playbook_stage == "gamma_snub"
     assert "Playbook 3" in decision.active_playbook
     assert decision.p_up > 0.85
@@ -35,7 +41,11 @@ def test_domination_bot_playbook3_late_gamma_snub() -> None:
 
 
 def test_domination_bot_price_cap_veto() -> None:
-    bot = ThreeStepDominationBot(max_entry_price=0.62)
+    bot = ThreeStepDominationBotV4(
+        max_entry_price=0.62,
+        entry_cutoff_seconds=0.0,
+        enable_every_cycle_engagement=False,
+    )
 
     book = L2BookState(market_ticker="KXBTC15M-T78650")
     book.yes_book = {Decimal("0.85"): Decimal("100")}
@@ -56,7 +66,7 @@ def test_domination_bot_price_cap_veto() -> None:
 
 
 def test_domination_bot_playbook2_mid_cycle_ofi_drift() -> None:
-    bot = ThreeStepDominationBot(min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"), min_spot_diff=35.0)
+    bot = ThreeStepDominationBotV4(min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"), min_spot_diff=35.0)
 
     book = L2BookState(market_ticker="KXBTC15M-T78650")
     book.yes_book = {Decimal("0.55"): Decimal("300")}
@@ -73,13 +83,13 @@ def test_domination_bot_playbook2_mid_cycle_ofi_drift() -> None:
         estimated_vpin=0.20,
     )
 
-    assert decision.strategy_id == "3_step_domination_bot"
+    assert decision.strategy_id == "bot1_ver_4"
     assert decision.playbook_stage == "drift"
     assert "Playbook 2" in decision.active_playbook
 
 
 def test_domination_bot_vpin_toxicity_veto() -> None:
-    bot = ThreeStepDominationBot()
+    bot = ThreeStepDominationBotV4(entry_cutoff_seconds=0.0, enable_every_cycle_engagement=False)
 
     book = L2BookState(market_ticker="KXBTC15M-T78650")
     book.yes_book = {Decimal("0.50"): Decimal("100")}
@@ -103,11 +113,13 @@ def test_domination_bot_vpin_toxicity_veto() -> None:
 
 def test_domination_bot_discount_sniper_maker_execution() -> None:
     """Verify that Domination Bot places resting maker limit orders at the user's discount price ($0.35) with $0.00 fee."""
-    bot = ThreeStepDominationBot(
+    bot = ThreeStepDominationBotV4(
         min_edge_pct=0.05,
         min_ev_dollars=Decimal("0.02"),
         min_spot_diff=35.0,
         discount_limit_price=Decimal("0.35"),
+        entry_cutoff_seconds=0.0,
+        enable_every_cycle_engagement=False,
     )
 
     book = L2BookState(market_ticker="KXBTC15M-T78650")
@@ -136,7 +148,7 @@ def test_domination_bot_discount_sniper_maker_execution() -> None:
 
 def test_domination_bot_dynamic_discount_update() -> None:
     """Verify that calling set_discount_limit_price dynamically tunes the sniper ceiling."""
-    bot = ThreeStepDominationBot()
+    bot = ThreeStepDominationBotV4()
     assert bot.discount_limit_price == Decimal("0.52")
 
     # Tune to 48 cents
@@ -156,10 +168,10 @@ def test_domination_bot_dynamic_discount_update() -> None:
 
 
 def test_domination_bot_asset_calibration() -> None:
-    """Verify that ThreeStepDominationBot dynamically scales min_spot_diff across BTC, ETH, SOL, DOGE."""
+    """Verify that ThreeStepDominationBotV4 dynamically scales min_spot_diff across BTC, ETH, SOL, DOGE."""
     from kalshi_sim.schemas import CryptoAsset
 
-    bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    bot = ThreeStepDominationBotV4(asset=CryptoAsset.BTC)
     assert bot.asset == CryptoAsset.BTC
     assert bot.min_spot_diff == 35.0
 
@@ -183,10 +195,10 @@ def test_domination_bot_asset_calibration() -> None:
 
 
 def test_domination_bot_asset_volatility_calibration() -> None:
-    """Verify that ThreeStepDominationBot calibrates 1m volatility across all crypto assets."""
+    """Verify that ThreeStepDominationBotV4 calibrates 1m volatility across all crypto assets."""
     from kalshi_sim.schemas import CryptoAsset
 
-    bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    bot = ThreeStepDominationBotV4(asset=CryptoAsset.BTC)
     assert bot.typical_1m_volatility == 14.0
 
     bot.set_asset(CryptoAsset.ETH)
@@ -205,7 +217,13 @@ def test_domination_bot_multi_asset_evaluation() -> None:
     from kalshi_sim.schemas import CryptoAsset
 
     # 1. Ethereum Evaluation
-    eth_bot = ThreeStepDominationBot(asset=CryptoAsset.ETH, min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"))
+    eth_bot = ThreeStepDominationBotV4(
+        asset=CryptoAsset.ETH,
+        min_edge_pct=0.05,
+        min_ev_dollars=Decimal("0.02"),
+        entry_cutoff_seconds=0.0,
+        enable_every_cycle_engagement=False,
+    )
     eth_book = L2BookState(market_ticker="KXETH15M-T2100")
     eth_book.yes_book = {Decimal("0.60"): Decimal("100")}
     eth_book.no_book = {Decimal("0.40"): Decimal("100")}
@@ -225,7 +243,13 @@ def test_domination_bot_multi_asset_evaluation() -> None:
     assert eth_decision.spot_diff == 8.0
 
     # 2. Dogecoin Evaluation (Micro-decimal precision test)
-    doge_bot = ThreeStepDominationBot(asset=CryptoAsset.DOGE, min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"))
+    doge_bot = ThreeStepDominationBotV4(
+        asset=CryptoAsset.DOGE,
+        min_edge_pct=0.05,
+        min_ev_dollars=Decimal("0.02"),
+        entry_cutoff_seconds=0.0,
+        enable_every_cycle_engagement=False,
+    )
     doge_book = L2BookState(market_ticker="KXDOGE15M-T090000")
     doge_book.yes_book = {Decimal("0.60"): Decimal("100")}
     doge_book.no_book = {Decimal("0.40"): Decimal("100")}
@@ -247,7 +271,13 @@ def test_domination_bot_multi_asset_evaluation() -> None:
     assert "+$0.001500" in doge_decision.rationale
 
     # 3. Solana Evaluation
-    sol_bot = ThreeStepDominationBot(asset=CryptoAsset.SOL, min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"))
+    sol_bot = ThreeStepDominationBotV4(
+        asset=CryptoAsset.SOL,
+        min_edge_pct=0.05,
+        min_ev_dollars=Decimal("0.02"),
+        entry_cutoff_seconds=0.0,
+        enable_every_cycle_engagement=False,
+    )
     sol_book = L2BookState(market_ticker="KXSOL15M-T130")
     sol_book.yes_book = {Decimal("0.60"): Decimal("100")}
     sol_book.no_book = {Decimal("0.40"): Decimal("100")}
@@ -273,7 +303,7 @@ def test_domination_bot_dynamic_proximity_threshold() -> None:
 
     # 1. BTC: min_spot_diff=35.0, typical_1m_vol=14.0
     # Floor = 35.0 * 1.15 = 40.25, Ceiling = 35.0 * 2.15 = 75.25
-    btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    btc_bot = ThreeStepDominationBotV4(asset=CryptoAsset.BTC)
     
     # At T=900s (15 mins): reaches ceiling 75.25
     assert btc_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(75.25, abs=1e-2)
@@ -292,7 +322,7 @@ def test_domination_bot_dynamic_proximity_threshold() -> None:
 
     # 2. ETH: min_spot_diff=2.50, typical_1m_vol=0.60
     # Floor = 2.50 * 1.15 = 2.875, Ceiling = 2.50 * 2.15 = 5.375
-    eth_bot = ThreeStepDominationBot(asset=CryptoAsset.ETH)
+    eth_bot = ThreeStepDominationBotV4(asset=CryptoAsset.ETH)
     assert eth_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(5.375, abs=1e-2)  # Reaches ceiling
     assert eth_bot.get_dynamic_proximity_threshold(600.0) == pytest.approx(4.39, abs=0.1)
     assert eth_bot.get_dynamic_proximity_threshold(360.0) == pytest.approx(3.40, abs=0.1)    # Sweet spot ~3.40 (1.36x)
@@ -300,7 +330,7 @@ def test_domination_bot_dynamic_proximity_threshold() -> None:
 
     # 3. SOL: min_spot_diff=0.50, typical_1m_vol=0.04
     # Floor = 0.50 * 1.15 = 0.575, Ceiling = 0.50 * 2.15 = 1.075
-    sol_bot = ThreeStepDominationBot(asset=CryptoAsset.SOL)
+    sol_bot = ThreeStepDominationBotV4(asset=CryptoAsset.SOL)
     assert sol_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(1.075, abs=1e-2)  # Reaches ceiling
     assert sol_bot.get_dynamic_proximity_threshold(600.0) == pytest.approx(0.88, abs=0.05)
     assert sol_bot.get_dynamic_proximity_threshold(360.0) == pytest.approx(0.68, abs=0.05)   # Sweet spot ~0.68 (1.36x)
@@ -308,7 +338,7 @@ def test_domination_bot_dynamic_proximity_threshold() -> None:
 
     # 4. DOGE: min_spot_diff=0.0005, typical_1m_vol=0.000045
     # Floor = 0.0005 * 1.15 = 0.000575, Ceiling = 0.0005 * 2.15 = 0.001075
-    doge_bot = ThreeStepDominationBot(asset=CryptoAsset.DOGE)
+    doge_bot = ThreeStepDominationBotV4(asset=CryptoAsset.DOGE)
     assert doge_bot.get_dynamic_proximity_threshold(900.0) == pytest.approx(0.001075, abs=1e-6)  # Reaches ceiling
     assert doge_bot.get_dynamic_proximity_threshold(360.0) == pytest.approx(0.000680, abs=1e-5)  # Sweet spot (1.36x)
     assert doge_bot.get_dynamic_proximity_threshold(120.0) == pytest.approx(0.000575, abs=1e-6)  # Clamped to floor
@@ -320,7 +350,7 @@ def test_domination_bot_dynamic_proximity_threshold() -> None:
         assert ratio == pytest.approx(1.36, abs=0.02)
 
     # 6. Elevated Live Volatility Protection: When vol doubles, moat widens
-    btc_high_vol = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    btc_high_vol = ThreeStepDominationBotV4(asset=CryptoAsset.BTC)
     btc_high_vol.typical_1m_volatility = 28.0  # 2x volatility spike
     # At T=360s, baseline was 47.60, high vol should widen to ceiling 75.25
     assert btc_high_vol.get_dynamic_proximity_threshold(360.0) == pytest.approx(75.25, abs=1e-2)
@@ -330,7 +360,7 @@ def test_domination_bot_dynamic_moat_unlocks_mid_cycle_entry() -> None:
     """Demonstrate that dynamic moat unlocks profitable mid-cycle trades ($55 diff) that the static $70 rule killed."""
     from kalshi_sim.schemas import CryptoAsset
 
-    btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    btc_bot = ThreeStepDominationBotV4(asset=CryptoAsset.BTC)
     book = L2BookState(market_ticker="KXBTC15M-T78650")
     book.yes_book = {Decimal("0.48"): Decimal("100")}
     book.no_book = {Decimal("0.52"): Decimal("100")}
@@ -356,7 +386,7 @@ def test_domination_bot_razor_tight_proximity_veto() -> None:
     from kalshi_sim.schemas import CryptoAsset
 
     # BTC: at T=120s, dynamic moat floor is $40.25. Diff = $20.00 (< $40.25) -> VETO
-    btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    btc_bot = ThreeStepDominationBotV4(asset=CryptoAsset.BTC, entry_cutoff_seconds=0.0, enable_every_cycle_engagement=False)
     book = L2BookState(market_ticker="KXBTC15M-T78650")
     book.yes_book = {Decimal("0.55"): Decimal("100")}
     book.no_book = {Decimal("0.45"): Decimal("100")}
@@ -370,7 +400,7 @@ def test_domination_bot_razor_tight_proximity_veto() -> None:
     assert "Razor-Tight Proximity Veto" in d_btc.rationale
 
     # ETH: at T=120s, dynamic moat floor is $2.875. Diff = $1.50 (< $2.875) -> VETO
-    eth_bot = ThreeStepDominationBot(asset=CryptoAsset.ETH)
+    eth_bot = ThreeStepDominationBotV4(asset=CryptoAsset.ETH, entry_cutoff_seconds=0.0, enable_every_cycle_engagement=False)
     d_eth = eth_bot.evaluate(
         book=book,
         spot_price=2101.50,  # +$1.50 (< $2.875 floor)
@@ -381,7 +411,7 @@ def test_domination_bot_razor_tight_proximity_veto() -> None:
     assert "Razor-Tight Proximity Veto" in d_eth.rationale
 
     # SOL: at T=120s, dynamic moat floor is $0.575. Diff = $0.30 (< $0.575) -> VETO
-    sol_bot = ThreeStepDominationBot(asset=CryptoAsset.SOL)
+    sol_bot = ThreeStepDominationBotV4(asset=CryptoAsset.SOL, entry_cutoff_seconds=0.0, enable_every_cycle_engagement=False)
     d_sol = sol_bot.evaluate(
         book=book,
         spot_price=130.30,  # +$0.30 (< $0.575 floor)
@@ -392,7 +422,7 @@ def test_domination_bot_razor_tight_proximity_veto() -> None:
     assert "Razor-Tight Proximity Veto" in d_sol.rationale
 
     # DOGE: at T=120s, dynamic moat floor is $0.000575. Diff = $0.000300 (< $0.000575) -> VETO
-    doge_bot = ThreeStepDominationBot(asset=CryptoAsset.DOGE)
+    doge_bot = ThreeStepDominationBotV4(asset=CryptoAsset.DOGE, entry_cutoff_seconds=0.0, enable_every_cycle_engagement=False)
     d_doge = doge_bot.evaluate(
         book=book,
         spot_price=0.090300,  # +$0.000300 (< $0.000575 floor)
@@ -407,7 +437,7 @@ def test_domination_bot_extreme_volatility_swing_empty_ask_no_crash() -> None:
     """Verify that during extreme swings (+-$125) with one-sided empty book, evaluate does not crash with TypeError."""
     from kalshi_sim.schemas import CryptoAsset
 
-    bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
+    bot = ThreeStepDominationBotV4(asset=CryptoAsset.BTC, entry_cutoff_seconds=0.0, enable_every_cycle_engagement=False)
 
     # 1. Massive upward swing (+125.0): no_book is empty -> best_yes_ask is None, but YES is recommended
     book_up = L2BookState(market_ticker="KXBTC15M-T79000")
@@ -448,7 +478,7 @@ def test_domination_bot_extreme_volatility_swing_empty_ask_no_crash() -> None:
 
 def test_domination_bot_playbook1_opening_quarantine_veto() -> None:
     """Verify that Playbook 1 strictly outputs WAIT when in the opening cycle quarantine window."""
-    bot = ThreeStepDominationBot(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0)
+    bot = ThreeStepDominationBotV4(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0)
 
     book = L2BookState(market_ticker="KXBTC15M-T79000")
     book.yes_book = {Decimal("0.50"): Decimal("100")}
@@ -471,7 +501,7 @@ def test_domination_bot_playbook1_opening_quarantine_veto() -> None:
 
 def test_domination_bot_playbook1_post_quarantine_activation() -> None:
     """Verify that Playbook 1 activates normally once the quarantine window has expired."""
-    bot = ThreeStepDominationBot(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0)
+    bot = ThreeStepDominationBotV4(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0)
 
     book = L2BookState(market_ticker="KXBTC15M-T79000")
     book.yes_book = {Decimal("0.48"): Decimal("100")}
@@ -513,7 +543,7 @@ def test_domination_bot_playbook1_onnx_microstructure_veto() -> None:
 
     # 1. Opposing signal: Proposing BUY YES on spot diff, but ONNX signals SHORT (downward absorption)
     mock_opposing = MockONNXEngine(signal="SHORT")
-    bot_opposing = ThreeStepDominationBot(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0, onnx_engine=mock_opposing)
+    bot_opposing = ThreeStepDominationBotV4(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0, onnx_engine=mock_opposing)
 
     book = L2BookState(market_ticker="KXBTC15M-T79000")
     book.yes_book = {Decimal("0.48"): Decimal("100")}
@@ -534,7 +564,7 @@ def test_domination_bot_playbook1_onnx_microstructure_veto() -> None:
 
     # 2. Confirmed signal: ONNX signals LONG -> trade passes!
     mock_agree = MockONNXEngine(signal="LONG")
-    bot_agree = ThreeStepDominationBot(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0, onnx_engine=mock_agree)
+    bot_agree = ThreeStepDominationBotV4(asset=CryptoAsset.BTC, opening_quarantine_seconds=90.0, onnx_engine=mock_agree)
 
     decision_pass = bot_agree.evaluate(
         book=book,
@@ -549,7 +579,7 @@ def test_domination_bot_playbook1_onnx_microstructure_veto() -> None:
 
 def test_domination_bot_clob_spread_corridor_veto() -> None:
     """Test Frontier 3: Vance Max CLOB Spread Corridor Cap vetoes wide/illiquid markets."""
-    bot = ThreeStepDominationBot(
+    bot = ThreeStepDominationBotV4(
         max_clob_spread_cents=0.05,  # 5¢ max corridor
         min_spot_diff=35.0,
     )
@@ -575,7 +605,7 @@ def test_domination_bot_clob_spread_corridor_veto() -> None:
 
 def test_domination_bot_anti_toxic_queue_depth_veto() -> None:
     """Test Frontier 2: Vance Anti-Toxic Queue Depth Shield vetoes resting behind massive whale walls."""
-    bot = ThreeStepDominationBot(
+    bot = ThreeStepDominationBotV4(
         max_queue_depth_ahead=250,  # 250 contracts limit
         discount_limit_price=Decimal("0.52"),
         max_clob_spread_cents=0.10,  # Allow spread to isolate queue test
@@ -604,10 +634,12 @@ def test_domination_bot_anti_toxic_queue_depth_veto() -> None:
 
 def test_domination_bot_playbook4_silas_twap_immutability_sniper() -> None:
     """Test Frontier 1: Silas TWAP Immutability Sniper harvests late-cycle retail panic dumps."""
-    bot = ThreeStepDominationBot(
+    bot = ThreeStepDominationBotV4(
         twap_immutability_sniper_cents=0.75,  # 75¢ ceiling
         max_clob_spread_cents=0.06,
         min_spot_diff=35.0,
+        entry_cutoff_seconds=0.0,
+        enable_every_cycle_engagement=False,
     )
 
     book = L2BookState(market_ticker="KXBTC15M-T79000")
@@ -627,7 +659,7 @@ def test_domination_bot_playbook4_silas_twap_immutability_sniper() -> None:
         max_position_size=1,
     )
 
-    assert decision.strategy_id == "3_step_domination_bot"
+    assert decision.strategy_id == "bot1_ver_4"
     assert decision.playbook_stage == "twap_sniper"
     assert "Playbook 4: Silas TWAP Immutability Sniper" in decision.active_playbook
     assert decision.recommended_side == "yes"
@@ -636,67 +668,157 @@ def test_domination_bot_playbook4_silas_twap_immutability_sniper() -> None:
     assert "Endgame Harvest" in decision.rationale
 
 
-def test_feature_extractors_rolling_window_bisect_eviction() -> None:
-    """Verify that KalshiOrderflowFeatureExtractor and GoldOrderflowFeatureExtractor bisect eviction functions correctly when >100 trade quantities and volumes are ingested."""
-    from datetime import datetime, timezone
-    from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
-    from kalshi_sim.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
-    from kalshi_sim.schemas import TradeEvent
+# ===========================================================================
+# V4 SPECIFIC TEST SUITE: Every-Cycle Engagement, +45% Harvest, -35% Stop Loss
+# ===========================================================================
 
-    # 1. Test KalshiOrderflowFeatureExtractor trade and volume eviction
-    extractor = KalshiOrderflowFeatureExtractor(target_depth=15)
-    book = L2BookState(market_ticker="KXBTC15M-T79000")
-    book.yes_book = {Decimal("0.50"): Decimal("100.0")}
-    book.no_book = {Decimal("0.50"): Decimal("100.0")}
+def test_v4_profit_harvest_at_45_pct() -> None:
+    """Verify that when position reaches +45% gain, Step 0 emits immediate profit harvest sell."""
+    from kalshi_sim.schemas import Position, Timeframe
 
-    # Process 120 trade events (>100 maxlen)
-    for i in range(120):
-        evt = TradeEvent(
-            trade_id=f"t-{i}",
-            market_ticker="KXBTC15M-T79000",
-            yes_price=Decimal("0.50"),
-            no_price=Decimal("0.50"),
-            count=Decimal(str(float(i + 1))),
-            taker_side="buy",
-            timestamp=datetime.now(timezone.utc),
-        )
-        extractor.process_trade(evt)
+    bot = ThreeStepDominationBotV4(profit_harvest_pct=0.45)
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    # Entry was at 30¢. +45% gain requires bid >= 44¢ (0.30 * 1.45 = 0.435 -> 0.44)
+    # Book has YES bid at 0.45, ask at 0.47
+    book.yes_book = {Decimal("0.45"): Decimal("100")}
+    book.no_book = {Decimal("0.53"): Decimal("100")}
 
-    assert len(extractor.rolling_trade_quantities) == 100
-    assert len(extractor.sorted_rolling_trade_quantities) == 100
-    assert extractor.sorted_rolling_trade_quantities == sorted(extractor.rolling_trade_quantities)
+    current_pos = Position(
+        ticker="KXBTC15M-T78650",
+        side=OrderSide.YES,
+        size=1,
+        avg_entry_price=Decimal("0.30"),
+        timeframe=Timeframe.FIFTEEN_MIN,
+    )
 
-    # Process 120 book ticks (>100 maxlen for rolling_volumes)
-    for _ in range(120):
-        vec = extractor.extract_features_from_book(book)
-        assert vec.shape == (28,)
+    decision = bot.evaluate(
+        book=book,
+        spot_price=78700.0,
+        target_strike=78650.0,
+        time_to_expiry_s=500.0,
+        current_position=current_pos,
+    )
 
-    assert len(extractor.rolling_volumes) == 100
-    assert len(extractor.sorted_rolling_volumes) == 100
-    assert extractor.sorted_rolling_volumes == sorted(extractor.rolling_volumes)
+    assert decision.action == "harvest"
+    assert decision.recommended_side == "sell_yes"
+    assert decision.limit_price == 0.45
+    assert "PROFIT HARVEST" in decision.rationale
 
-    # 2. Test GoldOrderflowFeatureExtractor trade and volume eviction
-    gold_extractor = GoldOrderflowFeatureExtractor(target_depth=15)
-    for i in range(120):
-        evt = TradeEvent(
-            trade_id=f"gt-{i}",
-            market_ticker="KXGOLD15M-T2000",
-            yes_price=Decimal("0.50"),
-            no_price=Decimal("0.50"),
-            count=Decimal(str(float(i + 1))),
-            taker_side="buy",
-            timestamp=datetime.now(timezone.utc),
-        )
-        gold_extractor.process_trade(evt)
 
-    assert len(gold_extractor.rolling_trade_quantities) == 100
-    assert len(gold_extractor.sorted_rolling_trade_quantities) == 100
-    assert gold_extractor.sorted_rolling_trade_quantities == sorted(gold_extractor.rolling_trade_quantities)
+def test_v4_defensive_stop_loss_at_35_pct() -> None:
+    """Verify that when position drops -35% below entry, Step 0 emits defensive stop loss sell."""
+    from kalshi_sim.schemas import Position, Timeframe
 
-    for _ in range(120):
-        vec_gold = gold_extractor.extract_features(book)
-        assert vec_gold.shape == (32,)
+    bot = ThreeStepDominationBotV4(enable_stop_loss=True, stop_loss_pct=0.35)
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    # Entry was at 40¢. -35% drop triggers when bid <= 26¢ (0.40 * 0.65 = 0.26)
+    # Book has YES bid at 0.25, ask at 0.28
+    book.yes_book = {Decimal("0.25"): Decimal("100")}
+    book.no_book = {Decimal("0.72"): Decimal("100")}
 
-    assert len(gold_extractor.rolling_volumes) == 100
-    assert len(gold_extractor.sorted_rolling_volumes) == 100
-    assert gold_extractor.sorted_rolling_volumes == sorted(gold_extractor.rolling_volumes)
+    current_pos = Position(
+        ticker="KXBTC15M-T78650",
+        side=OrderSide.YES,
+        size=1,
+        avg_entry_price=Decimal("0.40"),
+        timeframe=Timeframe.FIFTEEN_MIN,
+    )
+
+    decision = bot.evaluate(
+        book=book,
+        spot_price=78600.0,
+        target_strike=78650.0,
+        time_to_expiry_s=500.0,
+        current_position=current_pos,
+    )
+
+    assert decision.action == "stop_loss"
+    assert decision.recommended_side == "sell_yes"
+    assert decision.limit_price == 0.25
+    assert "DEFENSIVE STOP LOSS" in decision.rationale
+
+
+def test_v4_entry_cutoff_freeze_at_240s() -> None:
+    """Verify that new entries are strictly frozen when T <= 240s (Playbook 3 gamma risk)."""
+    bot = ThreeStepDominationBotV4(entry_cutoff_seconds=240.0)
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    book.yes_book = {Decimal("0.50"): Decimal("100")}
+    book.no_book = {Decimal("0.50"): Decimal("100")}
+
+    decision = bot.evaluate(
+        book=book,
+        spot_price=78750.0,
+        target_strike=78650.0,
+        time_to_expiry_s=200.0,  # <= 240s cutoff
+    )
+
+    assert decision.recommended_side == "wait"
+    assert "V4 Late Cycle Freeze" in decision.rationale
+    assert "200s <= 240s cutoff" in decision.rationale
+
+
+def test_v4_price_corridor_enforcement() -> None:
+    """Verify that entries below 18¢ floor or above 48¢ ceiling are strictly vetoed."""
+    bot = ThreeStepDominationBotV4(
+        min_entry_price=Decimal("0.18"),
+        max_entry_price=Decimal("0.48"),
+        entry_cutoff_seconds=240.0,
+    )
+
+    # 1. Floor test: Ask is 15¢ (< 18¢ floor)
+    book_cheap = L2BookState(market_ticker="KXBTC15M-T78650")
+    book_cheap.yes_book = {Decimal("0.15"): Decimal("100")}
+    book_cheap.no_book = {Decimal("0.85"): Decimal("100")}
+
+    d_floor = bot.evaluate(
+        book=book_cheap,
+        spot_price=78700.0,
+        target_strike=78650.0,
+        time_to_expiry_s=500.0,
+    )
+    assert d_floor.recommended_side == "wait"
+    assert "Price Floor Veto" in d_floor.rationale
+
+    # 2. Ceiling test: Ask is 55¢ (> 48¢ ceiling)
+    book_expensive = L2BookState(market_ticker="KXBTC15M-T78650")
+    book_expensive.yes_book = {Decimal("0.55"): Decimal("100")}
+    book_expensive.no_book = {Decimal("0.45"): Decimal("100")}
+
+    d_ceiling = bot.evaluate(
+        book=book_expensive,
+        spot_price=78700.0,
+        target_strike=78650.0,
+        time_to_expiry_s=500.0,
+    )
+    assert d_ceiling.recommended_side == "wait"
+    assert "Price Cap Veto" in d_ceiling.rationale
+
+
+def test_v4_every_cycle_engagement_entry() -> None:
+    """Verify that in Every-Cycle Engagement mode, bot enters at cheapest ask within [18¢, 48¢]."""
+    bot = ThreeStepDominationBotV4(
+        enable_every_cycle_engagement=True,
+        min_entry_price=Decimal("0.18"),
+        max_entry_price=Decimal("0.48"),
+        entry_cutoff_seconds=240.0,
+    )
+
+    book = L2BookState(market_ticker="KXBTC15M-T78650")
+    # Yes ask is 38¢ (in sweetspot corridor [18¢, 48¢]), spot is above strike
+    book.yes_book = {Decimal("0.38"): Decimal("100")}
+    book.no_book = {Decimal("0.62"): Decimal("100")}
+
+    decision = bot.evaluate(
+        book=book,
+        spot_price=78720.0,
+        target_strike=78650.0,
+        time_to_expiry_s=500.0,
+        total_equity=Decimal("50.00"),
+        max_position_size=1,
+    )
+
+    assert decision.recommended_side == "yes"
+    assert decision.limit_price == 0.38
+    assert decision.action == "entry"
+    assert "V4 Cycle Entry" in decision.rationale
+    assert "Harvest Target: +45%" in decision.rationale

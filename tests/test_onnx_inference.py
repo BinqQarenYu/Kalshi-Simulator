@@ -40,7 +40,7 @@ class TestONNXTradingPipeline(unittest.TestCase):
     def test_onnx_engine_inference(self):
         engine = KalshiONNXEngine(model_path="models/nano_microscope_overhauled.onnx")
         if engine.session is None:
-            self.skipTest("ONNX model file models/nano_microscope_overhauled.onnx not present on local machine")
+            self.skipTest("ONNX model file not present")
 
         res = engine.process_orderbook_tick(self.book)
 

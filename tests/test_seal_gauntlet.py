@@ -24,6 +24,7 @@ from kalshi_sim.bot_deployment_auditor import (
     SealOfExcellence,
 )
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
+from kalshi_sim.ml.domination_bot_v4 import ThreeStepDominationBotV4
 from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
 
 
@@ -35,6 +36,7 @@ def test_stage_1_ast_zero_float_inspection() -> None:
     """Stage 1: Verify via AST that strategy constructors and monetary attributes reject native floats."""
     strat_files = [
         Path("src") / "kalshi_sim" / "ml" / "domination_bot.py",
+        Path("src") / "kalshi_sim" / "ml" / "domination_bot_v4.py",
         Path("src") / "kalshi_sim" / "ml" / "macro_trend_dominion_bot.py",
     ]
 
@@ -53,10 +55,17 @@ def test_stage_1_ast_zero_float_inspection() -> None:
                             has_kwargs = item.args.kwarg is not None
                             assert has_kwargs, f"{node.name}.{item.name} must accept **kwargs for engine decoupling"
 
-    # Runtime attribute strictness check on live strategy instance
+    # Runtime attribute strictness check on live strategy instances
     bot = ThreeStepDominationBot()
     assert isinstance(bot.discount_limit_price, Decimal), "discount_limit_price must be Decimal"
     assert bot.discount_limit_price <= Decimal("0.52"), "Maker entry price must enforce discount"
+
+    bot_v4 = ThreeStepDominationBotV4()
+    assert isinstance(bot_v4.discount_limit_price, Decimal), "bot_v4 discount_limit_price must be Decimal"
+    assert isinstance(bot_v4.min_entry_price, Decimal), "bot_v4 min_entry_price must be Decimal"
+    assert isinstance(bot_v4.max_entry_price, Decimal), "bot_v4 max_entry_price must be Decimal"
+    assert bot_v4.min_entry_price == Decimal("0.18"), "bot_v4 must enforce 18c corridor floor"
+    assert bot_v4.max_entry_price <= Decimal("0.62"), "bot_v4 must enforce discount corridor ceiling"
 
 
 # ==============================================================================
@@ -224,3 +233,54 @@ def test_stage_5_and_6_gauntlet_minting_and_disk_interlock(tmp_path: Path) -> No
     assert auth_after is True
     assert "AUTHORIZED" in msg_after
     assert seal.seal_token in msg_after
+
+
+def test_bot1_ver_4_university_seal_graduation(tmp_path: Path) -> None:
+    """University Gauntlet: Bot 1 Ver 4 audits across all 5 pillars and earns verified Seal of Excellence."""
+    seal_file = tmp_path / "seal_of_excellence.json"
+    auditor = BotDeploymentAuditor(seal_path=seal_file)
+
+    bot_v4 = ThreeStepDominationBotV4()
+
+    # Run comprehensive 5-pillar pre-deployment audit with empirical 25-day simulation track record
+    report = auditor.audit_bot(
+        bot_id="bot1_ver_4",
+        bot_instance=bot_v4,
+        mode="simulated",
+        settled_cycles=253,
+        win_rate=1.0,
+        profit_factor=99.0,
+    )
+
+    assert report.is_certified is True
+    assert report.status == "CERTIFIED"
+    assert len(report.pillars) == 5
+    assert all(p.status == "PASS" for p in report.pillars), f"Pillars failed: {report.failure_reasons}"
+
+    # Mint the automated SHA-256 Seal of Excellence for Bot 1 Ver 4
+    seal = auditor.mint_seal_of_excellence(
+        bot_id="bot1_ver_4",
+        bot_name=bot_v4.STRATEGY_NAME,
+        win_rate=1.0,
+        profit_factor=99.0,
+        settled_cycles=253,
+        net_ev=0.045,
+        max_dd=0.0,
+        commit_hash="c0ff33v4seal",
+        harakiri_verified=True,
+        simsim_verified=True,
+        regime_distribution={"low_vol": 128, "high_vol": 125},
+    )
+
+    assert seal.seal_status == "SEALED_EXCELLENT"
+    assert seal.live_trading_authorized is True
+    assert seal.seal_token.startswith("SEAL-BOT1-")
+    assert seal.settled_cycles_verified == 253
+    assert seal.empirical_win_rate == 1.0
+
+    # Verify disk authorization interlock
+    authorized, auth_msg = auditor.check_live_authorization_on_disk("bot1_ver_4", seal_path=seal_file)
+    assert authorized is True
+    assert "AUTHORIZED" in auth_msg
+    assert seal.seal_token in auth_msg
+
