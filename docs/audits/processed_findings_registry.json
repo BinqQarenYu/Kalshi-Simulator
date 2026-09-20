@@ -1,13 +1,28 @@
 {
   "keys": [
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:404:FLOAT_CAST_LEAK",
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:452:FLOAT_CAST_LEAK",
+    "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\BotReportsDeck.tsx:259:MISSING_TABULAR_NUMS",
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:297:FLOAT_CAST_LEAK",
     "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:246:BOUNDARY_SINGULARITY_RISK",
-    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:310:FLOAT_CAST_LEAK",
+    "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\OrderEntryPanel.tsx:311:RAW_FLOAT_PARSING",
     "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\OrderBookLadder.tsx:149:RAW_FLOAT_PARSING",
     "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:245:BOUNDARY_SINGULARITY_RISK",
-    "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\BotReportsDeck.tsx:259:MISSING_TABULAR_NUMS",
     "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\LiveTradeModal.tsx:102:MISSING_TABULAR_NUMS",
+    "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\OrderEntryPanel.tsx:335:RAW_FLOAT_PARSING",
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:498:FLOAT_CAST_LEAK",
+    "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\OrderEntryPanel.tsx:346:RAW_FLOAT_PARSING",
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:317:BOUNDARY_SINGULARITY_RISK",
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:515:FLOAT_CAST_LEAK",
     "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:305:FLOAT_CAST_LEAK",
+    "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\OrderEntryPanel.tsx:308:RAW_FLOAT_PARSING",
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:310:FLOAT_CAST_LEAK",
     "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\BotReportsDeck.tsx:447:MISSING_TABULAR_NUMS",
-    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:297:FLOAT_CAST_LEAK"
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:468:FLOAT_CAST_LEAK",
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:451:FLOAT_CAST_LEAK",
+    "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\OrderEntryPanel.tsx:357:RAW_FLOAT_PARSING",
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:450:FLOAT_CAST_LEAK",
+    "F:\\012D_TRADE\\Kalshi Simulator\\frontend\\src\\components\\OrderEntryPanel.tsx:324:RAW_FLOAT_PARSING",
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:317:FLOAT_DIVISION_RISK"
   ]
 }
