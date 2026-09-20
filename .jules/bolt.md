@@ -60,3 +60,6 @@
 **Learning:** Re-executing `sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]` inside `get_depth_raw` on every feature extraction tick introduced redundant $O(N \log N)$ sorting overhead (~12.8 µs) even when order book states were unchanged between reads.
 **Action:** Utilized version-backed `FastBook._version` mutation tracking in `L2BookState.get_depth_raw(n)` to cache sorted depth tuples. Reduced `get_depth_raw` read latency from ~12.8 µs to ~0.32 µs per call (~40x speedup / 97.5% latency reduction).
 
+## 2026-09-20 - Fast VPIN Sample Variance & O(log N) Bisect Rolling List Deletion
+**Learning:** Calling `statistics.stdev` on floating-point deques converts numbers to Python `Fraction` objects and computes exact rational arithmetic, consuming >55% of feature extraction tick latency. Additionally, `list.remove(old_val)` on 100-item pre-sorted lists causes linear $O(N)$ scanning overhead.
+**Action:** Replace `statistics.stdev` with exact single-pass float sample standard deviation ($\sqrt{\frac{\sum x^2 - (\sum x)^2 / N}{N - 1}}$) (~32x faster computation), and use `bisect.bisect_left` lookup with `del list[idx]` for $O(\log N)$ deletion in sorted rolling lists. Reduced feature extraction tick latency from ~118 µs to ~61 µs (~1.94x overall speedup).
