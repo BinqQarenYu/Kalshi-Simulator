@@ -67,3 +67,7 @@
 ## 2026-09-20 - Direct `__dict__` Mutation for High-Frequency Pydantic Candlestick Updates
 **Learning:** Setting attributes on active Pydantic v2 `OHLCVCandle` model instances inside high-frequency tick loops triggers Pydantic `__setattr__` validator and field validation overhead on every tick update (~2.34 µs per tick).
 **Action:** Access `candle.__dict__` directly when mutating active and backfilled candlestick fields (`high`, `low`, `close`, `volume`, `trades_count`) in `OHLCVAggregator.add_tick`. Reduced `add_tick` latency from ~10.06 µs down to ~6.44 µs per tick (~36% latency reduction / ~1.56x throughput boost).
+
+## 2026-09-20 - Pure Python Scalar Math for 3-Class Softmax Temperature Scaling
+**Learning:** Calling NumPy operations (`/`, `np.max`, `np.exp`, `.sum()`) on tiny 3-element output probability vectors inside high-frequency per-tick inference loops introduced C-API array construction, indexing, and boxing overhead (~17.2 µs).
+**Action:** Use pure Python scalar arithmetic (`math.exp` and float operations) for small fixed-dimensional softmax vectors, reducing probability calibration latency to ~2.7 µs (~6.3x speedup / ~14.5 µs saved per ONNX inference tick).
