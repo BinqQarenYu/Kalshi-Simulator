@@ -482,13 +482,15 @@ class ServerState:
         ]
 
     def save_persisted_reports(self) -> None:
-        """Persist 15-minute event win/loss reports to disk."""
+        """Persist 15-minute event win/loss reports to disk (capped to latest 100 to prevent token bloat)."""
         try:
             self.data_dir.mkdir(parents=True, exist_ok=True)
             reports_file = self.data_dir / "win_loss_reports.json"
             tmp_file = self.data_dir / "win_loss_reports.tmp"
+            # Keep active hot ledger capped at 100 most recent records
+            capped_reports = self.win_loss_reports[:100] if len(self.win_loss_reports) > 100 else self.win_loss_reports
             with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(self.win_loss_reports, f, indent=2)
+                json.dump(capped_reports, f, indent=2)
             tmp_file.replace(reports_file)
         except Exception as exc:
             logger.warning("Failed to persist win/loss reports: %s", exc)

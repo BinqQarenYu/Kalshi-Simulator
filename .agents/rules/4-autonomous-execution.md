@@ -21,6 +21,7 @@ description: Autonomous engineering discipline, ASVL verification loop, minimal 
 - **No Redundant File Reads**: Never read a file back immediately after editing it.
 - **No Parrot Summaries**: Never re-summarize artifacts in text response after creating them; point the user to the artifact.
 - **Targeted Grep & Line Ranges**: Use `grep_search` and `view_file` with explicit `StartLine`/`EndLine`. Never dump unbounded files or terminal output into context.
+- **Large Data Files & Zero Token Bleed Armor**: NEVER read entire `.jsonl` tick files, `data/win_loss_reports.json`, or `data/archives/` registries with unbounded `view_file`. Always use Python one-liners, `grep_search`, or bounded line slices (`StartLine`/`EndLine`).
 - **Batch-First Tools**: Batch all independent tool calls into a single turn.
 
 ## 4. Debate & Formulation Exemption (Koko / Agent Rebut)
