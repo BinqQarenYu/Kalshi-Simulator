@@ -60,3 +60,6 @@
 **Learning:** Re-executing `sorted(self.yes_book.items(), key=_PRICE_GETTER, reverse=True)[:n]` inside `get_depth_raw` on every feature extraction tick introduced redundant $O(N \log N)$ sorting overhead (~12.8 µs) even when order book states were unchanged between reads.
 **Action:** Utilized version-backed `FastBook._version` mutation tracking in `L2BookState.get_depth_raw(n)` to cache sorted depth tuples. Reduced `get_depth_raw` read latency from ~12.8 µs to ~0.32 µs per call (~40x speedup / 97.5% latency reduction).
 
+## 2026-09-20 - Pure Python Sample Standard Deviation vs statistics.stdev Overhead
+**Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
+**Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
