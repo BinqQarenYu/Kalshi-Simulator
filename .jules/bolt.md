@@ -79,3 +79,7 @@
 ## 2026-09-20 - Pure Python Sample Standard Deviation vs statistics.stdev Overhead
 **Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
 **Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
+
+## 2026-09-21 - O(1) Version-Backed Float Depth Tuple Caching in L2BookState
+**Learning:** Converting order book price and quantity levels from `Decimal` to `float` on every ML feature extraction tick introduced redundant type conversion allocations (~8.4 µs) even when order book states were unchanged between ticks.
+**Action:** Implemented `get_depth_float_tuples(n)` on `L2BookState` with `FastBook._version` mutation tracking and updated `KalshiOrderflowFeatureExtractor` to use this fast path. Reduced depth extraction read latency from ~18.4 µs to ~10.5 µs per tick (~1.75x speedup / ~43% latency reduction).
