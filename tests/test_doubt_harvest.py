@@ -31,7 +31,7 @@ def bot1_v4():
     """Create a configured Bot1V4DominationEngine instance."""
     return Bot1V4DominationEngine(
         enable_doubt_harvest=True,
-        doubt_threshold=0.55,
+        doubt_threshold=0.80,
         upside_capture_ratio_threshold=0.50,
         asymmetric_peak_bid=Decimal("0.88"),
     )
@@ -65,13 +65,13 @@ def test_low_doubt_holds_healthy_trend(bot1_v4, exit_eval):
 
 
 def test_doubt_harvest_triggered_on_reversal(bot1_v4, exit_eval):
-    """When up 50% profit ($0.75 bid) and direction reverses (Doubt >= 0.55), lock in banked profit."""
+    """When up 50% profit ($0.75 bid from $0.50 entry) and direction reverses (Doubt >= 0.80), lock in banked profit."""
     book = _create_mock_l2_book(best_yes_bid="0.75", best_yes_ask="0.77")
 
     # Spot is declining sharply back toward strike, adverse velocity is -20.0 $/3s
     decision = exit_eval.evaluate_exit(
         side=OrderSide.YES,
-        entry_price=Decimal("0.55"),
+        entry_price=Decimal("0.50"),
         size=1,
         book=book,
         time_to_expiry_s=200.0,
@@ -170,20 +170,20 @@ def test_nine_minute_minor_noise_does_not_trigger_doubt_exit(bot1_v4, exit_eval)
     assert decision.should_exit is False
 
 
-def test_ninety_second_adverse_velocity_triggers_prompt_doubt_exit(bot1_v4, exit_eval):
-    """At 90 seconds left (T=90s), that same -$10 dip is a lethal threat; bot locks in profit."""
+def test_ninety_second_big_doubt_adverse_velocity_triggers_exit(bot1_v4, exit_eval):
+    """At 90 seconds left (T=90s), severe adverse velocity with thin moneyness is BIG doubt; bot locks in profit."""
     book = _create_mock_l2_book(best_yes_bid="0.75", best_yes_ask="0.77")
 
-    # With only 90s left, that same -$10.0 adverse velocity threatens expiration settlement
+    # With only 90s left, spot barely above strike (+$2) and -$15 adverse velocity = genuine reversal threat
     decision = exit_eval.evaluate_exit(
         side=OrderSide.YES,
-        entry_price=Decimal("0.55"),
+        entry_price=Decimal("0.50"),
         size=1,
         book=book,
         time_to_expiry_s=90.0,
-        spot_price=78660.0,
+        spot_price=78652.0,
         target_strike=78650.0,
-        spot_velocity_3s=-10.0,
+        spot_velocity_3s=-15.0,  # Severe adverse velocity with thin moneyness = BIG doubt
     )
 
     # Must immediately harvest to protect capital!

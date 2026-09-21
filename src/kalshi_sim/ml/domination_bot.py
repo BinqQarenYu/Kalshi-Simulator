@@ -110,7 +110,7 @@ class ThreeStepDominationBot:
         reentry_cooldown_seconds: float = 15.0,
         enable_lead_deer_peak_harvester: bool = False,
         enable_doubt_harvest: bool = False,
-        doubt_threshold: float = 0.55,
+        doubt_threshold: float = 0.80,
         asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
@@ -156,7 +156,7 @@ class ThreeStepDominationBot:
         self.max_clob_spread_cents = float(max_clob_spread_cents)
         self.enable_lead_deer_peak_harvester = bool(enable_lead_deer_peak_harvester)
         self.enable_doubt_harvest = bool(enable_doubt_harvest)
-        self.doubt_threshold = 0.55
+        self.doubt_threshold = float(doubt_threshold)
         self.upside_capture_ratio_threshold = 0.50
         self.asymmetric_peak_bid = Decimal("0.88")
 

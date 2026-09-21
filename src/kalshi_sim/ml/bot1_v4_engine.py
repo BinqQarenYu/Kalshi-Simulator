@@ -95,7 +95,7 @@ class Bot1V4DominationEngine:
         velocity_z_score_threshold: float = 2.50,
         reentry_cooldown_seconds: float = 15.0,
         enable_doubt_harvest: bool = True,
-        doubt_threshold: float = 0.55,
+        doubt_threshold: float = 0.80,
         upside_capture_ratio_threshold: float = 0.50,
         asymmetric_peak_bid: Decimal = Decimal("0.88"),
         onnx_engine: Optional[Any] = None,

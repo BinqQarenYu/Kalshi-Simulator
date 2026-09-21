@@ -421,19 +421,19 @@ class DominationExitEvaluator:
         doubt_score = min(1.0, (0.55 * doubt_brain + 0.45 * doubt_vel) * (1.0 + omega_t))
 
         enable_doubt_harvest = getattr(bot, "enable_doubt_harvest", True)
-        doubt_thresh = getattr(bot, "doubt_threshold", 0.55)
+        doubt_thresh = getattr(bot, "doubt_threshold", 0.80)
         upside_thresh = getattr(bot, "upside_capture_ratio_threshold", 0.50)
         asymmetric_peak = getattr(bot, "asymmetric_peak_bid", Decimal("0.88"))
 
         twap_safe_itm = False
-        if time_to_expiry_s <= 30.0 and twap_60s is not None and twap_60s > 0.0 and target_strike > 0.0:
+        if time_to_expiry_s <= 120.0 and twap_60s is not None and twap_60s > 0.0 and target_strike > 0.0:
             delta_twap = (twap_60s - target_strike) if side_is_yes else (target_strike - twap_60s)
             if delta_twap >= 10.0:
                 twap_safe_itm = True
 
         if enable_doubt_harvest and net_pnl_per_ct > Decimal("0.04") and not twap_safe_itm:
             # Condition A: 50% Profit reached AND Directional Reversal Doubt confirmed
-            if (upside_capture_ratio >= upside_thresh or best_bid >= Decimal("0.75")) and doubt_score >= doubt_thresh:
+            if upside_capture_ratio >= upside_thresh and doubt_score >= doubt_thresh:
                 return DominationExitDecision(
                     should_exit=True,
                     exit_reason="DOUBT_PROFIT_HARVEST",

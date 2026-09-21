@@ -183,17 +183,17 @@ def test_simsim_stream_ticks_replay() -> None:
 
 
 def test_simsim_bot1_v4_upgraded_doubt_harvest() -> None:
-    """Simsim Simulation 4: Replay Bot 1 Version 4 with Upgraded Horizon-Proportional Doubt Harvest.
+    """Simsim Simulation 4: Replay Bot 1 Version 4 with BIG Doubt Harvest.
 
     Validates that:
     1. At 9 minutes (T=540s), a -$10 adverse spot dip is classified as normal Brownian noise
        and position is HELD.
-    2. At 90 seconds (T=90s), that exact same -$10 adverse spot dip triggers prompt
-       DOUBT_PROFIT_HARVEST exit at $0.75 bid, locking in profit before reversal.
+    2. At 90 seconds (T=90s), severe adverse velocity with thin moneyness represents
+       BIG doubt (doubt_score >= 0.80) and triggers DOUBT_PROFIT_HARVEST exit.
     """
     bot1_v4 = Bot1V4DominationEngine(
         enable_doubt_harvest=True,
-        doubt_threshold=0.55,
+        doubt_threshold=0.80,
         default_btc_1m_volatility=14.0,
         enable_take_profit_ceiling=False,
         enable_dynamic_spot_velocity=False,  # Isolate Rule 5 Doubt Harvest
@@ -206,7 +206,7 @@ def test_simsim_bot1_v4_upgraded_doubt_harvest() -> None:
     # 1. Early in cycle (T=540s / 9 min remaining):
     early_exit = bot1_v4.evaluate_exit(
         side=OrderSide.YES,
-        entry_price=Decimal("0.51"),
+        entry_price=Decimal("0.50"),
         size=1,
         book=book,
         time_to_expiry_s=540.0,
@@ -214,22 +214,22 @@ def test_simsim_bot1_v4_upgraded_doubt_harvest() -> None:
         target_strike=85000.0,
         spot_velocity_3s=-10.0,  # -$10 dip in 3s
     )
-    # At 9 minutes, noise envelope V_threat ~ $25-$32, doubt score ~ 0.31 < 0.55 hurdle -> HOLD
+    # At 9 minutes, noise envelope is wide, doubt score stays low -> HOLD
     assert early_exit.should_exit is False
     assert early_exit.exit_reason == "HOLD"
 
     # 2. Late in cycle (T=90s / 1.5 min remaining):
     late_exit = bot1_v4.evaluate_exit(
         side=OrderSide.YES,
-        entry_price=Decimal("0.51"),
+        entry_price=Decimal("0.50"),
         size=1,
         book=book,
         time_to_expiry_s=90.0,
-        spot_price=85010.0,  # +$10 thin moat late in cycle
+        spot_price=85002.0,  # +$2 thin moat late in cycle (BIG doubt territory)
         target_strike=85000.0,
-        spot_velocity_3s=-10.0,  # Exact same -$10 dip
+        spot_velocity_3s=-15.0,  # Severe adverse velocity = BIG doubt
     )
-    # At 90 seconds, noise envelope V_threat ~ $14, doubt score ~ 0.62 >= 0.55 hurdle -> DOUBT_PROFIT_HARVEST
+    # At 90 seconds with thin moat + severe velocity, doubt_score >= 0.80 -> DOUBT_PROFIT_HARVEST
     assert late_exit.should_exit is True
     assert late_exit.exit_reason == "DOUBT_PROFIT_HARVEST"
     assert late_exit.exit_price == Decimal("0.75")
