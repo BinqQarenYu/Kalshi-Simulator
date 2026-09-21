@@ -16,6 +16,10 @@
 
 ## 📜 Architectural Learnings & Micro-UX Log
 
+## 2026-09-21 - Live Scanner Status Regions & Async Action Controls
+**Learning:** Live monitoring views with async toggle controls (such as the Cross-Exchange Arbitrage Radar) require explicit `role="status"` with `aria-live="polite"` for automatic screen reader announcements of status transitions (e.g., PAUSED vs SCANNING vs MISPRICING DETECTED), alongside loading states (`isToggling`) and focus-visible rings (`focus-visible:ring-2 focus-visible:ring-cyan-400`) on the toggle button.
+**Action:** When building live monitoring panels with toggle buttons, wrap live status badges in `role="status"` elements with `aria-live="polite"` and add `aria-label`, async loading spinners, and focus rings to action buttons.
+
 **Learning:** Hardware-style hold-to-activate controls (such as the 1.5-second hold-to-arm emergency kill switch in BabyBotConsole) that only handle mouse or touch events (`onMouseDown`/`onTouchStart`) are completely unusable for keyboard-only users and screen reader navigation. Supplying `onKeyDown` and `onKeyUp` listeners for `Space` and `Enter` keys (with `e.preventDefault()` and `!e.repeat` guards), adding `onBlur` safety cleanup, explicit descriptive `aria-label` instructions, and `focus-visible:ring-2` focus outlines ensures emergency safety controls remain fully accessible to all users.
 **Action:** When implementing hold-to-activate or long-press controls, always wire `onKeyDown` and `onKeyUp` listeners for `Space` and `Enter`, add `onBlur` state reset, provide explicit `aria-label` instructions on how to trigger the hold action via keyboard, and include `focus-visible:ring-2` styling.
 
