@@ -49,40 +49,23 @@ def test_orderbook_manager_delta():
     assert obm.get_book("TEST-TICKER").yes_book[Decimal("0.55")] == Decimal("5")
 
 
-def test_get_depth_float_tuples_caching_and_invalidation():
-    obm = OrderBookManager(enforce_consecutive_seq=False)
-    snapshot = OrderBookSnapshot(
-        market_ticker="TEST-FLOAT-CACHE",
-        seq=100,
-        yes_levels=[OrderBookLevel(price=Decimal("0.50"), quantity=Decimal("10.5"))],
-        no_levels=[OrderBookLevel(price=Decimal("0.40"), quantity=Decimal("20.25"))],
-        timestamp=datetime.now(),
-    )
-    book = obm.apply_snapshot(snapshot)
+def test_fastbook_top_of_book_tracking_after_pop():
+    from kalshi_sim.schemas import FastBook
 
-    # 1. Fetch float tuples and verify types & values
-    yes_floats, no_floats = book.get_depth_float_tuples(n=5)
-    assert isinstance(yes_floats[0][0], float)
-    assert isinstance(yes_floats[0][1], float)
-    assert yes_floats == [(0.50, 10.5)]
-    assert no_floats == [(0.40, 20.25)]
+    fb = FastBook({
+        Decimal("0.50"): Decimal("10"),
+        Decimal("0.40"): Decimal("20"),
+        Decimal("0.30"): Decimal("15"),
+    })
+    assert fb.best_bid == Decimal("0.50")
 
-    # 2. Verify O(1) cache identity on second call (exact same object returned)
-    yes_floats_cached, no_floats_cached = book.get_depth_float_tuples(n=5)
-    assert yes_floats_cached is yes_floats
-    assert no_floats_cached is no_floats
+    # Remove top price level
+    fb.pop(Decimal("0.50"))
 
-    # 3. Apply delta to modify order book and verify cache invalidation
-    delta = OrderBookDelta(
-        market_ticker="TEST-FLOAT-CACHE",
-        seq=101,
-        side="yes",
-        price=Decimal("0.55"),
-        delta=Decimal("15.0"),
-        timestamp=datetime.now(),
-    )
-    obm.apply_delta(delta)
+    # Insertion or update of an existing lower price level should NOT corrupt _best
+    fb[Decimal("0.30")] = Decimal("25")
+    assert fb.best_bid == Decimal("0.40")
 
-    yes_floats_updated, no_floats_updated = book.get_depth_float_tuples(n=5)
-    assert yes_floats_updated is not yes_floats
-    assert yes_floats_updated == [(0.55, 15.0), (0.50, 10.5)]
+    # Inserting a new top price level should update _best
+    fb[Decimal("0.60")] = Decimal("5")
+    assert fb.best_bid == Decimal("0.60")

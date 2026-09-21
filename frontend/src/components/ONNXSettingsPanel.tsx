@@ -409,7 +409,7 @@ export const ONNXSettingsPanel: React.FC = () => {
           <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
           <div>
             <div className="text-[9px] text-[#8c9ba5] uppercase">Cross-Brain Skew</div>
-            <div className={`font-bold font-mono ${params.cross_brain_skew_ms! > params.max_temporal_skew_ms! ? 'text-rose-400' : 'text-cyan-300'}`}>
+            <div className={`font-bold font-mono tabular-nums ${params.cross_brain_skew_ms! > params.max_temporal_skew_ms! ? 'text-rose-400' : 'text-cyan-300'}`}>
               {params.cross_brain_skew_ms?.toFixed(1)}ms {params.is_temporally_synced ? '✅' : '⚠️'}
             </div>
           </div>
@@ -419,7 +419,7 @@ export const ONNXSettingsPanel: React.FC = () => {
           <Activity className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
           <div>
             <div className="text-[9px] text-[#8c9ba5] uppercase">Realized 1M Vol (σ)</div>
-            <div className="font-bold font-mono text-emerald-300">
+            <div className="font-bold font-mono tabular-nums text-emerald-300">
               ${params.current_atr?.toFixed(2)}/min
             </div>
           </div>
@@ -666,13 +666,13 @@ export const ONNXSettingsPanel: React.FC = () => {
                   type="button"
                   aria-label="View Min Neural Confidence guidance"
                   onClick={() => setActiveInfo('min_confidence')}
-                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded"
+                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
                   title="View Parameter Guidance"
                 >
                   <Info className="w-3 h-3" />
                 </button>
               </label>
-              <span className="font-mono text-cyan-400">{((params.min_confidence || 0.7) * 100).toFixed(0)}%</span>
+              <span className="font-mono tabular-nums text-cyan-400">{((params.min_confidence || 0.7) * 100).toFixed(0)}%</span>
             </div>
             <input
               id="min-confidence-slider"
@@ -682,6 +682,10 @@ export const ONNXSettingsPanel: React.FC = () => {
               max="0.95"
               step="0.01"
               value={params.min_confidence || 0.70}
+              aria-valuemin={0.50}
+              aria-valuemax={0.95}
+              aria-valuenow={params.min_confidence || 0.70}
+              aria-valuetext={`${((params.min_confidence || 0.7) * 100).toFixed(0)} percent conviction`}
               onChange={(e) => handleChange('min_confidence', parseFloat(e.target.value))}
               className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
@@ -701,13 +705,13 @@ export const ONNXSettingsPanel: React.FC = () => {
                   type="button"
                   aria-label="View Minimum Expected Value guidance"
                   onClick={() => setActiveInfo('min_ev')}
-                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded"
+                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
                   title="View Parameter Guidance"
                 >
                   <Info className="w-3 h-3" />
                 </button>
               </label>
-              <span className="font-mono text-emerald-400">+${(params.min_ev_dollars || 0.02).toFixed(2)}</span>
+              <span className="font-mono tabular-nums text-emerald-400">+${(params.min_ev_dollars || 0.02).toFixed(2)}</span>
             </div>
             <input
               id="min-ev-slider"
@@ -717,6 +721,10 @@ export const ONNXSettingsPanel: React.FC = () => {
               max="0.20"
               step="0.01"
               value={params.min_ev_dollars || 0.02}
+              aria-valuemin={0.01}
+              aria-valuemax={0.20}
+              aria-valuenow={params.min_ev_dollars || 0.02}
+              aria-valuetext={`+$${(params.min_ev_dollars || 0.02).toFixed(2)} expected value per contract`}
               onChange={(e) => handleChange('min_ev_dollars', parseFloat(e.target.value))}
               className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
             />
@@ -747,13 +755,13 @@ export const ONNXSettingsPanel: React.FC = () => {
                   type="button"
                   aria-label="View Entry Discount Depth guidance"
                   onClick={() => setActiveInfo('entry_discount')}
-                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded"
+                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
                   title="View Parameter Guidance"
                 >
                   <Info className="w-3 h-3" />
                 </button>
               </label>
-              <span className="font-mono text-amber-300">${(params.entry_discount_depth || 0.52).toFixed(2)}</span>
+              <span className="font-mono tabular-nums text-amber-300">${(params.entry_discount_depth || 0.52).toFixed(2)}</span>
             </div>
             <input
               id="entry-discount-slider"
@@ -763,6 +771,10 @@ export const ONNXSettingsPanel: React.FC = () => {
               max="0.55"
               step="0.01"
               value={params.entry_discount_depth || 0.52}
+              aria-valuemin={0.15}
+              aria-valuemax={0.55}
+              aria-valuenow={params.entry_discount_depth || 0.52}
+              aria-valuetext={`$${(params.entry_discount_depth || 0.52).toFixed(2)} limit price ceiling`}
               onChange={(e) => handleChange('entry_discount_depth', parseFloat(e.target.value))}
               className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             />
@@ -782,13 +794,13 @@ export const ONNXSettingsPanel: React.FC = () => {
                   type="button"
                   aria-label="View Momentum Max Price Ceiling guidance"
                   onClick={() => setActiveInfo('momentum_max')}
-                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded"
+                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
                   title="View Parameter Guidance"
                 >
                   <Info className="w-3 h-3" />
                 </button>
               </label>
-              <span className="font-mono text-cyan-300">${(params.momentum_max_price || 0.62).toFixed(2)}</span>
+              <span className="font-mono tabular-nums text-cyan-300">${(params.momentum_max_price || 0.62).toFixed(2)}</span>
             </div>
             <input
               id="momentum-max-slider"
@@ -798,6 +810,10 @@ export const ONNXSettingsPanel: React.FC = () => {
               max="0.75"
               step="0.01"
               value={params.momentum_max_price || 0.62}
+              aria-valuemin={0.50}
+              aria-valuemax={0.75}
+              aria-valuenow={params.momentum_max_price || 0.62}
+              aria-valuetext={`$${(params.momentum_max_price || 0.62).toFixed(2)} momentum taker ceiling`}
               onChange={(e) => handleChange('momentum_max_price', parseFloat(e.target.value))}
               className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
@@ -817,13 +833,13 @@ export const ONNXSettingsPanel: React.FC = () => {
                   type="button"
                   aria-label="View Taker Cross EV Hurdle guidance"
                   onClick={() => setActiveInfo('taker_ev')}
-                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded"
+                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
                   title="View Parameter Guidance"
                 >
                   <Info className="w-3 h-3" />
                 </button>
               </label>
-              <span className="font-mono text-emerald-300">+${(params.taker_cross_ev_threshold || 0.04).toFixed(2)}</span>
+              <span className="font-mono tabular-nums text-emerald-300">+${(params.taker_cross_ev_threshold || 0.04).toFixed(2)}</span>
             </div>
             <input
               id="taker-ev-slider"
@@ -833,6 +849,10 @@ export const ONNXSettingsPanel: React.FC = () => {
               max="0.15"
               step="0.01"
               value={params.taker_cross_ev_threshold || 0.04}
+              aria-valuemin={0.01}
+              aria-valuemax={0.15}
+              aria-valuenow={params.taker_cross_ev_threshold || 0.04}
+              aria-valuetext={`+$${(params.taker_cross_ev_threshold || 0.04).toFixed(2)} taker expected value hurdle`}
               onChange={(e) => handleChange('taker_cross_ev_threshold', parseFloat(e.target.value))}
               className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
             />
@@ -852,13 +872,13 @@ export const ONNXSettingsPanel: React.FC = () => {
                   type="button"
                   aria-label="View Dynamic Moat Multiplier guidance"
                   onClick={() => setActiveInfo('dynamic_moat')}
-                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded"
+                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
                   title="View Parameter Guidance"
                 >
                   <Info className="w-3 h-3" />
                 </button>
               </label>
-              <span className="font-mono text-amber-300">{(params.dynamic_moat_multiplier || 1.36).toFixed(2)}x</span>
+              <span className="font-mono tabular-nums text-amber-300">{(params.dynamic_moat_multiplier || 1.36).toFixed(2)}x</span>
             </div>
             <input
               id="dynamic-moat-slider"
@@ -868,6 +888,10 @@ export const ONNXSettingsPanel: React.FC = () => {
               max="2.50"
               step="0.05"
               value={params.dynamic_moat_multiplier || 1.36}
+              aria-valuemin={1.00}
+              aria-valuemax={2.50}
+              aria-valuenow={params.dynamic_moat_multiplier || 1.36}
+              aria-valuetext={`${(params.dynamic_moat_multiplier || 1.36).toFixed(2)} times dynamic volatility expansion`}
               onChange={(e) => handleChange('dynamic_moat_multiplier', parseFloat(e.target.value))}
               className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             />
@@ -898,13 +922,13 @@ export const ONNXSettingsPanel: React.FC = () => {
                   type="button"
                   aria-label="View Cross-Brain Temporal Skew Guard guidance"
                   onClick={() => setActiveInfo('temporal_skew')}
-                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded"
+                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
                   title="View Parameter Guidance"
                 >
                   <Info className="w-3 h-3" />
                 </button>
               </label>
-              <span className="font-mono text-purple-400">{(params.max_temporal_skew_ms || 1000).toFixed(0)}ms</span>
+              <span className="font-mono tabular-nums text-purple-400">{(params.max_temporal_skew_ms || 1000).toFixed(0)}ms</span>
             </div>
             <input
               id="temporal-skew-slider"
@@ -914,6 +938,10 @@ export const ONNXSettingsPanel: React.FC = () => {
               max="3000"
               step="50"
               value={params.max_temporal_skew_ms || 1000}
+              aria-valuemin={200}
+              aria-valuemax={3000}
+              aria-valuenow={params.max_temporal_skew_ms || 1000}
+              aria-valuetext={`${(params.max_temporal_skew_ms || 1000).toFixed(0)} milliseconds max skew`}
               onChange={(e) => handleChange('max_temporal_skew_ms', parseFloat(e.target.value))}
               className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-purple-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
             />
@@ -933,13 +961,13 @@ export const ONNXSettingsPanel: React.FC = () => {
                   type="button"
                   aria-label="View Gamma Cliff Purge Timer guidance"
                   onClick={() => setActiveInfo('gamma_cliff')}
-                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded"
+                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
                   title="View Parameter Guidance"
                 >
                   <Info className="w-3 h-3" />
                 </button>
               </label>
-              <span className="font-mono text-rose-400">{(params.gamma_cliff_seconds || 90).toFixed(0)}s rem</span>
+              <span className="font-mono tabular-nums text-rose-400">{(params.gamma_cliff_seconds || 90).toFixed(0)}s rem</span>
             </div>
             <input
               id="gamma-cliff-slider"
@@ -949,6 +977,10 @@ export const ONNXSettingsPanel: React.FC = () => {
               max="180"
               step="5"
               value={params.gamma_cliff_seconds || 90}
+              aria-valuemin={30}
+              aria-valuemax={180}
+              aria-valuenow={params.gamma_cliff_seconds || 90}
+              aria-valuetext={`${(params.gamma_cliff_seconds || 90).toFixed(0)} seconds remaining before gamma purge`}
               onChange={(e) => handleChange('gamma_cliff_seconds', parseFloat(e.target.value))}
               className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-rose-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
             />
@@ -1033,13 +1065,13 @@ export const ONNXSettingsPanel: React.FC = () => {
                   type="button"
                   aria-label="View VPIN Toxicity Cutoff guidance"
                   onClick={() => setActiveInfo('vpin_toxicity')}
-                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded"
+                  className="text-cyan-400 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
                   title="View Parameter Guidance"
                 >
                   <Info className="w-3 h-3" />
                 </button>
               </label>
-              <span className="font-mono text-cyan-300">{Number(params.vpin_toxic_threshold || 0.70).toFixed(2)}</span>
+              <span className="font-mono tabular-nums text-cyan-300">{Number(params.vpin_toxic_threshold || 0.70).toFixed(2)}</span>
             </div>
             <input
               id="vpin-toxicity-slider"
@@ -1049,6 +1081,10 @@ export const ONNXSettingsPanel: React.FC = () => {
               max="0.90"
               step="0.01"
               value={params.vpin_toxic_threshold || 0.70}
+              aria-valuemin={0.50}
+              aria-valuemax={0.90}
+              aria-valuenow={params.vpin_toxic_threshold || 0.70}
+              aria-valuetext={`${Number(params.vpin_toxic_threshold || 0.70).toFixed(2)} volume synchronized toxicity cutoff`}
               onChange={(e) => handleChange('vpin_toxic_threshold', parseFloat(e.target.value))}
               className="w-full h-1.5 bg-[#21262d] rounded-lg appearance-none cursor-pointer accent-cyan-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
             />
@@ -1109,7 +1145,8 @@ export const ONNXSettingsPanel: React.FC = () => {
           role="dialog"
           aria-modal="true"
           aria-labelledby="param-doc-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in"
+          tabIndex={-1}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in focus-visible:outline-none"
           onClick={() => setActiveInfo(null)}
         >
           <div
@@ -1118,7 +1155,7 @@ export const ONNXSettingsPanel: React.FC = () => {
           >
             <div className="flex items-center justify-between border-b border-[#262d35] pb-2.5">
               <div className="flex items-center gap-2">
-                <span id="param-doc-title" className="font-bold text-white text-sm">{PARAM_DOCS[activeInfo].title}</span>
+                <h3 id="param-doc-title" className="font-bold text-white text-sm">{PARAM_DOCS[activeInfo].title}</h3>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
                   {PARAM_DOCS[activeInfo].symbol}
                 </span>
@@ -1178,7 +1215,8 @@ export const ONNXSettingsPanel: React.FC = () => {
           role="dialog"
           aria-modal="true"
           aria-labelledby="engine-spec-title"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in"
+          tabIndex={-1}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in focus-visible:outline-none"
           onClick={() => setSelectedEngine(null)}
         >
           <div

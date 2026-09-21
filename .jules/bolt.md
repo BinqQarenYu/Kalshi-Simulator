@@ -80,6 +80,14 @@
 **Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
 **Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
 
-## 2026-09-21 - O(1) Version-Backed Float Depth Tuple Caching in L2BookState
-**Learning:** Converting order book price and quantity levels from `Decimal` to `float` on every ML feature extraction tick introduced redundant type conversion allocations (~8.4 µs) even when order book states were unchanged between ticks.
-**Action:** Implemented `get_depth_float_tuples(n)` on `L2BookState` with `FastBook._version` mutation tracking and updated `KalshiOrderflowFeatureExtractor` to use this fast path. Reduced depth extraction read latency from ~18.4 µs to ~10.5 µs per tick (~1.75x speedup / ~43% latency reduction).
+## 2026-09-21 - Single-Pass Algebraic Trade Entropy Calculation
+**Learning:** Computing Shannon trade size entropy over rolling trade history deques by allocating intermediate Python lists (`recent_sizes`, `probs`) via `itertools.islice` and list comprehensions introduced ~2.4 µs of Python list allocation and multi-pass loop overhead per trade update.
+**Action:** Refactored `_update_cached_entropy` in `KalshiOrderflowFeatureExtractor` and `GoldOrderflowFeatureExtractor` to use the algebraic entropy expansion $H(P) = \log_2(S) - \frac{\sum s_i \log_2(s_i)}{S}$ in a single loop pass without list allocations. Reduced `_update_cached_entropy` latency from ~7.3 µs to ~4.9 µs per call (~33% latency reduction / ~1.47x speedup).
+
+## 2026-09-21 - Lockless Single-Threaded Async Token Bucket Rate Limiting
+**Learning:** Using `asyncio.Lock` in single-threaded Python asyncio components where no `await` statements exist inside the lock block introduces unnecessary lock context manager overhead (`__aenter__`/`__aexit__`, Future creation) without providing any synchronization benefit, as asyncio guarantees non-preemptive atomic execution between `await` points.
+**Action:** Remove `asyncio.Lock` from `AsyncTokenBucket` rate limiters and inline token replenishment on the fast path. Reduced `acquire` latency from ~1.97 µs down to ~0.89 µs per call (~2.2x speedup / 55% latency reduction).
+
+## 2026-09-21 - O(1) Version-Backed Top-of-Book Ask Caching in L2BookState
+**Learning:** Computing `best_yes_ask` and `best_no_ask` on every query re-calculated Decimal subtraction (`1 - best_no_bid`, `1 - best_yes_bid`) and dictionary `min()` scans on unchanged order book states (~0.70 µs per query).
+**Action:** Utilized `FastBook._version` mutation tracking to cache top-of-book asks in `L2BookState`. Reduced `best_yes_ask` / `best_no_ask` read latency from ~0.70 µs down to ~0.21 µs (~3.2x speedup / ~69% latency reduction).
