@@ -79,3 +79,7 @@
 ## 2026-09-20 - Pure Python Sample Standard Deviation vs statistics.stdev Overhead
 **Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
 **Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
+
+## 2026-09-21 - O(1) Version-Backed Top-of-Book Ask Caching in L2BookState
+**Learning:** Computing `best_yes_ask` and `best_no_ask` on every query re-calculated Decimal subtraction (`1 - best_no_bid`, `1 - best_yes_bid`) and dictionary `min()` scans on unchanged order book states (~0.70 µs per query).
+**Action:** Utilized `FastBook._version` mutation tracking to cache top-of-book asks in `L2BookState`. Reduced `best_yes_ask` / `best_no_ask` read latency from ~0.70 µs down to ~0.21 µs (~3.2x speedup / ~69% latency reduction).
