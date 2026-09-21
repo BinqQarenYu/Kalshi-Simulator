@@ -10,6 +10,7 @@ import operator
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
+import operator
 from typing import Any, Literal, Optional
 
 # Module-level fast item getter for order book sorting and pre-allocated Decimal constants
