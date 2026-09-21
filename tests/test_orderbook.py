@@ -47,3 +47,25 @@ def test_orderbook_manager_delta():
     book = obm.apply_delta(delta)
     assert book is not None
     assert obm.get_book("TEST-TICKER").yes_book[Decimal("0.55")] == Decimal("5")
+
+
+def test_fastbook_top_of_book_tracking_after_pop():
+    from kalshi_sim.schemas import FastBook
+
+    fb = FastBook({
+        Decimal("0.50"): Decimal("10"),
+        Decimal("0.40"): Decimal("20"),
+        Decimal("0.30"): Decimal("15"),
+    })
+    assert fb.best_bid == Decimal("0.50")
+
+    # Remove top price level
+    fb.pop(Decimal("0.50"))
+
+    # Insertion or update of an existing lower price level should NOT corrupt _best
+    fb[Decimal("0.30")] = Decimal("25")
+    assert fb.best_bid == Decimal("0.40")
+
+    # Inserting a new top price level should update _best
+    fb[Decimal("0.60")] = Decimal("5")
+    assert fb.best_bid == Decimal("0.60")
