@@ -27,19 +27,40 @@ class CrossExchangeScanner:
         self.kalshi_engine = kalshi_engine
         self.router = AtomicRouter(kalshi_engine)
         self._running = False
-        self.is_active = True  # Can be toggled from UI
+        self.is_active = False  # Permanently stopped by operator directive
+        self._task: Optional[asyncio.Task] = None
         self.mapped_pairs = []  # List of dicts mapping Kalshi Ticker -> PM Token IDs
-        self.latest_radar_scan = {"enabled": True, "status": "SCANNING (NO ARB)"}
+        self.latest_radar_scan = {
+            "enabled": False,
+            "status": "STOPPED",
+            "opportunities": [],
+            "markets_tracked": 0,
+            "message": "Arbitrage scanner and all execution functions stopped by operator directive."
+        }
         
         # Hardcoded Kalshi Taker fee approximation (dynamic based on price, but capped)
         self.kalshi_taker_fee_bps = 0.02  # $0.02 maximum per contract
 
     def start(self):
-        self._running = True
-        asyncio.create_task(self._scanner_loop(), name="arbitrage_scanner")
+        """Suppressed: Scanner is permanently stopped by operator directive."""
+        self._running = False
+        self.is_active = False
+        logger.info("🛑 [ARBITRAGE SCANNER] Scanner start() suppressed. Arbitrage scanner is stopped.")
 
     def stop(self):
         self._running = False
+        self.is_active = False
+        if self._task and not self._task.done():
+            self._task.cancel()
+            self._task = None
+        self.latest_radar_scan = {
+            "enabled": False,
+            "status": "STOPPED",
+            "opportunities": [],
+            "markets_tracked": 0,
+            "message": "Arbitrage scanner and all execution functions stopped."
+        }
+        logger.info("🛑 [ARBITRAGE SCANNER] Arbitrage scanner and all functions stopped.")
 
     async def _discover_pm_markets(self):
         """Phase 1: Oracle Parity Mapper. Finds Polymarket BTC daily markets."""
@@ -102,11 +123,15 @@ class CrossExchangeScanner:
             return None
 
     async def _scanner_loop(self):
-        """Phase 2: Spread Scanner."""
+        """Phase 2: Spread Scanner (Stopped)."""
+        if not self._running or not self.is_active:
+            logger.info("🛑 [ARBITRAGE SCANNER] Scanner loop called while stopped; aborting immediately.")
+            return
+            
         await self._discover_pm_markets()
         await self._discover_binance_predictions()
         
-        while self._running:
+        while self._running and self.is_active:
             try:
                 if not self.is_active:
                     self.latest_radar_scan = {"enabled": False, "status": "PAUSED"}

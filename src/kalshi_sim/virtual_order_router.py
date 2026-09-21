@@ -144,8 +144,9 @@ class VirtualOrderRouter:
             bot_match = (
                 active_strategy_bot is None
                 or b_type == active_strategy_bot
-                or (b_type in ("3_step_domination_bot", "bot1_v4_domination") and active_strategy_bot in ("3_step_domination_bot", "bot1_v4_domination"))
+                or (b_type in ("3_step_domination_bot", "bot1_v4_domination") and active_strategy_bot in ("3_step_domination_bot", "bot1_v4_domination", "both", "dual", "all", "dual_fleet"))
                 or (b_type in ("macro_trend_dominion", "macro_onnx") and active_strategy_bot in ("macro_trend_dominion", "macro_onnx"))
+                or active_strategy_bot in ("both", "dual", "all", "dual_fleet")
             )
             if self._order_client is None:
                 logger.error("🛑 [LIVE ORDER ROUTER] Order client is NULL! Cannot route live order for %s. Releasing in-flight lock.", ticker)
@@ -196,20 +197,22 @@ class VirtualOrderRouter:
                     if open_exchange_orders:
                         existing_ticker_orders = [o for o in open_exchange_orders if o.get("ticker") == ticker]
                         if existing_ticker_orders:
-                            logger.warning(
-                                "[PRE-TRADE VETO] %s already has %d resting order(s) active on Kalshi! Suppressing duplicate submission.",
-                                ticker, len(existing_ticker_orders)
-                            )
-                            self._guardrails.record_resting_order(
-                                order_id=existing_ticker_orders[0].get("order_id", "ext_rest"),
-                                ticker=ticker,
-                                side=live_side,
-                                size=live_count,
-                                price=Decimal(str(limit_price if order_type == "limit" else est_price)),
-                                cycle_id=ticker,
-                                bot_type=b_type,
-                            )
-                            return
+                            # 1. Anti-Wash Check: Never rest orders on opposite side
+                            if any(o.get("side", "").lower() != live_side.lower() for o in existing_ticker_orders):
+                                logger.warning(
+                                    "[PRE-TRADE VETO] %s already has opposing resting orders active on Kalshi! Opposing submission blocked.",
+                                    ticker
+                                )
+                                self._guardrails.release_in_flight_intent(ticker)
+                                return
+                            # 2. Combined Exposure Check: allow up to 2 resting orders across both bots
+                            if len(existing_ticker_orders) >= 2:
+                                logger.warning(
+                                    "[PRE-TRADE VETO] %s already has %d resting order(s) active on Kalshi (max 2 reached)! Suppressing duplicate submission.",
+                                    ticker, len(existing_ticker_orders)
+                                )
+                                self._guardrails.release_in_flight_intent(ticker)
+                                return
                 except Exception as chk_exc:
                     logger.debug("Failed pre-flight open order query: %s", chk_exc)
 

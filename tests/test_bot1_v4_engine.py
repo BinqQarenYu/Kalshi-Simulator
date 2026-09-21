@@ -138,11 +138,52 @@ def test_bot1_v4_onnx_graceful_fallback() -> None:
     assert decision.fused_source == "macro_erf"
 
 
-def test_bot1_v4_strict_68c_price_cap() -> None:
-    # Even if win probability is 99.9%, limit price must never exceed $0.68
+def test_bot1_v4_strict_55c_price_cap() -> None:
+    # Even if win probability is 99.9%, limit price must never exceed $0.55
     engine = Bot1V4DominationEngine(max_entry_price=Decimal("0.85"))  # deliberately set high to test clamp
     clamped_price = engine.compute_dynamic_limit_price(win_prob=0.999)
-    assert clamped_price <= Decimal("0.68")
+    assert clamped_price <= Decimal("0.55")
+
+
+def test_bot1_v4_opening_quarantine_veto() -> None:
+    engine = Bot1V4DominationEngine(opening_quarantine_seconds=90.0)
+    l2 = L2BookState("KXBTC15M-TEST")
+    decision = engine.evaluate_market_opportunity(
+        spot_price=85050.0,
+        target_strike=85000.0,
+        time_to_expiry_s=850.0,  # 50s into cycle (< 90s quarantine)
+        l2_book=l2,
+    )
+    assert decision.recommended_side == "wait"
+    assert "Opening Cycle Quarantine Active" in decision.rationale
+
+
+def test_bot1_v4_dynamic_proximity_moat_veto() -> None:
+    engine = Bot1V4DominationEngine(opening_quarantine_seconds=90.0)
+    l2 = L2BookState("KXBTC15M-TEST")
+    decision = engine.evaluate_market_opportunity(
+        spot_price=85005.0,
+        target_strike=85000.0,
+        time_to_expiry_s=500.0,  # Outside quarantine, but diff ($5) < dynamic moat (~$28+)
+        l2_book=l2,
+    )
+    assert decision.recommended_side == "wait"
+    assert "Proximity Moat Veto" in decision.rationale
+
+
+def test_bot1_v4_wide_clob_spread_veto() -> None:
+    engine = Bot1V4DominationEngine(opening_quarantine_seconds=90.0, max_clob_spread_cents=0.05)
+    l2 = L2BookState("KXBTC15M-TEST")
+    l2.yes_book = {Decimal("0.50"): Decimal("100")}
+    l2.no_book = {Decimal("0.40"): Decimal("100")}  # YES ask = 0.60, YES bid = 0.50 -> spread 0.10 > 0.05
+    decision = engine.evaluate_market_opportunity(
+        spot_price=85100.0,
+        target_strike=85000.0,
+        time_to_expiry_s=500.0,
+        l2_book=l2,
+    )
+    assert decision.recommended_side == "wait"
+    assert "Wide CLOB Spread Veto" in decision.rationale
 
 
 def test_bot1_v4_onnx_vpin_veto() -> None:

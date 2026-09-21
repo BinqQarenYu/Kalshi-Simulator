@@ -205,7 +205,12 @@ def resolve_bot_instance(bot_id: str) -> Any:
         if onnx_eng is None and hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
             onnx_eng = getattr(state.dual_onnx_bot, "gateway", None)
         state.bot1_v4_engine = Bot1V4DominationEngine(onnx_engine=onnx_eng)
-        return state.bot1_v4_engine
+    elif bot_id in ("both", "dual", "dual_domination", "dual_fleet"):
+        if hasattr(state, "bot1_v4_engine") and state.bot1_v4_engine:
+            return state.bot1_v4_engine
+        if hasattr(state, "domination_bot") and state.domination_bot:
+            return state.domination_bot
+        return getattr(state, "domination_bot", None)
     return None
 
 
@@ -293,7 +298,15 @@ class ServerState:
         self.integrity_task: asyncio.Task | None = None
         self.ai_worker_task: asyncio.Task | None = None
         self.ai_auto_trade: bool = True
-        self.active_strategy_bot: str = "3_step_domination_bot"
+        active_seal_strat = "bot1_v4_domination"
+        try:
+            seal_f = Path("data/seal_of_excellence.json")
+            if seal_f.exists():
+                s_data = json.loads(seal_f.read_text(encoding="utf-8"))
+                active_seal_strat = s_data.get("active_live_strategy", "bot1_v4_domination")
+        except Exception:
+            pass
+        self.active_strategy_bot: str = active_seal_strat
         self.bot_arm_states: dict[str, bool] = {
             "3_step_domination_bot": True,
             "bot1_v4_domination": True,
@@ -491,13 +504,15 @@ class ServerState:
         ]
 
     def save_persisted_reports(self) -> None:
-        """Persist 15-minute event win/loss reports to disk."""
+        """Persist 15-minute event win/loss reports to disk (capped to latest 100 to prevent token bloat)."""
         try:
             self.data_dir.mkdir(parents=True, exist_ok=True)
             reports_file = self.data_dir / "win_loss_reports.json"
             tmp_file = self.data_dir / "win_loss_reports.tmp"
+            # Keep active hot ledger capped at 100 most recent records
+            capped_reports = self.win_loss_reports[-100:] if len(self.win_loss_reports) > 100 else self.win_loss_reports
             with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(self.win_loss_reports, f, indent=2)
+                json.dump(capped_reports, f, indent=2)
             tmp_file.replace(reports_file)
         except Exception as exc:
             logger.warning("Failed to persist win/loss reports: %s", exc)
@@ -763,6 +778,23 @@ async def live_ticker_and_timer_loop() -> None:
                     # Settle open positions on current contract and record Win/Loss Event
                     if state.mode == "live":
                         asyncio.create_task(sync_live_settlements())
+                        
+                        # 🧹 SWEEP CLEAN ALL ORDER LIMIT PARKS FOR THIS EVENT
+                        async def sweep_clean_limit_orders(st):
+                            try:
+                                if st.order_client and st.active_ticker:
+                                    logger.info("🧹 [ORDER SWEEP] Sweeping clean all parked limit orders for %s at cycle expiration.", st.active_ticker)
+                                    orders = await st.order_client.get_open_orders(ticker=st.active_ticker)
+                                    for order in orders:
+                                        oid = order.get("order_id") if isinstance(order, dict) else getattr(order, "order_id", None)
+                                        if oid:
+                                            await st.order_client.cancel_order(oid)
+                                            logger.info("🧹 [ORDER SWEEP] Cancelled parked limit order: %s", oid)
+                            except Exception as e:
+                                logger.error("🧹 [ORDER SWEEP] Failed to sweep parked orders: %s", e)
+                                
+                        asyncio.create_task(sweep_clean_limit_orders(state))
+                        
                     if state.sim_agent:
                         active_macro_tag = "macro_onnx" if state.active_strategy_bot in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion") else "macro_trend_dominion"
                         portfolios_to_check = [
@@ -984,6 +1016,8 @@ async def start_background_simulation() -> None:
         state.sim_agent.execution_mode = "simulated"
     else:
         state.sim_agent.execution_mode = state.mode
+        
+    # Re-enabled per user request: Required by Agent Deer / DeerFlow for data organization
     state.tick_writer = TickWriter(data_dir=state.data_dir, timeframe="paper_live")
     await state.tick_writer.open()
 

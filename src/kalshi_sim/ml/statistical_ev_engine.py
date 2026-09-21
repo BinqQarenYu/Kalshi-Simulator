@@ -76,6 +76,58 @@ class StatisticalEVEngine:
         self.vpin_warn_threshold = vpin_warn_threshold
         self.vpin_toxic_threshold = vpin_toxic_threshold
 
+    @staticmethod
+    def compute_conviction_tier(
+        ai_prob: float,
+        price: Decimal,
+        vpin: float,
+        time_to_expiry_s: float = 300.0,
+        spot_distance_to_strike: float = 40.0,
+        total_equity: Decimal = Decimal("100.00"),
+    ) -> int:
+        """Calculate dynamic bet sizing (1x, 2x, 3x) according to Council Platinum Confluence rules.
+        
+        Tier 3 (3x Size):
+          - Total Equity >= $75.00
+          - AI Conviction >= 88%
+          - Limit Price <= $0.52
+          - VPIN < 0.20
+          - Time to Expiry > 300s
+          - Spot Distance to Strike >= $50.00
+          
+        Tier 2 (2x Size):
+          - Total Equity >= $50.00
+          - AI Conviction >= 82%
+          - Limit Price <= $0.54
+          - VPIN < 0.30
+          - Time to Expiry > 180s
+          - Spot Distance to Strike >= $30.00
+          
+        Tier 1 (1x Baseline):
+          - Default micro-bankroll sizing (1 contract).
+        """
+        if (
+            total_equity >= Decimal("75.00")
+            and ai_prob >= 0.88
+            and price <= Decimal("0.52")
+            and vpin < 0.20
+            and time_to_expiry_s > 300.0
+            and abs(spot_distance_to_strike) >= 50.0
+        ):
+            return 3
+
+        if (
+            total_equity >= Decimal("50.00")
+            and ai_prob >= 0.82
+            and price <= Decimal("0.54")
+            and vpin < 0.30
+            and time_to_expiry_s > 180.0
+            and abs(spot_distance_to_strike) >= 30.0
+        ):
+            return 2
+
+        return 1
+
     def calculate_ev(
         self,
         prob_win: float,
@@ -379,6 +431,16 @@ class StatisticalEVEngine:
         unit_cost = chosen_ask + active_fee
         contracts = int(allocated_capital / unit_cost) if unit_cost > 0 else 0
         contracts = max(1, min(max_position_size, contracts))
+
+        # Council Platinum Confluence: scale to 2x or 3x when conviction & structure permit
+        conviction_tier = self.compute_conviction_tier(
+            ai_prob=chosen_p,
+            price=chosen_ask,
+            vpin=vpin,
+            total_equity=total_equity,
+        )
+        if conviction_tier > 1:
+            contracts = max(contracts, min(max_position_size, conviction_tier))
 
         # Build informative rationale with VPIN taper and fee visibility
         taper_note = ""

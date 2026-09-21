@@ -240,6 +240,8 @@ class StandaloneSyncCoordinator(_BaseCoordinator):
             "bot_parameters": self.bot.get_parameters() if hasattr(self.bot, "get_parameters") else None,
         }
         all_reports.insert(0, report)
+        # Cap to latest 100 entries to prevent file and token bloat
+        all_reports = all_reports[:100]
         try:
             reports_file.write_text(json.dumps(all_reports, indent=2), encoding="utf-8")
         except Exception as e:
@@ -721,6 +723,8 @@ class StandaloneSyncCoordinator(_BaseCoordinator):
                             )
 
                         if new_reconciled > 0:
+                            # Cap to latest 100 entries to prevent token bloat
+                            all_reports = all_reports[:100]
                             # Atomic disk persist
                             tmp_file = self.data_dir / "win_loss_reports.tmp"
                             with open(tmp_file, "w", encoding="utf-8") as f:

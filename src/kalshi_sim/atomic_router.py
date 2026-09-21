@@ -20,11 +20,17 @@ class AtomicRouter:
     def __init__(self, kalshi_engine):
         self.kalshi_engine = kalshi_engine
         self.in_flight = False
+        self.enabled = False  # Permanently stopped by operator directive
         
     async def route_opportunity(self, opp: Dict[str, Any]):
         """
         Takes an opportunity dict and routes it.
+        Permanently disabled: returns immediately.
         """
+        if not self.enabled:
+            logger.warning("🚫 [ATOMIC ROUTER] Arbitrage execution permanently stopped by operator directive.")
+            return
+
         if self.in_flight:
             return
             

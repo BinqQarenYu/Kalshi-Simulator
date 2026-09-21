@@ -85,7 +85,7 @@ class ThreeStepDominationBot:
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
         fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
-        max_entry_price: Decimal = Decimal("0.68"),  # $0.68 standard entry price cap ($0.70+ hard kill wall)
+        max_entry_price: Decimal = Decimal("0.57"),  # $0.57 revised entry price cap per user instruction
         discount_limit_price: Decimal = Decimal("0.52"),  # Configurable discount sniper ceiling (48¢-52¢ sweetspot)
         min_confidence: float = 0.81,  # 81% model conviction threshold
         enable_trailing_ratchet: bool = True,  # High-water mark trailing profit ratchet and breakeven armor
@@ -107,8 +107,10 @@ class ThreeStepDominationBot:
         twap_immutability_sniper_cents: float = 0.75,  # 75¢ ceiling for Silas TWAP late-cycle arbitrage harvest
         max_queue_depth_ahead: int = 250,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
         max_clob_spread_cents: float = 0.05,  # Max allowable bid-ask spread corridor cap ($0.05)
+        reentry_cooldown_seconds: float = 15.0,
         enable_lead_deer_peak_harvester: bool = False,
         enable_doubt_harvest: bool = False,
+        doubt_threshold: float = 0.55,
         asset: CryptoAsset | str = CryptoAsset.BTC,
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
@@ -227,6 +229,8 @@ class ThreeStepDominationBot:
             "max_queue_depth_ahead": int(self.max_queue_depth_ahead),
             "max_clob_spread_cents": float(self.max_clob_spread_cents),
             "enable_lead_deer_peak_harvester": bool(getattr(self, "enable_lead_deer_peak_harvester", True)),
+            "enable_doubt_harvest": bool(getattr(self, "enable_doubt_harvest", True)),
+            "doubt_threshold": float(getattr(self, "doubt_threshold", 0.55)),
         }
 
     def compute_dynamic_reversal_threshold(self, time_to_expiry_s: float) -> float:

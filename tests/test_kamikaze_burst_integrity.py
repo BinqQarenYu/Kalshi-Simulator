@@ -289,6 +289,7 @@ def test_integrity_live_daemon_status() -> None:
     # Verify active strategy is valid institutional bot (3-Step Domination, The ONNX Strategy, or Macro Trend Dominion)
     assert strat_data.get("active_strategy") in (
         "3_step_domination_bot",
+        "bot1_v4_domination",
         "macro_trend_dominion",
         "macro_onnx",
         "dual_onnx",

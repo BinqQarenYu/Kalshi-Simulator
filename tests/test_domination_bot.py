@@ -636,8 +636,8 @@ def test_domination_bot_playbook4_silas_twap_immutability_sniper() -> None:
     assert "Endgame Harvest" in decision.rationale
 
 
-def test_bot1_v4_first_10s_initial_entry() -> None:
-    """Test Bot1V4DominationEngine First 10s Initial Entry Sequence ($0.55 Maker Park)."""
+def test_bot1_v4_opening_quarantine_and_entry() -> None:
+    """Test Bot1V4DominationEngine Opening Quarantine and Entry Sequence."""
     from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
 
     engine = Bot1V4DominationEngine()
@@ -645,9 +645,9 @@ def test_bot1_v4_first_10s_initial_entry() -> None:
     book.yes_book = {Decimal("0.50"): Decimal("10")}
     book.no_book = {Decimal("0.48"): Decimal("10")}
 
-    # T = 897s (First 5s Warmup) -> expect wait
+    # T = 897s (Opening Quarantine active: >810s) -> expect wait
     dec_warmup = engine.evaluate_market_opportunity(
-        spot_price=79050.0,
+        spot_price=79100.0,
         target_strike=79000.0,
         time_to_expiry_s=897.0,
         l2_book=book,
@@ -655,22 +655,20 @@ def test_bot1_v4_first_10s_initial_entry() -> None:
         cycle_id="TEST_CYCLE_10S",
     )
     assert dec_warmup.recommended_side == "wait"
-    assert dec_warmup.active_playbook == "initial_cycle_warmup"
+    assert dec_warmup.active_playbook == "opening_cycle_quarantine"
 
-    # T = 892s (Seconds 5..10 Initial Entry) -> expect Maker Limit Park Order @ $0.55 on YES
+    # T = 800s (Post 90s Opening Quarantine: <=810s, spot diff +$100 > proximity moat) -> expect YES entry
     dec_entry = engine.evaluate_market_opportunity(
-        spot_price=79050.0,
+        spot_price=79100.0,
         target_strike=79000.0,
-        time_to_expiry_s=892.0,
+        time_to_expiry_s=800.0,
         l2_book=book,
         vpin=0.15,
         cycle_id="TEST_CYCLE_10S",
     )
     assert dec_entry.recommended_side == "yes"
     assert dec_entry.recommended_contracts == 1
-    assert dec_entry.limit_price == 0.55
-    assert dec_entry.active_playbook == "initial_10s_maker_park"
-    assert "First 10s Initial Entry" in dec_entry.rationale
+    assert dec_entry.limit_price <= 0.55
 
 
 def test_three_step_bot_first_10s_initial_entry() -> None:

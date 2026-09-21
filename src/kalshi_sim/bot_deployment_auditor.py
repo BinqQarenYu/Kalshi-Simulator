@@ -228,9 +228,9 @@ class BotDeploymentAuditor:
         failures: List[str] = []
 
         # 1. Micro-bankroll sizing limit check:
-        # Bankrolls <= $100 must be clamped to max 1-2 contracts (or $1.50 risk)
-        test_equities = [Decimal("15.00"), Decimal("20.00"), Decimal("50.00"), Decimal("100.00")]
-        for eq in test_equities:
+        # Under $50: max 1 contract, $50-$75: max 2 contracts, >=$75: max 3 contracts
+        test_equities = [(Decimal("15.00"), 1), (Decimal("20.00"), 1), (Decimal("50.00"), 2), (Decimal("100.00"), 3)]
+        for eq, max_expected in test_equities:
             test_guard = AgentGuardrails()
             allowed, reason, approved_size, _ = test_guard.validate_pre_trade_intent(
                 ticker="KXBTC15M-AUDIT-TEST",
@@ -242,8 +242,8 @@ class BotDeploymentAuditor:
                 cycle_id=f"AUDIT-CYCLE-{eq}",
                 is_bot=True,
             )
-            if approved_size > 2:
-                failures.append(f"Equity ${eq} approved size {approved_size} exceeds micro-bankroll max 2 contracts")
+            if approved_size > max_expected:
+                failures.append(f"Equity ${eq} approved size {approved_size} exceeds tiered bankroll cap {max_expected} contracts")
 
         details["micro_bankroll_check"] = "PASS" if not failures else "FAIL"
 
@@ -483,10 +483,11 @@ class BotDeploymentAuditor:
                 content = self.seal_path.read_text(encoding="utf-8").strip()
                 if content:
                     data = json.loads(content)
+                    self.active_live_strategy = data.get("active_live_strategy", "bot1_v4_domination")
                     seals_dict = data.get("seals", {})
                     for bid, s_data in seals_dict.items():
                         self._seals[bid] = SealOfExcellence.from_dict(s_data)
-                    logger.info("[BOT AUDITOR] Loaded %d Seal(s) of Excellence from %s", len(self._seals), self.seal_path)
+                    logger.info("[BOT AUDITOR] Loaded %d Seal(s) of Excellence from %s (Active: %s)", len(self._seals), self.seal_path, self.active_live_strategy)
                     return
         except Exception as exc:
             logger.error("[BOT AUDITOR] Failed to parse seals file: %s", exc)
@@ -562,7 +563,7 @@ class BotDeploymentAuditor:
             payload = {
                 "version": "1.0",
                 "last_updated": datetime.now(timezone.utc).isoformat(),
-                "active_live_strategy": "3_step_domination_bot",
+                "active_live_strategy": getattr(self, "active_live_strategy", "bot1_v4_domination"),
                 "seals": {bid: s.to_dict() for bid, s in self._seals.items()},
             }
             tmp_path = self.seal_path.with_suffix(".tmp")
@@ -610,7 +611,7 @@ class BotDeploymentAuditor:
         return {
             "version": "1.0",
             "last_updated": datetime.now(timezone.utc).isoformat(),
-            "active_live_strategy": "3_step_domination_bot",
+            "active_live_strategy": getattr(self, "active_live_strategy", "bot1_v4_domination"),
             "seals": {bid: s.to_dict() for bid, s in self._seals.items()},
         }
 

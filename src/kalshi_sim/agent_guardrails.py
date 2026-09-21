@@ -46,6 +46,8 @@ class AgentGuardrails:
         self._last_order_ts: float = 0.0
         self._last_order_ts_by_ticker: dict[str, float] = {}
         self._cycle_locks: dict[str, str] = {}  # cycle_key -> trade_id
+        self._bot_cycle_locks: dict[tuple[str, str], str] = {}  # (cycle_key, bot_key) -> trade_id
+        self._cycle_active_side: dict[str, str] = {}  # cycle_key -> active_side ('yes' / 'no')
         self._in_flight_locks: set[str] = set()  # In-flight order dispatch locks (anti-burst)
         self._in_flight_lock_ts: dict[str, float] = {}  # cycle_key -> monotonic lock reservation timestamp
         self._cycle_contracts_count: dict[str, int] = {}  # cycle_key -> total contracts placed (hard cap: 2)
@@ -273,20 +275,38 @@ class AgentGuardrails:
                 self._record_rejection("order_in_flight", msg, ticker, now_utc)
                 return False, msg, 0, {"cycle_key": cycle_key}
 
-        # 3. 1-Trade-Per-Cycle & Multi-Turnover Explorer Check
-        already_allocated = self._cycle_contracts_count.get(cycle_key, 0)
-        is_brave_explorer = (bot_type == "bot1_v4_domination")
-        max_allowed_turnovers = 4 if is_brave_explorer else 1
+        # 2c. CFTC Anti-Wash Trading Directional Harmony Check
+        active_side = self._cycle_active_side.get(cycle_key)
+        if is_bot and active_side and active_side.lower() != side.lower():
+            msg = (
+                f"CFTC ANTI-WASH TRADING VETO: Cycle '{cycle_key}' already has active '{active_side.upper()}' position. "
+                f"Opposing '{side.upper()}' order is strictly prohibited by CFTC wash-trading rules."
+            )
+            self._record_rejection("anti_wash_veto", msg, ticker, now_utc)
+            return False, msg, 0, {"active_side": active_side, "proposed_side": side}
 
-        if is_bot and not is_brave_explorer and (cycle_key in self._cycle_locks or already_allocated >= 2):
-            locked_trade = self._cycle_locks.get(cycle_key, f"{already_allocated}_contracts")
-            msg = f"1-TRADE-PER-CYCLE LOCKOUT: Cycle '{cycle_key}' already has active trade '{locked_trade}'. Further entries blocked until expiration."
-            self._record_rejection("cycle_locked", msg, ticker, now_utc)
-            return False, msg, 0, {"locked_trade": locked_trade, "already_allocated": already_allocated}
-        elif is_bot and is_brave_explorer and already_allocated >= max_allowed_turnovers:
-            msg = f"SEAL OF THE BRAVE MULTI-TURNOVER CAP REACHED: Cycle '{cycle_key}' reached max brave explorer turnover cap ({already_allocated}/{max_allowed_turnovers})."
-            self._record_rejection("cycle_locked", msg, ticker, now_utc)
-            return False, msg, 0, {"already_allocated": already_allocated, "max_allowed_turnovers": max_allowed_turnovers}
+        # 3. 1-Trade-Per-Cycle Lock Check
+        already_allocated = self._cycle_contracts_count.get(cycle_key, 0)
+        bot_key = bot_type.lower() if bot_type else None
+
+        if is_bot and bot_key:
+            bot_lock_key = (cycle_key, bot_key)
+            if bot_lock_key in self._bot_cycle_locks:
+                locked_trade = self._bot_cycle_locks[bot_lock_key]
+                msg = f"1-TRADE-PER-CYCLE LOCKOUT: Bot '{bot_type}' already has active trade '{locked_trade}' in cycle '{cycle_key}'. Further entries blocked until expiration."
+                self._record_rejection("cycle_locked", msg, ticker, now_utc)
+                return False, msg, 0, {"locked_trade": locked_trade, "already_allocated": already_allocated, "bot_type": bot_type}
+            cycle_cap = 4 if total_equity >= Decimal("75.00") else (3 if total_equity >= Decimal("50.00") else 2)
+            if already_allocated >= cycle_cap:
+                msg = f"CYCLE EXPOSURE CAP: Cycle '{cycle_key}' reached max {cycle_cap} contracts exposure ({already_allocated}/{cycle_cap} active)."
+                self._record_rejection("max_cycle_exposure", msg, ticker, now_utc)
+                return False, msg, 0, {"already_allocated": already_allocated, "cycle_cap": cycle_cap}
+        elif is_bot:
+            if cycle_key in self._cycle_locks or already_allocated >= 2:
+                locked_trade = self._cycle_locks.get(cycle_key, f"{already_allocated}_contracts")
+                msg = f"1-TRADE-PER-CYCLE LOCKOUT: Cycle '{cycle_key}' already has active trade '{locked_trade}'. Further entries blocked until expiration."
+                self._record_rejection("cycle_locked", msg, ticker, now_utc)
+                return False, msg, 0, {"locked_trade": locked_trade, "already_allocated": already_allocated}
 
         # 4. Mandatory Execution Cooldown Throttle (Automated bots only)
         if is_bot:
@@ -369,11 +389,33 @@ class AgentGuardrails:
                 self._record_rejection("bot_prohibited", msg, ticker, now_utc)
                 return False, msg, 0, {"bot_type": bot_type}
             else:
-                # Strictly 1 contract per trade; cycle capacity max 2 shares total
-                remaining_cycle_capacity = max(0, 2 - already_allocated)
-                bankroll_cap = min(1, remaining_cycle_capacity)
+                # Tiered Bankroll & Cycle Capacity (Council Scaled Sizing Spec):
+                # Under $50: Max 1 contract per trade, max 2 contracts per cycle across fleet
+                # $50 - $75: Max 2 contracts per trade, max 3 contracts per cycle across fleet
+                # >= $75: Max 3 contracts per trade, max 4 contracts per cycle across fleet
+                if total_equity >= Decimal("75.00"):
+                    max_cycle_cap = 4
+                    per_trade_cap = 3
+                elif total_equity >= Decimal("50.00"):
+                    max_cycle_cap = 3
+                    per_trade_cap = 2
+                else:
+                    max_cycle_cap = 2
+                    per_trade_cap = 1
 
-        approved_size = min(requested_size, budget_contracts, bankroll_cap)
+                # Council Conviction & Risk Filter for Sized Orders (> 1 contract)
+                effective_requested_size = requested_size
+                if requested_size >= 3:
+                    if total_equity < Decimal("75.00") or est_price > Decimal("0.52") or vpin >= 0.20:
+                        effective_requested_size = min(requested_size, 2 if (total_equity >= Decimal("50.00") and est_price <= Decimal("0.54") and vpin < 0.30) else 1)
+                elif requested_size == 2:
+                    if total_equity < Decimal("50.00") or est_price > Decimal("0.54") or vpin >= 0.30:
+                        effective_requested_size = 1
+
+                remaining_cycle_capacity = max(0, max_cycle_cap - already_allocated)
+                bankroll_cap = min(per_trade_cap, remaining_cycle_capacity)
+
+        approved_size = min(effective_requested_size if is_bot else requested_size, budget_contracts, bankroll_cap)
 
         # 7. Loss Streak & Drawdown Defense Taper
         is_tapered = False
@@ -382,8 +424,8 @@ class AgentGuardrails:
             approved_size = min(approved_size, 1)  # Strict self-preservation: minimum size
 
         if approved_size <= 0:
-            if already_allocated >= 2:
-                msg = f"CYCLE EXPOSURE CAP: Cycle '{cycle_key}' reached max 2 contracts exposure ({already_allocated}/2 active)."
+            if already_allocated >= max_cycle_cap:
+                msg = f"CYCLE EXPOSURE CAP: Cycle '{cycle_key}' reached max {max_cycle_cap} contracts exposure ({already_allocated}/{max_cycle_cap} active)."
                 self._record_rejection("max_cycle_exposure", msg, ticker, now_utc)
             else:
                 msg = f"INSUFFICIENT RISK BUDGET: Equity ${total_equity:.2f} (Max Risk ${max_risk_dollars:.2f}) cannot afford 1 contract @ ${unit_cost:.2f}."
@@ -438,6 +480,9 @@ class AgentGuardrails:
         self._in_flight_locks.discard(cycle_key)
         self._cycle_contracts_count[cycle_key] = self._cycle_contracts_count.get(cycle_key, 0) + size
         self._cycle_locks[cycle_key] = trade_id
+        if bot_type:
+            self._bot_cycle_locks[(cycle_key, bot_type.lower())] = trade_id
+        self._cycle_active_side[cycle_key] = side.lower()
         self._last_order_ts = now_mono
         self._last_order_ts_by_ticker[ticker] = now_mono
 
@@ -486,6 +531,9 @@ class AgentGuardrails:
         self._in_flight_locks.discard(cycle_key)
         self._cycle_contracts_count[cycle_key] = self._cycle_contracts_count.get(cycle_key, 0) + size
         self._cycle_locks[cycle_key] = order_id
+        if bot_type:
+            self._bot_cycle_locks[(cycle_key, bot_type.lower())] = order_id
+        self._cycle_active_side[cycle_key] = side.lower()
         self._last_order_ts = now_mono
         self._last_order_ts_by_ticker[ticker] = now_mono
         
@@ -542,9 +590,13 @@ class AgentGuardrails:
         """Release the cycle lock upon official contract expiration and update loss streaks."""
         cycle_key = cycle_id or ticker
         self._cycle_locks.pop(cycle_key, None)
+        self._cycle_active_side.pop(cycle_key, None)
         self._cycle_contracts_count.pop(cycle_key, None)
         self._in_flight_locks.discard(cycle_key)
         self._in_flight_lock_ts.pop(cycle_key, None)
+        keys_to_remove = [k for k in self._bot_cycle_locks if k[0] == cycle_key]
+        for k in keys_to_remove:
+            self._bot_cycle_locks.pop(k, None)
 
         if outcome.lower() == "loss":
             self._consecutive_losses += 1

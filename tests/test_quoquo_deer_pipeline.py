@@ -65,3 +65,24 @@ def test_deer_trade_outcome_processing(tmp_path):
     assert digest.pnl == '0.49'
     assert digest.contracts == 1
     assert 'WIN' in digest.deer_briefing or 'favorable' in digest.deer_briefing
+
+
+def test_quoquo_brain_oracle_queries(tmp_path):
+    from kalshi_sim.quoquo import QuoquoBrain, QuoquoVault
+
+    vault = QuoquoVault(vault_dir=tmp_path)
+    brain = QuoquoBrain(vault=vault)
+
+    # Test Ground-Truth Fallback Invariants
+    res_fee = brain.ask("What is the taker fee?")
+    assert "0.07" in res_fee["answer"] or "fee" in res_fee["answer"].lower()
+    assert res_fee["cost_dollars"] == 0.0
+
+    res_size = brain.ask("What is the micro bankroll size?")
+    assert "1 contract" in res_size["answer"]
+    assert res_size["cost_dollars"] == 0.0
+
+    res_seal = brain.ask("Which bots have seal of excellence?")
+    assert "Bot 1" in res_size["answer"] or "Seal of Excellence" in res_seal["answer"]
+    assert res_seal["cost_dollars"] == 0.0
+

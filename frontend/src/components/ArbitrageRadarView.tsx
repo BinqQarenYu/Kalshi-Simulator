@@ -30,7 +30,7 @@ export const ArbitrageRadarView: React.FC = () => {
     }
   };
 
-  const isEnabled = radarData?.enabled !== false;
+  const isEnabled = Boolean(radarData?.enabled);
 
   return (
     <div className="flex flex-col h-full bg-[#0a0f16] text-[#cdd9e5] p-6 space-y-6">

@@ -652,8 +652,8 @@ class StandaloneBotEngine:
         self.tasks.append(asyncio.create_task(self._resting_order_watchdog_loop(), name="resting_watchdog"))
         self.tasks.append(asyncio.create_task(self._settlement_reconciliation_loop(), name="settlement_sync"))
 
-        # Start Arbitrage Scanner Shadow Mode
-        self.arb_scanner.start()
+        # Arbitrage Scanner permanently stopped by operator directive
+        self.arb_scanner.stop()
         logger.info("🚀 [STANDALONE BOT ACTIVE] Background loops spawned. Bot status: %s", "ARMED" if self.is_armed else "DISARMED")
 
     async def _windows_keep_alive_loop(self) -> None:

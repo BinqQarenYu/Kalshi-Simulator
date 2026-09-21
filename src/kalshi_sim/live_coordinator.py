@@ -129,8 +129,14 @@ class LiveCoordinator:
             logger.warning("🛡️ [ANTI-WASH TRADING VETO] %s rejected for %s: %s", bot_id, prop_side.upper(), msg)
             return False, msg
 
-        # 2. Combined Sizing Armor Check (Max 2 contracts across both bots per cycle)
+        # 1b. 1-Trade-Per-Cycle Per-Bot Lockout
         trades = state.get("trades", [])
+        if any(t.get("bot_id") == bot_id for t in trades):
+            msg = f"1-TRADE-PER-CYCLE LOCKOUT: Bot '{bot_id}' already has active trade in this cycle."
+            logger.warning("🛡️ [PER-BOT CYCLE VETO] %s on %s: %s", bot_id, ticker, msg)
+            return False, msg
+
+        # 2. Combined Sizing Armor Check (Max 2 contracts across both bots per cycle)
         existing_contracts = sum(int(t.get("contracts", 1)) for t in trades)
         if existing_contracts + requested_contracts > max_combined_contracts:
             msg = (

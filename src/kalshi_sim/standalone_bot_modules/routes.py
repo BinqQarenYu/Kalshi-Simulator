@@ -606,14 +606,12 @@ async def arm_bot() -> Dict[str, Any]:
 
 @router.post("/api/arbitrage/toggle")
 async def toggle_arbitrage() -> Dict[str, Any]:
-    """Toggle the cross-exchange arbitrage scanner."""
+    """Arbitrage scanner is permanently stopped by operator directive."""
     engine = _require_engine()
-    if not hasattr(engine, 'arb_scanner'):
-        raise HTTPException(status_code=503, detail="Scanner not ready")
-    engine.arb_scanner.is_active = not engine.arb_scanner.is_active
-    state_str = "ENABLED" if engine.arb_scanner.is_active else "PAUSED"
-    logger.info(f"⚡ [ARBITRAGE RADAR] Scanner has been {state_str} by user.")
-    return {"status": "SUCCESS", "active": engine.arb_scanner.is_active}
+    if hasattr(engine, 'arb_scanner'):
+        engine.arb_scanner.stop()
+    logger.info("🛑 [ARBITRAGE RADAR] Arbitrage scanner remains permanently STOPPED by operator directive.")
+    return {"status": "SUCCESS", "active": False, "message": "Arbitrage scanner is stopped by operator directive."}
 
 
 @router.post("/api/bot/disarm")

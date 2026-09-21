@@ -76,3 +76,45 @@
 ### [2026-09-20 18:19:57 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:515`: Casting the price to a float causes IEEE-754 precision drift, violating the strict decimal financial arithmetic invariant.
 
 ### [2026-09-20 18:30:11 ET] **Deer Architect (UI/UX)** on `OrderEntryPanel.tsx:357`: The order entry panel violates constitutional visual standards by lacking tabular numerals for high-frequency financial telemetry.
+
+### [2026-09-20 20:10:45 ET] **Deer Architect (UI/UX)** on `PriceHero.tsx:142`: Financial telemetry figures lack tabular numerals, causing layout jitter during dynamic price updates.
+
+### [2026-09-20 20:20:58 ET] **Lead Deer (Fatal Flaw)** on `archival_engine.py:112`: Using standard float division and round() on byte sizes violates the strict decimal financial arithmetic invariant.
+
+### [2026-09-20 20:31:23 ET] **Deer Architect (UI/UX)** on `UniversalTerminalView.tsx:643`: Financial telemetry lacks tabular numerals, violating Article VI for glanceable alignment.
+
+### [2026-09-20 21:01:36 ET] **Lead Deer (Fatal Flaw)** on `archival_engine.py:113`: Using standard float division and round() on byte sizes for metadata calculation violates the strict decimal financial arithmetic invariant.
+
+### [2026-09-20 21:21:47 ET] **Lead Deer (Fatal Flaw)** on `archival_engine.py:114`: Direct floating-point division and rounding used for size metrics violate the strict decimal financial arithmetic invariant.
+
+### [2026-09-20 22:02:27 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:299`: Casting the decimal estimated price to a Python float leaks IEEE-754 precision drift into financial metadata.
+
+### [2026-09-20 22:33:15 ET] **Deer Architect (UI/UX)** on `WinLossReportsModal.tsx:285`: Financial figures require tabular numerals to prevent layout shift during high-frequency PnL updates.
+
+### [2026-09-20 23:03:45 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:304`: Casting decimal 'est_price' to a native Python float introduces IEEE-754 precision drift, violating the strict decimal financial arithmetic invariant.
+
+### [2026-09-20 23:34:18 ET] **Deer Architect (UI/UX)** on `WinLossReportsModal.tsx:289`: Financial telemetry must use tabular numerals to prevent layout jitter during rapid updates.
+
+### [2026-09-21 00:24:42 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:311`: Using standard float division and operators for financial risk calculations violates the strict decimal financial arithmetic invariant, risking precision drift.
+
+### [2026-09-21 00:34:56 ET] **Deer Architect (UI/UX)** on `WinLossReportsModal.tsx:303`: The financial PnL display lacks tabular numerals causing layout jitter during high-frequency updates.
+
+### [2026-09-21 00:55:31 ET] **Deer Architect (UI/UX)** on `WinLossReportsModal.tsx:320`: The financial PnL display lacks the required tabular-nums class for stable, glanceable telemetry alignment.
+
+### [2026-09-21 01:25:49 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:398`: Casting financial amounts like approved_cost and max_risk_dollars to float violates the strict decimal financial arithmetic invariant.
+
+### [2026-09-21 01:46:06 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:444`: Casting financial variables price and cost to native floats introduces IEEE-754 precision drift, violating the strict decimal financial arithmetic invariant.
+
+### [2026-09-21 03:46:40 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:445`: Casting financial variables cost and fee to Python float introduces IEEE-754 precision drift, violating the strict decimal invariant.
+
+### [2026-09-21 05:37:19 ET] **Deer Architect (UI/UX)** on `WinLossReportsModal.tsx:491`: Financial asset price fails Article VI invariant 1 by lacking tabular numerals and monospace formatting.
+
+### [2026-09-21 06:17:43 ET] **Deer Architect (UI/UX)** on `WinLossReportsModal.tsx:492`: Financial price data and differentials lack tabular numerals, causing layout jitter during real-time updates.
+
+### [2026-09-21 07:48:42 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:446`: Casting the decimal fee to a float introduces IEEE-754 precision drift, violating the strict decimal financial arithmetic invariant.
+
+### [2026-09-21 09:09:09 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:462`: Casting price to a float violates the strict decimal financial arithmetic invariant, risking precision drift.
+
+### [2026-09-21 09:49:26 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:492`: Casting financial price and cost calculations to Python float introduces IEEE-754 precision drift, violating the Strict Decimal Financial Arithmetic invariant.
+
+### [2026-09-21 11:10:10 ET] **Lead Deer (Fatal Flaw)** on `agent_guardrails.py:509`: Casting the decimal price to a float introduces IEEE-754 precision drift, violating the mandatory decimal arithmetic invariant.

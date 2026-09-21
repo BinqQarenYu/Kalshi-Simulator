@@ -88,14 +88,15 @@ class DominationExitEvaluator:
             )
 
         # Volatility calibration
-        sigma_1 = rolling_vol_1m if (rolling_vol_1m is not None and rolling_vol_1m > 0.001) else bot.typical_1m_volatility
+        sigma_1 = rolling_vol_1m if (rolling_vol_1m is not None and rolling_vol_1m > 0.001) else getattr(bot, "typical_1m_volatility", getattr(bot, "default_btc_1m_volatility", 14.0))
         sigma_s = sigma_1 / math.sqrt(60.0)
         sigma_3s = max(0.001, sigma_s * math.sqrt(3.0))
 
         # Moneyness & Deep ITM Moat
         if spot_price > 0.0 and target_strike > 0.0:
             moneyness = (spot_price - target_strike) if side_is_yes else (target_strike - spot_price)
-            moat = bot.moneyness_moat_multiplier * sigma_s * math.sqrt(max(10.0, time_to_expiry_s))
+            moat_mult = getattr(bot, "moneyness_moat_multiplier", 1.36)
+            moat = moat_mult * sigma_s * math.sqrt(max(10.0, time_to_expiry_s))
             # If position is deep ITM and remaining moneyness after adverse move is still well above moat
             if moneyness > 0 and moneyness >= moat and (moneyness - adverse_vel_3s) > (0.5 * moat):
                 return (
@@ -419,7 +420,7 @@ class DominationExitEvaluator:
         omega_t = 0.50 + 0.50 * ((1.0 - tau_rem) ** 1.5)
         doubt_score = min(1.0, (0.55 * doubt_brain + 0.45 * doubt_vel) * (1.0 + omega_t))
 
-        enable_doubt_harvest = getattr(bot, "enable_doubt_harvest", False)
+        enable_doubt_harvest = getattr(bot, "enable_doubt_harvest", True)
         doubt_thresh = getattr(bot, "doubt_threshold", 0.55)
         upside_thresh = getattr(bot, "upside_capture_ratio_threshold", 0.50)
         asymmetric_peak = getattr(bot, "asymmetric_peak_bid", Decimal("0.88"))
@@ -486,12 +487,20 @@ class DominationExitEvaluator:
                 )
 
         # Rule 6: Valley Ejector (Early Loss Capping / Dynamic Capital Salvage)
-        # When trade is failing early (T > 180s), best bid dropped to <= $0.38, reverse conviction >= 70%,
-        # and not a gap-down recovery from a previous deep profit high-water mark.
+        # 3-Minute Death Window patched. Now operates until expiration, but tightens criteria inside 180s.
+        is_valley_crash = best_bid <= Decimal("0.38") and reverse_prob >= 0.70
+        if time_to_expiry_s <= 180.0:
+            # Inside 3 mins, require higher conviction (85%) to prevent late-cycle jitter spoofing
+            is_valley_crash = best_bid <= Decimal("0.38") and reverse_prob >= 0.85
+            # Silas TWAP Parity: If TWAP is still safely in our favor, ignore the spot-driven crash.
+            if twap_60s is not None and target_strike > 0.0:
+                if side_is_yes and twap_60s >= target_strike + 3.0:
+                    is_valley_crash = False
+                elif not side_is_yes and twap_60s <= target_strike - 3.0:
+                    is_valley_crash = False
+
         if (
-            time_to_expiry_s > 180.0
-            and best_bid <= Decimal("0.38")
-            and reverse_prob >= 0.70
+            is_valley_crash
             and (peak_bid is None or peak_bid < Decimal("0.80"))
         ):
             return DominationExitDecision(
@@ -502,7 +511,7 @@ class DominationExitEvaluator:
                 unrealized_pnl=round(total_net_pnl, 4),
                 rationale=(
                     f"🛑 [VALLEY EJECTOR] Bid collapsed to ${best_bid:.2f} with {reverse_prob*100:.1f}% adverse conviction "
-                    f"(T={int(time_to_expiry_s)}s > 180s) | Liquidating early to salvage capital (PnL: -${abs(total_net_pnl):.2f}) "
+                    f"(T={int(time_to_expiry_s)}s) | Liquidating early to salvage capital (PnL: -${abs(total_net_pnl):.2f}) "
                     f"instead of absorbing a -100% expiration loss."
                 ),
             )

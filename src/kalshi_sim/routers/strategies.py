@@ -215,8 +215,10 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
             cand_bot = "dominion_2_bot"
         elif cand_bot in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
             cand_bot = "bot1_v4_domination"
+        elif cand_bot in ("both", "dual", "dual_domination", "dual_fleet"):
+            cand_bot = "both"
 
-        if cand_bot in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot"):
+        if cand_bot in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot", "both"):
             # Enforce Pre-Deployment Audit Certification Gate
             if not state.bot_auditor.is_certified(cand_bot):
                 bot_inst = resolve_bot_instance(cand_bot)
@@ -1040,6 +1042,22 @@ async def get_bot_strategies() -> dict[str, Any]:
                 ],
             },
             {
+                "id": "bot1_v4_domination",
+                "name": "Bot 1 V4 (Multi-Turnover Domination)",
+                "description": "Multi-Turnover Quantitative Domination Engine + Dynamic EV Math Coupling + Doubt Harvester",
+                "active": state.active_strategy_bot == "bot1_v4_domination",
+                "badge": "Multi-Turnover V4",
+                "icon": "Crosshair",
+                "features": [
+                    "Multi-Turnover Execution (Max 4 Round-Trips)",
+                    "Dynamic EV Coupling (52c floor, 55c ceiling)",
+                    "Doubt-Harvester Scalp (+40% ROI)",
+                    "90s Opening Noise Quarantine Shield",
+                    "Dynamic Proximity Moat ($28+)",
+                    "Micro-Bankroll Sizing Armor (Strictly 1 Contract)",
+                ],
+            },
+            {
                 "id": "onnx_microstructure_bot",
                 "name": "ONNX Microstructure Bot",
                 "description": "28-D Deep Feature Tensor + Neural Network Inference + Quarter-Kelly Sizing",
@@ -1071,8 +1089,10 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
         strat_id = "macro_trend_dominion"
     elif strat_id in ("dominion2", "dominion_v2"):
         strat_id = "dominion_2_bot"
+    elif strat_id in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
+        strat_id = "bot1_v4_domination"
 
-    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot"):
+    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot"):
         raise HTTPException(status_code=400, detail=f"Invalid strategy_id: {req.strategy_id}")
 
     # Enforce Pre-Deployment Audit Certification Gate

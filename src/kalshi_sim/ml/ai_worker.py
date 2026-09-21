@@ -43,8 +43,17 @@ class AIWorker:
         self.hmm_brain = hmm_brain
         self._running = False
         self._task: Optional[asyncio.Task[None]] = None
-        self._last_compute_duration_ms: float = 0.0
-        self.active_strategy_bot: str = "3_step_domination_bot"  # Default: 3-Step Domination Bot
+        active_seal_strat = "bot1_v4_domination"
+        try:
+            from pathlib import Path
+            import json
+            seal_f = Path("data/seal_of_excellence.json")
+            if seal_f.exists():
+                s_data = json.loads(seal_f.read_text(encoding="utf-8"))
+                active_seal_strat = s_data.get("active_live_strategy", "bot1_v4_domination")
+        except Exception:
+            pass
+        self.active_strategy_bot: str = active_seal_strat
         self._macro_trend_bot = MacroTrendDominionBot(
             strategy_id="macro_trend_dominion",
             strategy_name="Macro Trend Dominion",
@@ -53,6 +62,8 @@ class AIWorker:
         self._domination_bot = ThreeStepDominationBot()
         self._dominion2_bot = Dominion2Bot()
         self._dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
+        from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
+        self._bot1_v4_engine = Bot1V4DominationEngine()
 
         # Thread-safe in-memory cached AI signals
         self._cached_signals: dict[str, Any] = {
@@ -90,6 +101,12 @@ class AIWorker:
             logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
         elif strategy_id in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot"):
             self.active_strategy_bot = "macro_trend_dominion"
+            logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
+        elif strategy_id in ("bot1_v4_domination", "bot1_v4", "domination_v4", "v4_domination"):
+            self.active_strategy_bot = "bot1_v4_domination"
+            logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
+        elif strategy_id in ("both", "dual", "dual_domination", "dual_fleet"):
+            self.active_strategy_bot = "both"
             logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
         elif strategy_id in ("dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot", "dominion2", "dominion_v2"):
             # Normalize alias
@@ -371,7 +388,54 @@ class AIWorker:
                                 "compute_latency_ms": round(compute_duration, 2),
                             }
 
-                        # 3. Strategy: ONNX Microstructure Bot
+                        # 3. Strategy: Bot 1 V4 (Multi-Turnover Domination) or Dual Bot Fleet
+                        elif self.active_strategy_bot in ("bot1_v4_domination", "both", "dual", "dual_domination", "dual_fleet"):
+                            vpin_val = 0.15
+                            try:
+                                vpin_val = float(self._sim_agent._onnx_engine.extractor.compute_vpin())
+                            except Exception:
+                                pass
+
+                            dec_v4 = self._bot1_v4_engine.evaluate_market_opportunity(
+                                spot_price=spot_price,
+                                target_strike=target_strike,
+                                time_to_expiry_s=time_to_expiry_s,
+                                l2_book=book,
+                                vpin=vpin_val,
+                                cycle_id=ticker,
+                            )
+
+                            compute_duration = (asyncio.get_event_loop().time() - start_t) * 1000.0
+                            self._last_compute_duration_ms = compute_duration
+
+                            self._cached_signals = {
+                                "strategy_id": dec_v4.strategy_id,
+                                "strategy_name": dec_v4.strategy_name,
+                                "active_playbook": dec_v4.active_playbook,
+                                "playbook_stage": dec_v4.playbook_stage,
+                                "p_up": dec_v4.p_up,
+                                "p_down": dec_v4.p_down,
+                                "p_wait": dec_v4.p_wait,
+                                "vpin": dec_v4.vpin,
+                                "vpin_is_safe": dec_v4.vpin_is_safe,
+                                "ev_yes": dec_v4.ev_yes,
+                                "ev_no": dec_v4.ev_no,
+                                "edge_yes": dec_v4.edge_yes,
+                                "edge_no": dec_v4.edge_no,
+                                "kelly_f_yes": dec_v4.kelly_f_yes,
+                                "kelly_f_no": dec_v4.kelly_f_no,
+                                "recommended_side": dec_v4.recommended_side,
+                                "recommended_contracts": dec_v4.recommended_contracts,
+                                "rationale": dec_v4.rationale,
+                                "order_type": getattr(dec_v4, "order_type", "limit"),
+                                "limit_price": getattr(dec_v4, "limit_price", 0.52),
+                                "discount_limit_price": float(self._bot1_v4_engine.discount_limit_price),
+                                "turnovers_completed": dec_v4.turnovers_completed,
+                                "max_turnovers": dec_v4.max_turnovers,
+                                "compute_latency_ms": round(compute_duration, 2),
+                            }
+
+                        # 4. Strategy: ONNX Microstructure Bot
                         else:
                             onnx_res = self._sim_agent._onnx_engine.process_orderbook_tick(book, latest_trades=trades)
                             prob_long = onnx_res.get("prob_long", 0.33)

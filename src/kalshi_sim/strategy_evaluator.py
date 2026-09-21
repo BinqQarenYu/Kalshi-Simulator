@@ -55,6 +55,7 @@ class StrategyEvaluationCoordinator:
         dual_onnx_bot: DualONNXArbitrageBot,
         btc_orderflow_feed: BtcOrderflowFeed,
         spot_price_getter: Optional[Callable[[], Decimal]] = None,
+        bot1_v4_engine: Optional[Any] = None,
     ) -> None:
         self._guardrails = guardrails
         self._simulator = simulator
@@ -67,6 +68,7 @@ class StrategyEvaluationCoordinator:
         self._dual_onnx_bot = dual_onnx_bot
         self._btc_orderflow_feed = btc_orderflow_feed
         self._spot_price_getter = spot_price_getter
+        self._bot1_v4_engine = bot1_v4_engine
 
         # Cooldown and rate-limiting caches
         self._last_macro_eval_time: dict[str, float] = {}
@@ -162,8 +164,8 @@ class StrategyEvaluationCoordinator:
                 place_order_fn=place_order_fn,
             )
 
-        # BOT 1: 3-Step Domination Bot
-        if active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination", "bot1_v4_domination", "bot1_v4"):
+        # BOT 1: 3-Step Domination Bot / Bot 1 V4 Engine / Dual Bot Fleet
+        if active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination", "bot1_v4_domination", "bot1_v4", "both", "dual", "all", "dual_domination", "dual_fleet"):
             await self._eval_domination(
                 ticker=ticker,
                 book=book,
@@ -173,6 +175,7 @@ class StrategyEvaluationCoordinator:
                 portfolio=portfolio_domination,
                 is_live=is_live,
                 place_order_fn=place_order_fn,
+                active_bot_type=active_strategy_bot,
             )
 
         # BOT: The ONNX Strategy (Dual-Brain Spot Lead vs Kalshi Lag CLOB)
@@ -393,6 +396,7 @@ class StrategyEvaluationCoordinator:
         portfolio: Portfolio,
         is_live: bool,
         place_order_fn: Callable[..., Any],
+        active_bot_type: str = "3_step_domination_bot",
     ) -> None:
         pos = portfolio.get_position(ticker)
         if pos is not None:
@@ -406,6 +410,7 @@ class StrategyEvaluationCoordinator:
                 portfolio=portfolio,
                 is_live=is_live,
                 place_order_fn=place_order_fn,
+                active_bot_type=active_bot_type,
             )
             return
 
@@ -441,59 +446,77 @@ class StrategyEvaluationCoordinator:
                 except Exception:
                     pass
 
-                decision = self._domination_bot.evaluate(
-                    book=book,
-                    spot_price=spot_price,
-                    target_strike=target_strike,
-                    time_to_expiry_s=time_to_expiry_s,
-                    recent_trades=trades,
-                    total_equity=portfolio.equity,
-                    max_position_size=1,
-                    estimated_vpin=vpin_score,
-                )
+                is_dual = active_bot_type in ("both", "dual", "all", "dual_domination", "dual_fleet")
+                engines_to_eval = []
+                if is_dual:
+                    engines_to_eval = [
+                        (self._domination_bot, "3_step_domination_bot", False),
+                        (self._bot1_v4_engine, "bot1_v4_domination", True),
+                    ]
+                elif active_bot_type in ("bot1_v4_domination", "bot1_v4") and self._bot1_v4_engine is not None:
+                    engines_to_eval = [(self._bot1_v4_engine, "bot1_v4_domination", True)]
+                else:
+                    engines_to_eval = [(self._domination_bot, "3_step_domination_bot", False)]
 
-                now_mono = time.monotonic()
-                if now_mono - self._last_pred_log_time.get(ticker, 0.0) >= 3.0:
-                    self._last_pred_log_time[ticker] = now_mono
-                    self._db_writer.enqueue_ai_prediction(
-                        ticker=ticker,
-                        p_up=decision.p_up,
-                        p_down=decision.p_down,
-                        p_wait=decision.p_wait,
-                        vpin=decision.vpin,
-                        ev_yes=decision.ev_yes,
-                        ev_no=decision.ev_no,
-                        recommended_side=decision.recommended_side,
-                        rationale=decision.rationale,
-                    )
-
-                if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
-                    order_size = 1
-                    side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
-                    logger.info(
-                        "[%s] %-18s | %-3s (%s) | Edge=%+.1f%% | EV=+%s/ct | Size=%d cts",
-                        "LIVE 3-STEP BOT" if is_live else "3-STEP BOT",
-                        ticker,
-                        decision.recommended_side.upper(),
-                        decision.active_playbook,
-                        decision.edge_pct,
-                        f"${max(decision.ev_yes, decision.ev_no):.2f}",
-                        order_size,
-                    )
-                    order_type_val = getattr(decision, "order_type", "limit")
-                    limit_price_val = Decimal(str(getattr(decision, "limit_price", self._domination_bot.discount_limit_price)))
-                    await place_order_fn(
+                for bot_engine, bot_type_tag, is_v4 in engines_to_eval:
+                    if bot_engine is None:
+                        continue
+                    decision = bot_engine.evaluate(
                         book=book,
-                        ticker=ticker,
-                        side=side_enum,
-                        max_size=order_size,
-                        timeframe=timeframe,
-                        reasoning=decision.rationale,
-                        portfolio=portfolio,
-                        bot_type="3_step_domination_bot",
-                        order_type=order_type_val,
-                        limit_price=limit_price_val,
+                        spot_price=spot_price,
+                        target_strike=target_strike,
+                        time_to_expiry_s=time_to_expiry_s,
+                        recent_trades=trades,
+                        total_equity=portfolio.equity,
+                        max_position_size=1,
+                        estimated_vpin=vpin_score,
+                        cycle_id=ticker,
                     )
+
+                    now_mono = time.monotonic()
+                    if now_mono - self._last_pred_log_time.get(f"{ticker}_{bot_type_tag}", 0.0) >= 3.0:
+                        self._last_pred_log_time[f"{ticker}_{bot_type_tag}"] = now_mono
+                        self._db_writer.enqueue_ai_prediction(
+                            ticker=ticker,
+                            p_up=decision.p_up,
+                            p_down=decision.p_down,
+                            p_wait=decision.p_wait,
+                            vpin=decision.vpin,
+                            ev_yes=decision.ev_yes,
+                            ev_no=decision.ev_no,
+                            recommended_side=decision.recommended_side,
+                            rationale=f"[{bot_type_tag}] {decision.rationale}",
+                        )
+
+                    if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
+                        order_size = max(1, min(3, int(getattr(decision, "recommended_contracts", 1))))
+                        side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
+                        bot_label = ("LIVE BOT 1 V4" if is_v4 else "LIVE 3-STEP BOT") if is_live else ("BOT 1 V4" if is_v4 else "3-STEP BOT")
+                        logger.info(
+                            "[%s] %-18s | %-3s (%s) | Edge=%+.1f%% | EV=+%s/ct | Size=%d cts",
+                            bot_label,
+                            ticker,
+                            decision.recommended_side.upper(),
+                            decision.active_playbook,
+                            decision.edge_pct,
+                            f"${max(decision.ev_yes, decision.ev_no):.2f}",
+                            order_size,
+                        )
+                        order_type_val = getattr(decision, "order_type", "limit")
+                        base_discount = getattr(bot_engine, "discount_limit_price", Decimal("0.52"))
+                        limit_price_val = Decimal(str(getattr(decision, "limit_price", base_discount)))
+                        await place_order_fn(
+                            book=book,
+                            ticker=ticker,
+                            side=side_enum,
+                            max_size=order_size,
+                            timeframe=timeframe,
+                            reasoning=decision.rationale,
+                            portfolio=portfolio,
+                            bot_type=bot_type_tag,
+                            order_type=order_type_val,
+                            limit_price=limit_price_val,
+                        )
             except Exception as exc:
                 logger.debug("Domination bot evaluation error: %s", exc)
 
@@ -508,6 +531,7 @@ class StrategyEvaluationCoordinator:
         portfolio: Portfolio,
         is_live: bool,
         place_order_fn: Callable[..., Any],
+        active_bot_type: str = "3_step_domination_bot",
     ) -> None:
         """Evaluate open position against 50%-75% take-profit scalping and quantitative exit rules."""
         _eval_now = time.monotonic()
