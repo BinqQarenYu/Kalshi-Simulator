@@ -91,3 +91,7 @@
 ## 2026-09-21 - O(1) Version-Backed Top-of-Book Ask Caching in L2BookState
 **Learning:** Computing `best_yes_ask` and `best_no_ask` on every query re-calculated Decimal subtraction (`1 - best_no_bid`, `1 - best_yes_bid`) and dictionary `min()` scans on unchanged order book states (~0.70 µs per query).
 **Action:** Utilized `FastBook._version` mutation tracking to cache top-of-book asks in `L2BookState`. Reduced `best_yes_ask` / `best_no_ask` read latency from ~0.70 µs down to ~0.21 µs (~3.2x speedup / ~69% latency reduction).
+
+## 2026-09-21 - O(1) Version-Backed Pre-Converted Float Depth Tuple Caching
+**Learning:** Executing `float()` conversions on 30 order book `Decimal` price and quantity tuples inside high-frequency feature extraction loops introduced significant interpreter object casting overhead (~8.68 µs per tick) even when order book states were unchanged between ticks.
+**Action:** Implemented `L2BookState.get_depth_float_tuples(n)` leveraging `FastBook._version` mutation tracking to cache pre-converted float depth tuples. Reduced `KalshiOrderflowFeatureExtractor.extract_features_from_book` tick latency from ~17.95 µs down to ~9.27 µs (~1.94x speedup / ~48% latency reduction).
