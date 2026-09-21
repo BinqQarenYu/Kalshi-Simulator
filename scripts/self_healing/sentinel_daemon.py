@@ -152,13 +152,20 @@ def sentinel_cycle():
                 agent_role="Deer Architect (UI/UX Ergonomics)"
             )
     else:
-        print(f"[*] Cycle {_CYCLE_COUNTER}: [BACKEND LEAD DEER] Scanning repository for mathematical & quantitative flaws...")
-        findings = scan_directory(REPO_ROOT / "strategies")
-        findings.extend(scan_directory(REPO_ROOT / "src" / "kalshi_sim"))
+        print(f"[*] Cycle {_CYCLE_COUNTER}: [BACKEND LEAD DEER] Scanning PERPETUAL TRADING vertical for mathematical flaws...")
+        # STRICT BOUNDARY: Perpetual Trading Vertical Only
+        findings = []
+        perp_dir = REPO_ROOT / "src" / "kalshi_sim" / "perpetuals"
+        if perp_dir.exists():
+            findings.extend(scan_directory(perp_dir))
+        perp_router = REPO_ROOT / "src" / "kalshi_sim" / "routers" / "perpetuals.py"
+        if perp_router.exists():
+            from scripts.self_healing.ast_truth_scanner import scan_file
+            findings.extend(scan_file(perp_router))
         unprocessed_be = [f for f in findings if f"{f.file_path}:{f.line_no}:{f.category}" not in processed]
 
         if not unprocessed_be:
-            print("[+] Backend clean. Zero unaddressed mathematical or logic flaws found.")
+            print("[+] Perpetual backend clean. Zero unaddressed mathematical or margin flaws found.")
             return
 
         print(f"[!] Found {len(findings)} suspect findings ({len(unprocessed_be)} unaddressed). Processing 1 problem...")
@@ -189,9 +196,9 @@ def sentinel_cycle():
             )
 
 
-def run_sentinel_forever(interval_seconds: int = 600):
-    """24/7 Continuous Autonomous Watchman Loop (WF-006 'Project Hephaestus'). 10m Cadence."""
-    print(f"[*] Autonomous Self-Healing Sentinel Daemon engaged. Alternating Cadence: {interval_seconds // 60}m.")
+def run_sentinel_forever(interval_seconds: int = 1800):
+    """24/7 Continuous Autonomous Watchman Loop (WF-006 'Project Hephaestus'). 30m Cadence."""
+    print(f"[*] Autonomous Self-Healing Perpetual Sentinel Daemon engaged. Alternating Cadence: {interval_seconds // 60}m.")
     while True:
         try:
             sentinel_cycle()
@@ -202,5 +209,5 @@ def run_sentinel_forever(interval_seconds: int = 600):
 
 
 if __name__ == "__main__":
-    run_sentinel_forever(interval_seconds=600)
+    run_sentinel_forever(interval_seconds=1800)
 

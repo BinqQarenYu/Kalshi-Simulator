@@ -38,3 +38,5 @@
 ### [2026-09-19 13:37:49 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL values require tabular monospace numerals (`font-mono tabular-nums`) to prevent layout jitter and ensure glanceable telemetry.
 
 ### [2026-09-19 14:18:45 ET] **Deer Architect (UI/UX)** on `BotReportsDeck.tsx:259`: Financial PnL telemetry lacks mandatory monospace tabular alignment ('font-mono tabular-nums') required for glanceable institutional monitoring.
+
+### [2026-09-21 02:49:26 ET] **Lead Deer (Fatal Flaw)** on `perpetuals.py:140`: Casting the price to a Python float violates the strict decimal financial arithmetic invariant and risks precision drift.

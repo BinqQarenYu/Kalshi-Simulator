@@ -1,1 +1,1 @@
-" \\Isolated Perpetual Trading Engine Package.\\\
+"""Isolated Perpetual Trading Engine Package."""

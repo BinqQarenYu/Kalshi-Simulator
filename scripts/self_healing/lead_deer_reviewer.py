@@ -17,7 +17,7 @@ MAX_CALLS_PER_HOUR = 2
 
 
 class LeadDeerReviewer:
-    def __init__(self, deerflow_env_path: Path = Path("F:/012A_Github/deer-flow/.env")):
+    def __init__(self, deerflow_env_path: Path = Path(r"C:\Users\Admin\.gemini\mcp\deer-flow\.env")):
         self.deerflow_env_path = deerflow_env_path
         self._ensure_throttle_db()
 
@@ -101,8 +101,17 @@ RESPOND STRICTLY IN VALID JSON:
             if self.deerflow_env_path.exists():
                 load_dotenv(self.deerflow_env_path)
             api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            if not api_key or api_key.startswith("$"):
+                # Read securely from Windows User Environment registry
+                try:
+                    import winreg
+                    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as reg_key:
+                        api_key, _ = winreg.QueryValueEx(reg_key, "GEMINI_API_KEY")
+                except Exception:
+                    pass
+
             if not api_key or api_key.startswith("AQ.") or "your-" in api_key:
-                return {"status": "ERROR", "reason": "No valid GEMINI_API_KEY found in .env (Key must start with AIzaSy...)"}
+                return {"status": "ERROR", "reason": "No valid GEMINI_API_KEY found in environment or .env (Key must start with AIzaSy...)"}
 
             model_candidates = ["models/gemini-flash-lite-latest", "models/gemini-flash-latest"]
             payload = {
