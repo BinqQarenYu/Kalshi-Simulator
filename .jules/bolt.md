@@ -79,3 +79,7 @@
 ## 2026-09-20 - Pure Python Sample Standard Deviation vs statistics.stdev Overhead
 **Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
 **Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
+
+## 2026-09-21 - Single-Pass Algebraic Trade Entropy Calculation
+**Learning:** Computing Shannon trade size entropy over rolling trade history deques by allocating intermediate Python lists (`recent_sizes`, `probs`) via `itertools.islice` and list comprehensions introduced ~2.4 µs of Python list allocation and multi-pass loop overhead per trade update.
+**Action:** Refactored `_update_cached_entropy` in `KalshiOrderflowFeatureExtractor` and `GoldOrderflowFeatureExtractor` to use the algebraic entropy expansion $H(P) = \log_2(S) - \frac{\sum s_i \log_2(s_i)}{S}$ in a single loop pass without list allocations. Reduced `_update_cached_entropy` latency from ~7.3 µs to ~4.9 µs per call (~33% latency reduction / ~1.47x speedup).
