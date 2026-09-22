@@ -313,27 +313,73 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
         onDoubleClick={() => handleDoubleClick(0)}
         onMouseEnter={() => setHoveredGutter(0)}
         onMouseLeave={() => setHoveredGutter(null)}
-        className={`relative z-20 w-1.5 shrink-0 h-full cursor-col-resize flex items-center justify-center transition-colors duration-150 ${
+        className={`relative z-20 w-2.5 shrink-0 h-full cursor-col-resize flex flex-col items-center justify-between py-6 transition-all duration-150 border-x border-[#1a2027] ${
           activeGutter === 0
-            ? 'bg-[#00bda5] shadow-[0_0_10px_rgba(0,189,165,0.6)]'
+            ? 'bg-[#00bda5] shadow-[0_0_15px_rgba(0,189,165,0.8)]'
             : hoveredGutter === 0
-            ? 'bg-[#00bda5]/80'
-            : 'bg-[#262d35] hover:bg-[#00bda5]/60'
+            ? 'bg-[#00bda5] shadow-[0_0_10px_rgba(0,189,165,0.5)]'
+            : 'bg-[#1a2026] hover:bg-[#00bda5]/70'
         }`}
+        title="Drag left/right to resize, click arrows to expand/collapse, or double-click to reset"
       >
-        {/* Invisible expanded hit area for effortless grabbing (12px hit zone) */}
-        <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
+        {/* Invisible expanded hit area for effortless grabbing (20px hit zone) */}
+        <div className="absolute inset-y-0 -left-2.5 -right-2.5 cursor-col-resize" />
+
+        {/* Top Quick-Slide Arrow: Collapse Left Panel */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            const min0 = minPercentageSizes[0];
+            const next: [number, number, number] = [min0, 100 - min0 - sizes[2], sizes[2]];
+            setSizes(next);
+            onResize?.(next);
+            onResizeEnd?.(next);
+          }}
+          className={`w-4 h-4 rounded bg-[#0f1318] hover:bg-[#00bda5] hover:text-black text-[#8c9ba5] flex items-center justify-center text-[9px] font-bold z-30 transition cursor-pointer shadow-sm ${
+            hoveredGutter === 0 || activeGutter === 0 ? 'opacity-100' : 'opacity-40'
+          }`}
+          title="Slide divider left (collapse Left Panel)"
+        >
+          ◀
+        </button>
 
         {/* Center tactile grip pill */}
-        <div
-          className={`w-0.5 h-6 rounded-full transition-all duration-150 ${
-            activeGutter === 0
-              ? 'bg-white h-9 shadow'
-              : hoveredGutter === 0
-              ? 'bg-white/90 h-8'
-              : 'bg-[#8c9ba5]/40'
+        <div className="flex flex-col items-center gap-1 my-auto">
+          <div
+            className={`w-1 rounded-full transition-all duration-150 ${
+              activeGutter === 0
+                ? 'bg-white h-12 shadow-md'
+                : hoveredGutter === 0
+                ? 'bg-white h-10'
+                : 'bg-[#00bda5] h-8 shadow-sm'
+            }`}
+          />
+          <div className="flex flex-col gap-0.5 opacity-80">
+            <span className="w-1 h-1 rounded-full bg-slate-300" />
+            <span className="w-1 h-1 rounded-full bg-slate-300" />
+            <span className="w-1 h-1 rounded-full bg-slate-300" />
+          </div>
+        </div>
+
+        {/* Bottom Quick-Slide Arrow: Maximize Left Panel */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            const max0 = maxPercentageSizes[0];
+            const next: [number, number, number] = [max0, 100 - max0 - sizes[2], sizes[2]];
+            setSizes(next);
+            onResize?.(next);
+            onResizeEnd?.(next);
+          }}
+          className={`w-4 h-4 rounded bg-[#0f1318] hover:bg-[#00bda5] hover:text-black text-[#8c9ba5] flex items-center justify-center text-[9px] font-bold z-30 transition cursor-pointer shadow-sm ${
+            hoveredGutter === 0 || activeGutter === 0 ? 'opacity-100' : 'opacity-40'
           }`}
-        />
+          title="Slide divider right (expand Left Panel)"
+        >
+          ▶
+        </button>
       </div>
 
       {/* =========================================================================
@@ -362,33 +408,79 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
           tabIndex={0}
           aria-orientation="vertical"
           aria-valuenow={sizes[2]}
-          aria-label="Resize center and right panels"
+          aria-label="Drag to resize right Baby Bot console panel"
           onMouseDown={(e) => handleMouseDown(1, e)}
           onTouchStart={(e) => handleTouchStart(1, e)}
           onDoubleClick={() => handleDoubleClick(1)}
           onMouseEnter={() => setHoveredGutter(1)}
           onMouseLeave={() => setHoveredGutter(null)}
-          className={`relative z-20 w-1.5 shrink-0 h-full cursor-col-resize flex items-center justify-center transition-colors duration-150 ${
+          className={`relative z-30 w-2.5 shrink-0 h-full cursor-col-resize flex flex-col items-center justify-between py-6 transition-all duration-150 border-x border-[#1a2027] ${
             activeGutter === 1
-              ? 'bg-[#00bda5] shadow-[0_0_10px_rgba(0,189,165,0.6)]'
+              ? 'bg-[#00bda5] shadow-[0_0_15px_rgba(0,189,165,0.8)]'
               : hoveredGutter === 1
-              ? 'bg-[#00bda5]/80'
-              : 'bg-[#262d35] hover:bg-[#00bda5]/60'
+              ? 'bg-[#00bda5] shadow-[0_0_10px_rgba(0,189,165,0.5)]'
+              : 'bg-[#1e252d] hover:bg-[#00bda5]/80'
           }`}
+          title="Drag left/right to resize console, click arrows to adjust, or double-click to reset"
         >
-          {/* Invisible expanded hit area for effortless grabbing (12px hit zone) */}
-          <div className="absolute inset-y-0 -left-1.5 -right-1.5 cursor-col-resize" />
+          {/* Invisible expanded hit area for effortless grabbing (20px hit zone) */}
+          <div className="absolute inset-y-0 -left-2.5 -right-2.5 cursor-col-resize" />
 
-          {/* Center tactile grip pill */}
-          <div
-            className={`w-0.5 h-6 rounded-full transition-all duration-150 ${
-              activeGutter === 1
-                ? 'bg-white h-9 shadow'
-                : hoveredGutter === 1
-                ? 'bg-white/90 h-8'
-                : 'bg-[#8c9ba5]/40'
+          {/* Top Quick-Slide Arrow: Maximize Right Panel (Expand Console) */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              const max2 = maxPercentageSizes[2];
+              const next: [number, number, number] = [sizes[0], 100 - sizes[0] - max2, max2];
+              setSizes(next);
+              onResize?.(next);
+              onResizeEnd?.(next);
+            }}
+            className={`w-4 h-4 rounded bg-[#0f1318] hover:bg-[#00bda5] hover:text-black text-[#8c9ba5] flex items-center justify-center text-[9px] font-bold z-30 transition cursor-pointer shadow-sm ${
+              hoveredGutter === 1 || activeGutter === 1 ? 'opacity-100' : 'opacity-40'
             }`}
-          />
+            title="Slide divider left (expand Right Baby Bot Console)"
+          >
+            ◀
+          </button>
+
+          {/* Center tactile grip pill with grip dots */}
+          <div className="flex flex-col items-center gap-1 my-auto">
+            <div
+              className={`w-1 rounded-full transition-all duration-150 ${
+                activeGutter === 1
+                  ? 'bg-white h-12 shadow-md'
+                  : hoveredGutter === 1
+                  ? 'bg-white h-10'
+                  : 'bg-[#00bda5] h-8 shadow-sm'
+              }`}
+            />
+            <div className="flex flex-col gap-0.5 opacity-80">
+              <span className="w-1 h-1 rounded-full bg-slate-300" />
+              <span className="w-1 h-1 rounded-full bg-slate-300" />
+              <span className="w-1 h-1 rounded-full bg-slate-300" />
+            </div>
+          </div>
+
+          {/* Bottom Quick-Slide Arrow: Minimize Right Panel */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              const min2 = minPercentageSizes[2];
+              const next: [number, number, number] = [sizes[0], 100 - sizes[0] - min2, min2];
+              setSizes(next);
+              onResize?.(next);
+              onResizeEnd?.(next);
+            }}
+            className={`w-4 h-4 rounded bg-[#0f1318] hover:bg-[#00bda5] hover:text-black text-[#8c9ba5] flex items-center justify-center text-[9px] font-bold z-30 transition cursor-pointer shadow-sm ${
+              hoveredGutter === 1 || activeGutter === 1 ? 'opacity-100' : 'opacity-40'
+            }`}
+            title="Slide divider right (collapse Right Console)"
+          >
+            ▶
+          </button>
         </div>
       )}
 
@@ -420,14 +512,14 @@ export const ResizableSplitPane: React.FC<ResizableSplitPaneProps> = ({
       ) : null}
 
       {/* =========================================================================
-          LIVE TELEMETRY PERCENTAGE BADGE (Visible during active dragging)
+          LIVE TELEMETRY PERCENTAGE BADGE & MAXIMIZE PRESET TOOLBAR
           ========================================================================= */}
       {showLivePercentageBadge && activeGutter !== null && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none animate-fade-in">
-          <div className="px-3 py-1 rounded-full bg-[#12161a]/95 border border-[#00bda5]/50 text-[#00bda5] font-mono text-[11px] font-bold shadow-2xl flex items-center gap-2 backdrop-blur-md">
+          <div className="px-3.5 py-1.5 rounded-full bg-[#12161a]/95 border border-[#00bda5]/50 text-[#00bda5] font-mono text-[11px] font-bold shadow-2xl flex items-center gap-2.5 backdrop-blur-md">
             <span className="w-1.5 h-1.5 rounded-full bg-[#00bda5] animate-ping" />
             <span>
-              {sizes[0].toFixed(0)}% │ {sizes[1].toFixed(0)}% │ {sizes[2].toFixed(0)}%
+              Left: {sizes[0].toFixed(0)}% │ Center: {sizes[1].toFixed(0)}% │ Right: {sizes[2].toFixed(0)}%
             </span>
             <span className="text-[9px] text-[#8c9ba5] font-normal">(Double-click divider to reset)</span>
           </div>

@@ -230,6 +230,7 @@ export interface WinLossEventReport {
   execution_mode?: string;
   lane?: string;
   timestamp_utc: string;
+  bot_parameters?: Record<string, any>;
 }
 
 export interface BotPerformanceSummary {

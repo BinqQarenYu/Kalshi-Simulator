@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
+from kalshi_sim.ml.domination_exit_evaluator import (
+    DominationExitDecision,
+    DominationExitEvaluator,
+)
+from kalshi_sim.ml.lead_deer_quant_brain import ExitDecision, LeadDeerQuantBrain
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
 from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, get_asset_config
 
@@ -56,22 +61,13 @@ class DominationDecision:
     limit_price: float = 0.52
 
 
-@dataclass(frozen=True)
-class DominationExitDecision:
-    """Structured exit decision output from the 3-Step Domination Bot."""
-    should_exit: bool
-    exit_reason: str  # 'TAKE_PROFIT_CEILING' | 'TAKE_PROFIT_ROI' | 'LATE_CYCLE_HARVEST' | 'HOLD' | 'NO_BID' | 'NONE'
-    exit_price: Decimal
-    profit_pct: float
-    unrealized_pnl: Decimal
-    rationale: str
 
 
 class ThreeStepDominationBot:
-    """Institutional Cycle-Aware 3-Step Quantitative Strategy Bot."""
+    """Institutional Cycle-Aware 3-Step Quantitative Strategy Bot (v3.2 Baseline)."""
 
     STRATEGY_ID = "3_step_domination_bot"
-    STRATEGY_NAME = "3-Step Domination Bot"
+    STRATEGY_NAME = "3-Step Dominion v3.2"
 
     def __init__(
         self,
@@ -89,9 +85,9 @@ class ThreeStepDominationBot:
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
         fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
-        max_entry_price: Decimal = Decimal("0.62"),  # $0.62 standard entry price cap (enforces >= 1.6:1 R:R)
+        max_entry_price: Decimal = Decimal("0.68"),  # $0.68 standard entry price cap ($0.70+ hard kill wall)
         discount_limit_price: Decimal = Decimal("0.52"),  # Configurable discount sniper ceiling (48¢-52¢ sweetspot)
-        min_confidence: float = 0.81,  # 81% model conviction threshold (Historical best)
+        min_confidence: float = 0.52,  # 52% model conviction threshold (temporary relaxed test mode)
         enable_trailing_ratchet: bool = True,  # High-water mark trailing profit ratchet and breakeven armor
         trailing_ratchet_buffer: Decimal = Decimal("0.08"),  # $0.08 pullback buffer below peak bid (Historical best)
         spot_delta_front_run_threshold: float = 28.0,  # $28.0 rolling 3s spot velocity base threshold (2.0σ winning sweetspot)
@@ -107,7 +103,7 @@ class ThreeStepDominationBot:
         twap_fading_quarantine_seconds: float = 15.0,  # 15s expiration quarantine (strict hold to $1.00)
         twap_fading_window_seconds: float = 60.0,  # 60s Silas TWAP fading evaluation window
         enable_dynamic_reversal_curve: bool = True,  # Time-adaptive reversal curve (decays 85% -> 50% as tau -> 0)
-        opening_quarantine_seconds: float = 90.0,  # Quarantine opening seconds of cycle to eliminate false breakouts
+        opening_quarantine_seconds: float = 30.0,  # Quarantine opening 30s of cycle to eliminate false breakouts
         onnx_engine: Optional[Any] = None,  # Brain 1 QuoLas Nano Microscope ONNX inference engine
         twap_immutability_sniper_cents: float = 0.75,  # 75¢ ceiling for Silas TWAP late-cycle arbitrage harvest
         max_queue_depth_ahead: int = 25000,  # Max resting contracts ahead before order placement (anti-toxic whale armor)
@@ -155,6 +151,16 @@ class ThreeStepDominationBot:
         self.twap_immutability_sniper_cents = float(twap_immutability_sniper_cents)
         self.max_queue_depth_ahead = int(max_queue_depth_ahead)
         self.max_clob_spread_cents = float(max_clob_spread_cents)
+        self.enable_lead_deer_peak_harvester = True
+
+        # Lead Deer Quant Brain & Continuous Experience Buffer (Council Weapon)
+        self.lead_deer_brain = LeadDeerQuantBrain(
+            min_confidence=float(self.min_confidence),
+            min_ev_dollars=float(self.min_ev_dollars),
+            maker_discount_ceiling=float(self.discount_limit_price),
+        )
+
+        self._exit_evaluator = DominationExitEvaluator(self)
 
         # Underlying Stage 2 EV & Quarter-Kelly Optimizer
         self._ev_engine = StatisticalEVEngine(
@@ -189,7 +195,7 @@ class ThreeStepDominationBot:
             "asset": self.asset.value if hasattr(self, "asset") else "BTC",
             "discount_limit_price": float(self.discount_limit_price),
             "momentum_max_price": float(self.max_entry_price),
-            "min_confidence": float(self.min_confidence),
+            "min_confidence": round(float(self.min_confidence) * 100.0, 1) if self.min_confidence <= 1.0 else round(float(self.min_confidence), 1),
             "min_edge_pct": round(float(self.min_edge_pct) * 100.0, 1),
             "min_ev_dollars": float(self.min_ev_dollars),
             "min_spot_diff": float(self.min_spot_diff),
@@ -215,6 +221,7 @@ class ThreeStepDominationBot:
             "twap_immutability_sniper_cents": float(self.twap_immutability_sniper_cents),
             "max_queue_depth_ahead": int(self.max_queue_depth_ahead),
             "max_clob_spread_cents": float(self.max_clob_spread_cents),
+            "enable_lead_deer_peak_harvester": bool(getattr(self, "enable_lead_deer_peak_harvester", True)),
         }
 
     def compute_dynamic_reversal_threshold(self, time_to_expiry_s: float) -> float:
@@ -225,6 +232,20 @@ class ThreeStepDominationBot:
         # Scales linearly from 50% at tau=0 up to base threshold at tau=10m
         scaled = 0.50 + 0.035 * tau_mins
         return min(self.reverse_indicator_threshold, scaled)
+
+    def compute_dynamic_limit_price(self, win_prob: float) -> Decimal:
+        """Dynamic EV Math Coupling:
+        Entry Limit = min(win_prob - EV_hurdle, max_entry_price)
+        Dynamically scales entry ceiling up to max_entry_price ($0.62) when model conviction is high,
+        while maintaining at least min_ev_dollars ($0.02) net EV edge.
+        """
+        ev_hurdle = float(self.min_ev_dollars)
+        max_cap = float(self.max_entry_price)
+        base_floor = float(self.discount_limit_price)
+
+        dynamic_price = win_prob - ev_hurdle
+        clamped_price = max(base_floor, min(dynamic_price, max_cap))
+        return Decimal(str(round(clamped_price, 2)))
 
     def update_parameters(
         self,
@@ -333,6 +354,8 @@ class ThreeStepDominationBot:
             self.max_queue_depth_ahead = max(10, min(2000, int(max_queue_depth_ahead)))
         if max_clob_spread_cents is not None:
             self.max_clob_spread_cents = max(0.01, min(0.25, float(max_clob_spread_cents)))
+        if "enable_lead_deer_peak_harvester" in kwargs and kwargs["enable_lead_deer_peak_harvester"] is not None:
+            self.enable_lead_deer_peak_harvester = bool(kwargs["enable_lead_deer_peak_harvester"])
         logger.debug("[DOMINATION BOT] Live parameters updated: %s", self.get_parameters())
         return self.get_parameters()
 
@@ -359,8 +382,8 @@ class ThreeStepDominationBot:
         baseline_vol = float(cfg.typical_1m_volatility)
         live_vol = self.typical_1m_volatility if self.typical_1m_volatility > 0 else baseline_vol
 
-        floor_moat = self.min_spot_diff * 1.15
-        ceiling_moat = self.min_spot_diff * 2.15
+        floor_moat = max(4.0, self.min_spot_diff * 0.80)
+        ceiling_moat = max(12.0, self.min_spot_diff * 1.50)
 
         expected_full_cycle_noise = baseline_vol * math.sqrt(cycle_mins)
         if expected_full_cycle_noise > 1e-9:
@@ -420,6 +443,13 @@ class ThreeStepDominationBot:
         **kwargs: Any,
     ) -> DominationDecision:
         """Execute 3-step cycle analysis and determine optimal playbook execution."""
+        # Auto-sync with Single Source of Truth on disk before evaluation
+        try:
+            from kalshi_sim.truth_synchronizer import truth_synchronizer
+            truth_synchronizer.sync_engine(self, asset=self.asset.value if hasattr(self.asset, "value") else str(self.asset))
+        except Exception:
+            pass
+
         if not book or (not book.yes_book and not book.no_book) or spot_price <= 0 or target_strike <= 0:
             return self._build_wait_decision(
                 time_to_expiry_s=time_to_expiry_s,
@@ -945,7 +975,7 @@ class ThreeStepDominationBot:
                         ),
                     )
                 cfg = get_asset_config(self.asset)
-                deep_separation_diff = self.min_spot_diff * 2.3
+                deep_separation_diff = self.min_spot_diff * 1.4
                 # Tier 2: Standard cap ($0.62) unless spot diff is deep in-the-money
                 if target_ask > self.max_entry_price and abs(spot_diff) < deep_separation_diff:
                     deep_sep_str = cfg.format_price(deep_separation_diff)
@@ -1148,111 +1178,16 @@ class ThreeStepDominationBot:
         twap_60s: Optional[float] = None,
         rolling_vol_1m: Optional[float] = None,
     ) -> tuple[bool, str]:
-        """Evaluate Spot Velocity Front-Run using 4-Regime Fading Mathematics.
-
-        Regime 1 (T > 240s): Macro Drift Zone (Z-Score >= 2.50σ and outside Deep ITM Moat).
-        Regime 2 (60s < T <= 240s): Transition Zone (adaptive moneyness-scaled threshold).
-        Regime 3 (15s < T <= 60s): Silas TWAP Fading Invariance (exit vetoed unless |v| >= v_crit).
-        Regime 4 (T <= 15s): Expiration Quarantine Zone (strict hold to $1.00 settlement).
-        """
-        if not self.enable_dynamic_spot_velocity:
-            adverse_spot_dump = False
-            if side_is_yes and spot_velocity_3s <= -self.spot_delta_front_run_threshold:
-                adverse_spot_dump = True
-            elif (not side_is_yes) and spot_velocity_3s >= self.spot_delta_front_run_threshold:
-                adverse_spot_dump = True
-            return adverse_spot_dump, f"Static Threshold: {self.spot_delta_front_run_threshold:.2f}"
-
-        # Calculate adverse velocity (positive number means moving adversely against our position)
-        adverse_vel_3s = -spot_velocity_3s if side_is_yes else spot_velocity_3s
-
-        if adverse_vel_3s <= 0.0:
-            return False, f"Favorable drift ({spot_velocity_3s:+.2f})"
-
-        # Regime 4: Expiration Quarantine Zone (T_rem <= 15s)
-        # Lock out front-run sells to prevent giving away EV into widening spreads right before $1.00 settlement
-        if time_to_expiry_s <= self.twap_fading_quarantine_seconds:
-            return (
-                False,
-                f"EXPIRATION QUARANTINE: T={time_to_expiry_s:.1f}s <= {self.twap_fading_quarantine_seconds:.0f}s. "
-                f"Sells strictly locked out to protect EV and hold for $1.00 settlement."
-            )
-
-        # Volatility calibration
-        sigma_1 = rolling_vol_1m if (rolling_vol_1m is not None and rolling_vol_1m > 0.001) else self.typical_1m_volatility
-        sigma_s = sigma_1 / math.sqrt(60.0)
-        sigma_3s = max(0.001, sigma_s * math.sqrt(3.0))
-
-        # Moneyness & Deep ITM Moat
-        if spot_price > 0.0 and target_strike > 0.0:
-            moneyness = (spot_price - target_strike) if side_is_yes else (target_strike - spot_price)
-            moat = self.moneyness_moat_multiplier * sigma_s * math.sqrt(max(10.0, time_to_expiry_s))
-            # If position is deep ITM and remaining moneyness after adverse move is still well above moat
-            if moneyness > 0 and moneyness >= moat and (moneyness - adverse_vel_3s) > (0.5 * moat):
-                return (
-                    False,
-                    f"DEEP ITM IMMUNITY: Moneyness +${moneyness:.2f} exceeds dynamic moat +${moat:.2f}. "
-                    f"Position safe from adverse drift."
-                )
-        else:
-            moneyness = 0.0
-
-        # Regime 3: TWAP Fading Zone (15s < T_rem <= 60s)
-        # Silas TWAP Gravity Invariance: Kalshi settles on 60s trailing TWAP.
-        # Future spot velocity impact fades quadratically at O(T_rem^2).
-        if time_to_expiry_s <= self.twap_fading_window_seconds and twap_60s is not None and twap_60s > 0.0 and target_strike > 0.0:
-            delta_twap = (twap_60s - target_strike) if side_is_yes else (target_strike - twap_60s)
-            if delta_twap > 0.0:
-                v_sec = adverse_vel_3s / 3.0
-                t_safe = max(1.0, time_to_expiry_s)
-                v_crit = (2.0 * delta_twap * 60.0) / (t_safe ** 2)
-                if v_sec < v_crit:
-                    return (
-                        False,
-                        f"SILAS TWAP GRAVITY VETO: Adverse velocity {v_sec:+.2f}$/s < v_crit {v_crit:.2f}$/s. "
-                        f"60s TWAP cushion +${delta_twap:.2f} physically intact. Holding to $1.00 settlement."
-                    )
-                else:
-                    return (
-                        True,
-                        f"TWAP BREACH HAZARD: Adverse velocity {v_sec:+.2f}$/s >= v_crit {v_crit:.2f}$/s "
-                        f"threatens settlement TWAP (+${delta_twap:.2f} cushion). Front-running vacuum!"
-                    )
-
-        # Regime 2: Transition Zone (60s < T_rem <= 240s)
-        if time_to_expiry_s <= 240.0:
-            if spot_price > 0.0 and target_strike > 0.0:
-                m_pos = max(0.0, moneyness)
-                scale = math.sqrt(time_to_expiry_s / 60.0)
-                dyn_thresh = max(0.80 * sigma_1, m_pos / max(0.5, scale))
-            else:
-                dyn_thresh = self.spot_delta_front_run_threshold
-
-            if adverse_vel_3s >= dyn_thresh:
-                return (
-                    True,
-                    f"TRANSITION DRIFT HAZARD: 3s adverse velocity {adverse_vel_3s:+.2f} >= dynamic threshold "
-                    f"{dyn_thresh:.2f} (T={time_to_expiry_s:.0f}s). Front-running resting bids!"
-                )
-            else:
-                return (
-                    False,
-                    f"TRANSITION NORMAL: 3s adverse velocity {adverse_vel_3s:+.2f} < dynamic threshold {dyn_thresh:.2f}."
-                )
-
-        # Regime 1: Macro Drift Zone (T_rem > 240s)
-        z_score = adverse_vel_3s / sigma_3s
-        if z_score >= self.velocity_z_score_threshold:
-            return (
-                True,
-                f"MACRO DRIFT SHIFT: Adverse velocity Z-Score {z_score:.2f}σ >= {self.velocity_z_score_threshold:.2f}σ "
-                f"(Adverse {adverse_vel_3s:+.2f}$ in 3s). Front-running trend reversal."
-            )
-        else:
-            return (
-                False,
-                f"MACRO STABLE: Adverse velocity Z-Score {z_score:.2f}σ < {self.velocity_z_score_threshold:.2f}σ."
-            )
+        """Evaluate Spot Velocity Front-Run using 4-Regime Fading Mathematics."""
+        return self._exit_evaluator.compute_dynamic_spot_velocity_decision(
+            side_is_yes=side_is_yes,
+            spot_velocity_3s=spot_velocity_3s,
+            time_to_expiry_s=time_to_expiry_s,
+            spot_price=spot_price,
+            target_strike=target_strike,
+            twap_60s=twap_60s,
+            rolling_vol_1m=rolling_vol_1m,
+        )
 
     def evaluate_exit(
         self,
@@ -1270,186 +1205,17 @@ class ThreeStepDominationBot:
         **kwargs: Any,
     ) -> DominationExitDecision:
         """Evaluate open position against quantitative Take-Profit and Early Liquidation rules."""
-        if not book or size <= 0:
-            return DominationExitDecision(
-                should_exit=False,
-                exit_reason="NONE",
-                exit_price=Decimal("0.00"),
-                profit_pct=0.0,
-                unrealized_pnl=Decimal("0.00"),
-                rationale="No order book or zero position size.",
-            )
-
-        side_is_yes = (side == OrderSide.YES) if isinstance(side, OrderSide) else (str(side).lower() == "yes")
-        best_bid = book.best_yes_bid if side_is_yes else book.best_no_bid
-
-        if best_bid is None or best_bid <= Decimal("0.00"):
-            return DominationExitDecision(
-                should_exit=False,
-                exit_reason="NO_BID",
-                exit_price=Decimal("0.00"),
-                profit_pct=0.0,
-                unrealized_pnl=Decimal("0.00"),
-                rationale=f"Cannot exit: No active bid on the {'YES' if side_is_yes else 'NO'} book to liquidate against.",
-            )
-
-        safe_entry = max(Decimal("0.01"), entry_price)
-        gross_pnl_per_ct = best_bid - safe_entry
-        net_pnl_per_ct = gross_pnl_per_ct - self.fee_per_contract
-        total_net_pnl = net_pnl_per_ct * Decimal(str(size))
-        roi = float(gross_pnl_per_ct / safe_entry)
-
-        # Compute indicator probabilities and reverse direction conviction
-        prob_yes, prob_no = self.compute_market_probabilities(
+        return self._exit_evaluator.evaluate_exit(
+            side=side,
+            entry_price=entry_price,
+            size=size,
             book=book,
+            time_to_expiry_s=time_to_expiry_s,
             spot_price=spot_price,
             target_strike=target_strike,
-            time_to_expiry_s=time_to_expiry_s,
+            peak_bid=peak_bid,
+            spot_velocity_3s=spot_velocity_3s,
+            twap_60s=twap_60s,
+            rolling_vol_1m=rolling_vol_1m,
+            **kwargs,
         )
-        reverse_prob = prob_no if side_is_yes else prob_yes
-        dyn_reversal_threshold = self.compute_dynamic_reversal_threshold(time_to_expiry_s)
-
-        # Rule 1: Asymmetric Tail Risk Ceiling (e.g. Bid >= $0.94 or $0.90)
-        # Exits if ceiling reached AND either require_reversal_for_tp_ceiling is False OR reverse_prob >= dyn_reversal_threshold
-        if self.enable_take_profit_ceiling and best_bid >= self.take_profit_price_threshold and net_pnl_per_ct > Decimal("0.00"):
-            reversal_confirmed = (not self.require_reversal_for_tp_ceiling) or (reverse_prob >= dyn_reversal_threshold)
-            if reversal_confirmed:
-                rev_text = f" with {reverse_prob*100:.1f}% adverse reversal confirmation" if self.require_reversal_for_tp_ceiling else ""
-                return DominationExitDecision(
-                    should_exit=True,
-                    exit_reason="TAKE_PROFIT_CEILING",
-                    exit_price=best_bid,
-                    profit_pct=round(roi * 100.0, 2),
-                    unrealized_pnl=round(total_net_pnl, 4),
-                    rationale=(
-                        f"🎯 [TAKE PROFIT CEILING] Best bid ${best_bid:.2f} >= ${self.take_profit_price_threshold:.2f} "
-                        f"reached{rev_text} | Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | "
-                        f"Liquidating immediately to lock in banked gains before gamma cliff."
-                    ),
-                )
-            else:
-                logger.debug(
-                    "[HOLD TO SETTLEMENT] Bid $%.2f >= $%.2f ceiling, but reverse conviction %.1f%% < %.0f%%. Continuing to $1.00 settlement.",
-                    float(best_bid), float(self.take_profit_price_threshold), reverse_prob * 100.0, dyn_reversal_threshold * 100.0
-                )
-
-        # Rule 2: High-Frequency Spot Delta Front-Runner (Fading Mathematics)
-        if best_bid >= Decimal("0.85") and net_pnl_per_ct > Decimal("0.00"):
-            should_front_run, fr_rationale = self.compute_dynamic_spot_velocity_decision(
-                side_is_yes=side_is_yes,
-                spot_velocity_3s=spot_velocity_3s,
-                time_to_expiry_s=time_to_expiry_s,
-                spot_price=spot_price,
-                target_strike=target_strike,
-                twap_60s=twap_60s,
-                rolling_vol_1m=rolling_vol_1m,
-            )
-
-            if should_front_run:
-                return DominationExitDecision(
-                    should_exit=True,
-                    exit_reason="SPOT_DELTA_FRONT_RUN",
-                    exit_price=best_bid,
-                    profit_pct=round(roi * 100.0, 2),
-                    unrealized_pnl=round(total_net_pnl, 4),
-                    rationale=(
-                        f"⚡ [SPOT VELOCITY FRONT-RUN] {fr_rationale} | Front-running orderbook vacuum to lock in bid "
-                        f"${best_bid:.2f} (Net +${total_net_pnl:.2f}, +{roi*100:.1f}% ROI) before liquidity evaporates."
-                    ),
-                )
-
-        # Rule 3: High-Water Mark Trailing Profit Ratchet & Deep Breakeven Armor
-        # Calibrated via 5,000-cycle Monte Carlo: only trail after reaching deep profit (peak >= $0.88)
-        # to avoid whipsawing out of normal intra-cycle 50c-70c oscillations.
-        if self.enable_trailing_ratchet and peak_bid is not None and peak_bid > best_bid:
-            effective_peak = max(entry_price, peak_bid)
-
-            # Tier 2 & 3: Major Profit Trail (Active once peak bid >= $0.88)
-            if effective_peak >= Decimal("0.88"):
-                buffer = Decimal("0.06") if effective_peak >= Decimal("0.92") else self.trailing_ratchet_buffer
-                tier_floor = effective_peak - buffer
-                if best_bid <= tier_floor and net_pnl_per_ct > Decimal("0.00"):
-                    return DominationExitDecision(
-                        should_exit=True,
-                        exit_reason="TRAILING_PROFIT_RATCHET",
-                        exit_price=best_bid,
-                        profit_pct=round(roi * 100.0, 2),
-                        unrealized_pnl=round(total_net_pnl, 4),
-                        rationale=(
-                            f"🛡️ [TRAILING PROFIT RATCHET] Bid ${best_bid:.2f} dropped to/below trailing floor ${tier_floor:.2f} "
-                            f"(Peak was ${effective_peak:.2f}) | Locking in +${total_net_pnl:.2f} profit "
-                            f"(+{roi*100:.1f}% ROI) to protect banked gains."
-                        ),
-                    )
-
-            # Tier 1: Deep Breakeven Armor (Active ONLY once peak reached >= $0.85 and gained >= +20c from entry)
-            # Protected by lower bound (entry - 0.04) so it never sells into panic gap-downs
-            if effective_peak >= Decimal("0.85") and effective_peak >= entry_price + Decimal("0.20"):
-                be_floor = entry_price + self.fee_per_contract
-                if (entry_price - Decimal("0.04")) <= best_bid <= be_floor:
-                    return DominationExitDecision(
-                        should_exit=True,
-                        exit_reason="TRAILING_PROFIT_RATCHET",
-                        exit_price=best_bid,
-                        profit_pct=round(roi * 100.0, 2),
-                        unrealized_pnl=round(total_net_pnl, 4),
-                        rationale=(
-                            f"🛡️ [BREAKEVEN ARMOR] Bid ${best_bid:.2f} dropped back to entry/fee floor ${be_floor:.2f} "
-                            f"(Peak was ${effective_peak:.2f}) | Exiting near breakeven to protect capital from negative reversal."
-                        ),
-                    )
-
-        # Rule 4: Late-Cycle Expiration Defense (15s < T <= 120s, Bid >= $0.85, ROI >= 15%)
-        # In final 2 minutes, binary gamma risk explodes; lock in gains before unpredictable settlement
-        # In final 15 seconds, quarantined to hold for $1.00 settlement
-        if (
-            time_to_expiry_s > self.twap_fading_quarantine_seconds
-            and time_to_expiry_s <= 120.0
-            and best_bid >= Decimal("0.85")
-            and roi >= self.late_cycle_roi
-            and net_pnl_per_ct > Decimal("0.00")
-        ):
-            return DominationExitDecision(
-                should_exit=True,
-                exit_reason="LATE_CYCLE_HARVEST",
-                exit_price=best_bid,
-                profit_pct=round(roi * 100.0, 2),
-                unrealized_pnl=round(total_net_pnl, 4),
-                rationale=(
-                    f"⏱️ [LATE CYCLE HARVEST] T={int(time_to_expiry_s)}s <= 120s | "
-                    f"Bid ${best_bid:.2f} with +{roi*100:.1f}% ROI | "
-                    f"Net profit +${total_net_pnl:.2f} | Locking in win before binary settlement volatility."
-                ),
-            )
-
-        # Rule 5: Dynamic Reversal Take-Profit Harvest (ROI >= min_take_profit_roi ONLY IF reverse_prob >= dyn_reversal_threshold)
-        if (
-            self.enable_reverse_take_profit_roi
-            and roi >= self.min_take_profit_roi
-            and reverse_prob >= dyn_reversal_threshold
-            and net_pnl_per_ct > Decimal("0.00")
-        ):
-            return DominationExitDecision(
-                should_exit=True,
-                exit_reason="TAKE_PROFIT_ROI",
-                exit_price=best_bid,
-                profit_pct=round(roi * 100.0, 2),
-                unrealized_pnl=round(total_net_pnl, 4),
-                rationale=(
-                    f"🚨 [REVERSE SIGNAL TAKE-PROFIT] Indicators show {reverse_prob*100:.1f}% conviction in reverse direction "
-                    f"(>= {dyn_reversal_threshold*100:.0f}% target) | "
-                    f"Net ROI +{roi*100:.1f}% >= +{self.min_take_profit_roi*100:.0f}% target at ${best_bid:.2f} | "
-                    f"Net profit +${total_net_pnl:.2f} | Securing banked returns before reversal destroys gains."
-                ),
-            )
-
-        pnl_prefix = "+" if total_net_pnl >= Decimal("0.00") else "-"
-        return DominationExitDecision(
-            should_exit=False,
-            exit_reason="HOLD",
-            exit_price=best_bid,
-            profit_pct=round(roi * 100.0, 2),
-            unrealized_pnl=round(total_net_pnl, 4),
-            rationale=f"Holding position: Bid ${best_bid:.2f} (ROI: {roi*100:+.1f}%, PnL: {pnl_prefix}${abs(total_net_pnl):.2f}) has not hit take-profit criteria.",
-        )
-

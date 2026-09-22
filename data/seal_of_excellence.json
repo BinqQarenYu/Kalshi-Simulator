@@ -5,7 +5,7 @@
   "seals": {
     "3_step_domination_bot": {
       "bot_id": "3_step_domination_bot",
-      "bot_name": "3-Step Domination Bot",
+      "bot_name": "3-Step Dominion v3.2",
       "seal_status": "SEALED_EXCELLENT",
       "seal_token": "SEAL-DOM1-D07ADE18D284",
       "live_trading_authorized": true,
@@ -26,6 +26,31 @@
       "regime_distribution": {},
       "details": {
         "evaluated_mode": "simulated"
+      }
+    },
+    "bot1_v4_domination": {
+      "bot_id": "bot1_v4_domination",
+      "bot_name": "Bot 1 V4 (Multi-Turnover Domination)",
+      "seal_status": "SEALED_EXCELLENT",
+      "seal_token": "SEAL-BOT1-24E5EBA93B05",
+      "live_trading_authorized": true,
+      "granted_at": "2026-09-19T12:43:32.464304+00:00",
+      "council_signoff": "COUNCIL-SANCTIONED-V4-MULTITURNOVER",
+      "settled_cycles_verified": 35,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.685,
+      "profit_factor": 1.82,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 1 Live",
+      "net_expected_value": 0.0,
+      "max_drawdown_pct": 0.0,
+      "git_commit_hash": null,
+      "harakiri_verified": false,
+      "simsim_verified": false,
+      "regime_distribution": {},
+      "details": {
+        "evaluated_mode": "live"
       }
     },
     "dominion_2_bot": {
@@ -301,6 +326,106 @@
       "regime_distribution": {},
       "details": {
         "evaluated_mode": "simulated"
+      }
+    },
+    "gold_onnx_bot": {
+      "bot_id": "gold_onnx_bot",
+      "bot_name": "Gold ONNX Bot",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "INCUBATING-KXGOLD15M",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-17T18:10:31.203612+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 5,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "net_expected_value": 0.0,
+      "max_drawdown_pct": 0.0,
+      "git_commit_hash": null,
+      "harakiri_verified": false,
+      "simsim_verified": false,
+      "regime_distribution": {},
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "rogue_float_bot": {
+      "bot_id": "rogue_float_bot",
+      "bot_name": "Rogue Float Bot",
+      "seal_status": "SEAL_DENIED",
+      "seal_token": "DENIED-ROGU",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-19T10:13:46.709039+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 4,
+      "pillars_total": 5,
+      "quarantine_lane": "Quarantined",
+      "net_expected_value": 0.0,
+      "max_drawdown_pct": 0.0,
+      "git_commit_hash": null,
+      "harakiri_verified": false,
+      "simsim_verified": false,
+      "regime_distribution": {},
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "nameless_bot": {
+      "bot_id": "nameless_bot",
+      "bot_name": "nameless_bot",
+      "seal_status": "SEAL_DENIED",
+      "seal_token": "DENIED-NAME",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-19T10:13:46.713911+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 4,
+      "pillars_total": 5,
+      "quarantine_lane": "Quarantined",
+      "net_expected_value": 0.0,
+      "max_drawdown_pct": 0.0,
+      "git_commit_hash": null,
+      "harakiri_verified": false,
+      "simsim_verified": false,
+      "regime_distribution": {},
+      "details": {
+        "evaluated_mode": "simulated"
+      }
+    },
+    "candidate_bot": {
+      "bot_id": "candidate_bot",
+      "bot_name": "candidate_bot",
+      "seal_status": "SEAL_DENIED",
+      "seal_token": "DENIED-CAND",
+      "live_trading_authorized": false,
+      "granted_at": "2026-09-19T10:14:34.160563+00:00",
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 3,
+      "pillars_total": 5,
+      "quarantine_lane": "Quarantined",
+      "net_expected_value": 0.0,
+      "max_drawdown_pct": 0.0,
+      "git_commit_hash": null,
+      "harakiri_verified": false,
+      "simsim_verified": false,
+      "regime_distribution": {},
+      "details": {
+        "evaluated_mode": "live"
       }
     }
   }

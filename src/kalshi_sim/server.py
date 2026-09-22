@@ -107,6 +107,29 @@ from kalshi_sim.schemas import (
 from kalshi_sim.simulation_agent import SimulationAgent
 from kalshi_sim.tick_writer import TickWriter
 
+from kalshi_sim.server_settlements import (
+    record_win_loss_event_report,
+    format_cycle_time_from_iso,
+    sync_live_settlements,
+    init_server_settlements,
+)
+from kalshi_sim.server_feeds import (
+    start_live_feed,
+    live_kalshi_public_sync_loop,
+    standalone_sync_loop,
+    start_live_public_feed,
+    start_mock_feed,
+    stop_current_feed,
+    live_btc_spot_ws_loop,
+    live_btc_spot_sync_loop,
+    update_dynamic_clob_ladder,
+    init_server_feeds,
+)
+from kalshi_sim.server_state_payload import (
+    _build_full_state_payload,
+    init_state_payload,
+)
+
 logger = logging.getLogger("kalshi_sim.server")
 
 TIMEFRAME_CONFIGS: dict[Timeframe, dict[str, Any]] = {
@@ -173,6 +196,12 @@ def resolve_bot_instance(bot_id: str) -> Any:
             return state.dual_onnx_bot
         state.dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=getattr(state, "hmm_brain", None))
         return state.dual_onnx_bot
+    elif bot_id in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
+        if hasattr(state, "bot1_v4_engine") and state.bot1_v4_engine:
+            return state.bot1_v4_engine
+        from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
+        state.bot1_v4_engine = Bot1V4DominationEngine()
+        return state.bot1_v4_engine
     return None
 
 
@@ -261,6 +290,13 @@ class ServerState:
         self.ai_worker_task: asyncio.Task | None = None
         self.ai_auto_trade: bool = True
         self.active_strategy_bot: str = "3_step_domination_bot"
+        self.bot_arm_states: dict[str, bool] = {
+            "3_step_domination_bot": True,
+            "bot1_v4_domination": True,
+            "macro_trend_dominion": True,
+            "dual_onnx": True,
+            "dominion_2_bot": True,
+        }
         self.domination_discount_price: Decimal = Decimal("0.52")
         self.mode: Literal["mock", "live"] = "live"
         self.market_expiry_seconds: int = 900
@@ -451,16 +487,26 @@ class ServerState:
         ]
 
     def save_persisted_reports(self) -> None:
-        """Persist 15-minute event win/loss reports to disk."""
+        """Persist 15-minute event win/loss reports to disk (capped to latest 100 to prevent token bloat)."""
         try:
             self.data_dir.mkdir(parents=True, exist_ok=True)
             reports_file = self.data_dir / "win_loss_reports.json"
             tmp_file = self.data_dir / "win_loss_reports.tmp"
+            # Keep active hot ledger capped at 100 most recent records
+            capped_reports = self.win_loss_reports[:100] if len(self.win_loss_reports) > 100 else self.win_loss_reports
             with open(tmp_file, "w", encoding="utf-8") as f:
-                json.dump(self.win_loss_reports, f, indent=2)
+                json.dump(capped_reports, f, indent=2)
             tmp_file.replace(reports_file)
         except Exception as exc:
             logger.warning("Failed to persist win/loss reports: %s", exc)
+
+    def is_bot_armed(self, bot_id: str | None = None) -> bool:
+        if not self.ai_auto_trade:
+            return False
+        if not bot_id:
+            return True
+        norm = str(bot_id).lower()
+        return self.bot_arm_states.get(norm, True)
 
     @property
     def is_connected(self) -> bool:
@@ -472,219 +518,20 @@ class ServerState:
 
 state = ServerState()
 
-
-async def start_live_feed() -> bool:
-    """Initialize and run live Kalshi WebSocket feed for live paper trading."""
-    try:
-        config = load_config()
-        env = os.getenv("KALSHI_ENV", "live").lower()
-        ws_url = PROD_WS_URL if env in ("prod", "live") else DEMO_WS_URL
-        rest_base = PROD_REST_BASE if env in ("prod", "live") else DEMO_REST_BASE
-
-        async def _on_live_trade(trade: Any) -> None:
-            side_val = getattr(trade.taker_side, "value", str(trade.taker_side))
-            p_val = trade.yes_price if str(side_val).lower() == "yes" else (Decimal("1.0") - trade.no_price if trade.no_price else Decimal("0.50"))
-            p_cents = float(p_val * 100) if p_val else 50.0
-            count = int(getattr(trade, "count", 1))
-            val = p_cents / 100.0 * count
-            val_str = f"+${val:,.0f}" if str(side_val).lower() == "yes" else f"-${val:,.0f}"
-            t_str = trade.timestamp.strftime("%H:%M:%S") if getattr(trade, "timestamp", None) else datetime.now(timezone.utc).strftime("%H:%M:%S")
-            trade_entry = {
-                "ticker": trade.market_ticker,
-                "side": side_val,
-                "price_cents": f"{p_cents:.1f}¢",
-                "contracts": count,
-                "val_str": val_str,
-                "time": t_str,
-            }
-            state.trade_tape.append(trade_entry)
+# Initialize extracted server modules with dependency injection
+init_server_settlements(
+    state_getter=lambda: state,
+    resolve_bot_instance_fn=resolve_bot_instance,
+)
+init_server_feeds(
+    state_getter=lambda: state,
+    trigger_instant_broadcast_fn=lambda: trigger_instant_broadcast(),
+)
 
 
-        async def _on_live_ticker(update: Any) -> None:
-            if getattr(update, "volume", None):
-                vol_num = int(update.volume)
-                state.volume_24h_str = f"${vol_num * 100:,.0f}" if vol_num < 100000 else f"${vol_num:,.0f}"
-
-        state.ingestion_agent = IngestionAgent(
-            api_key_id=config["api_key_id"],
-            private_key_path=config["private_key_path"],
-            timeframes=state.timeframes,
-            data_dir=state.data_dir,
-            enable_simulation=True,
-            starting_capital=state.starting_capital,
-            live_demo_orders=False,
-            orderbook=state.orderbook,
-            sim_agent=state.sim_agent,
-            tick_writer=state.tick_writer,
-            ws_url=ws_url,
-            rest_base=rest_base,
-            on_trade=_on_live_trade,
-            on_ticker=_on_live_ticker,
-        )
-        state.feed_task = asyncio.create_task(state.ingestion_agent.run(), name="live_ingestion")
-        state.mode = "live"
-        logger.info("[LIVE PAPER TRADING] Connected to live Kalshi (%s) WebSocket stream.", env.upper())
-        return True
-    except (Exception, SystemExit) as exc:
-        logger.info("[LIVE FEED] Live Kalshi credentials not in env (%s). Streaming 100%% real live Kalshi public market feeds.", exc)
-        await start_live_public_feed()
-        return True
-
-
-async def live_kalshi_public_sync_loop() -> None:
-    """Continuously ingest 100% REAL live Kalshi market contracts, strikes, timer, and orderbook."""
-    connector = create_aiohttp_connector()
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "application/json",
-    }
-    async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
-        last_market_poll = 0.0
-        while True:
-            try:
-                now_mono = time.monotonic()
-                now_utc = datetime.now(timezone.utc)
-
-                # 1. Discover active live Kalshi 15M open markets every 2.0s
-                active_cfg = get_asset_config(state.active_asset)
-                if now_mono - last_market_poll >= 2.0:
-                    last_market_poll = now_mono
-                    url = f"{PROD_REST_BASE}/markets?series_ticker={active_cfg.series_ticker_15m}&status=open&limit=10"
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            raw_markets = data.get("markets", [])
-                            open_m: list[tuple[datetime, dict[str, Any]]] = []
-                            for m in raw_markets:
-                                ticker = m.get("ticker")
-                                if not ticker:
-                                    continue
-                                close_str = m.get("close_time")
-                                open_str = m.get("open_time")
-                                close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00")) if close_str else None
-                                open_dt = datetime.fromisoformat(open_str.replace("Z", "+00:00")) if open_str else None
-                                floor_str = m.get("floor_strike")
-                                floor_dec = Decimal(str(floor_str)) if floor_str is not None else None
-                                
-                                minfo = MarketInfo(
-                                    ticker=ticker,
-                                    series_ticker=m.get("series_ticker", active_cfg.series_ticker_15m),
-                                    title=m.get("title", ""),
-                                    subtitle=m.get("subtitle", ""),
-                                    status=MarketStatus.OPEN,
-                                    open_time=open_dt,
-                                    close_time=close_dt,
-                                    expiration_time=close_dt,
-                                    floor_strike=floor_dec,
-                                    cap_strike=None,
-                                    strike_type="greater",
-                                )
-                                if state.sim_agent:
-                                    state.sim_agent._market_cache[ticker] = minfo
-                                    state.sim_agent._ticker_timeframe_map[ticker] = Timeframe.FIFTEEN_MIN
-                                if close_dt and close_dt > now_utc:
-                                    open_m.append((close_dt, m))
-
-                            if open_m:
-                                open_m.sort(key=lambda x: x[0])
-                                active_close, active_m = open_m[0]
-                                new_ticker = active_m.get("ticker", "")
-                                if new_ticker:
-                                    state.active_ticker = new_ticker
-                                    fl = active_m.get("floor_strike")
-                                    if fl is not None:
-                                        state.target_strike = Decimal(str(fl))
-
-                # 2. Fetch live Level-2 Orderbook Snapshot from Kalshi public API every 500ms
-                active_ticker = state.active_ticker
-                if active_ticker and any(active_ticker.startswith(pfx) for pfx in ["KXBTC", "KXETH", "KXSOL", "KXDOGE"]):
-                    ob_url = f"{PROD_REST_BASE}/markets/{active_ticker}/orderbook"
-                    async with session.get(ob_url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
-                        if resp2.status == 200:
-                            ob_data = await resp2.json()
-                            raw_book = ob_data.get("orderbook_fp") or ob_data.get("orderbook") or {}
-                            bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []
-                            asks = raw_book.get("no_dollars") or raw_book.get("no") or []
-
-                            book = state.orderbook.get_book(active_ticker)
-                            if not book:
-                                book = L2BookState(active_ticker)
-                                state.orderbook._books[active_ticker] = book
-
-                            # Parse real yes bids and no bids into Decimal CLOB
-                            new_yes_book: dict[Decimal, Decimal] = {}
-                            for pr_str, qty_str in bids:
-                                new_yes_book[Decimal(str(pr_str))] = Decimal(str(qty_str))
-
-                            new_no_book: dict[Decimal, Decimal] = {}
-                            for pr_str, qty_str in asks:
-                                new_no_book[Decimal(str(pr_str))] = Decimal(str(qty_str))
-
-                            book.yes_book = new_yes_book
-                            book.no_book = new_no_book
-
-                            # Trigger bot evaluation against real live orderbook (suppressed only if sim_agent is in real live execution mode and standalone bot holds lock)
-                            if state.sim_agent and state.ai_auto_trade:
-                                is_live_exec = getattr(state.sim_agent, "execution_mode", "simulated") == "live"
-                                if is_live_exec:
-                                    holder = get_active_lock_holder()
-                                    if not (holder and holder[1] != os.getpid()):
-                                        asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
-                                else:
-                                    asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
-
-                            state.is_dirty = True
-
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.debug("[LIVE KALSHI SYNC] Poll error: %s", exc)
-
-            await asyncio.sleep(0.5)
-
-
-async def standalone_sync_loop() -> None:
-    """Retired in Option C: Mother Server is the monolithic trading engine on Port 8000."""
-    return
-
-
-
-async def start_live_public_feed() -> None:
-    """Run continuous live public Kalshi sync (Zero mock data)."""
-    state.mode = "live"
-    state.feed_task = asyncio.create_task(live_kalshi_public_sync_loop(), name="live_public_sync")
-    logger.info("[LIVE KALSHI SYNC] Connected to 100%% Real Live Kalshi Public Market & Orderbook stream.")
-
-
-async def start_mock_feed() -> None:
-    """Initialize and run interactive mock market feed for offline testing."""
-    state.mock_feed = MockKalshiFeed(
-        state.orderbook,
-        state.sim_agent,
-        tick_writer=state.tick_writer,
-    )
-    state.feed_task = asyncio.create_task(state.mock_feed.run(), name="mock_feed")
-    state.mode = "mock"
-    logger.info("[MOCK SIMULATION] Interactive mock feed started for offline testing.")
-
-
-async def stop_current_feed() -> None:
-    """Stop active feed gracefully."""
-    if state.mock_feed:
-        state.mock_feed.stop()
-        state.mock_feed = None
-    if state.ingestion_agent:
-        await state.ingestion_agent._shutdown()
-        state.ingestion_agent = None
-    if state.feed_task and not state.feed_task.done():
-        state.feed_task.cancel()
-        try:
-            await state.feed_task
-        except asyncio.CancelledError:
-            logger.debug("Feed task cancelled successfully.")
-        except Exception as exc:
-            logger.warning("Unexpected error awaiting feed task: %s", exc)
-        state.feed_task = None
+# start_live_feed, live_kalshi_public_sync_loop, standalone_sync_loop,
+# start_live_public_feed, start_mock_feed, stop_current_feed
+# — extracted to server_feeds.py (re-exported above)
 
 
 def _orjson_default_server(obj: Any) -> Any:
@@ -699,161 +546,14 @@ def fast_dumps(obj: Any) -> str:
     return orjson.dumps(obj, default=_orjson_default_server).decode("utf-8")
 
 
-async def live_btc_spot_ws_loop() -> None:
-    """Streams real-time crypto spot price ticks prioritizing official CF Benchmarks 5Hz feed."""
-    def _on_cf_asset(asset: CryptoAsset, price: Decimal, twap: Optional[Decimal], source: str) -> None:
-        if asset == state.active_asset:
-            if price != state.current_btc_price:
-                state.current_btc_price = price
-                if twap is not None:
-                    state.twap_60s_price = twap
-                state.coinbase_connected = True  # Marks spot feed healthy
-                now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                state.price_history.append({
-                    "time": now_t,
-                    "price": float(price),
-                    "target": float(state.target_strike),
-                })
-                if state.mode != "live":
-                    update_dynamic_clob_ladder(price, state.target_strike, state.active_ticker)
-                state.is_dirty = True
-                if state.connected_websockets:
-                    asyncio.create_task(trigger_instant_broadcast())
-
-    api_key_id = os.getenv("KALSHI_API_KEY_ID", "")
-    priv_key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH", "")
-    if api_key_id and priv_key_path:
-        try:
-            state.cf_sync = CFBenchmarksSync(
-                api_key_id=api_key_id,
-                private_key_path=priv_key_path,
-                on_asset_price_update=_on_cf_asset,
-            )
-            await state.cf_sync.start()
-            logger.info("[SPOT FEED] Official CF Benchmarks Multi-Asset 5Hz active on Mother server.")
-        except Exception as e:
-            logger.warning("[SPOT FEED] Could not start CF Benchmarks sync: %s", e)
-
-    async def _coinbase_worker(session: aiohttp.ClientSession) -> None:
-        while True:
-            try:
-                async with session.ws_connect("wss://ws-feed.exchange.coinbase.com", timeout=5.0) as ws:
-                    sub_msg = {
-                        "type": "subscribe",
-                        "product_ids": ["BTC-USD", "ETH-USD", "SOL-USD", "DOGE-USD"],
-                        "channels": ["ticker"]
-                    }
-                    await ws.send_json(sub_msg)
-                    logger.info("[SPOT FEED] Coinbase Pro WebSocket active as standby.")
-                    product_map = {
-                        "BTC-USD": CryptoAsset.BTC,
-                        "ETH-USD": CryptoAsset.ETH,
-                        "SOL-USD": CryptoAsset.SOL,
-                        "DOGE-USD": CryptoAsset.DOGE,
-                    }
-                    async for msg in ws:
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            data = json.loads(msg.data)
-                            if data.get("type") == "ticker" and "price" in data:
-                                pid = data.get("product_id")
-                                matched_asset = product_map.get(pid)
-                                if matched_asset == state.active_asset and not (state.cf_sync and state.cf_sync.is_connected):
-                                    p = Decimal(str(data["price"]))
-                                    if p != state.current_btc_price:
-                                        state.current_btc_price = p
-                                        now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                                        state.price_history.append({
-                                            "time": now_t,
-                                            "price": float(p),
-                                            "target": float(state.target_strike),
-                                        })
-                                        if state.mode != "live":
-                                            update_dynamic_clob_ladder(p, state.target_strike, state.active_ticker)
-                                        state.is_dirty = True
-                                        if state.connected_websockets:
-                                            asyncio.create_task(trigger_instant_broadcast())
-                        elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                            break
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.debug("[SPOT FEED] Coinbase WS retry in 2s: %s", exc)
-            await asyncio.sleep(2.0)
-
-    async def _binance_worker(session: aiohttp.ClientSession) -> None:
-        while True:
-            try:
-                async with session.ws_connect("wss://stream.binance.com:9443/ws/btcusdt@ticker", timeout=5.0) as ws:
-                    logger.info("[SPOT FEED] Binance WebSocket active as fallback standby for BTC-USDT.")
-                    async for msg in ws:
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            data = json.loads(msg.data)
-                            if "c" in data and not (state.cf_sync and state.cf_sync.is_connected) and not state.coinbase_connected:
-                                p = Decimal(str(data["c"]))
-                                if p != state.current_btc_price:
-                                    state.current_btc_price = p
-                                    now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                                    state.price_history.append({
-                                        "time": now_t,
-                                        "price": float(p),
-                                        "target": float(state.target_strike),
-                                    })
-                                    if state.mode != "live":
-                                        update_dynamic_clob_ladder(p, state.target_strike, state.active_ticker)
-                                    state.is_dirty = True
-                                    if state.connected_websockets:
-                                        asyncio.create_task(trigger_instant_broadcast())
-
-                        elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                            break
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.debug("[SPOT FEED] Binance WS retry in 2s: %s", exc)
-            await asyncio.sleep(2.0)
-
-    connector = create_aiohttp_connector()
-    async with aiohttp.ClientSession(connector=connector) as session:
-        cb_task = asyncio.create_task(_coinbase_worker(session), name="coinbase_spot_ws")
-        bn_task = asyncio.create_task(_binance_worker(session), name="binance_spot_ws")
-        try:
-            await asyncio.gather(cb_task, bn_task)
-        except asyncio.CancelledError:
-            cb_task.cancel()
-            bn_task.cancel()
-            await asyncio.gather(cb_task, bn_task, return_exceptions=True)
-        finally:
-            if state.cf_sync:
-                await state.cf_sync.stop()
+# live_btc_spot_ws_loop, live_btc_spot_sync_loop
+# — extracted to server_feeds.py (re-exported above)
 
 
+# record_win_loss_event_report — extracted to server_settlements.py (re-exported above)
 
 
-async def live_btc_spot_sync_loop() -> None:
-    """Fallback REST polling synchronizer for BTC spot price."""
-    connector = create_aiohttp_connector()
-    async with aiohttp.ClientSession(connector=connector) as session:
-        while True:
-            try:
-                if not (state.cf_sync and state.cf_sync.is_connected):
-                    async with session.get("https://api.coinbase.com/v2/prices/BTC-USD/spot", timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            amt_str = data.get("data", {}).get("amount")
-                            if amt_str:
-                                state.current_btc_price = Decimal(str(amt_str))
-            except Exception as exc:
-                logger.debug("[SPOT SYNC] Coinbase REST sync error: %s", exc)
-                try:
-                    if not (state.cf_sync and state.cf_sync.is_connected):
-                        async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
-                            if resp2.status == 200:
-                                data2 = await resp2.json()
-                                if "price" in data2:
-                                    state.current_btc_price = Decimal(str(data2["price"]))
-                except Exception as exc2:
-                    logger.debug("[SPOT SYNC] Binance REST fallback sync error: %s", exc2)
-            await asyncio.sleep(0.5)
+# format_cycle_time_from_iso — extracted to server_settlements.py (re-exported above)
 
 
 def record_win_loss_event_report(
@@ -1517,65 +1217,7 @@ def resolve_active_market(now_utc: datetime | None = None) -> tuple[Any | None, 
     return active_m, remaining_secs, strike, target_time_str, time_window_str
 
 
-def update_dynamic_clob_ladder(spot_price: Decimal, strike_price: Decimal, ticker: str, remaining_secs: int = 900) -> None:
-    """Maintain dynamic, high-frequency Level-2 CLOB order book reflecting live BTC spot price movements and time-to-expiry decay."""
-    book = state.orderbook.get_book(ticker)
-    if not book:
-        book = L2BookState(ticker)
-        state.orderbook._books[ticker] = book
-
-    diff = float(spot_price - strike_price)
-    # Dynamic time-to-expiry fraction (tau in range [0, 1]) scaled to active timeframe
-    tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
-    cycle_duration = 300.0 if tf_val == "5m" else (3600.0 if tf_val == "1h" else 900.0)
-    tau_fraction = min(1.0, max(5, remaining_secs) / cycle_duration)
-    # Volatility scale narrows with sqrt(tau):
-    # For 5M, volatility scale starts tighter (~105.0 down to ~25.0 at expiry) reflecting smaller 5m dispersion
-    if state.active_asset == CryptoAsset.BTC:
-        if tf_val == "5m":
-            scale = max(25.0, 105.0 * math.sqrt(tau_fraction))
-        else:
-            scale = max(35.0, 180.0 * math.sqrt(tau_fraction))
-    else:
-        active_cfg = get_asset_config(state.active_asset)
-        base_diff = float(active_cfg.min_spot_diff)
-        multiplier = (105.0 / 25.0) if tf_val == "5m" else (180.0 / 35.0)
-        scale = max(base_diff, base_diff * multiplier * math.sqrt(tau_fraction))
-    z = diff / scale if scale > 0 else 0.0
-    try:
-        prob = 1.0 / (1.0 + math.exp(-z))
-    except OverflowError:
-        prob = 1.0 if z > 0 else 0.0
-
-    # Add realistic market-making micro-jitter
-    noise = random.uniform(-0.008, 0.008)
-    prob_mid = max(0.01, min(0.99, prob + noise))
-
-    yes_bid_best = max(Decimal("0.01"), min(Decimal("0.98"), Decimal(str(round(prob_mid - 0.01, 2)))))
-    no_bid_best = max(Decimal("0.01"), min(Decimal("0.98"), Decimal(str(round((1.00 - prob_mid) - 0.01, 2)))))
-
-    # Strictly guarantee uncrossed book invariant: yes_bid + no_bid <= 1.00
-    if yes_bid_best + no_bid_best >= Decimal("1.00"):
-        no_bid_best = Decimal("1.00") - yes_bid_best - Decimal("0.01")
-        if no_bid_best < Decimal("0.01"):
-            no_bid_best = Decimal("0.01")
-            yes_bid_best = Decimal("0.98")
-
-    # Generate 10-12 active levels on YES and NO with realistic depth profiles
-    yes_levels: dict[Decimal, Decimal] = {}
-    no_levels: dict[Decimal, Decimal] = {}
-    for i in range(10):
-        p_yes = max(Decimal("0.01"), yes_bid_best - Decimal(str(round(i * 0.01, 2))))
-        p_no = max(Decimal("0.01"), no_bid_best - Decimal(str(round(i * 0.01, 2))))
-        base_qty = random.randint(150, 650) + (i * random.randint(100, 250))
-        yes_levels[p_yes] = Decimal(str(base_qty))
-        no_levels[p_no] = Decimal(str(base_qty + random.randint(-30, 30)))
-
-    book.yes_book = yes_levels
-    book.no_book = no_levels
-    book.last_update = datetime.now(timezone.utc)
-    book._stale = False
-    state.is_dirty = True
+# update_dynamic_clob_ladder — extracted to server_feeds.py (re-exported above)
 
 
 async def live_ticker_and_timer_loop() -> None:
@@ -1996,6 +1638,14 @@ async def start_background_simulation() -> None:
     logger.info("Simulation background tasks started in '%s' mode with Real-time BTC Orderflow Feed, Decoupled AI Worker, Agent_integrity_check & Live Balance Sync active.", state.mode)
 
 
+# Initialize state payload module (needs resolve_active_market defined above)
+init_state_payload(
+    state_getter=lambda: state,
+    resolve_active_market_fn=resolve_active_market,
+    resolve_bot_instance_fn=resolve_bot_instance,
+    timeframe_configs=TIMEFRAME_CONFIGS,
+)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     prevent_windows_sleep()
@@ -2110,23 +1760,7 @@ class OrderRequest(BaseModel):
     limit_price: float | None = Field(default=None)
     resting_only: bool = Field(default=False)
     execution_mode: Literal["paper", "live"] | None = Field(default=None)
-
-class SettingsRequest(BaseModel):
-    ai_auto_trade: bool | None = None
-    active_strategy_bot: str | None = None
-    active_timeframe: str | None = None
-    active_ticker: str | None = None
-    mode: Literal["mock", "live"] | None = None
-    domination_discount_price: float | None = Field(default=None, ge=0.10, le=0.65)
-
-class DominationConfigRequest(BaseModel):
-    discount_limit_price: float = Field(default=0.52, ge=0.10, le=0.65, description="Maker discount limit price ceiling")
-
-class StrategySelectRequest(BaseModel):
-    strategy_id: str
-
-class ResetRequest(BaseModel):
-    capital: float = Field(default=100.0, ge=1.0)
+    bot_type: Optional[str] = Field(default=None)
 
 
 # ---------------------------------------------------------------------------
@@ -5937,436 +5571,7 @@ async def audit_incubator_bot_promotion_endpoint(req: IncubatorAuditRequest) -> 
 # WebSocket Broadcast Logic
 # ---------------------------------------------------------------------------
 
-def _build_full_state_payload() -> dict[str, Any]:
-    """Serialize full real-time state for UI consumption."""
-    now_utc = datetime.now(timezone.utc)
-    active_m, remaining_secs, strike_dec, target_time_str, time_window_str = resolve_active_market(now_utc)
-
-    ticker = state.active_ticker
-    book = state.orderbook.get_book(ticker)
-
-    # Best bid / ask in dollars & cents
-    if book and (book.best_yes_bid or book.best_no_bid):
-        best_yes_bid = float(book.best_yes_bid) if book.best_yes_bid else (float(Decimal("1.0") - book.best_no_ask) if book.best_no_ask else 0.0)
-        best_yes_ask = float(book.best_yes_ask) if book.best_yes_ask else (float(Decimal("1.0") - book.best_no_bid) if book.best_no_bid else 0.0)
-        best_no_bid = float(book.best_no_bid) if book.best_no_bid else (float(Decimal("1.0") - book.best_yes_ask) if book.best_yes_ask else 0.0)
-        best_no_ask = float(book.best_no_ask) if book.best_no_ask else (float(Decimal("1.0") - book.best_yes_bid) if book.best_yes_bid else 0.0)
-    elif state.mode == "live":
-        best_yes_bid = 0.0
-        best_yes_ask = 0.0
-        best_no_bid = 0.0
-        best_no_ask = 0.0
-    else:
-        # Dynamic digital option fair probability with time-to-expiry decay (Strictly MOCK mode only)
-        diff_val = float(state.current_btc_price - strike_dec)
-        tf_val = state.active_timeframe.value if hasattr(state.active_timeframe, "value") else str(state.active_timeframe)
-        cycle_duration = 300.0 if tf_val == "5m" else (3600.0 if tf_val == "1h" else 900.0)
-        tau_fraction = min(1.0, max(5, remaining_secs) / cycle_duration)
-        if state.active_asset == CryptoAsset.BTC:
-            scale = max(25.0, 105.0 * math.sqrt(tau_fraction)) if tf_val == "5m" else max(35.0, 180.0 * math.sqrt(tau_fraction))
-        else:
-            active_cfg = get_asset_config(state.active_asset)
-            base_diff = float(active_cfg.min_spot_diff)
-            multiplier = (105.0 / 25.0) if tf_val == "5m" else (180.0 / 35.0)
-            scale = max(base_diff, base_diff * multiplier * math.sqrt(tau_fraction))
-        z = diff_val / scale
-        try:
-            p_yes = 1.0 / (1.0 + math.exp(-z))
-        except OverflowError:
-            p_yes = 1.0 if z > 0 else 0.0
-        best_yes_bid = round(max(0.01, min(0.98, p_yes - 0.01)), 2)
-        best_yes_ask = round(min(0.99, max(0.02, p_yes + 0.01)), 2)
-        best_no_bid = round(max(0.01, min(0.98, (1.0 - p_yes) - 0.01)), 2)
-        best_no_ask = round(min(0.99, max(0.02, (1.0 - p_yes) + 0.01)), 2)
-
-    # Calculate mid-market probability (%)
-    if best_yes_bid > 0 and best_yes_ask > 0:
-        market_chance_pct = round(((best_yes_bid + best_yes_ask) / 2.0) * 100.0, 1)
-    elif best_yes_ask > 0:
-        market_chance_pct = round(best_yes_ask * 100.0, 1)
-    elif state.mode == "live":
-        market_chance_pct = 0.0
-    else:
-        market_chance_pct = 50.0
-
-    # L2 Ladder (formatted in cents matching Kalshi UI: e.g. 52.0¢, 51.0¢, etc.)
-    ladder: list[dict[str, Any]] = []
-    if book and (book.yes_book or book.no_book):
-        all_quantities = [float(q) for q in list(book.yes_book.values()) + list(book.no_book.values())]
-        max_qty = max(all_quantities) if all_quantities else 1000.0
-
-        for pr, qty in sorted(book.yes_book.items(), key=lambda x: x[0], reverse=True)[:8]:
-            pr_cents = float(pr * 100)
-            ladder.append({
-                "side": "yes",
-                "price_cents": f"{pr_cents:.1f}¢",
-                "price_raw": float(pr),
-                "contracts": int(qty),
-                "total": f"${float(pr * qty):,.0f}",
-                "depth_pct": min(100, max(8, int((float(qty) / max_qty) * 100))),
-            })
-        for pr, qty in sorted(book.no_book.items(), key=lambda x: x[0], reverse=True)[:8]:
-            pr_cents = float(pr * 100)
-            ladder.append({
-                "side": "no",
-                "price_cents": f"{pr_cents:.1f}¢",
-                "price_raw": float(pr),
-                "contracts": int(qty),
-                "total": f"${float(pr * qty):,.0f}",
-                "depth_pct": min(100, max(8, int((float(qty) / max_qty) * 100))),
-            })
-
-    # AI signals — decoupled background worker (<0.001ms instant memory fetch)
-    ai_data = state.ai_worker.get_cached_signals()
-
-    # Portfolio state
-    portfolio_data: dict[str, Any] = {
-        "balance": float(state.starting_capital),
-        "equity": float(state.starting_capital),
-        "realized_pnl": 0.0,
-        "unrealized_pnl": 0.0,
-        "win_rate": 0.0,
-        "total_trades": 0,
-        "wins": 0,
-        "losses": 0,
-        "circuit_breaker_tripped": False,
-        "current_drawdown_pct": 0.0,
-        "positions": [],
-        "settlements": [],
-        "open_orders": [],
-        "resting_orders": [],
-    }
-
-    if state.mode == "live" and state.live_portfolio:
-        lp = state.live_portfolio
-        live_cash = float(lp.get("balance_dollars", 28.21))
-        live_equity = round(live_cash + float(lp.get("payout_pending", 0.0)), 2)
-        live_reports = [r for r in state.win_loss_reports if r.get("execution_mode") == "live" or r.get("mode") == "live"]
-        live_wins = sum(1 for r in live_reports if r.get("outcome") == "WIN")
-        live_losses = sum(1 for r in live_reports if r.get("outcome") == "LOSS")
-        live_trades = live_wins + live_losses
-        live_wr = (live_wins / live_trades * 100.0) if live_trades > 0 else 0.0
-        live_realized_pnl = sum(float(r.get("pnl", 0.0)) for r in live_reports)
-        portfolio_data["realized_pnl"] = round(live_realized_pnl, 2)
-        portfolio_data["win_rate"] = round(live_wr, 1)
-        portfolio_data["total_trades"] = live_trades
-        portfolio_data["wins"] = live_wins
-        portfolio_data["losses"] = live_losses
-        portfolio_data["circuit_breaker_tripped"] = False
-        portfolio_data["current_drawdown_pct"] = 0.0
-        portfolio_data["positions"] = [
-            {
-                "ticker": p.get("ticker", ""),
-                "side": p.get("side", "yes"),
-                "size": p.get("position", 0),
-                "entry_price": float(p.get("entry_price", 0.50)),
-                "current_price": float(p.get("current_price", best_yes_ask or 0.50)),
-                "unrealized_pnl": float(p.get("unrealized_pnl", 0.0)),
-            }
-            for p in lp.get("positions", [])
-        ]
-    elif state.sim_agent and state.sim_agent.portfolio:
-        p = state.sim_agent.portfolio
-        snap = p.get_pnl_snapshot()
-        portfolio_data["balance"] = float(p.balance)
-        portfolio_data["equity"] = float(snap.total_equity)
-        portfolio_data["realized_pnl"] = float(snap.total_realized_pnl)
-        portfolio_data["unrealized_pnl"] = float(snap.total_unrealized_pnl)
-        portfolio_data["win_rate"] = float(snap.win_rate * 100) if snap.win_rate is not None else 0.0
-        portfolio_data["total_trades"] = snap.total_trades
-        portfolio_data["wins"] = snap.wins
-        portfolio_data["losses"] = snap.losses
-        portfolio_data["circuit_breaker_tripped"] = p._circuit_breaker_tripped
-        portfolio_data["current_drawdown_pct"] = 0.0
-        portfolio_data["positions"] = [
-            {
-                "ticker": pos.ticker,
-                "side": pos.side.value,
-                "size": pos.size,
-                "entry_price": float(pos.avg_entry_price),
-                "current_price": float(pos.current_price or pos.avg_entry_price),
-                "unrealized_pnl": float(pos.unrealized_pnl),
-            }
-            for pos in p.get_all_positions()
-        ]
-        portfolio_data["settlements"] = [
-            {
-                "ticker": s.ticker,
-                "side": s.side.value,
-                "size": s.size,
-                "entry_price": float(s.entry_price),
-                "settlement_price": float(s.settlement_price),
-                "outcome": s.outcome,
-                "pnl": float(s.pnl),
-                "timestamp": s.timestamp.strftime("%H:%M:%S"),
-            }
-            for s in reversed(p.get_settlement_history()[-10:])
-        ]
-
-    # Resting orders
-    if state.sim_agent and state.sim_agent._simulator:
-        orders_list = [
-            {
-                "order_id": o.order_id,
-                "ticker": o.ticker,
-                "side": o.side.value,
-                "size": o.size,
-                "limit_price": float(o.limit_price) if o.limit_price else 0.0,
-                "timeframe": o.timeframe.value,
-                "status": o.status,
-                "created_at": o.created_at.strftime("%H:%M:%S"),
-            }
-            for o in (state.sim_agent._simulator.get_all_resting_orders())
-        ]
-        portfolio_data["resting_orders"] = orders_list
-        portfolio_data["open_orders"] = orders_list
-
-    # Calculate BTC spot delta from strike (Prioritizing official CF Benchmarks)
-    if state.cf_sync and state.cf_sync.is_connected:
-        cf_p = state.cf_sync.get_price(state.active_asset)
-        if cf_p > Decimal("0.00"):
-            state.current_btc_price = cf_p
-            cf_twap = state.cf_sync.get_twap(state.active_asset)
-            if cf_twap:
-                state.twap_60s_price = cf_twap
-
-    # Use TWAP for settlement parity diff calculation if available
-    btc_spot = float(state.twap_60s_price) if state.twap_60s_price is not None else float(state.current_btc_price)
-    s_flt = float(strike_dec)
-    diff = btc_spot - s_flt
-    diff_pct = (diff / s_flt) * 100.0 if s_flt > 0.0 else 0.0
-
-    cfg = TIMEFRAME_CONFIGS.get(state.active_timeframe, {})
-    asset_cfg = get_asset_config(state.active_asset)
-    title = f"{asset_cfg.name} {state.active_timeframe.value}"
-    series = asset_cfg.series_ticker_15m
-
-    # -----------------------------------------------------------------------
-    # Dual-ONNX Telemetry & 4-Pillar Pre-Flight Gates
-    # -----------------------------------------------------------------------
-    abs_diff = abs(diff)
-    required_moat = 47.60  # 1.36x Sweet spot
-    moat_floor = 40.25     # 1.15x Floor
-    moat_ceiling = 75.25   # 2.15x Ceiling
-    moat_pass = abs_diff >= moat_floor
-    moat_status = "PASS" if moat_pass else "VETO"
-    moat_reason = (
-        f"Separation ${abs_diff:.2f} >= ${moat_floor:.2f} (Floor)"
-        if moat_pass
-        else f"Strike Noise Trap: |Diff| ${abs_diff:.2f} < Min Moat ${moat_floor:.2f}"
-    )
-
-    vpin_val = float(ai_data.get("vpin", 0.15))
-    vpin_pass = vpin_val < 0.60
-    vpin_status = "PASS" if vpin_pass else "VETO"
-    vpin_reason = (
-        f"Flow toxicity safe ({vpin_val:.2f} < 0.60)"
-        if vpin_pass
-        else f"High Toxicity Flow Veto ({vpin_val:.2f} >= 0.60)"
-    )
-
-    cycle_locked = False
-    if state.sim_agent and hasattr(state.sim_agent, "_guardrails"):
-        cycle_key = state.active_ticker
-        cycle_locked = cycle_key in state.sim_agent._guardrails._cycle_locks
-    cycle_status = "LOCKED" if cycle_locked else "READY"
-    cycle_reason = "1 trade per cycle lock active" if cycle_locked else "Cycle ready for execution"
-
-    ev_val = float(ai_data.get("expected_value", ai_data.get("ev_yes", 0.0)))
-    edge_val = float(ai_data.get("statistical_edge", ai_data.get("edge_yes", 0.0)))
-    rec_side = ai_data.get("recommended_side", "wait")
-    edge_pass = (edge_val >= 0.05 or ev_val >= 0.04) and (rec_side in ("yes", "no"))
-    edge_status = "PASS" if edge_pass else "WAIT"
-    edge_reason = (
-        f"EV +${ev_val:.2f} / Edge {edge_val * 100:.1f}%"
-        if edge_pass
-        else "Waiting for statistical edge > 5%"
-    )
-
-    preflight_gates = {
-        "moat_gate": {
-            "status": moat_status,
-            "label": "Dynamic Moat",
-            "current_diff": round(diff, 2),
-            "abs_diff": round(abs_diff, 2),
-            "required_moat": required_moat,
-            "floor": moat_floor,
-            "sweet_spot": required_moat,
-            "ceiling": moat_ceiling,
-            "reason": moat_reason,
-        },
-        "vpin_gate": {
-            "status": vpin_status,
-            "label": "VPIN Safety",
-            "current_vpin": round(vpin_val, 3),
-            "threshold": 0.60,
-            "reason": vpin_reason,
-        },
-        "cycle_lock_gate": {
-            "status": cycle_status,
-            "label": "Cycle Lock",
-            "locked": cycle_locked,
-            "reason": cycle_reason,
-        },
-        "edge_gate": {
-            "status": edge_status,
-            "label": "Edge / EV",
-            "edge_pct": round(edge_val * 100.0, 1),
-            "ev": round(ev_val, 2),
-            "reason": edge_reason,
-        },
-    }
-
-    dual_bot = getattr(state, "dual_onnx_bot", None)
-    dual_telemetry = {
-        "regime": ai_data.get("regime", "CHOP_WAIT"),
-        "action": ai_data.get("action", "HOLD"),
-        "side": ai_data.get("recommended_side", "wait"),
-        "quolas_signal": ai_data.get("quolas_signal", ai_data.get("onnx_signal", "WAIT")),
-        "quolas_confidence": float(ai_data.get("quolas_confidence", ai_data.get("onnx_confidence", 0.50))),
-        "kalshi_signal": ai_data.get("kalshi_signal", "WAIT"),
-        "kalshi_confidence": float(ai_data.get("kalshi_confidence", 0.50)),
-        "recommended_limit_price": float(ai_data.get("recommended_limit_price", 0.48)),
-        "expected_value": float(ai_data.get("expected_value", 0.0)),
-        "recommended_contracts": int(ai_data.get("recommended_contracts", 1)),
-        "rationale": ai_data.get("rationale", ""),
-        "active": state.active_strategy_bot in ("dual_onnx", "the_onnx_strategy"),
-        # The 5 Strategy Execution Dials
-        "brain_priority_mode": getattr(dual_bot, "brain_priority_mode", "TREND_ALIGNED_SCALP"),
-        "contract_scaling_mode": getattr(dual_bot, "contract_scaling_mode", "TIER_0_STRICT_1"),
-        "volatility_floor": float(getattr(dual_bot, "volatility_floor", 10.0)),
-        "volatility_ceiling": float(getattr(dual_bot, "volatility_ceiling", 45.0)),
-        "entry_discount_depth": float(getattr(dual_bot, "entry_discount_depth", 0.52)),
-        "tape_confirmation_ticks": getattr(dual_bot, "tape_confirmation_ticks", 2),
-        "taker_cross_ev_threshold": float(getattr(dual_bot, "taker_cross_ev_threshold", 0.08)),
-        "dynamic_moat_multiplier": float(getattr(dual_bot, "dynamic_moat_multiplier", 1.15)),
-        "current_atr": float(getattr(dual_bot, "current_atr", 14.0)),
-        "tape_streak": getattr(dual_bot, "tape_streak", 0),
-    }
-
-    macro_bot = getattr(state.sim_agent, "_macro_trend_bot", None) if state.sim_agent else None
-    if not macro_bot:
-        macro_bot = resolve_bot_instance("macro_trend_dominion")
-
-    macro_params = macro_bot.get_parameters() if macro_bot and hasattr(macro_bot, "get_parameters") else {}
-    learning_diag = macro_bot.learning_engine.get_diagnostics() if macro_bot and hasattr(macro_bot, "learning_engine") else {}
-
-    macro_telemetry = {
-        "active": state.active_strategy_bot in ("macro_trend_dominion", "macro_onnx", "macro_trend", "macro_trend_dominion_bot"),
-        "strategy_id": "macro_trend_dominion",
-        "strategy_name": "Macro Trend Dominion",
-        "call": ai_data.get("call", "YES" if ai_data.get("recommended_side") == "yes" else ("NO" if ai_data.get("recommended_side") == "no" else "DONT")),
-        "side": ai_data.get("recommended_side", "wait"),
-        "confidence_pct": round(float(ai_data.get("confidence_pct", ai_data.get("ai_prob", 0.50) * 100.0)), 1),
-        "limit_price_cents": int(macro_params.get("limit_price_cents", 52)),
-        "limit_price": float(macro_params.get("limit_price_cents", 52)) / 100.0,
-        "expected_value": float(ai_data.get("expected_value", 0.0)),
-        "net_edge_pct": float(ai_data.get("net_edge_pct", ai_data.get("statistical_edge", 0.0) * 100.0)),
-        "recommended_contracts": int(ai_data.get("recommended_contracts", 1)),
-        "macro_trend": "BULL" if diff > 0 else "BEAR",
-        "hmm_regime": str(getattr(getattr(state, "hmm_brain", None), "current_regime", "UNKNOWN")),
-        "spot_signal": ai_data.get("quolas_signal", ai_data.get("onnx_signal", "WAIT")),
-        "spot_confidence": float(ai_data.get("quolas_confidence", ai_data.get("onnx_confidence", 0.50))),
-        "kalshi_signal": ai_data.get("kalshi_signal", "WAIT"),
-        "kalshi_confidence": float(ai_data.get("kalshi_confidence", 0.50)),
-        "rationale": ai_data.get("rationale", ""),
-        "brier_score": learning_diag.get("rolling_brier_score", 0.25),
-        "brier_shrinkage_factor": learning_diag.get("brier_shrinkage_factor", 1.0),
-        "active_price_cap": learning_diag.get("active_price_cap", 0.52),
-        "pruned_deciles": learning_diag.get("pruned_deciles", []),
-        "failure_counts": learning_diag.get("failure_counts", {}),
-        "parameters": macro_params,
-    }
-
-    payload = {
-        "timestamp": now_utc.isoformat(),
-        "market": {
-            "active_asset": state.active_asset.value,
-            "active_asset_name": asset_cfg.name,
-            "active_asset_decimals": asset_cfg.price_decimals,
-            "cf_indices": state.cf_sync.get_all_state() if state.cf_sync else {},
-            "title": title,
-            "series": series,
-            "ticker": state.active_ticker,
-            "target_strike": float(strike_dec),
-            "target_strike_str": asset_cfg.format_price(strike_dec),
-            "target_time_str": target_time_str,
-            "time_window_str": time_window_str,
-            "current_btc_price": btc_spot,
-            "current_btc_price_str": asset_cfg.format_price(btc_spot),
-            "diff": round(diff, asset_cfg.price_decimals),
-            "diff_pct": round(diff_pct, 3),
-            "diff_str": asset_cfg.format_diff(diff, diff_pct),
-            "expiry_countdown_seconds": remaining_secs,
-            "expiry_countdown_str": f"{remaining_secs // 60:02d}:{remaining_secs % 60:02d}",
-            "timeframe": state.active_timeframe.value,
-            "market_chance_pct": market_chance_pct,
-            "volume_24h_str": state.volume_24h_str,
-            "best_yes_ask": round(best_yes_ask, 3),
-            "best_yes_bid": round(best_yes_bid, 3),
-            "best_no_ask": round(best_no_ask, 3),
-            "best_no_bid": round(best_no_bid, 3),
-            "yes_cents_str": f"{best_yes_ask * 100:.1f}¢",
-            "no_cents_str": f"{best_no_ask * 100:.1f}¢",
-            "twap_60s_price": float(state.twap_60s_price) if state.twap_60s_price is not None else None,
-            "is_twap_active": bool(state.twap_60s_price is not None),
-        },
-
-        "chart": list(state.price_history)[-60:],
-        "trade_tape": list(state.trade_tape)[-15:],
-        "orderbook_ladder": ladder,
-        "ai_signals": ai_data,
-        "portfolio": portfolio_data,
-        "live_portfolio": state.live_portfolio,
-        "win_loss_reports": state.win_loss_reports[:15],
-        "memory_profile": {
-            "total_hot_ticks": state.memory_manager.get_memory_profile().total_hot_ticks,
-            "total_offloaded_ticks": state.memory_manager.get_memory_profile().total_offloaded_ticks,
-            "estimated_hot_memory_kb": round(state.memory_manager.get_memory_profile().estimated_hot_memory_kb, 1),
-            "is_pressure_critical": state.memory_manager.get_memory_profile().is_pressure_critical,
-        },
-        "system_resources": state.system_governor.get_resource_metrics().to_dict(),
-        "settings": {
-            "ai_auto_trade": state.ai_auto_trade,
-            "active_strategy_bot": state.active_strategy_bot,
-            "bot_certified": state.bot_auditor.is_certified(state.active_strategy_bot),
-            "bot_sealed": state.bot_auditor.has_seal_of_excellence(state.active_strategy_bot),
-            "mode": state.mode,
-            "timeframe": state.active_timeframe.value,
-            "domination_discount_price": float(state.domination_discount_price),
-            "standalone_lock_active": False,
-            "standalone_sync_active": False,
-            "lock_holder": None,
-        },
-        "bot_audit_status": {
-            "active_bot": state.active_strategy_bot,
-            "is_certified": state.bot_auditor.is_certified(state.active_strategy_bot),
-            "is_sealed": state.bot_auditor.has_seal_of_excellence(state.active_strategy_bot),
-            "report": state.bot_auditor.get_certification(state.active_strategy_bot).to_dict() if state.bot_auditor.get_certification(state.active_strategy_bot) else None,
-            "seal": state.bot_auditor.get_seal(state.active_strategy_bot).to_dict() if state.bot_auditor.get_seal(state.active_strategy_bot) else None,
-        },
-        "seal_of_excellence": state.bot_auditor.get_all_seals(),
-        "integrity_status": state.integrity_agent.get_latest_status(),
-        "compliance_status": state.law_order_agent.get_compliance_status(),
-        "guardrails_status": state.guardrails_agent.get_status(),
-        "token_credit_status": state.token_credit_agent.get_status(),
-        "btc_orderflow": state.btc_orderflow_feed.get_orderflow_summary() if hasattr(state, "btc_orderflow_feed") and state.btc_orderflow_feed else None,
-        "continuous_training": state.continuous_trainer.get_status() if hasattr(state, "continuous_trainer") and state.continuous_trainer else None,
-        "hmm_macro_regime": state.hmm_brain.get_status() if hasattr(state, "hmm_brain") and state.hmm_brain else None,
-        "dual_onnx_telemetry": dual_telemetry,
-        "macro_trend_dominion_telemetry": macro_telemetry,
-        "preflight_gates": preflight_gates,
-    }
-
-    # SECURITY: Audit state payload for private keys or sensitive credential leaks prior to WebSocket broadcast
-    if hasattr(state, "law_order_agent") and state.law_order_agent:
-        audit_res = state.law_order_agent.audit_credential_security(payload)
-        if audit_res.status == "FAIL":
-            logger.critical("[SECURITY ALERT] Blocked state broadcast payload due to credential leak!")
-            raise ValueError(f"State payload security audit failed: {audit_res.message}")
-
-    return payload
-
+# _build_full_state_payload — extracted to server_state_payload.py (re-exported above)
 
 
 
@@ -6433,16 +5638,59 @@ async def broadcast_loop() -> None:
         await asyncio.sleep(0.08)
 
 
+# ---------------------------------------------------------------------------
+# Modular Router Mounts
+# ---------------------------------------------------------------------------
+from kalshi_sim.routers.analytics import (
+    router as analytics_router,
+    init_analytics_router,
+    _calculate_15m_metrics,
+    _matches_bot_id,
+)
+init_analytics_router(lambda: state, sync_live_settlements)
+app.include_router(analytics_router)
 
+from kalshi_sim.routers.governance import router as governance_router, init_governance_router
+init_governance_router(lambda: state, resolve_bot_instance)
+app.include_router(governance_router)
 
-class BotSpawnRequest(BaseModel):
-    bot_id: str
+from kalshi_sim.routers.data import router as data_router, init_data_router
+init_data_router(lambda: state)
+app.include_router(data_router)
 
+from kalshi_sim.routers.orders import (
+    router as orders_router,
+    init_orders_router,
+    place_order,
+    cancel_order,
+    get_open_orders,
+)
+init_orders_router(lambda: state, trigger_instant_broadcast)
+app.include_router(orders_router)
 
-@app.post("/api/bots/spawn")
-async def spawn_bot(req: BotSpawnRequest) -> dict[str, Any]:
-    """Activate strategy bot directly inside the unified single-port engine."""
-    bot_id = req.bot_id.strip()
+from kalshi_sim.routers.strategies import (
+    router as strategies_router,
+    init_strategies_router,
+    SettingsRequest,
+    DominationConfigRequest,
+    StrategySelectRequest,
+    ResetRequest,
+    trigger_emergency_kill_switch,
+    reset_circuit_breaker,
+    spawn_bot,
+    BotSpawnRequest,
+)
+init_strategies_router(
+    state_getter=lambda: state,
+    resolve_bot_instance_fn=resolve_bot_instance,
+    trigger_instant_broadcast_fn=trigger_instant_broadcast,
+    stop_current_feed_fn=stop_current_feed,
+    start_live_feed_fn=start_live_feed,
+    start_mock_feed_fn=start_mock_feed,
+    record_win_loss_event_report_fn=record_win_loss_event_report,
+    build_full_state_payload_fn=_build_full_state_payload,
+)
+app.include_router(strategies_router)
 
     # Synchronize active strategy bot on Mother Server
     canonical_strat = bot_id
@@ -6459,22 +5707,19 @@ async def spawn_bot(req: BotSpawnRequest) -> dict[str, Any]:
     elif bot_id in ("3_step_domination_bot", "domination_bot", "domination"):
         canonical_strat = "3_step_domination_bot"
 
-    state.active_strategy_bot = canonical_strat
-    if state.ai_worker:
-        state.ai_worker.set_active_strategy(canonical_strat)
-    if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):
-        state.sim_agent.set_active_strategy(canonical_strat)
-    state.is_dirty = True
-    asyncio.create_task(trigger_instant_broadcast())
+from kalshi_sim.routers.presets import (
+    router as presets_router,
+    init_presets_router,
+)
+init_presets_router(state_getter=lambda: state)
+app.include_router(presets_router)
 
-    logger.info("🚀 [BOT ACTIVATED] Unified single-port engine activated '%s' (Canonical: '%s')", bot_id, canonical_strat)
-    return {
-        "status": "success",
-        "bot_id": bot_id,
-        "strategy": canonical_strat,
-        "url": "http://localhost:8000",
-        "message": f"Bot '{bot_id}' activated in unified engine on Port 8000",
-    }
+from kalshi_sim.routers.perpetuals import (
+    router as perpetuals_router,
+    init_perpetuals_router,
+)
+init_perpetuals_router(state_getter=lambda: state)
+app.include_router(perpetuals_router)
 
 # ---------------------------------------------------------------------------
 # Frontend Static Mount (if built)

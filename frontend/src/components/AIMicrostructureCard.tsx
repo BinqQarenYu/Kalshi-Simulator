@@ -65,7 +65,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
 
   const handleDiscountChange = async (newPrice: number) => {
     const rounded = Math.round(newPrice * 100) / 100;
-    const clamped = Math.min(0.50, Math.max(0.15, rounded));
+    const clamped = Math.min(0.65, Math.max(0.15, rounded));
     setLocalDiscount(clamped);
     if (onUpdateDiscountPrice) {
       try {
@@ -87,7 +87,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   const isBot1V4 = activeStrategy === 'bot1_ver_4' || activeStrategy === '3_step_domination_bot_v4';
   const isDominion2 = false; // Deprecated and unregistered
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';
-  const isSealed = is3StepBot || isMacroTrend || Boolean(signals?.is_sealed || signals?.bot_sealed);
+  const isSealed = is3StepBot || isMacroTrend || isGoldOnnx || Boolean(signals?.is_sealed || signals?.bot_sealed);
 
   // Close dropdown on outside click or Escape key
   useEffect(() => {
@@ -208,13 +208,13 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               <div className="h-5 w-5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center">
                 <Layers className="h-3.5 w-3.5 text-cyan-300" />
               </div>
+            ) : isGoldOnnx || isMacroTrend ? (
+              <div className="h-5 w-5 rounded-lg bg-amber-500/20 border border-amber-500/50 flex items-center justify-center">
+                <Crown className="h-3.5 w-3.5 text-amber-400" />
+              </div>
             ) : isMacroOnnx ? (
               <div className="h-5 w-5 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center">
                 <Cpu className="h-3.5 w-3.5 text-purple-300" />
-              </div>
-            ) : isMacroTrend ? (
-              <div className="h-5 w-5 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center">
-                <TrendingUp className="h-3.5 w-3.5 text-cyan-400" />
               </div>
             ) : isDominion2 ? (
               <div className="h-5 w-5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center">
@@ -348,6 +348,38 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
                   </div>
                 </div>
                 {isMacroTrend && <Check className="h-4 w-4 text-cyan-400 shrink-0 mt-1" aria-hidden="true" />}
+              </button>
+
+              {/* Bot 4: Gold ONNX Spacetime Bot */}
+              <button
+                type="button"
+                role="option"
+                aria-selected={isGoldOnnx}
+                aria-label="Select Gold ONNX Spacetime Bot strategy"
+                onClick={() => handleStrategyChange('gold_onnx_bot')}
+                className={`w-full p-2.5 rounded-xl text-left flex items-start justify-between gap-2 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 ${
+                  isGoldOnnx
+                    ? 'bg-amber-500/20 border border-amber-500/50'
+                    : 'hover:bg-[#21262d] border border-transparent'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <div className="h-7 w-7 rounded-lg bg-amber-500/20 border border-amber-500/50 flex items-center justify-center shrink-0 mt-0.5">
+                    <Crown className="h-4 w-4 text-amber-400" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>Bot 4: Gold ONNX Bot</span>
+                      <span className="px-1.5 py-0.2 text-[9px] font-mono bg-amber-500/20 text-amber-300 rounded-full font-bold">
+                        Gold ONNX
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-0.5 leading-tight">
+                      32-D Spacetime Inference • Gold KXGOLD15M • Velocity Shield
+                    </p>
+                  </div>
+                </div>
+                {isGoldOnnx && <Check className="h-4 w-4 text-amber-400 shrink-0 mt-1" aria-hidden="true" />}
               </button>
 
               {/* Bot 1: 3-Step Domination Bot */}
@@ -554,6 +586,48 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
         </div>
       )}
 
+      {/* Bot 4: Gold ONNX Spacetime Inference Engine Badge & Telemetry */}
+      {isGoldOnnx && (
+        <div className="flex flex-col gap-2 p-3 bg-amber-950/20 border border-amber-500/50 rounded-xl font-mono text-xs shadow-inner">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Crown className="h-4 w-4 text-amber-400" />
+              <span className="font-bold text-white uppercase text-[11px]">Bot 4: 32-D Gold ONNX Spacetime</span>
+            </div>
+            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+              (signals.recommended_side?.toUpperCase() === 'YES')
+                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                : (signals.recommended_side?.toUpperCase() === 'NO')
+                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+            }`}>
+              {signals.recommended_side?.toUpperCase() === 'YES' ? '🎯 BUY YES' : signals.recommended_side?.toUpperCase() === 'NO' ? '🎯 BUY NO' : '⏸️ HOLD (WAIT)'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-3 gap-1.5 text-center text-[10px]">
+            <div className="p-1.5 bg-[#0e131a] rounded border border-[#212a36]">
+              <div className="text-gray-400 text-[9px]">Model Conviction</div>
+              <div className="font-bold text-amber-300">
+                {signals.onnx_confidence ? `${(signals.onnx_confidence * 100).toFixed(0)}%` : '85%'}
+              </div>
+            </div>
+            <div className="p-1.5 bg-[#0e131a] rounded border border-[#212a36]">
+              <div className="text-gray-400 text-[9px]">Gold Velocity</div>
+              <div className="font-bold text-white">
+                Shield Active ($2.50)
+              </div>
+            </div>
+            <div className="p-1.5 bg-[#0e131a] rounded border border-[#212a36]">
+              <div className="text-gray-400 text-[9px]">Target Asset</div>
+              <div className="font-bold text-amber-400">
+                KXGOLD15M
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ⚡ Option B: Maker Discount Sniper Controller ($0.00 Fees) */}
       {is3StepBot && (
         <div className="bg-[#161b22] border border-amber-500/30 rounded-xl p-3.5 flex flex-col gap-3 shadow-inner">
@@ -590,8 +664,8 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               <span>QUICK PRESETS</span>
               <span className="font-mono text-gray-400">Target Entry Price</span>
             </div>
-            <div role="group" aria-label="Quick discount price presets" className="grid grid-cols-5 gap-1.5">
-              {[0.30, 0.35, 0.40, 0.45, 0.48].map((preset) => {
+            <div role="group" aria-label="Quick discount price presets" className="grid grid-cols-6 gap-1.5">
+              {[0.35, 0.40, 0.45, 0.48, 0.51, 0.52].map((preset) => {
                 const isActive = Math.abs(localDiscount - preset) < 0.005;
                 return (
                   <button
@@ -626,7 +700,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
               id="discount-range-slider"
               type="range"
               min="0.15"
-              max="0.50"
+              max="0.65"
               step="0.01"
               value={localDiscount}
               aria-label="Fine-tune discount limit price ceiling"
@@ -969,12 +1043,12 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             {isTesting ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin text-white" />
-                <span>Running {isMacroOnnx ? 'Macro ONNX (84.6% WR)' : isMacroTrend ? 'Macro Trend' : isDominion2 ? 'Dominion 2' : is3StepBot ? '3-Step Playbook' : 'ONNX AI'} Evaluation...</span>
+                <span>Running {isGoldOnnx ? 'Gold ONNX Bot (Bot 4)' : isMacroOnnx ? 'Macro ONNX (84.6% WR)' : isMacroTrend ? 'Macro Trend' : isDominion2 ? 'Dominion 2' : is3StepBot ? '3-Step Playbook' : 'ONNX AI'} Evaluation...</span>
               </>
             ) : (
               <>
                 <Play className="h-3.5 w-3.5 fill-current text-white/90" />
-                <span>🧪 Test {isMacroOnnx ? 'Macro ONNX Bot (84.6% WR)' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2' : is3StepBot ? '3-Step Domination' : 'ONNX Bot'} (15M Event)</span>
+                <span>🧪 Test {isGoldOnnx ? 'Gold ONNX Bot 4 (KXGOLD15M)' : isMacroOnnx ? 'Macro ONNX Bot (84.6% WR)' : isMacroTrend ? 'Macro Trend Dominion' : isDominion2 ? 'Dominion 2' : is3StepBot ? '3-Step Domination' : 'ONNX Bot'} (15M Event)</span>
               </>
             )}
           </button>

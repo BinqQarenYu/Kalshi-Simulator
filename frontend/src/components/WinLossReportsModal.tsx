@@ -507,8 +507,16 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
                         </td>
                         <td className="py-3 px-3 font-sans text-gray-300 text-[11px] max-w-xs">
                           <div className="font-semibold text-gray-200 truncate" title={report.ai_rationale}>{report.ai_rationale || '--'}</div>
-                          <div className="text-[10px] text-gray-500 font-mono flex items-center gap-2 mt-0.5">
+                          <div className="text-[10px] text-gray-500 font-mono flex items-center gap-2 mt-0.5 flex-wrap">
                             {isLive ? <span className="text-emerald-400 font-semibold flex items-center gap-1"><ShieldCheck className="h-3 w-3" /> Kalshi Exchange Verified</span> : <><span>Conf: {report.ai_confidence != null ? (report.ai_confidence * 100).toFixed(1) : '0.0'}%</span><span>•</span><span>VPIN: {report.vpin_score != null ? report.vpin_score.toFixed(2) : '0.00'}</span></>}
+                            {report.bot_parameters && (
+                              <span
+                                className="px-1.5 py-0.2 rounded bg-cyan-950/40 text-cyan-400 border border-cyan-800/40 text-[9px] font-mono cursor-help"
+                                title={`Maker: $${report.bot_parameters.discount_limit_price ?? '0.51'} | Edge: ${report.bot_parameters.min_edge_pct ?? '1.5'}% | MaxQueue: ${report.bot_parameters.max_queue_depth_ahead ?? '25000'} | TP: $${report.bot_parameters.take_profit_price_threshold ?? '0.92'} | Moat: ${report.bot_parameters.moneyness_moat_multiplier ?? '1.36'}x`}
+                              >
+                                ⚙️ Dials Locked
+                              </span>
+                            )}
                           </div>
                         </td>
                       </tr>

@@ -158,6 +158,25 @@ class LiveCoordinator:
             bot_id, ticker, contracts, side.upper(), price, len(state["trades"]),
         )
 
+    def record_trade_execution(
+        self,
+        ticker: str,
+        side: str,
+        bot_id: str,
+        contracts: int = 1,
+        price: Any = 0.50,
+        expiry_ts: Optional[float] = None,
+    ) -> None:
+        """Convenience alias for record_trade supporting Decimal or float prices."""
+        self.record_trade(
+            ticker=ticker,
+            side=side,
+            contracts=contracts,
+            price=float(price),
+            bot_id=bot_id,
+            expiry_ts=expiry_ts,
+        )
+
     def clear_cycle(self, ticker: Optional[str] = None) -> None:
         """Clear active coordination state."""
         state = self._read_state()

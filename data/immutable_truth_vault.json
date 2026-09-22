@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "vault_name": "Citadel Immutable Truth Vault",
+  "version": "1.0.0",
+  "genesis_timestamp": "2026-09-17T20:47:00Z",
+  "governance": {
+    "status": "HARD_LOCKED",
+    "lead_agents": ["Koko", "Lead Deer", "Quoquo", "Codeflow"],
+    "upgrade_policy": "CRYPTOGRAPHIC_CEREMONY_ONLY"
+  },
+  "tier_0_math_axioms": {
+    "AXIOM_0_1_DECIMAL_ONLY": {
+      "name": "Strict Decimal Financial Arithmetic",
+      "description": "Never use IEEE-754 floating-point math for balances, order amounts, entry/exit prices, PnL, fees, or strike differences. All monetary math must use Python decimal.Decimal and TypeScript decimal.js.",
+      "severity": "FATAL_VETO",
+      "forbidden_tokens": ["float(", "np.float64", "np.float32", "double"]
+    },
+    "AXIOM_0_2_UNCROSSED_BOOK": {
+      "name": "Uncrossed Order Book Invariant",
+      "description": "Best YES Bid + Best NO Bid <= 1.00 must hold at all times. Any crossed book state must trigger an immediate snapshot resync.",
+      "severity": "FATAL_VETO",
+      "max_combined_bid": "1.00"
+    },
+    "AXIOM_0_3_EXPIRATION_SINGULARITY": {
+      "name": "Settlement Boundary Continuity",
+      "description": "At T_rem -> 0, mathematical formulas must not divide by remaining time. Settlement payout resolves strictly to $1.00 or $0.00 without floating drift.",
+      "severity": "FATAL_VETO"
+    },
+    "AXIOM_0_4_PAYOUT_BOUNDS": {
+      "name": "Binary Contract Boundedness",
+      "description": "Contract settlement values, option pricing, and probability estimates are strictly bounded in the closed interval [0.00, 1.00].",
+      "severity": "FATAL_VETO"
+    }
+  },
+  "tier_1_regulatory_invariants": {
+    "AXIOM_1_1_CFTC_ANTI_WASH": {
+      "name": "Zero Opposing Cannibalism",
+      "description": "Multiple bots on the same account must NEVER hold opposing positions (YES vs NO) on the same contract cycle. Synchronously arbitrated by LiveCoordinator.",
+      "severity": "FATAL_VETO",
+      "statute": "CFTC Section 4c(a)(1)"
+    },
+    "AXIOM_1_2_IN_FLIGHT_INTENT_LOCK": {
+      "name": "1-Trade-Per-Cycle Intent Lock",
+      "description": "Once an automated bot reserves trade intent for the active cycle, no further orders or additions may be submitted for that ticker until settlement.",
+      "severity": "FATAL_VETO"
+    },
+    "AXIOM_1_3_MICRO_BANKROLL_ARMOR": {
+      "name": "Micro-Bankroll Hard Sizing Cap",
+      "description": "For bankrolls under $75, sizing is strictly hard-capped to 1 contract per trade for each asset (BTC, ETH, SOL, DOGE).",
+      "severity": "FATAL_VETO",
+      "max_contracts_per_trade": 1
+    }
+  },
+  "tier_2_operational_sanctuary": {
+    "AXIOM_2_1_LIVE_SANCTUARY_MUTEX": {
+      "name": "Live Trading Sanctuary Barrier",
+      "description": "Autonomous self-healing, refactoring, and heavy testing loops must NEVER touch files or consume CPU priority when Bot 1 holds active positions or during T_rem <= 240s.",
+      "severity": "EXECUTION_HALT"
+    },
+    "AXIOM_2_2_PARAMETER_FREEZE": {
+      "name": "Strategy Hyperparameter Freeze",
+      "description": "Self-healing daemons are strictly forbidden from modifying calibrated strategy parameters (discount_limit_price, vpin, velocity sweetspots). Bug fixes only.",
+      "severity": "FATAL_VETO"
+    },
+    "AXIOM_2_3_TOKEN_CREDIT_ARMOR": {
+      "name": "Token Bucket Rate Limiting",
+      "description": "Lead Deer cloud consultations are hard-capped to <= 2 queries per hour with micro-payloads (<= 60 lines) to guarantee $0.00 cost within Google Free Tier.",
+      "severity": "RATE_LIMIT_BLOCK"
+    }
+  }
+}

@@ -27,14 +27,15 @@ description: Core quantitative trading invariants, capital preservation rules, a
 - When a bot holds the Seal of Excellence, live trading is enabled across Mother Dash, docked console, and standalone engines.
 - Candidate bots without a verified Seal of Excellence remain strictly locked in Lane 2 Incubator (Shadow / Paper) mode.
 
-## 6. Zero Git-Branching for Bots
-- Never create git branches or worktrees to run different bots. All bots exist as modular Python classes in `strategies/`.
+## 6. Zero Git-Branching for Bots & Modular Engine Hierarchy
+- Never create git branches or worktrees to run different bots. All bots exist as modular Python classes inheriting `BaseStrategyEngine` (e.g. `domination_bot.py`, `dual_onnx.py`, `macro_trend_dominion_bot.py`).
+- All multi-paper and multi-live bots execute in a shared process environment governed by `LiveCoordinator`.
 
-## 7. Mandatory Seal of Excellence & On-Demand Certification
+## 7. Mandatory Seal of Excellence & 1 Quant University Graduation
 - **No bot may route live capital without an automated SHA-256 Seal of Excellence on disk. Bypasses and manual exemptions are strictly prohibited.**
-- **Sealed Roster**: Bots holding certified disk seals (**Bot 1** and **Bot 3**) are authorized for live execution across all platforms: Mother Dash, Docked Baby Bot Console, and Standalone Engines.
-- **On-Demand User Trigger**: Only run or activate the Seal of Excellence test gauntlet when the user explicitly asks to *"check bot if it's time to test for excellence"*.
-- **Sequential Promotion**: Strategies must mature in Lane 2 Incubator (live ticks, zero capital risk) before testing for excellence. Direct live deployment is prohibited.
+- **Sealed Live Roster**: Bots holding certified disk seals (**Bot 1** and **Bot 3**) are authorized for live execution across all platforms: Mother Dash, Docked Baby Bot Console, and Standalone Engines.
+- **The 1 Quant University Curriculum**: All candidate bots mature in Lane 2 Incubator across academic levels (Freshman -> Sophomore -> Junior -> Senior) completing at least 30 settled cycles before testing for excellence.
+- **On-Demand User Trigger**: Only run or activate the Seal of Excellence test gauntlet when the user explicitly asks to *"check bot if it's time to test for excellence"*. Sequential promotion from paper incubation to live deployment is mandatory.
 
 ## 8. Multi-Bot Anti-Cannibalism & Directional Coherence
 - **Zero Opposing Position Cannibalism**: Multiple bots operating on the same account/ticker must **NEVER** take opposing positions (e.g. Bot 1 BUY YES while Bot 3 BUY NO) on the same 15M contract cycle.

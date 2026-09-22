@@ -72,18 +72,22 @@ class OHLCVAggregator:
         if price is None:
             return
 
-        # Performance Optimization: Avoid string conversion when price or volume is already Decimal
+        # Performance optimization: Fast-path Decimal type check and ZERO_DECIMAL detection
         price_dec = price if isinstance(price, Decimal) else Decimal(str(price))
-        if isinstance(volume, Decimal):
+        if volume is ZERO_DECIMAL or volume == 0 or volume is None:
+            vol_dec = ZERO_DECIMAL
+        elif isinstance(volume, Decimal):
             vol_dec = volume
-        elif volume is None:
-            vol_dec = Decimal("0")
         else:
             vol_dec = Decimal(str(volume))
 
-        # Determine UNIX epoch seconds
+        # Performance optimization: Fast-path integer and float timestamps to avoid datetime overhead
         if timestamp is None:
             ts_sec = int(time.time())
+        elif isinstance(timestamp, int):
+            ts_sec = timestamp
+        elif isinstance(timestamp, float):
+            ts_sec = int(timestamp)
         elif isinstance(timestamp, datetime):
             if timestamp.tzinfo is None:
                 timestamp = timestamp.replace(tzinfo=timezone.utc)

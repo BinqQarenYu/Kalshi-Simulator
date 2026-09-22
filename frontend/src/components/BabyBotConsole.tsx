@@ -271,8 +271,14 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [killHoldProgress, setKillHoldProgress] = useState(0);
   const [isArmingKill, setIsArmingKill] = useState(false);
-  const [isHalted, setIsHalted] = useState(false);
+  const [botHaltMap, setBotHaltMap] = useState<Record<string, boolean>>({});
   const [isParamsOpen, setIsParamsOpen] = useState(false);
+
+  const serverBotArmStates = (aiSignals as any)?.settings?.bot_arm_states || (aiSignals as any)?.bot_arm_states;
+  const isCurrentBotHalted = Boolean(
+    botHaltMap[selectedBotId] ||
+    (serverBotArmStates && serverBotArmStates[selectedBotId] === false)
+  );
 
   // Dedicated Bot Micro-Report State (Live vs Paper Segregated)
   const [reportMode, setReportMode] = useState<'live' | 'paper'>(tradingMode);
@@ -309,9 +315,9 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   }, [selectedBotId, reportMode]);
 
   const [botParams, setBotParams] = useState<Record<string, any>>({
-    discount_limit_price: 0.48,
-    entry_discount_depth: 0.48,
-    momentum_max_price: 0.62,
+    discount_limit_price: 0.51,
+    entry_discount_depth: 0.51,
+    momentum_max_price: 0.63,
     min_confidence: 0.81,
     min_ev_dollars: 0.02,
     min_edge_pct: 6.0,
@@ -319,9 +325,9 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     vpin_toxic_threshold: 0.60,
     take_profit_price_threshold: 0.92,
     enable_take_profit_ceiling: true,
-    require_reversal_for_tp_ceiling: false,
+    require_reversal_for_tp_ceiling: true,
     enable_reverse_take_profit_roi: true,
-    reverse_indicator_threshold: 85.0,
+    reverse_indicator_threshold: 83.0,
     min_take_profit_roi: 40.0,
     enable_trailing_ratchet: true,
     trailing_ratchet_buffer: 0.08,
@@ -381,7 +387,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       if (selectedBotId === '3_step_domination_bot') {
         return {
           bot_id: '3_step_domination_bot',
-          bot_name: '3-Step Domination Bot',
+          bot_name: 'Bot 1 V4 (3-Step Domination Bot)',
           seal_status: 'SEALED_EXCELLENT' as const,
           seal_token: 'SEAL-DOM1-D07ADE18D284',
           live_trading_authorized: true,
@@ -551,8 +557,9 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
     } else {
       setBotParams((prev) => ({
         ...prev,
-        discount_limit_price: 0.48,
-        momentum_max_price: 0.62,
+        discount_limit_price: 0.51,
+        entry_discount_depth: 0.51,
+        momentum_max_price: 0.63,
         min_confidence: 0.81,
         min_edge_pct: 6.0,
         min_ev_dollars: 0.02,
@@ -560,7 +567,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         min_spot_diff: assetMoat,
         take_profit_price_threshold: activeAssetKey === 'GOLD' || activeAssetKey === 'DOGE' ? 0.90 : 0.92,
         enable_take_profit_ceiling: true,
-        require_reversal_for_tp_ceiling: false,
+        require_reversal_for_tp_ceiling: true,
         enable_reverse_take_profit_roi: true,
         reverse_indicator_threshold: activeAssetKey === 'GOLD' ? 52.0 : 83.0,
         min_take_profit_roi: activeAssetKey === 'GOLD' ? 35.0 : 40.0,
@@ -770,9 +777,28 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
   const macroTotalCycles = Math.max(1, (botPerformance?.total_events ?? 0));
   const macroAccuracy = macroTotalCycles > 0 ? (((macroTotalCycles - macroMistakes) / macroTotalCycles) * 100).toFixed(1) : '100.0';
 
+  const handleBotArmToggle = async () => {
+    const nextHalted = !isCurrentBotHalted;
+    setBotHaltMap(prev => ({ ...prev, [selectedBotId]: nextHalted }));
+    soundFX.playClickSound();
+    try {
+      if (nextHalted) {
+        await fetch(`/api/bot/disarm?bot_id=${selectedBotId}`, { method: 'POST' });
+        onFlattenHalt?.();
+      } else {
+        await fetch(`/api/bot/arm?bot_id=${selectedBotId}`, { method: 'POST' });
+      }
+    } catch (err) {
+      console.error("Failed to update bot arm status:", err);
+    }
+  };
+
   // Hold-to-arm kill switch logic
   const handleHoldStart = () => {
-    if (isHalted) return;
+    if (isCurrentBotHalted) {
+      handleBotArmToggle();
+      return;
+    }
     setIsArmingKill(true);
     const startTime = Date.now();
     const duration = 1500; // 1.5 seconds
@@ -786,9 +812,8 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
         if (holdIntervalRef.current) clearInterval(holdIntervalRef.current);
         setIsArmingKill(false);
         setKillHoldProgress(100);
-        setIsHalted(true);
         soundFX.playLossSound();
-        onFlattenHalt?.();
+        handleBotArmToggle();
       }
     }, 30);
   };
@@ -799,7 +824,7 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       holdIntervalRef.current = null;
     }
     setIsArmingKill(false);
-    if (!isHalted) {
+    if (!isCurrentBotHalted) {
       setKillHoldProgress(0);
     }
   };
@@ -834,38 +859,35 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           : 'border-amber-500/50 shadow-amber-500/10'
       }`}
     >
-      {/* 1. Header: Execution Mode, Bot Name & Telemetry */}
-      <div
-        className={`px-4 py-2.5 border-b flex items-center justify-between transition-colors ${
-          isLiveRealMoney
-            ? 'bg-[#4c111e]/50 border-[#f43f5e]/40'
-            : effectiveLaneBadge === 'shadow'
-            ? 'bg-[#115e59]/40 border-[#00bda5]/40'
-            : 'bg-[#291f0b]/50 border-amber-500/40'
-        }`}
-      >
-        <div className="flex items-center gap-2 overflow-hidden">
-          <div
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-bold tracking-wider uppercase border shadow-sm shrink-0 ${
-              isLiveRealMoney
-                ? 'bg-[#d31a38] text-white border-rose-400 animate-pulse'
-                : effectiveLaneBadge === 'shadow'
-                ? 'bg-[#00bda5]/20 text-[#2dd4bf] border-[#00bda5]/50'
-                : 'bg-amber-500/20 text-amber-300 border-amber-500/50'
-            }`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isLiveRealMoney ? 'bg-white' : effectiveLaneBadge === 'shadow' ? 'bg-[#2dd4bf]' : 'bg-amber-400'
-              }`}
-            />
-            <span>{isLiveRealMoney ? 'LIVE REAL-MONEY' : effectiveLaneBadge === 'shadow' ? 'SHADOW (PAPER)' : 'OFFLINE SIM'}</span>
-          </div>
+      {/* 1. Header, Strategy Switcher & Seal Banner */}
+      <BabyBotHeaderActions
+        isLiveRealMoney={isLiveRealMoney}
+        effectiveLaneBadge={effectiveLaneBadge}
+        activeProfile={activeProfile}
+        isAudioMuted={isAudioMuted}
+        setIsAudioMuted={setIsAudioMuted}
+        onTogglePopOut={onTogglePopOut}
+        isPoppedOut={isPoppedOut}
+        sealOfExcellence={sealOfExcellence}
+        onSelectBot={onSelectBot}
+        isBotSealed={isBotSealed}
+        activeSeal={activeSeal}
+      />
 
-          <span className="text-xs font-mono font-bold text-slate-200 truncate">
-            {activeProfile.name}
-          </span>
-        </div>
+      {/* 3. Target Contract & Event Horizon Banner */}
+      <BabyBotHorizonBanner
+        market={market}
+        is5m={is5m}
+        diffColor={diffColor}
+        diffBg={diffBg}
+        diffVal={diffVal}
+        isDiffPositive={isDiffPositive}
+        phase5m={phase5m}
+        remSecs={remSecs}
+        progressPct={progressPct}
+        yesProb={yesProb}
+        noProb={noProb}
+      />
 
         <div className="flex items-center gap-2 text-[11px] font-mono shrink-0">
           <span className="text-emerald-400 flex items-center gap-1">
@@ -1724,109 +1746,14 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       )}
 
       {/* 6. Active Position & Risk Telemetry */}
-      <div className="p-4 bg-[#12161a] border-b border-[#262d35] space-y-2.5">
-        <div className="flex items-center justify-between text-xs font-mono">
-          <span className="text-[#8c9ba5] uppercase tracking-wider text-[10px] font-bold">Active Position</span>
-          <span className="text-[10px] text-amber-400 font-bold">Hard Cap: 1 Contract</span>
-        </div>
-
-        <div className="p-2.5 rounded-lg bg-[#171c22] border border-[#262d35] flex items-center justify-between font-mono text-xs">
-          {activePosition && activePosition.size > 0 ? (
-            <>
-              <div className="flex items-center gap-2">
-                <span
-                  className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
-                    activePosition.side === 'yes'
-                      ? 'bg-[#10b981]/20 text-[#10b981]'
-                      : 'bg-[#f43f5e]/20 text-[#f43f5e]'
-                  }`}
-                >
-                  {activePosition.side.toUpperCase()}
-                </span>
-                <span className="text-white font-bold">
-                  {activePosition.size} ct @ {activePosition.entry_price * 100}¢
-                </span>
-              </div>
-              <div className="text-right">
-                <div
-                  className={`font-bold ${
-                    activePosition.unrealized_pnl >= 0 ? 'text-[#10b981]' : 'text-[#f43f5e]'
-                  }`}
-                >
-                  {activePosition.unrealized_pnl >= 0 ? '+' : ''}${activePosition.unrealized_pnl.toFixed(2)}
-                </div>
-                <div className="text-[10px] text-[#8c9ba5]">Unrealized PnL</div>
-              </div>
-            </>
-          ) : (
-            <div className="w-full text-center text-[#8c9ba5] py-1 text-xs">
-              FLAT · No open contract positions (Holding ${(botParams.discount_limit_price || 0.52).toFixed(2)} Maker Resting Limit)
-            </div>
-          )}
-        </div>
-
-        {/* Asymmetric Risk Breakdown */}
-        <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-          <div className="p-2 rounded bg-[#13171c] border border-[#1f262d]">
-            <span className="text-[#8c9ba5] text-[10px]">MAX RISK (CAPITAL):</span>
-            <div className="text-sm font-bold text-[#f43f5e] mt-0.5">
-              -${(botParams.discount_limit_price || 0.52).toFixed(2)} / ct
-            </div>
-          </div>
-          <div className="p-2 rounded bg-[#13171c] border border-[#1f262d]">
-            <span className="text-[#8c9ba5] text-[10px]">MAX SETTLEMENT WIN:</span>
-            <div className="text-sm font-bold text-[#10b981] mt-0.5">
-              +${(1.0 - (botParams.discount_limit_price || 0.52)).toFixed(2)} / ct
-            </div>
-          </div>
-        </div>
-
-        {/* Guardrail Health: Consecutive Losses & VPIN */}
-        <div className="grid grid-cols-2 gap-2 text-[11px] font-mono pt-1">
-          <div className="flex items-center justify-between p-2 rounded bg-[#13171c] border border-[#1f262d]">
-            <span className="text-[#8c9ba5]">Loss Breaker:</span>
-            <div className="flex items-center gap-1">
-              {[0, 1, 2].map((idx) => (
-                <span
-                  key={idx}
-                  className={`w-2 h-2 rounded-full border ${
-                    idx < consecutiveLosses
-                      ? 'bg-[#f43f5e] border-[#f43f5e]'
-                      : 'bg-transparent border-[#8c9ba5]/40'
-                  }`}
-                />
-              ))}
-              <span className="text-[10px] text-[#8c9ba5] ml-1">{consecutiveLosses}/3</span>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between p-2 rounded bg-[#13171c] border border-[#1f262d]">
-            <span className="text-[#8c9ba5]">VPIN Toxicity:</span>
-            <span className={`font-bold ${isVpinToxic ? 'text-[#f43f5e]' : 'text-emerald-400'}`}>
-              {vpin.toFixed(2)} {isVpinToxic ? '⚠️' : 'OK'}
-            </span>
-          </div>
-        </div>
-
-        {/* Coin-Flip Dead-Zone Indicator */}
-        <div
-          className={`p-2 rounded-lg border text-[11px] font-mono flex items-center justify-between ${
-            isDeadZone
-              ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-          }`}
-        >
-          <div className="flex items-center gap-1.5">
-            <span
-              className={`w-2 h-2 rounded-full ${isDeadZone ? 'bg-amber-400' : 'bg-emerald-400 animate-pulse'}`}
-            />
-            <span>{isDeadZone ? 'Razor-Tight Dead Zone Active' : 'Directional Edge Ready'}</span>
-          </div>
-          <span className="text-[10px] font-bold uppercase tracking-wider">
-            {isDeadZone ? 'SKIPPING' : 'EDGE CONFIRMED'}
-          </span>
-        </div>
-      </div>
+      <BabyBotPositionDeck
+        activePosition={activePosition}
+        botParams={botParams}
+        consecutiveLosses={consecutiveLosses}
+        vpin={vpin}
+        isVpinToxic={isVpinToxic}
+        isDeadZone={isDeadZone}
+      />
 
       {/* 7. EXPANDABLE STRATEGY PARAMETERS & GUARDRAILS ACCORDION */}
       <div className="border-b border-[#262d35] bg-[#0c0f12]">
@@ -3556,156 +3483,24 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
       </div>
 
       {/* 8.5. Dedicated Bot Micro-Report Stream & KPI Strip (Live vs Paper Segregated) */}
-      <div className="border-b border-[#262d35] bg-[#0c1015] p-3 text-xs font-mono">
-        {/* Header & Segregated Pill Toggle */}
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
-              <span>📋</span>
-              <span className="truncate max-w-[110px] sm:max-w-none">{activeProfile.shortName} Ledger</span>
-            </span>
-            {/* Live / Paper Pill Toggle */}
-            <div className="flex items-center bg-[#171c22] p-0.5 rounded border border-[#262d35] text-[10px]">
-              <button
-                type="button"
-                onClick={() => setReportMode('live')}
-                className={`px-2 py-0.5 rounded font-bold transition-all ${
-                  reportMode === 'live'
-                    ? 'bg-amber-500 text-black shadow-sm'
-                    : 'text-[#8c9ba5] hover:text-white'
-                }`}
-              >
-                LIVE
-              </button>
-              <button
-                type="button"
-                onClick={() => setReportMode('paper')}
-                className={`px-2 py-0.5 rounded font-bold transition-all ${
-                  reportMode === 'paper'
-                    ? 'bg-purple-500 text-white shadow-sm'
-                    : 'text-[#8c9ba5] hover:text-white'
-                }`}
-              >
-                PAPER
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={fetchMicroReports}
-              disabled={isLoadingReports}
-              title="Refresh ledger"
-              className="text-[#8c9ba5] hover:text-white transition-colors"
-            >
-              <RefreshCw className={`w-3 h-3 ${isLoadingReports ? 'animate-spin text-[#00bda5]' : ''}`} />
-            </button>
-            {onOpenReports && (
-              <button
-                type="button"
-                onClick={onOpenReports}
-                className="text-[10px] text-[#00bda5] hover:text-[#2dd4bf] hover:underline flex items-center gap-0.5 cursor-pointer"
-              >
-                <span>Full Ledger</span>
-                <ExternalLink className="w-2.5 h-2.5" />
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Mini KPI Strip */}
-        <div className="grid grid-cols-3 gap-1.5 mb-2 bg-[#12171e] p-2 rounded border border-[#262d35]/60">
-          <div className="flex flex-col">
-            <span className="text-[9px] text-[#8c9ba5] uppercase tracking-wider">Win Rate</span>
-            <span className={`text-[12px] font-bold ${
-              (botPerformance?.win_rate_pct ?? 0) >= 50
-                ? 'text-emerald-400'
-                : (botPerformance?.total_events ?? 0) === 0
-                ? 'text-[#8c9ba5]'
-                : 'text-rose-400'
-            }`}>
-              {botPerformance && botPerformance.total_events > 0
-                ? `${botPerformance.win_rate_pct.toFixed(1)}%`
-                : '--'}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-[9px] text-[#8c9ba5] uppercase tracking-wider">Net PnL</span>
-            <span className={`text-[12px] font-bold ${
-              (botPerformance?.total_pnl ?? 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'
-            }`}>
-              {botPerformance && botPerformance.total_events > 0
-                ? `${botPerformance.total_pnl >= 0 ? '+' : ''}$${botPerformance.total_pnl.toFixed(2)}`
-                : '--'}
-            </span>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-[9px] text-[#8c9ba5] uppercase tracking-wider">Cycles</span>
-            <span className="text-[12px] font-bold text-white">
-              {botPerformance && botPerformance.total_events > 0
-                ? `${botPerformance.wins}W / ${botPerformance.losses}L`
-                : '--'}
-            </span>
-          </div>
-        </div>
-
-        {/* Recent Settlements List */}
-        {recentReports.length > 0 ? (
-          <div className="space-y-1">
-            {recentReports.map((r, idx) => {
-              const isWin = r.outcome.toLowerCase() === 'win';
-              const rawPnl = r.pnl !== undefined ? r.pnl : r.net_pnl;
-              const pnlNum = typeof rawPnl === 'number' ? rawPnl : parseFloat(String(rawPnl || '0'));
-              const displaySide = r.bot_side || r.side || 'YES';
-              return (
-                <div
-                  key={r.report_id || idx}
-                  className={`flex items-center justify-between p-1.5 rounded border text-[10px] ${
-                    isWin
-                      ? 'bg-emerald-950/20 border-emerald-500/20 text-emerald-300'
-                      : 'bg-rose-950/20 border-rose-500/20 text-rose-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 truncate max-w-[65%]">
-                    {isWin ? (
-                      <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-                    ) : (
-                      <XCircle className="w-3 h-3 text-rose-400 shrink-0" />
-                    )}
-                    <span className="truncate text-white font-medium">
-                      {r.ticker.replace('KXBTC15M-', '').replace('KXETH15M-', 'ETH-').replace('KXSOL15M-', 'SOL-')}
-                    </span>
-                    <span className="text-[8px] text-[#8c9ba5] uppercase px-1 py-0.2 bg-[#171c22] rounded border border-[#262d35]">
-                      {displaySide}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0 font-mono">
-                    <span className={`font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {pnlNum >= 0 ? `+$${pnlNum.toFixed(2)}` : `-$${Math.abs(pnlNum).toFixed(2)}`}
-                    </span>
-                    <span className="text-[9px] text-[#8c9ba5]">
-                      {r.timestamp_utc ? r.timestamp_utc.slice(11, 16) : ''}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div className="py-2 text-center text-[#8c9ba5] text-[10px] bg-[#12171e]/50 rounded border border-[#262d35]/40">
-            <span>No {reportMode.toUpperCase()} settlements for {activeProfile.shortName}</span>
-          </div>
-        )}
-      </div>
+      <BabyBotMicroLedger
+        activeProfile={activeProfile}
+        reportMode={reportMode}
+        setReportMode={setReportMode}
+        fetchMicroReports={fetchMicroReports}
+        isLoadingReports={isLoadingReports}
+        onOpenReports={onOpenReports}
+        botPerformance={botPerformance}
+        recentReports={recentReports}
+      />
 
       {/* 9. Hardware-Style Emergency Kill-Switch */}
       <div className="p-4 bg-[#0c0f12]">
         <button
           type="button"
           aria-label={
-            isHalted
-              ? 'Bot emergency halted. All resting orders cancelled.'
+            isCurrentBotHalted
+              ? 'Bot emergency halted. Click to re-arm.'
               : 'Flatten all positions and halt bot. Hold mouse button or press and hold Space or Enter for 1.5 seconds'
           }
           onMouseDown={handleHoldStart}
@@ -3717,12 +3512,12 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           onKeyUp={handleKeyUp}
           onBlur={handleHoldEnd}
           className={`w-full relative overflow-hidden py-3.5 px-4 rounded-lg font-extrabold text-xs tracking-wider uppercase transition-all shadow-lg select-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#f43f5e] ${
-            isHalted
-              ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+            isCurrentBotHalted
+              ? 'bg-amber-950/40 text-amber-300 border border-amber-500/50 hover:bg-amber-900/60'
               : 'border-2 border-[#d31a38] text-[#f43f5e] hover:bg-[#d31a38]/10 active:scale-[0.99]'
           }`}
           style={{
-            backgroundImage: isHalted
+            backgroundImage: isCurrentBotHalted
               ? 'none'
               : 'repeating-linear-gradient(45deg, rgba(211,26,56,0.08), rgba(211,26,56,0.08) 10px, transparent 10px, transparent 20px)',
           }}
@@ -3736,10 +3531,10 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           )}
 
           <div className="relative z-10 flex items-center justify-center gap-2">
-            <AlertOctagon className={`w-4 h-4 ${isHalted ? 'text-slate-500' : 'text-[#f43f5e]'}`} />
+            <AlertOctagon className={`w-4 h-4 ${isCurrentBotHalted ? 'text-amber-400' : 'text-[#f43f5e]'}`} />
             <span>
-              {isHalted
-                ? '★ BOT EMERGENCY HALTED · RESTING CANCELLED ★'
+              {isCurrentBotHalted
+                ? '★ BOT HALTED · CLICK TO RE-ARM ★'
                 : isArmingKill
                 ? `ARMING KILL SWITCH (${(1.5 - (killHoldProgress * 1.5) / 100).toFixed(1)}s)...`
                 : '★ FLATTEN ALL & HALT BOT (HOLD 1.5s) ★'}

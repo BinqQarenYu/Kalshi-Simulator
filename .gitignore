@@ -47,5 +47,8 @@ frontend/playwright-report/
 .vscode/
 .idea/
 *.swp
-.DS_Store
 Thumbs.db
+
+# Large Archives & Ticks Dumps
+data/archives/
+*.tar.gz

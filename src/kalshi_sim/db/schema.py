@@ -18,7 +18,48 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
+
+SCHEMA_V3_SQL = """
+-- 8. Perpetual Trading Positions Table
+CREATE TABLE IF NOT EXISTS perp_positions (
+    id TEXT PRIMARY KEY,
+    asset TEXT NOT NULL,
+    side TEXT NOT NULL,
+    size REAL NOT NULL,
+    entry_price REAL NOT NULL,
+    mark_price REAL NOT NULL,
+    leverage REAL NOT NULL,
+    liquidation_price REAL NOT NULL,
+    margin REAL NOT NULL,
+    unrealized_pnl REAL DEFAULT 0.0,
+    realized_pnl REAL DEFAULT 0.0,
+    status TEXT DEFAULT 'open',
+    bot_id TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_perp_positions_asset ON perp_positions (asset, status);
+
+-- 9. Perpetual Trading Orders Table
+CREATE TABLE IF NOT EXISTS perp_orders (
+    id TEXT PRIMARY KEY,
+    asset TEXT NOT NULL,
+    side TEXT NOT NULL,
+    order_type TEXT NOT NULL,
+    size REAL NOT NULL,
+    price REAL,
+    leverage REAL NOT NULL,
+    margin REAL NOT NULL,
+    status TEXT DEFAULT 'pending',
+    bot_id TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_perp_orders_asset ON perp_orders (asset, status);
+"""
+
 
 SCHEMA_V1_SQL = """
 -- 1. Schema Migrations Version Registry
@@ -205,5 +246,15 @@ class MigrationEngine:
             await db.commit()
             current_version = 2
             logger.info("Successfully applied migration V2.")
+
+        if current_version < 3:
+            logger.info("Applying migration V3 (Perpetual trading tables and indexes)...")
+            await db.executescript(SCHEMA_V3_SQL)
+            await db.execute(
+                "INSERT OR REPLACE INTO schema_migrations (version, description) VALUES (3, 'Perpetual trading positions and orders schema')"
+            )
+            await db.commit()
+            current_version = 3
+            logger.info("Successfully applied migration V3.")
 
         return current_version
