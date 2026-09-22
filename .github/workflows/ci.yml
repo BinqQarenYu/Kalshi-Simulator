@@ -1,0 +1,60 @@
+name: ASVL Quality Gate
+
+on:
+  push:
+    branches: [ "dominion_v2.001", "main" ]
+  pull_request:
+    branches: [ "dominion_v2.001", "main" ]
+
+jobs:
+  backend-pytest:
+    name: Backend Pytest (Decimal & Memory Math)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          
+      - name: Install Backend Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest pytest-asyncio fastapi uvicorn onnxruntime httpx websockets
+          
+      - name: Run Pytest
+        run: |
+          # 100% pass required for backend ASVL Gate
+          python -m pytest tests/ -v
+
+  frontend-typecheck:
+    name: Frontend TypeScript & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+          
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci
+        
+      - name: Run TypeScript Compiler (Typecheck)
+        working-directory: ./frontend
+        run: |
+          # Zero TypeScript errors allowed
+          npm run typecheck
+          
+      - name: Run Production Build
+        working-directory: ./frontend
+        run: npm run build
