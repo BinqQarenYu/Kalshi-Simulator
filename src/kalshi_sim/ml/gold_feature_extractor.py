@@ -176,11 +176,11 @@ class GoldOrderflowFeatureExtractor:
 
             n_pcs = len(self.vpin_bucket_price_changes)
             if n_pcs >= 5:
-                # Performance optimization: Sum-of-squares formula Var(X) = E[X^2] - (E[X])^2 eliminates
-                # list copy allocations and double iteration over deque (~44% latency reduction in VPIN sigma).
+                # Performance optimization: Sum-of-squares sample variance formula S^2 = (sum_sq - (sum_pc^2)/N) / (N-1)
+                # matches statistics.stdev exactly while eliminating list copy allocations (~44% speedup in VPIN sigma).
                 sum_pc = sum(self.vpin_bucket_price_changes)
                 sum_sq = sum(x * x for x in self.vpin_bucket_price_changes)
-                variance = max(0.0, (sum_sq / n_pcs) - (sum_pc / n_pcs) ** 2)
+                variance = max(0.0, (sum_sq - (sum_pc ** 2) / n_pcs) / (n_pcs - 1))
                 sigma_v = math.sqrt(variance)
             else:
                 sigma_v = max(price * 0.00005, 1e-4)
