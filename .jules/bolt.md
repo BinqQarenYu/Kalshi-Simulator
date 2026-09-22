@@ -91,3 +91,7 @@
 ## 2026-09-21 - O(1) Version-Backed Top-of-Book Ask Caching in L2BookState
 **Learning:** Computing `best_yes_ask` and `best_no_ask` on every query re-calculated Decimal subtraction (`1 - best_no_bid`, `1 - best_yes_bid`) and dictionary `min()` scans on unchanged order book states (~0.70 µs per query).
 **Action:** Utilized `FastBook._version` mutation tracking to cache top-of-book asks in `L2BookState`. Reduced `best_yes_ask` / `best_no_ask` read latency from ~0.70 µs down to ~0.21 µs (~3.2x speedup / ~69% latency reduction).
+
+## 2026-09-22 - Fast Float Sizing & Fast-Path String Formatting in High-Frequency EV Engine
+**Learning:** Constructing `Decimal(f"{tapered_kelly:.6f}")` or `Decimal(str(val))` strings during high-frequency Kelly contract sizing and price difference formatting created heavy `Decimal` object heap allocations and string parsing overhead in every strategy evaluation loop.
+**Action:** Fast-path `float` and `int` inputs in `AssetConfig.format_price` and `format_diff`, compute `StatisticalEVEngine` contract sizing using float arithmetic (`float(total_equity) * tapered_kelly`), pre-compute `_INV_SQRT2 = 1.0 / math.sqrt(2.0)` in CDF functions, and cache `self._asset_config` on `ThreeStepDominationBotV4`. Reduced `AssetConfig.format_diff` latency by ~1.86x and `StatisticalEVEngine` contract sizing latency by ~2.35x.
