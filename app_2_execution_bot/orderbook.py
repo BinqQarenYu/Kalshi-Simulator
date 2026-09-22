@@ -13,7 +13,7 @@ from decimal import Decimal
 import logging
 import time
 
-from kalshi_sim.schemas import (
+from shared.schemas import (
     L2BookState,
     OrderBookDelta,
     OrderBookLevel,

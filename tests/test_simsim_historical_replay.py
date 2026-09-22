@@ -11,8 +11,8 @@ from decimal import Decimal
 from pathlib import Path
 import pytest
 
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from shared.schemas import CryptoAsset, L2BookState, OrderSide
 
 
 def test_simsim_fading_variance_vs_twap_gravity() -> None:

@@ -2,8 +2,8 @@
 
 from decimal import Decimal
 import pytest
-from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
-from kalshi_sim.schemas import L2BookState
+from app_1_machine_engine.ml.bot1_v4_engine import Bot1V4DominationEngine
+from shared.schemas import L2BookState
 
 
 def test_bot1_v4_ev_coupling() -> None:

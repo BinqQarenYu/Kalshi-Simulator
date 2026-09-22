@@ -9,7 +9,7 @@ import orjson
 import pytest
 
 from kalshi_sim.execution_logger import ExecutionLogger, _format_currency, _orjson_default
-from kalshi_sim.schemas import (
+from shared.schemas import (
     OrderSide,
     OrderStatus,
     OrderType,

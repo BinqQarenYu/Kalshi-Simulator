@@ -10,10 +10,10 @@ import numpy as np
 import onnxruntime as ort
 import pytest
 
-from kalshi_sim.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
-from kalshi_sim.ml.gold_model import QuoLasGoldMicroscopeNet, TORCH_AVAILABLE
-from kalshi_sim.ml.export_gold_onnx import export_gold_to_onnx
-from kalshi_sim.schemas import L2BookState, OrderSide, TradeEvent
+from app_2_execution_bot.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
+from app_1_machine_engine.ml.gold_model import QuoLasGoldMicroscopeNet, TORCH_AVAILABLE
+from app_1_machine_engine.ml.export_gold_onnx import export_gold_to_onnx
+from shared.schemas import L2BookState, OrderSide, TradeEvent
 
 
 @pytest.fixture
@@ -131,7 +131,7 @@ def test_export_gold_onnx_and_inference(tmp_path: Path) -> None:
 
 def test_kalshi_venue_adapter_evaluation() -> None:
     """Verify KalshiVenueAdapter transforms probabilities into valid Kalshi signals with CFTC fee logic."""
-    from kalshi_sim.ml.adapters import KalshiVenueAdapter, SignalDirection
+    from app_1_machine_engine.ml.adapters import KalshiVenueAdapter, SignalDirection
 
     adapter = KalshiVenueAdapter(min_conviction=Decimal("0.65"), dead_zone_gold_usd=Decimal("0.75"))
 
@@ -171,7 +171,7 @@ def test_kalshi_venue_adapter_evaluation() -> None:
 
 def test_polymarket_venue_adapter_evaluation() -> None:
     """Verify PolymarketVenueAdapter produces gasless, point-in-time oracle signals."""
-    from kalshi_sim.ml.adapters import PolymarketVenueAdapter, SignalDirection
+    from app_1_machine_engine.ml.adapters import PolymarketVenueAdapter, SignalDirection
 
     adapter = PolymarketVenueAdapter(min_conviction=Decimal("0.65"))
 
@@ -194,7 +194,7 @@ def test_polymarket_venue_adapter_evaluation() -> None:
 
 def test_binance_venue_adapter_evaluation() -> None:
     """Verify BinanceVenueAdapter computes basis point taker fees and index mark signals."""
-    from kalshi_sim.ml.adapters import BinanceVenueAdapter, SignalDirection
+    from app_1_machine_engine.ml.adapters import BinanceVenueAdapter, SignalDirection
 
     adapter = BinanceVenueAdapter(min_conviction=Decimal("0.65"))
 

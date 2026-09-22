@@ -64,7 +64,7 @@ class LiveCoordinator:
         """
         # 0. Seal of Excellence Pre-Flight Live Authorization Gate
         if is_live:
-            from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
+            from app_3_autonomous_chef.bot_deployment_auditor import BotDeploymentAuditor
             auth_ok, auth_msg = BotDeploymentAuditor.check_live_authorization_on_disk(bot_id)
             if not auth_ok:
                 veto_msg = f"SEAL OF EXCELLENCE VETO: {auth_msg}"

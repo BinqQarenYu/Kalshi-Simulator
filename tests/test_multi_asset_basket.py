@@ -5,10 +5,10 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
-from kalshi_sim.schemas import CryptoAsset, get_asset_config, CRYPTO_ASSETS
+from shared.schemas import CryptoAsset, get_asset_config, CRYPTO_ASSETS
 from kalshi_sim.market_discovery import ASSET_TIMEFRAME_SERIES, Timeframe
-from kalshi_sim.cfbenchmarks_sync import INDEX_TO_ASSET, COINBASE_FALLBACK_PAIRS
-from kalshi_sim.standalone_bot import StandaloneBotEngine, app
+from shared.cfbenchmarks_sync import INDEX_TO_ASSET, COINBASE_FALLBACK_PAIRS
+from app_2_execution_bot.standalone_bot import StandaloneBotEngine, app
 
 
 class TestMultiAssetBasket:

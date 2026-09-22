@@ -22,7 +22,7 @@ except (ImportError, OSError):
     nn = None
     TORCH_AVAILABLE = False
 
-from kalshi_sim.ml.model import QuoLasMicroscopeNet
+from app_1_machine_engine.ml.model import QuoLasMicroscopeNet
 
 logger = logging.getLogger(__name__)
 

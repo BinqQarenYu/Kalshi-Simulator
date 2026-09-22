@@ -5,9 +5,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from kalshi_sim.order_simulator import OrderSimulator
-from kalshi_sim.orderbook import OrderBookManager
+from app_2_execution_bot.orderbook import OrderBookManager
 from kalshi_sim.portfolio import Portfolio
-from kalshi_sim.schemas import (
+from shared.schemas import (
     L2BookState,
     MarketInfo,
     MarketStatus,
@@ -234,7 +234,7 @@ class TestKalshiSimulation(unittest.TestCase):
 
     def test_fastbook_and_l2bookstate_optimization(self):
         """FastBook O(1) top-of-book indexing and L2BookState property correctness."""
-        from kalshi_sim.schemas import FastBook
+        from shared.schemas import FastBook
 
         # 1. FastBook operations
         fb = FastBook({Decimal("0.40"): Decimal("100"), Decimal("0.45"): Decimal("200")})

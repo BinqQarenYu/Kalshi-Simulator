@@ -23,8 +23,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import onnxruntime as ort
 
-from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
-from kalshi_sim.schemas import L2BookState, OrderBookLevel, OrderSide, TradeEvent
+from app_2_execution_bot.ml.feature_extractor import KalshiOrderflowFeatureExtractor
+from shared.schemas import L2BookState, OrderBookLevel, OrderSide, TradeEvent
 
 
 def _d(val: Any) -> Decimal:
@@ -230,7 +230,7 @@ def load_production_cycles() -> List[CycleData]:
     return cycles
 
 
-from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
+from app_2_execution_bot.ml.onnx_engine import KalshiONNXEngine
 
 
 class ONNXMicrostructurePredictor:

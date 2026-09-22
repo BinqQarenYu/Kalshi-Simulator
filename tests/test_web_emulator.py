@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from kalshi_sim.schemas import Timeframe
+from shared.schemas import Timeframe
 from kalshi_sim.web_emulator import KalshiWebEmulator
 
 

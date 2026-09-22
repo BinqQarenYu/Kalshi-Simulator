@@ -23,9 +23,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from kalshi_sim.ml.domination_bot_v4 import ThreeStepDominationBotV4
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.schemas import L2BookState, OrderSide
+from app_1_machine_engine.ml.domination_bot_v4 import ThreeStepDominationBotV4
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from shared.schemas import L2BookState, OrderSide
 
 
 @dataclass

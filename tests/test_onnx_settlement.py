@@ -1,11 +1,11 @@
 import pytest
 from decimal import Decimal
 from datetime import datetime, timezone, timedelta
-from kalshi_sim.schemas import OrderSide, SimulatedFill, Timeframe, MarketInfo, MarketStatus, TickerUpdate
-from kalshi_sim.orderbook import OrderBookManager
+from shared.schemas import OrderSide, SimulatedFill, Timeframe, MarketInfo, MarketStatus, TickerUpdate
+from app_2_execution_bot.orderbook import OrderBookManager
 from kalshi_sim.settlement import check_expirations, settle_position
 from kalshi_sim.simulation_agent import SimulationAgent
-from kalshi_sim.server import record_win_loss_event_report, _matches_bot_id
+from app_2_execution_bot.server import record_win_loss_event_report, _matches_bot_id
 
 
 def test_dual_onnx_expiration_and_settlement():

@@ -4,11 +4,11 @@ from decimal import Decimal
 import pytest
 import time
 
-from kalshi_sim.live_coordinator import LiveCoordinator
-from kalshi_sim.incubator_agent import IncubatorAgent, ShadowTradeRecord
-from kalshi_sim.exchange_router import ExchangeRouter, SpotExchangeAdapter
-from kalshi_sim.base_engine import TradeIntent
-from kalshi_sim.schemas import OrderSide, OrderType
+from app_2_execution_bot.live_coordinator import LiveCoordinator
+from app_3_autonomous_chef.incubator_agent import IncubatorAgent, ShadowTradeRecord
+from app_2_execution_bot.exchange_router import ExchangeRouter, SpotExchangeAdapter
+from shared.base_engine import TradeIntent
+from shared.schemas import OrderSide, OrderType
 
 
 def test_live_coordinator_anti_wash_and_same_direction(tmp_path):
@@ -54,7 +54,7 @@ def test_live_coordinator_anti_wash_and_same_direction(tmp_path):
 def test_university_academic_standing_and_exam(tmp_path):
     state_file = tmp_path / "incubator_test_state.json"
     seal_file = tmp_path / "seal_test_state.json"
-    from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
+    from app_3_autonomous_chef.bot_deployment_auditor import BotDeploymentAuditor
     auditor = BotDeploymentAuditor(seal_path=seal_file)
     incubator = IncubatorAgent(auditor=auditor, state_path=state_file)
 

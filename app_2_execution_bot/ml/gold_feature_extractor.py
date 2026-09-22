@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from kalshi_sim.schemas import L2BookState, TradeEvent
+from shared.schemas import L2BookState, TradeEvent
 
 # Module-level C struct compilation for fast feature vector float32 packing
 _STRUCT_32F = struct.Struct("32f")

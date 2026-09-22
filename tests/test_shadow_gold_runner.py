@@ -6,9 +6,9 @@ import tempfile
 from pathlib import Path
 import pytest
 
-from kalshi_sim.incubator_manager import IncubatorManager
-from kalshi_sim.ml.gold_inversion_bot import GoldInversionBot
-from kalshi_sim.schemas import CryptoAsset, L2BookState, MarketInfo, MarketStatus, OrderSide
+from app_3_autonomous_chef.incubator_manager import IncubatorManager
+from app_1_machine_engine.ml.gold_inversion_bot import GoldInversionBot
+from shared.schemas import CryptoAsset, L2BookState, MarketInfo, MarketStatus, OrderSide
 from kalshi_sim.shadow_gold_runner import Lane2GoldShadowRunner, calculate_kalshi_taker_fee
 
 

@@ -10,10 +10,10 @@ from fastapi.testclient import TestClient
 import pytest
 
 from datetime import datetime, timezone
-from kalshi_sim.order_client import KalshiLiveOrderClient
+from app_2_execution_bot.order_client import KalshiLiveOrderClient
 from kalshi_sim.portfolio import Portfolio
-from kalshi_sim.schemas import OrderSide, Timeframe, LivePortfolioState
-from kalshi_sim.server import app, state
+from shared.schemas import OrderSide, Timeframe, LivePortfolioState
+from app_2_execution_bot.server import app, state
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 import pytest
 
-from kalshi_sim.data_hygiene import DataHygieneManager, HygieneReport
+from app_1_machine_engine.data_hygiene import DataHygieneManager, HygieneReport
 
 
 def test_data_hygiene_classification_and_purge(tmp_path: Path):

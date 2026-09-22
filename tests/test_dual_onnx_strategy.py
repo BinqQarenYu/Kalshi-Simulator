@@ -20,10 +20,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kalshi_sim.ml.dual_onnx_gateway import DualONNXGateway, _make_neutral_result
-from kalshi_sim.ml.dual_onnx_schemas import DualONNXDecision, DualONNXRegime
-from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot, _classify_signal
-from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderBookLevel, OrderSide
+from app_1_machine_engine.ml.dual_onnx_gateway import DualONNXGateway, _make_neutral_result
+from app_1_machine_engine.ml.dual_onnx_schemas import DualONNXDecision, DualONNXRegime
+from app_1_machine_engine.ml.dual_onnx_strategy import DualONNXArbitrageBot, _classify_signal
+from shared.schemas import CryptoAsset, L2BookState, OrderBookLevel, OrderSide
 
 
 @pytest.fixture
@@ -619,7 +619,7 @@ def test_gamma_cliff_guard(spot_l2_book: L2BookState, kalshi_l2_book: L2BookStat
 
 def test_kalshi_taker_fee_schedule() -> None:
     """Verify authentic CFTC taker fee schedule with $0.01 floor and $0.02 cap per contract."""
-    from kalshi_sim.ml.dual_onnx_strategy import calculate_kalshi_taker_fee
+    from app_1_machine_engine.ml.dual_onnx_strategy import calculate_kalshi_taker_fee
 
     # At $0.50: 0.07 * 1 * 0.50 * 0.50 = 0.0175 -> ceil is $0.02
     assert calculate_kalshi_taker_fee(Decimal("0.50"), contracts=1) == Decimal("0.02")
@@ -639,7 +639,7 @@ def test_kalshi_taker_fee_schedule() -> None:
 
 def test_dynamic_volatility_from_candle_builder(spot_l2_book: L2BookState, kalshi_l2_book: L2BookState) -> None:
     """Verify dynamic volatility calculation from CandleBuilder rolling candles."""
-    from kalshi_sim.ml.quolas_core.candle_builder import CandleBuilder
+    from app_1_machine_engine.ml.quolas_core.candle_builder import CandleBuilder
 
     builder = CandleBuilder(interval_seconds=60, max_candles=50)
     # Feed candles with high volatility (e.g. $60 spread)

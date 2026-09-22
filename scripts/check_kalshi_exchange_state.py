@@ -4,8 +4,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
-from kalshi_sim.order_client import KalshiLiveOrderClient
-from kalshi_sim.auth import PROD_REST_BASE, DEMO_REST_BASE
+from app_2_execution_bot.order_client import KalshiLiveOrderClient
+from shared.auth import PROD_REST_BASE, DEMO_REST_BASE
 
 async def main():
     api_key_id = os.getenv("KALSHI_API_KEY_ID", "")

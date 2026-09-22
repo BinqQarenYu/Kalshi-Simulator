@@ -5,7 +5,7 @@ from pathlib import Path
 import time
 import pytest
 
-from kalshi_sim.live_coordinator import LiveCoordinator
+from app_2_execution_bot.live_coordinator import LiveCoordinator
 
 
 @pytest.fixture

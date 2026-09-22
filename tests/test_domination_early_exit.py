@@ -3,8 +3,8 @@
 from decimal import Decimal
 import pytest
 
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.schemas import L2BookState, OrderSide
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from shared.schemas import L2BookState, OrderSide
 
 
 def test_take_profit_ceiling_holds_when_no_reversal() -> None:

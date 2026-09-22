@@ -18,7 +18,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from kalshi_sim.schemas import L2BookState, OrderSide, OrderType
+from shared.schemas import L2BookState, OrderSide, OrderType
 
 logger = logging.getLogger("ExchangeRouter")
 

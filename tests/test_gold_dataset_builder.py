@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from kalshi_sim.ml.gold_dataset_builder import GoldDatasetBuilder
+from app_1_machine_engine.ml.gold_dataset_builder import GoldDatasetBuilder
 
 
 def test_parse_tick_line_and_book_building() -> None:

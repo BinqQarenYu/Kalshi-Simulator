@@ -2,7 +2,7 @@
 
 import gc
 import pytest
-from kalshi_sim.system_governor import SystemResourceGovernor, get_system_governor, SystemResourceMetrics
+from app_3_autonomous_chef.system_governor import SystemResourceGovernor, get_system_governor, SystemResourceMetrics
 
 
 def test_system_governor_initialization():

@@ -17,7 +17,7 @@ from typing import Any
 import orjson
 from pydantic import BaseModel
 
-from kalshi_sim.schemas import (
+from shared.schemas import (
     OrderBookDelta,
     OrderBookSnapshot,
     TickerUpdate,

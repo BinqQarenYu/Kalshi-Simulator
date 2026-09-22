@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
-from kalshi_sim.schemas import Timeframe
+from shared.schemas import Timeframe
 
 
 def test_5m_live_trade_is_strictly_vetoed():
@@ -114,8 +114,8 @@ def test_5m_clob_tau_scaling():
 
 def test_5m_domination_bot_playbook_scaling():
     """Verify that 3-Step Domination Bot dynamically scales all 3 playbooks on 5M contracts."""
-    from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-    from kalshi_sim.orderbook import L2BookState
+    from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+    from app_2_execution_bot.orderbook import L2BookState
     
     bot = ThreeStepDominationBot()
     book = L2BookState("KXBTC5M-26SEP071305-05")
@@ -165,7 +165,7 @@ def test_5m_domination_bot_playbook_scaling():
 
 def test_5m_win_loss_event_report_generation():
     """Verify record_win_loss_event_report properly generates 5M reports with 5m cycle windows."""
-    from kalshi_sim.server import record_win_loss_event_report, format_cycle_time_from_iso
+    from app_2_execution_bot.server import record_win_loss_event_report, format_cycle_time_from_iso
     
     rep = record_win_loss_event_report(
         ticker="KXBTC5M-26SEP071305-05",

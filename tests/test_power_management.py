@@ -5,8 +5,8 @@ import sys
 from unittest.mock import MagicMock, patch
 import pytest
 
-from kalshi_sim.server import prevent_windows_sleep, _windows_keep_alive_loop
-from kalshi_sim.standalone_bot import prevent_windows_sleep as bot_prevent_sleep
+from app_2_execution_bot.server import prevent_windows_sleep, _windows_keep_alive_loop
+from app_2_execution_bot.standalone_bot import prevent_windows_sleep as bot_prevent_sleep
 
 
 def test_prevent_windows_sleep_execution():

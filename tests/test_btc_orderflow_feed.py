@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
-from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
-from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
+from app_2_execution_bot.ml.feature_extractor import KalshiOrderflowFeatureExtractor
+from app_2_execution_bot.ml.onnx_engine import KalshiONNXEngine
 
 
 def test_btc_orderflow_feed_initialization_and_seed():

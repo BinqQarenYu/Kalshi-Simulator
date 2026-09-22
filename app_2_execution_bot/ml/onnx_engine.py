@@ -24,8 +24,8 @@ try:
 except ImportError:
     ONNX_AVAILABLE = False
 
-from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
-from kalshi_sim.schemas import L2BookState, TradeEvent
+from app_2_execution_bot.ml.feature_extractor import KalshiOrderflowFeatureExtractor
+from shared.schemas import L2BookState, TradeEvent
 
 logger = logging.getLogger(__name__)
 

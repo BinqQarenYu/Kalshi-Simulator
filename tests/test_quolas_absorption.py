@@ -18,16 +18,16 @@ from typing import Any, Dict, List
 import numpy as np
 import pytest
 
-from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
-from kalshi_sim.ml.dual_onnx_gateway import DualONNXGateway
-from kalshi_sim.ml.dual_onnx_schemas import DualONNXRegime
-from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
-from kalshi_sim.ml.quolas_core.candle_builder import Candle, CandleBuilder
-from kalshi_sim.ml.quolas_core.config import HMMConfig
-from kalshi_sim.ml.quolas_core.hmm_brain import HMMBrain
-from kalshi_sim.ml.quolas_core.regime_types import MarketRegime
+from app_1_machine_engine.ml.continuous_trainer import ContinuousModelTrainer
+from app_1_machine_engine.ml.dual_onnx_gateway import DualONNXGateway
+from app_1_machine_engine.ml.dual_onnx_schemas import DualONNXRegime
+from app_1_machine_engine.ml.dual_onnx_strategy import DualONNXArbitrageBot
+from app_1_machine_engine.ml.quolas_core.candle_builder import Candle, CandleBuilder
+from app_1_machine_engine.ml.quolas_core.config import HMMConfig
+from app_1_machine_engine.ml.quolas_core.hmm_brain import HMMBrain
+from app_1_machine_engine.ml.quolas_core.regime_types import MarketRegime
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
-from kalshi_sim.schemas import L2BookState
+from shared.schemas import L2BookState
 
 
 # ---------------------------------------------------------------------------
@@ -238,8 +238,8 @@ def test_cross_brain_temporal_skew_veto():
 def test_continuous_trainer_quolas_export(tmp_path: Path):
     """Test export_and_verify_onnx produces a verified ONNX model with UTF-8 safety."""
     pytest.importorskip("torch")
-    from kalshi_sim.ml.continuous_trainer import export_and_verify_onnx
-    from kalshi_sim.ml.model import QuoLasMicroscopeNet
+    from app_1_machine_engine.ml.continuous_trainer import export_and_verify_onnx
+    from app_1_machine_engine.ml.model import QuoLasMicroscopeNet
     net = QuoLasMicroscopeNet(input_dim=28, hidden_dim=64, num_classes=3)
     target_onnx = tmp_path / "test_quolas.onnx"
 

@@ -10,17 +10,17 @@ import time
 import numpy as np
 import pytest
 
-from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
-from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
-from kalshi_sim.orderbook import OrderBookManager
-from kalshi_sim.schemas import (
+from app_2_execution_bot.ml.feature_extractor import KalshiOrderflowFeatureExtractor
+from app_2_execution_bot.ml.onnx_engine import KalshiONNXEngine
+from app_2_execution_bot.orderbook import OrderBookManager
+from shared.schemas import (
     L2BookState,
     OrderBookDelta,
     OrderBookLevel,
     OrderBookSnapshot,
     TradeEvent,
 )
-from kalshi_sim.server import _build_full_state_payload, fast_dumps
+from app_2_execution_bot.server import _build_full_state_payload, fast_dumps
 
 
 

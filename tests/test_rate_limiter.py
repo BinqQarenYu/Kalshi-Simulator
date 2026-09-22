@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kalshi_sim.rate_limiter import AsyncTokenBucket, kalshi_rate_limiter
+from app_2_execution_bot.rate_limiter import AsyncTokenBucket, kalshi_rate_limiter
 
 
 def test_init_defaults_and_custom() -> None:

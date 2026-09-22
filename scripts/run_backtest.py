@@ -10,8 +10,8 @@ import argparse
 import logging
 from pathlib import Path
 
-from kalshi_sim.ml.backtester import BacktestEngine, ModelComparator
-from kalshi_sim.ml.dataset_builder import DatasetBuilder
+from app_1_machine_engine.ml.backtester import BacktestEngine, ModelComparator
+from app_1_machine_engine.ml.dataset_builder import DatasetBuilder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("run_backtest")

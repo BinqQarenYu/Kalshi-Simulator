@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 load_dotenv()
 
-from kalshi_sim.order_client import KalshiLiveOrderClient
-from kalshi_sim.auth import PROD_REST_BASE
+from app_2_execution_bot.order_client import KalshiLiveOrderClient
+from shared.auth import PROD_REST_BASE
 
 async def main():
     print("=" * 80)

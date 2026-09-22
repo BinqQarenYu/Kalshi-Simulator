@@ -22,8 +22,8 @@ if hasattr(sys.stdout, "reconfigure"):
 import torch
 import onnxruntime as ort
 
-from kalshi_sim.ml.model import QuoLasMicroscopeNet, ExportableQuoLasNet
-from kalshi_sim.ml.train_model import ModelTrainer
+from app_1_machine_engine.ml.model import QuoLasMicroscopeNet, ExportableQuoLasNet
+from app_1_machine_engine.ml.train_model import ModelTrainer
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("train_model")

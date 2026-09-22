@@ -22,17 +22,17 @@ from typing import Any, Callable, Dict, List, Optional
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.db import DatabaseWriter
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
-from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
-from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
-from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
-from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from app_1_machine_engine.ml.dominion_2_bot import Dominion2Bot
+from app_1_machine_engine.ml.dual_onnx_strategy import DualONNXArbitrageBot
+from app_1_machine_engine.ml.macro_trend_dominion import MacroTrendDominionBot
+from app_2_execution_bot.ml.onnx_engine import KalshiONNXEngine
+from app_1_machine_engine.ml.statistical_ev_engine import StatisticalEVEngine
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
 from kalshi_sim.order_simulator import OrderSimulator
 from kalshi_sim.portfolio import Portfolio
 from kalshi_sim.process_lock import get_active_lock_holder
-from kalshi_sim.schemas import L2BookState, MarketInfo, OrderSide, Timeframe, TradeEvent
+from shared.schemas import L2BookState, MarketInfo, OrderSide, Timeframe, TradeEvent
 
 logger = logging.getLogger(__name__)
 

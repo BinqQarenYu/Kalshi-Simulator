@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator, Callable, Coroutine
 
 import aiohttp
 
-from kalshi_sim.auth import create_aiohttp_connector, get_ssl_context, get_ws_auth_headers
+from shared.auth import create_aiohttp_connector, get_ssl_context, get_ws_auth_headers
 
 logger = logging.getLogger(__name__)
 

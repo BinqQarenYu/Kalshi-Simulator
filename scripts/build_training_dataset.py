@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from kalshi_sim.ml.dataset_builder import DatasetBuilder
+from app_1_machine_engine.ml.dataset_builder import DatasetBuilder
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("build_dataset")

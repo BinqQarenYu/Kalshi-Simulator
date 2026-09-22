@@ -12,8 +12,8 @@ from kalshi_sim.incubator_stress_lab import (
     QuantitativeMathEngine,
     StressTestScore,
 )
-from kalshi_sim.ml.doge_inversion_bot import DogeInversionBot
-from kalshi_sim.schemas import L2BookState, MarketInfo, MarketStatus, OrderSide
+from app_1_machine_engine.ml.doge_inversion_bot import DogeInversionBot
+from shared.schemas import L2BookState, MarketInfo, MarketStatus, OrderSide
 
 
 def test_quantitative_math_engine():

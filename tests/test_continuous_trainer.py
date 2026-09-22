@@ -13,12 +13,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from kalshi_sim.ml.continuous_trainer import (
+from app_1_machine_engine.ml.continuous_trainer import (
     ContinuousModelTrainer,
     apply_low_priority_to_thread_or_process,
     export_and_verify_onnx,
 )
-from kalshi_sim.ml.model import QuoLasMicroscopeNet
+from app_1_machine_engine.ml.model import QuoLasMicroscopeNet
 
 
 def test_low_priority_execution() -> None:

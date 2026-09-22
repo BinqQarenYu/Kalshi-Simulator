@@ -12,8 +12,8 @@ import orjson
 import pytest
 from pydantic import BaseModel
 
-from kalshi_sim.schemas import TradeEvent
-from kalshi_sim.tick_writer import TickWriter
+from shared.schemas import TradeEvent
+from app_1_machine_engine.tick_writer import TickWriter
 
 
 class DummyRecord(BaseModel):

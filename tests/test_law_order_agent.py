@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from kalshi_sim.law_order_agent import AgentLawOrder, ComplianceCheckItem
-from kalshi_sim.schemas import OrderSide, OrderType, OrderStatus, SimulatedOrder, Timeframe
+from shared.schemas import OrderSide, OrderType, OrderStatus, SimulatedOrder, Timeframe
 
 
 @pytest.fixture

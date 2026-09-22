@@ -14,7 +14,7 @@ from decimal import Decimal
 import unittest
 
 from kalshi_sim.order_simulator import OrderSimulator
-from kalshi_sim.schemas import (
+from shared.schemas import (
     L2BookState,
     OrderSide,
     OrderStatus,

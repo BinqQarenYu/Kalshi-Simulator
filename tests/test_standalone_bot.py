@@ -19,9 +19,9 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 
 from kalshi_sim.process_lock import TradingEngineLock, get_active_lock_holder, is_pid_running
-from kalshi_sim.schemas import CryptoAsset, LiveOrderRequest
-from kalshi_sim.standalone_bot import StandaloneBotEngine, app, app_engine
-from kalshi_sim.server import app as server_app
+from shared.schemas import CryptoAsset, LiveOrderRequest
+from app_2_execution_bot.standalone_bot import StandaloneBotEngine, app, app_engine
+from app_2_execution_bot.server import app as server_app
 
 
 def test_pid_running():
@@ -378,7 +378,7 @@ def test_standalone_bot_settlement_reconciliation(tmp_path: Path):
 def test_main_server_ai_auto_trade_lockout():
     fake_holder = ("standalone_bot", 99999)
     with patch("kalshi_sim.server.get_active_lock_holder", return_value=fake_holder):
-        from kalshi_sim.server import state as server_state
+        from app_2_execution_bot.server import state as server_state
         old_mode = server_state.mode
         server_state.mode = "live"
         try:
@@ -457,14 +457,14 @@ def test_standalone_bot_sweep_old_orders(tmp_path):
 def test_simulation_agent_live_lockout_suppression(tmp_path):
     async def _run():
         from kalshi_sim.simulation_agent import SimulationAgent
-        from kalshi_sim.orderbook import OrderBookManager
-        from kalshi_sim.schemas import L2BookState
+        from app_2_execution_bot.orderbook import OrderBookManager
+        from shared.schemas import L2BookState
 
         mgr = OrderBookManager()
         book = L2BookState("KXBTC15M-LOCKTEST")
         mgr.set_book("KXBTC15M-LOCKTEST", book)
 
-        from kalshi_sim.schemas import Timeframe
+        from shared.schemas import Timeframe
         agent = SimulationAgent(orderbook_manager=mgr, timeframes=[Timeframe.FIFTEEN_MIN])
         agent.execution_mode = "live"
         agent.active_strategy_bot = "3_step_domination_bot"
@@ -483,7 +483,7 @@ def test_simulation_agent_live_lockout_suppression(tmp_path):
 
 
 def test_standalone_bot_multi_asset_switching(tmp_path: Path):
-    from kalshi_sim.schemas import CryptoAsset
+    from shared.schemas import CryptoAsset
 
     # 1. Initialize engine with ETH
     engine = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path, asset=CryptoAsset.ETH)
@@ -682,7 +682,7 @@ def test_take_profit_ceiling_execution_in_standalone_engine(tmp_path: Path):
     and executes take-profit ceiling when an adverse reversal >= 85% is detected.
     """
     from datetime import timedelta
-    from kalshi_sim.schemas import L2BookState
+    from shared.schemas import L2BookState
 
     engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
     engine.active_ticker = "KXBTC15M-T100000"
@@ -724,8 +724,8 @@ def test_take_profit_ceiling_execution_in_standalone_engine(tmp_path: Path):
 
 def test_take_profit_ceiling_api_parameter_update(tmp_path: Path):
     """Verify enable_take_profit_ceiling and reversal gate parameter API updates."""
-    from kalshi_sim.standalone_bot import app_engine
-    import kalshi_sim.standalone_bot as sb
+    from app_2_execution_bot.standalone_bot import app_engine
+    import app_2_execution_bot.standalone_bot as sb
 
     test_engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
     sb.app_engine = test_engine
@@ -771,7 +771,7 @@ def test_take_profit_ceiling_api_parameter_update(tmp_path: Path):
 def test_bot_parameters_persistence_across_restarts(tmp_path: Path):
     """Verify strategy parameters survive daemon reboots and become permanent defaults."""
     import json
-    from kalshi_sim.schemas import CryptoAsset
+    from shared.schemas import CryptoAsset
 
     # 1. Initial engine has factory defaults
     engine1 = StandaloneBotEngine(is_live=False, is_armed=False, data_dir=tmp_path)
@@ -1110,7 +1110,7 @@ def test_entry_timing_window_and_auto_sweep(tmp_path: Path):
 
 def test_standalone_poe_endpoints_and_flight_recorder(tmp_path: Path):
     """Verify POE endpoints /api/poe/scorecards and /api/poe/report on StandaloneBotEngine."""
-    import kalshi_sim.standalone_bot as sb
+    import app_2_execution_bot.standalone_bot as sb
 
     engine = StandaloneBotEngine(is_live=False, is_armed=True, data_dir=tmp_path)
     sb.app_engine = engine

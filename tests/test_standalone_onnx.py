@@ -22,8 +22,8 @@ from kalshi_sim.standalone_onnx import (
     LOCK_FILE_PATH,
     DOM_LOCK_FILE_PATH,
 )
-from kalshi_sim.schemas import CryptoAsset
-from kalshi_sim.ml.dual_onnx_schemas import DualONNXRegime
+from shared.schemas import CryptoAsset
+from app_1_machine_engine.ml.dual_onnx_schemas import DualONNXRegime
 
 
 @pytest.fixture
@@ -86,7 +86,7 @@ def test_mutual_interlock_detection(tmp_path: Path):
 
 def test_fastapi_endpoints_with_mock_engine(test_engine: StandaloneONNXEngine):
     """Verify Port 8002 FastAPI endpoints return valid schemas and mutate state."""
-    import kalshi_sim.standalone_onnx as so
+    import shared.standalone_onnx as so
     so.app_engine = test_engine
 
     client = TestClient(app)
@@ -165,7 +165,7 @@ def test_brain_2_telemetry_and_evaluation(test_engine: StandaloneONNXEngine):
     test_engine.current_btc_spot = Decimal("78150.00")
 
     # Seed Kalshi orderbook
-    from kalshi_sim.schemas import L2BookState
+    from shared.schemas import L2BookState
     kalshi_book = L2BookState(ticker)
     kalshi_book.yes_book = {Decimal("0.55"): Decimal("25"), Decimal("0.54"): Decimal("10")}
     kalshi_book.no_book = {Decimal("0.46"): Decimal("30"), Decimal("0.47"): Decimal("15")}

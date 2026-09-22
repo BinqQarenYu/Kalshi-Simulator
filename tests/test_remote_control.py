@@ -18,13 +18,13 @@ import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
-from kalshi_sim.remote_control import (
+from app_3_autonomous_chef.remote_control import (
     RemoteControlManager,
     get_device_name,
     get_local_lan_ip,
     get_tailscale_ip,
 )
-from kalshi_sim.standalone_bot import app, app_engine
+from app_2_execution_bot.standalone_bot import app, app_engine
 
 
 def test_device_discovery():

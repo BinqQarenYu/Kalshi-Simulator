@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 import pytest
-from kalshi_sim.server import _calculate_15m_metrics, _matches_bot_id
+from app_2_execution_bot.server import _calculate_15m_metrics, _matches_bot_id
 
 
 def test_matches_bot_id_onnx_macro():

@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import pytest
 
-from kalshi_sim.poe_flight_recorder import (
+from app_3_autonomous_chef.poe_flight_recorder import (
     POEFlightRecorder,
     compute_fisher_exact_2x2,
 )

@@ -2,8 +2,8 @@ from datetime import datetime
 from decimal import Decimal
 import time
 
-from kalshi_sim.orderbook import OrderBookManager
-from kalshi_sim.schemas import OrderBookDelta, OrderBookLevel, OrderBookSnapshot
+from app_2_execution_bot.orderbook import OrderBookManager
+from shared.schemas import OrderBookDelta, OrderBookLevel, OrderBookSnapshot
 
 
 def test_orderbook_manager_snapshot_and_getters():
@@ -50,7 +50,7 @@ def test_orderbook_manager_delta():
 
 
 def test_fastbook_top_of_book_tracking_after_pop():
-    from kalshi_sim.schemas import FastBook
+    from shared.schemas import FastBook
 
     fb = FastBook({
         Decimal("0.50"): Decimal("10"),

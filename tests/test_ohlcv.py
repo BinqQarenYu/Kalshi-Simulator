@@ -4,8 +4,8 @@ from decimal import Decimal
 import time
 import pytest
 
-from kalshi_sim.ohlcv_aggregator import OHLCVAggregator
-from kalshi_sim.schemas import CandleInterval, OHLCVCandle
+from app_1_machine_engine.ohlcv_aggregator import OHLCVAggregator
+from shared.schemas import CandleInterval, OHLCVCandle
 
 
 def test_aggregator_single_tick_creation():

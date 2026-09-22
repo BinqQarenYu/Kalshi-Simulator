@@ -3,8 +3,8 @@
 from decimal import Decimal
 import pytest
 
-from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine, ExpectedValueResult
-from kalshi_sim.schemas import OrderSide
+from app_1_machine_engine.ml.statistical_ev_engine import StatisticalEVEngine, ExpectedValueResult
+from shared.schemas import OrderSide
 
 
 def test_positive_ev_yes_trade():

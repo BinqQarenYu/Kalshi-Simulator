@@ -5,8 +5,8 @@ import unittest
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from kalshi_sim.order_client import KalshiDemoOrderClient
-from kalshi_sim.schemas import OrderSide
+from app_2_execution_bot.order_client import KalshiDemoOrderClient
+from shared.schemas import OrderSide
 
 
 class TestKalshiDemoOrderClient(unittest.IsolatedAsyncioTestCase):

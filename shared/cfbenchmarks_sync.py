@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import aiohttp
 
-from kalshi_sim.auth import (
+from shared.auth import (
     PROD_REST_BASE,
     PROD_WS_URL,
     create_aiohttp_connector,
@@ -34,7 +34,7 @@ from kalshi_sim.auth import (
     get_ws_auth_headers,
     load_private_key,
 )
-from kalshi_sim.schemas import CRYPTO_ASSETS, CryptoAsset, get_asset_config
+from shared.schemas import CRYPTO_ASSETS, CryptoAsset, get_asset_config
 
 logger = logging.getLogger("CFBenchmarksSync")
 

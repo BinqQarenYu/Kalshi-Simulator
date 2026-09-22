@@ -7,10 +7,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from kalshi_sim.ml.backtester import BacktestEngine, BacktestResult, ModelComparator
-from kalshi_sim.ml.dataset_builder import TickFrame
-from kalshi_sim.ml.export_onnx import export_to_onnx
-from kalshi_sim.ml.model import QuoLasMicroscopeNet
+from app_1_machine_engine.ml.backtester import BacktestEngine, BacktestResult, ModelComparator
+from app_1_machine_engine.ml.dataset_builder import TickFrame
+from app_1_machine_engine.ml.export_onnx import export_to_onnx
+from app_1_machine_engine.ml.model import QuoLasMicroscopeNet
 
 
 @pytest.fixture

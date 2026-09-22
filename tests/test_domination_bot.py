@@ -3,8 +3,8 @@
 from decimal import Decimal
 import pytest
 
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderBookLevel, OrderSide
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from shared.schemas import CryptoAsset, L2BookState, OrderBookLevel, OrderSide
 
 
 def test_domination_bot_playbook3_late_gamma_snub() -> None:
@@ -157,7 +157,7 @@ def test_domination_bot_dynamic_discount_update() -> None:
 
 def test_domination_bot_asset_calibration() -> None:
     """Verify that ThreeStepDominationBot dynamically scales min_spot_diff across BTC, ETH, SOL, DOGE."""
-    from kalshi_sim.schemas import CryptoAsset
+    from shared.schemas import CryptoAsset
 
     bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
     assert bot.asset == CryptoAsset.BTC
@@ -184,7 +184,7 @@ def test_domination_bot_asset_calibration() -> None:
 
 def test_domination_bot_asset_volatility_calibration() -> None:
     """Verify that ThreeStepDominationBot calibrates 1m volatility across all crypto assets."""
-    from kalshi_sim.schemas import CryptoAsset
+    from shared.schemas import CryptoAsset
 
     bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
     assert bot.typical_1m_volatility == 14.0
@@ -202,7 +202,7 @@ def test_domination_bot_asset_volatility_calibration() -> None:
 
 def test_domination_bot_multi_asset_evaluation() -> None:
     """Verify that Domination Bot correctly evaluates and trades ETH, SOL, and DOGE with true statistical edge."""
-    from kalshi_sim.schemas import CryptoAsset
+    from shared.schemas import CryptoAsset
 
     # 1. Ethereum Evaluation
     eth_bot = ThreeStepDominationBot(asset=CryptoAsset.ETH, min_edge_pct=0.05, min_ev_dollars=Decimal("0.02"))
@@ -269,7 +269,7 @@ def test_domination_bot_multi_asset_evaluation() -> None:
 
 def test_domination_bot_dynamic_proximity_threshold() -> None:
     """Verify Option A: Self-calibrating dynamic proximity threshold across all 4 crypto assets."""
-    from kalshi_sim.schemas import CryptoAsset
+    from shared.schemas import CryptoAsset
 
     # 1. BTC: min_spot_diff=35.0, typical_1m_vol=14.0
     # Floor = 35.0 * 1.15 = 40.25, Ceiling = 35.0 * 2.15 = 75.25
@@ -328,7 +328,7 @@ def test_domination_bot_dynamic_proximity_threshold() -> None:
 
 def test_domination_bot_dynamic_moat_unlocks_mid_cycle_entry() -> None:
     """Demonstrate that dynamic moat unlocks profitable mid-cycle trades ($55 diff) that the static $70 rule killed."""
-    from kalshi_sim.schemas import CryptoAsset
+    from shared.schemas import CryptoAsset
 
     btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
     book = L2BookState(market_ticker="KXBTC15M-T78650")
@@ -353,7 +353,7 @@ def test_domination_bot_dynamic_moat_unlocks_mid_cycle_entry() -> None:
 
 def test_domination_bot_razor_tight_proximity_veto() -> None:
     """Verify that any razor-tight event (|Diff| < dynamic moat) is vetoed across all crypto assets."""
-    from kalshi_sim.schemas import CryptoAsset
+    from shared.schemas import CryptoAsset
 
     # BTC: at T=120s, dynamic moat floor is $40.25. Diff = $20.00 (< $40.25) -> VETO
     btc_bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
@@ -405,7 +405,7 @@ def test_domination_bot_razor_tight_proximity_veto() -> None:
 
 def test_domination_bot_extreme_volatility_swing_empty_ask_no_crash() -> None:
     """Verify that during extreme swings (+-$125) with one-sided empty book, evaluate does not crash with TypeError."""
-    from kalshi_sim.schemas import CryptoAsset
+    from shared.schemas import CryptoAsset
 
     bot = ThreeStepDominationBot(asset=CryptoAsset.BTC)
 
@@ -639,9 +639,9 @@ def test_domination_bot_playbook4_silas_twap_immutability_sniper() -> None:
 def test_feature_extractors_rolling_window_bisect_eviction() -> None:
     """Verify that KalshiOrderflowFeatureExtractor and GoldOrderflowFeatureExtractor bisect eviction functions correctly when >100 trade quantities and volumes are ingested."""
     from datetime import datetime, timezone
-    from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
-    from kalshi_sim.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
-    from kalshi_sim.schemas import TradeEvent
+    from app_2_execution_bot.ml.feature_extractor import KalshiOrderflowFeatureExtractor
+    from app_2_execution_bot.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
+    from shared.schemas import TradeEvent
 
     # 1. Test KalshiOrderflowFeatureExtractor trade and volume eviction
     extractor = KalshiOrderflowFeatureExtractor(target_depth=15)

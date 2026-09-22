@@ -44,9 +44,9 @@ except (ImportError, OSError):
     TensorDataset = None
     TORCH_AVAILABLE = False
 
-from kalshi_sim.ml.export_gold_onnx import export_gold_to_onnx
-from kalshi_sim.ml.gold_dataset_builder import GoldDatasetBuilder
-from kalshi_sim.ml.gold_model import QuoLasGoldMicroscopeNet
+from app_1_machine_engine.ml.export_gold_onnx import export_gold_to_onnx
+from app_1_machine_engine.ml.gold_dataset_builder import GoldDatasetBuilder
+from app_1_machine_engine.ml.gold_model import QuoLasGoldMicroscopeNet
 
 logger = logging.getLogger("kalshi_sim.gold_continuous_trainer")
 

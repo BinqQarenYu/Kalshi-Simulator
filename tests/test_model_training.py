@@ -8,8 +8,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from kalshi_sim.ml.model import QuoLasMicroscopeNet
-from kalshi_sim.ml.train_model import FocalLoss, ModelTrainer, OrderflowDataset
+from app_1_machine_engine.ml.model import QuoLasMicroscopeNet
+from app_1_machine_engine.ml.train_model import FocalLoss, ModelTrainer, OrderflowDataset
 
 
 def test_quolas_microscope_forward_pass() -> None:

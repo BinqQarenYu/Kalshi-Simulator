@@ -19,13 +19,13 @@ import pytest
 from typing import Any, Dict
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
-from kalshi_sim.bot_deployment_auditor import (
+from app_3_autonomous_chef.bot_deployment_auditor import (
     BotDeploymentAuditor,
     SealOfExcellence,
 )
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.ml.domination_bot_v4 import ThreeStepDominationBotV4
-from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from app_1_machine_engine.ml.domination_bot_v4 import ThreeStepDominationBotV4
+from app_1_machine_engine.ml.macro_trend_dominion_bot import MacroTrendDominionBot
 
 
 # ==============================================================================

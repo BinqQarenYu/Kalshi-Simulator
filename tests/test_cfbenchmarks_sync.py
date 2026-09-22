@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
-from kalshi_sim.schemas import CryptoAsset
+from shared.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
+from shared.schemas import CryptoAsset
 
 
 def test_cfbenchmarks_initial_state():

@@ -8,7 +8,7 @@ from typing import Dict, List
 import numpy as np
 import pytest
 
-from kalshi_sim.ml.quolas_core import (
+from app_1_machine_engine.ml.quolas_core import (
     DepthSnapshot,
     FlowSignal,
     HMMBrain,
@@ -330,10 +330,10 @@ def test_hmm_brain_training_and_prediction(tmp_path):
 
 def test_dual_onnx_gateway_and_hmm_strategy_integration():
     from decimal import Decimal
-    from kalshi_sim.ml.dual_onnx_gateway import DualONNXGateway
-    from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
-    from kalshi_sim.ml.dual_onnx_schemas import DualONNXRegime
-    from kalshi_sim.schemas import L2BookState
+    from app_1_machine_engine.ml.dual_onnx_gateway import DualONNXGateway
+    from app_1_machine_engine.ml.dual_onnx_strategy import DualONNXArbitrageBot
+    from app_1_machine_engine.ml.dual_onnx_schemas import DualONNXRegime
+    from shared.schemas import L2BookState
 
     # 1. Gateway with NanoMatrixBuilder
     builder = NanoMatrixBuilder(target_depth=15)

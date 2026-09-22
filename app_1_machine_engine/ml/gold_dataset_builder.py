@@ -20,8 +20,8 @@ from typing import Any, Dict, Generator, Iterable, List, Optional, Sequence, Tup
 
 import numpy as np
 
-from kalshi_sim.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
-from kalshi_sim.schemas import L2BookState, OrderSide, TradeEvent
+from app_2_execution_bot.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
+from shared.schemas import L2BookState, OrderSide, TradeEvent
 
 logger = logging.getLogger(__name__)
 

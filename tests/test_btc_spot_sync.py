@@ -32,7 +32,7 @@ async def test_live_btc_spot_sync_loop_exception_logging(caplog):
             pass
 
     # Import locally or dynamically to isolate test execution
-    from kalshi_sim.server import live_btc_spot_sync_loop
+    from app_2_execution_bot.server import live_btc_spot_sync_loop
 
     with patch("kalshi_sim.server.create_aiohttp_connector"):
         with patch("aiohttp.ClientSession", return_value=DummySessionContextManager()):

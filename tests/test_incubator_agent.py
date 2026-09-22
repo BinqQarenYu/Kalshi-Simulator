@@ -7,14 +7,14 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from kalshi_sim.incubator_agent import (
+from app_3_autonomous_chef.incubator_agent import (
     IncubatorAgent,
     ShadowTradeRecord,
     CyclePostMortem,
     BotScorecard,
     calc_taker_fee,
 )
-from kalshi_sim.server import app
+from app_2_execution_bot.server import app
 
 
 @pytest.fixture

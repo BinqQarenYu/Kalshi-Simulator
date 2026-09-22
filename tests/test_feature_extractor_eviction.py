@@ -4,9 +4,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 import numpy as np
 
-from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
-from kalshi_sim.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
-from kalshi_sim.schemas import L2BookState, TradeEvent
+from app_2_execution_bot.ml.feature_extractor import KalshiOrderflowFeatureExtractor
+from app_2_execution_bot.ml.gold_feature_extractor import GoldOrderflowFeatureExtractor
+from shared.schemas import L2BookState, TradeEvent
 
 
 def test_kalshi_feature_extractor_trade_eviction() -> None:

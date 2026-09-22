@@ -8,12 +8,12 @@ import time
 import numpy as np
 import pytest
 
-from kalshi_sim.ml.gold_continuous_trainer import (
+from app_1_machine_engine.ml.gold_continuous_trainer import (
     GoldContinuousTrainer,
     MulticlassFocalLoss,
     TORCH_AVAILABLE,
 )
-from kalshi_sim.ml.gold_dataset_builder import GoldDatasetBuilder
+from app_1_machine_engine.ml.gold_dataset_builder import GoldDatasetBuilder
 
 
 @pytest.mark.skipif(not TORCH_AVAILABLE, reason="PyTorch required for trainer tests")

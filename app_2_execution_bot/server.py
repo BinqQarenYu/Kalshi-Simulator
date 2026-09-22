@@ -44,10 +44,10 @@ from pydantic import BaseModel, Field
 import uvicorn
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
-from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
-from kalshi_sim.incubator_agent import get_incubator_agent, IncubatorAgent
+from app_3_autonomous_chef.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
+from app_3_autonomous_chef.incubator_agent import get_incubator_agent, IncubatorAgent
 from kalshi_sim.process_lock import TradingEngineLock, get_active_lock_holder
-from kalshi_sim.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, async_validate_credentials, create_aiohttp_connector, load_private_key
+from shared.auth import DEMO_REST_BASE, DEMO_WS_URL, PROD_REST_BASE, PROD_WS_URL, async_validate_credentials, create_aiohttp_connector, load_private_key
 from kalshi_sim.data_memory_manager import MarketDataMemoryManager, MemoryProfile
 from kalshi_sim.db import HistoricalQueryService, get_db, get_db_writer
 from kalshi_sim.gdrive_sync import GDriveSyncDaemon
@@ -55,31 +55,31 @@ from kalshi_sim.ingestion_agent import IngestionAgent, load_config
 from kalshi_sim.integrity_agent import get_integrity_agent, AgentIntegrityCheck
 from kalshi_sim.law_order_agent import AgentLawOrder
 from kalshi_sim.token_credit_agent import get_token_credit_agent, AgentTokenCredit
-from kalshi_sim.system_governor import get_system_governor, SystemResourceGovernor
+from app_3_autonomous_chef.system_governor import get_system_governor, SystemResourceGovernor
 from kalshi_sim.mock_feed import MockKalshiFeed
 
 
-from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
-from kalshi_sim.clock_sync import clock_sync
-from kalshi_sim.ml.ai_worker import AIWorker
-from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
-from kalshi_sim.ml.gold_continuous_trainer import GoldContinuousTrainer
+from shared.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
+from shared.clock_sync import clock_sync
+from app_1_machine_engine.ml.ai_worker import AIWorker
+from app_1_machine_engine.ml.continuous_trainer import ContinuousModelTrainer
+from app_1_machine_engine.ml.gold_continuous_trainer import GoldContinuousTrainer
 from kalshi_sim.shadow_gold_runner import Lane2GoldShadowRunner
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.ml.domination_bot_v4 import ThreeStepDominationBotV4
-from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
-from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
-from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
-from kalshi_sim.ml.quolas_core.hmm_brain import HMMBrain
-from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from app_1_machine_engine.ml.domination_bot_v4 import ThreeStepDominationBotV4
+from app_1_machine_engine.ml.dominion_2_bot import Dominion2Bot
+from app_1_machine_engine.ml.dual_onnx_strategy import DualONNXArbitrageBot
+from app_1_machine_engine.ml.macro_trend_dominion import MacroTrendDominionBot
+from app_1_machine_engine.ml.quolas_core.hmm_brain import HMMBrain
+from app_1_machine_engine.ml.statistical_ev_engine import StatisticalEVEngine
 from kalshi_sim.notifications import TelemetryAlertDispatcher
-from kalshi_sim.ohlcv_aggregator import OHLCVAggregator
-from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
-from kalshi_sim.orderbook import OrderBookManager
+from app_1_machine_engine.ohlcv_aggregator import OHLCVAggregator
+from app_2_execution_bot.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
+from app_2_execution_bot.orderbook import OrderBookManager
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
 from kalshi_sim.portfolio import Portfolio
-from kalshi_sim.rate_limiter import kalshi_rate_limiter
-from kalshi_sim.schemas import (
+from app_2_execution_bot.rate_limiter import kalshi_rate_limiter
+from shared.schemas import (
     CRYPTO_ASSETS,
     CandleInterval,
     CryptoAsset,
@@ -105,15 +105,15 @@ from kalshi_sim.schemas import (
     WinLossEventReport,
 )
 from kalshi_sim.simulation_agent import SimulationAgent
-from kalshi_sim.tick_writer import TickWriter
+from app_1_machine_engine.tick_writer import TickWriter
 
-from kalshi_sim.server_settlements import (
+from app_2_execution_bot.server_settlements import (
     record_win_loss_event_report,
     format_cycle_time_from_iso,
     sync_live_settlements,
     init_server_settlements,
 )
-from kalshi_sim.server_feeds import (
+from app_2_execution_bot.server_feeds import (
     start_live_feed,
     live_kalshi_public_sync_loop,
     standalone_sync_loop,
@@ -125,7 +125,7 @@ from kalshi_sim.server_feeds import (
     update_dynamic_clob_ladder,
     init_server_feeds,
 )
-from kalshi_sim.server_state_payload import (
+from app_2_execution_bot.server_state_payload import (
     _build_full_state_payload,
     init_state_payload,
 )
@@ -199,7 +199,7 @@ def resolve_bot_instance(bot_id: str) -> Any:
     elif bot_id in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
         if hasattr(state, "bot1_v4_engine") and state.bot1_v4_engine:
             return state.bot1_v4_engine
-        from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
+        from app_1_machine_engine.ml.bot1_v4_engine import Bot1V4DominationEngine
         state.bot1_v4_engine = Bot1V4DominationEngine()
         return state.bot1_v4_engine
     return None

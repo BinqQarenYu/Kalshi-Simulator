@@ -12,16 +12,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
-from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
+from app_3_autonomous_chef.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
 from kalshi_sim.integrity_agent import AgentIntegrityCheck
 from kalshi_sim.law_order_agent import AgentLawOrder
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
-from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
-from kalshi_sim.orderbook import OrderBookManager
-from kalshi_sim.schemas import L2BookState, OrderSide, Timeframe
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from app_1_machine_engine.ml.dominion_2_bot import Dominion2Bot
+from app_1_machine_engine.ml.macro_trend_dominion_bot import MacroTrendDominionBot
+from app_2_execution_bot.orderbook import OrderBookManager
+from shared.schemas import L2BookState, OrderSide, Timeframe
 from kalshi_sim.simulation_agent import SimulationAgent
-from kalshi_sim.server import app, state
+from app_2_execution_bot.server import app, state
 
 
 @pytest.fixture
@@ -213,7 +213,7 @@ def test_live_mode_blocks_uncalibrated_bot(auditor):
 
 
 def test_live_coordinator_seal_veto():
-    from kalshi_sim.live_coordinator import LiveCoordinator
+    from app_2_execution_bot.live_coordinator import LiveCoordinator
     coord = LiveCoordinator()
 
     # Candidate bot without seal is strictly vetoed in live mode

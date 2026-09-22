@@ -20,9 +20,9 @@ from typing import Iterator, List, Optional, Tuple, Union
 import numpy as np
 import orjson
 
-from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
-from kalshi_sim.orderbook import OrderBookManager
-from kalshi_sim.schemas import (
+from app_2_execution_bot.ml.feature_extractor import KalshiOrderflowFeatureExtractor
+from app_2_execution_bot.orderbook import OrderBookManager
+from shared.schemas import (
     L2BookState,
     OrderBookDelta,
     OrderBookLevel,

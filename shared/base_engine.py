@@ -13,7 +13,7 @@ from decimal import Decimal
 import logging
 from typing import Any, Dict, List, Optional
 
-from kalshi_sim.schemas import L2BookState, MarketInfo, OrderSide, OrderType, Timeframe
+from shared.schemas import L2BookState, MarketInfo, OrderSide, OrderType, Timeframe
 
 logger = logging.getLogger("BaseEngine")
 

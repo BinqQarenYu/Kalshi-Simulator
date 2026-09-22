@@ -8,7 +8,7 @@ import time
 from unittest.mock import MagicMock, patch
 import pytest
 
-from kalshi_sim.clock_sync import KalshiClockSync, clock_sync
+from shared.clock_sync import KalshiClockSync, clock_sync
 
 
 def test_clock_sync_initialization_and_monotonicity() -> None:
@@ -83,7 +83,7 @@ def test_global_clock_sync_instance() -> None:
 def test_unified_macro_trend_parameters() -> None:
     """Verify Mother Server GET and POST /api/bot/parameters updates Macro Trend Dominion directly in unified engine."""
     from fastapi.testclient import TestClient
-    from kalshi_sim.server import app, state, resolve_bot_instance
+    from app_2_execution_bot.server import app, state, resolve_bot_instance
 
     client = TestClient(app)
     macro_inst = resolve_bot_instance("macro_trend_dominion")

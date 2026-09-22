@@ -15,9 +15,9 @@ import pytest
 from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.law_order_agent import AgentLawOrder
 from kalshi_sim.integrity_agent import AgentIntegrityCheck
-from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
+from app_1_machine_engine.ml.macro_trend_dominion_bot import MacroTrendDominionBot
 from kalshi_sim.portfolio import Portfolio
-from kalshi_sim.schemas import L2BookState, OrderSide
+from shared.schemas import L2BookState, OrderSide
 
 
 # =============================================================================
@@ -265,7 +265,7 @@ def test_integrity_live_daemon_status() -> None:
     except Exception:
         # Fallback to in-process TestClient if live daemon is not running on port 8000
         from fastapi.testclient import TestClient
-        from kalshi_sim.server import app
+        from app_2_execution_bot.server import app
         client = TestClient(app)
         res_integrity = client.post("/api/integrity/audit-now")
         assert res_integrity.status_code == 200

@@ -23,7 +23,7 @@ from kalshi_sim.standalone_macro import (
     DOM_LOCK_FILE_PATH,
     ONNX_LOCK_FILE_PATH,
 )
-from kalshi_sim.schemas import CryptoAsset
+from shared.schemas import CryptoAsset
 
 
 @pytest.fixture
@@ -100,7 +100,7 @@ def test_mutual_interlock_detection(tmp_path: Path, monkeypatch):
 
 def test_standalone_macro_endpoints(test_engine: StandaloneMacroEngine, monkeypatch):
     """Verify REST API endpoints and Pocket Cockpit HTML delivery."""
-    import kalshi_sim.standalone_macro as sm
+    import shared.standalone_macro as sm
     sm.app_engine = test_engine
 
     client = TestClient(app)

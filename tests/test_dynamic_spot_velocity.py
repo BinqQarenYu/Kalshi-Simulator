@@ -4,8 +4,8 @@ import math
 from decimal import Decimal
 import pytest
 
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from shared.schemas import CryptoAsset, L2BookState, OrderSide
 
 
 def test_expiration_quarantine_locks_out_sells() -> None:
@@ -217,7 +217,7 @@ def test_no_position_front_runs_on_adverse_upward_spike() -> None:
 
 def test_standalone_engine_ols_regression_velocity() -> None:
     """Test StandaloneBotEngine OLS regression slope calculation and SNR noise rejection."""
-    from kalshi_sim.standalone_bot import StandaloneBotEngine
+    from app_2_execution_bot.standalone_bot import StandaloneBotEngine
     from collections import deque
 
     # 1. Linear downward drift of -$2.00 per second for 3 seconds (15 ticks at 0.2s spacing)

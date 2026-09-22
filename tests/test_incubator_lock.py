@@ -18,9 +18,9 @@ from pathlib import Path
 import pytest
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
-from kalshi_sim.incubator_manager import IncubatorManager
-from kalshi_sim.ml.gold_inversion_bot import GoldInversionBot
-from kalshi_sim.schemas import (
+from app_3_autonomous_chef.incubator_manager import IncubatorManager
+from app_1_machine_engine.ml.gold_inversion_bot import GoldInversionBot
+from shared.schemas import (
     CryptoAsset,
     L2BookState,
     MarketInfo,
@@ -54,7 +54,7 @@ def test_default_gold_quarantine_lock(tmp_incubator: IncubatorManager) -> None:
 
 def test_guardrails_incubator_lock_veto(tmp_incubator: IncubatorManager, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify that AgentGuardrails vetoes live order placement for GOLD while locked."""
-    from kalshi_sim import incubator_manager
+    from app_3_autonomous_chef import incubator_manager
 
     # Point global singleton to tmp_incubator
     monkeypatch.setattr(incubator_manager, "get_incubator_manager", lambda *args, **kwargs: tmp_incubator)
@@ -78,7 +78,7 @@ def test_guardrails_incubator_lock_veto(tmp_incubator: IncubatorManager, monkeyp
 
 def test_pre_trade_intent_blocks_live_gold(tmp_incubator: IncubatorManager, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify that validate_pre_trade_intent blocks live orders for GOLD."""
-    from kalshi_sim import incubator_manager
+    from app_3_autonomous_chef import incubator_manager
     monkeypatch.setattr(incubator_manager, "get_incubator_manager", lambda *args, **kwargs: tmp_incubator)
 
     guardrails = AgentGuardrails()
@@ -208,7 +208,7 @@ def test_post_certification_live_access_granted(
     tmp_incubator: IncubatorManager, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verify that once certified, AgentGuardrails allows live trading on GOLD."""
-    from kalshi_sim import incubator_manager
+    from app_3_autonomous_chef import incubator_manager
     monkeypatch.setattr(incubator_manager, "get_incubator_manager", lambda *args, **kwargs: tmp_incubator)
 
     # Fast-forward certification

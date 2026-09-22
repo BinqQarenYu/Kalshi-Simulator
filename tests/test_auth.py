@@ -11,7 +11,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
 import pytest
 
-from kalshi_sim.auth import (
+from shared.auth import (
     async_validate_credentials,
     get_auth_headers,
     get_ssl_context,
@@ -20,7 +20,7 @@ from kalshi_sim.auth import (
     sign_request,
     verify_signature,
 )
-from kalshi_sim.server import app
+from app_2_execution_bot.server import app
 
 
 @pytest.fixture

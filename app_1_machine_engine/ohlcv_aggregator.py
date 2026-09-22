@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Deque, Dict, List, Optional, Union
 
-from kalshi_sim.schemas import CandleInterval, OHLCVCandle
+from shared.schemas import CandleInterval, OHLCVCandle
 
 logger = logging.getLogger(__name__)
 

@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple
 from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.integrity_agent import AgentIntegrityCheck
 from kalshi_sim.law_order_agent import AgentLawOrder
-from kalshi_sim.schemas import L2BookState, OrderSide
+from shared.schemas import L2BookState, OrderSide
 
 logger = logging.getLogger("kalshi_sim.bot_auditor")
 

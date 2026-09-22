@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 import pytest
 
-from kalshi_sim.rate_limiter import AsyncTokenBucket
-from kalshi_sim.server import app
+from app_2_execution_bot.rate_limiter import AsyncTokenBucket
+from app_2_execution_bot.server import app
 
 
 @pytest.mark.anyio

@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 
 from kalshi_sim.integrity_agent import AgentIntegrityCheck, get_integrity_agent
 from kalshi_sim.portfolio import Portfolio
-from kalshi_sim.schemas import OrderSide, SettlementResult
-from kalshi_sim.server import app
+from shared.schemas import OrderSide, SettlementResult
+from app_2_execution_bot.server import app
 
 
 @pytest.fixture

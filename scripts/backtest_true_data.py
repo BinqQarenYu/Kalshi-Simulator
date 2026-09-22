@@ -21,8 +21,8 @@ from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 from datetime import datetime
 
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.schemas import L2BookState, OrderBookLevel, OrderSide
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from shared.schemas import L2BookState, OrderBookLevel, OrderSide
 
 
 @dataclass

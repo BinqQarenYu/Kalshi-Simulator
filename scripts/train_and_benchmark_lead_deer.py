@@ -5,8 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
-from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer, CycleExperience
-from kalshi_sim.ml.lead_deer_quant_brain import LeadDeerQuantBrain
+from app_1_machine_engine.ml.experience_buffer import ContinuousExperienceBuffer, CycleExperience
+from app_1_machine_engine.ml.lead_deer_quant_brain import LeadDeerQuantBrain
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger('benchmark')

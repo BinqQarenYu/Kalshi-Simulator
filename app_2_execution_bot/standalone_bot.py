@@ -46,10 +46,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
-from kalshi_sim.remote_control import RemoteControlManager
+from app_3_autonomous_chef.remote_control import RemoteControlManager
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
-from kalshi_sim.auth import (
+from shared.auth import (
     DEMO_REST_BASE,
     DEMO_WS_URL,
     PROD_REST_BASE,
@@ -57,20 +57,20 @@ from kalshi_sim.auth import (
     create_aiohttp_connector,
     load_private_key,
 )
-from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
-from kalshi_sim.cfbenchmarks_sync import CFBenchmarksSync
-from kalshi_sim.clock_sync import clock_sync
+from app_3_autonomous_chef.bot_deployment_auditor import BotDeploymentAuditor
+from shared.cfbenchmarks_sync import CFBenchmarksSync
+from shared.clock_sync import clock_sync
 from kalshi_sim.db import get_db, get_db_writer, DatabaseWriter
-from kalshi_sim.incubator_manager import get_incubator_manager, IncubatorManager
-from kalshi_sim.live_coordinator import LiveCoordinator
-from kalshi_sim.ml.domination_bot import DominationDecision, ThreeStepDominationBot
-from kalshi_sim.ml.macro_trend_dominion_bot import MacroTrendDominionBot
-from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
-from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
-from kalshi_sim.orderbook import OrderBookManager
-from kalshi_sim.poe_flight_recorder import POEFlightRecorder, POEDecisionRecord
-from kalshi_sim.rate_limiter import kalshi_rate_limiter
-from kalshi_sim.schemas import (
+from app_3_autonomous_chef.incubator_manager import get_incubator_manager, IncubatorManager
+from app_2_execution_bot.live_coordinator import LiveCoordinator
+from app_1_machine_engine.ml.domination_bot import DominationDecision, ThreeStepDominationBot
+from app_1_machine_engine.ml.macro_trend_dominion_bot import MacroTrendDominionBot
+from app_2_execution_bot.ml.onnx_engine import KalshiONNXEngine
+from app_2_execution_bot.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
+from app_2_execution_bot.orderbook import OrderBookManager
+from app_3_autonomous_chef.poe_flight_recorder import POEFlightRecorder, POEDecisionRecord
+from app_2_execution_bot.rate_limiter import kalshi_rate_limiter
+from shared.schemas import (
     CRYPTO_ASSETS,
     CryptoAsset,
     get_asset_config,
@@ -93,14 +93,14 @@ logger = logging.getLogger("StandaloneBot")
 import copy
 from kalshi_sim.process_lock import TradingEngineLock, is_pid_running
 
-from kalshi_sim.standalone_bot_modules.config import (
+from app_2_execution_bot.standalone_bot_modules.config import (
     DEFAULT_ASSET_PROFILES,
     ET_ZONE,
     LOCK_FILE_PATH,
     QRCODE_PATH,
     TEMPLATE_PATH,
 )
-from kalshi_sim.standalone_bot_modules.power import (
+from app_2_execution_bot.standalone_bot_modules.power import (
     format_cycle_time_from_iso,
     prevent_windows_sleep,
 )
@@ -281,9 +281,9 @@ class StandaloneBotEngine:
         self._spot_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=300))
 
         # Modular Engine Coordinators
-        from kalshi_sim.standalone_bot_modules.standalone_sync import StandaloneSyncCoordinator
-        from kalshi_sim.standalone_bot_modules.standalone_evaluation import StandaloneEvaluationCoordinator
-        from kalshi_sim.standalone_bot_modules.standalone_feeds import StandaloneFeedsCoordinator
+        from app_2_execution_bot.standalone_bot_modules.standalone_sync import StandaloneSyncCoordinator
+        from app_2_execution_bot.standalone_bot_modules.standalone_evaluation import StandaloneEvaluationCoordinator
+        from app_2_execution_bot.standalone_bot_modules.standalone_feeds import StandaloneFeedsCoordinator
 
         self._sync_coordinator = StandaloneSyncCoordinator(self)
         self._eval_coordinator = StandaloneEvaluationCoordinator(self)
@@ -868,7 +868,7 @@ async def remote_auth_middleware(request: Request, call_next):
 # Mount Pocket Cockpit Modular Router & Re-Export Symbols
 # ---------------------------------------------------------------------------
 
-from kalshi_sim.standalone_bot_modules.routes import (
+from app_2_execution_bot.standalone_bot_modules.routes import (
     router as cockpit_router,
     set_engine_accessor,
     AssetSelectRequest,

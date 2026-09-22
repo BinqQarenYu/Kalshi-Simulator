@@ -18,12 +18,12 @@ import time
 from typing import Optional
 import pytest
 
-from kalshi_sim.ml.macro_trend_dominion_bot import (
+from app_1_machine_engine.ml.macro_trend_dominion_bot import (
     MacroTrendDominionBot,
     MacroTrendDecision,
     MacroTrendExitDecision,
 )
-from kalshi_sim.schemas import L2BookState, OrderSide
+from shared.schemas import L2BookState, OrderSide
 
 
 def _create_mock_l2_book(

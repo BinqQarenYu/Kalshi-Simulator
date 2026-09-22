@@ -3,9 +3,9 @@
 from decimal import Decimal
 import pytest
 
-from kalshi_sim.ml.macro_trend_dominion.bot import MacroTrendDominionBot
-from kalshi_sim.ml.macro_trend_dominion.learning_engine import MacroDominionLearningEngine
-from kalshi_sim.ml.quolas_core.regime_types import MarketRegime
+from app_1_machine_engine.ml.macro_trend_dominion.bot import MacroTrendDominionBot
+from app_1_machine_engine.ml.macro_trend_dominion.learning_engine import MacroDominionLearningEngine
+from app_1_machine_engine.ml.quolas_core.regime_types import MarketRegime
 
 
 class MockHMMBrain:

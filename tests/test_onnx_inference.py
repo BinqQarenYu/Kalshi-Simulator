@@ -5,9 +5,9 @@ from decimal import Decimal
 from pathlib import Path
 import numpy as np
 
-from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
-from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
-from kalshi_sim.schemas import (
+from app_2_execution_bot.ml.feature_extractor import KalshiOrderflowFeatureExtractor
+from app_2_execution_bot.ml.onnx_engine import KalshiONNXEngine
+from shared.schemas import (
     L2BookState,
     OrderBookLevel,
     TradeEvent,

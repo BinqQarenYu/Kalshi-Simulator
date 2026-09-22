@@ -20,8 +20,8 @@ from typing import Any, Dict, List
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
-from kalshi_sim.schemas import L2BookState
+from app_1_machine_engine.ml.domination_bot import ThreeStepDominationBot
+from shared.schemas import L2BookState
 
 
 @dataclass

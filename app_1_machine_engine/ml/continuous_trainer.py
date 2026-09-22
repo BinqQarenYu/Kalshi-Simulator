@@ -50,9 +50,9 @@ except ImportError:
     ORT_AVAILABLE = False
 
 try:
-    from kalshi_sim.ml.dataset_builder import DatasetBuilder
-    from kalshi_sim.ml.model import ExportableQuoLasNet, QuoLasMicroscopeNet
-    from kalshi_sim.ml.train_model import ModelTrainer
+    from app_1_machine_engine.ml.dataset_builder import DatasetBuilder
+    from app_1_machine_engine.ml.model import ExportableQuoLasNet, QuoLasMicroscopeNet
+    from app_1_machine_engine.ml.train_model import ModelTrainer
 except ImportError:
     DatasetBuilder = None  # type: ignore
     ExportableQuoLasNet = None  # type: ignore

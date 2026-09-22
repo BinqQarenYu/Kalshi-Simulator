@@ -13,7 +13,7 @@ from kalshi_sim.data_memory_manager import (
     MarketDataMemoryManager,
     ZeroCopyRingBuffer,
 )
-from kalshi_sim.schemas import TickerUpdate
+from shared.schemas import TickerUpdate
 
 
 def test_ring_buffer_empty_and_capacity():

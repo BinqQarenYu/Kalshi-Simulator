@@ -16,14 +16,14 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 
-from kalshi_sim.auth import (
+from shared.auth import (
     DEMO_REST_BASE,
     PROD_REST_BASE,
     create_aiohttp_connector,
     get_auth_headers,
     load_private_key,
 )
-from kalshi_sim.schemas import (
+from shared.schemas import (
     LivePortfolioState,
     LivePositionItem,
     OrderSide,

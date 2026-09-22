@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from kalshi_sim.server import app, _build_full_state_payload
+from app_2_execution_bot.server import app, _build_full_state_payload
 
 
 @pytest.fixture
@@ -65,7 +65,7 @@ def test_switch_timeframe_endpoint(client: TestClient) -> None:
 
 def test_toggle_feed_mode_endpoint(client: TestClient) -> None:
     from unittest.mock import patch
-    from kalshi_sim.server import state
+    from app_2_execution_bot.server import state
     # Switch to mock
     resp_mock = client.post("/api/settings", json={"mode": "mock"})
     assert resp_mock.status_code == 200
@@ -94,7 +94,7 @@ def test_reset_portfolio_endpoint(client: TestClient) -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["capital"] == 15000.0
-    from kalshi_sim.server import state
+    from app_2_execution_bot.server import state
     client.post("/api/reset", json={"capital": float(state.starting_capital)})
 
 
@@ -483,8 +483,8 @@ def test_bot_arm_disarm_panic_endpoints(client: TestClient) -> None:
 def test_mother_server_monolithic_source_of_truth(client: TestClient) -> None:
     """Verify that Mother server provides 100% of market, timer, and balance state directly as monolithic engine."""
     from decimal import Decimal
-    from kalshi_sim.server import state, _build_full_state_payload
-    from kalshi_sim.schemas import CryptoAsset
+    from app_2_execution_bot.server import state, _build_full_state_payload
+    from shared.schemas import CryptoAsset
 
     state.active_ticker = "KXETH15M-TRUTH-15"
     state.active_asset = CryptoAsset.ETH
@@ -528,7 +528,7 @@ def test_sweep_orders_endpoint(client: TestClient) -> None:
         assert "time_to_expiry_s" in data
 
         # Test sweep with simulated resting orders
-        from kalshi_sim.server import state
+        from app_2_execution_bot.server import state
         if state.sim_agent is not None:
             state.sim_agent.active_resting_orders = {
                 "order-old-1": {"ticker": "KXBTC15M-OLD-TICKER", "price": 0.45},
@@ -624,7 +624,7 @@ def test_bot_parameters_onnx_dials_endpoint() -> None:
 
 def test_spawn_bot_endpoint(client: TestClient) -> None:
     """Verify POST /api/bots/spawn activates requested bot in-engine on Port 8000."""
-    from kalshi_sim.server import state
+    from app_2_execution_bot.server import state
 
     # Test Bot 1 (3-Step Dominion)
     resp1 = client.post("/api/bots/spawn", json={"bot_id": "3_step_domination_bot"})

@@ -9,12 +9,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from kalshi_sim.ml.export_onnx import (
+from app_1_machine_engine.ml.export_onnx import (
     benchmark_onnx_inference,
     check_numerical_parity,
     export_to_onnx,
 )
-from kalshi_sim.ml.model import QuoLasMicroscopeNet
+from app_1_machine_engine.ml.model import QuoLasMicroscopeNet
 
 
 def test_export_to_onnx_and_parity(tmp_path: Path) -> None:

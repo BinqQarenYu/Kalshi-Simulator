@@ -27,8 +27,8 @@ from pathlib import Path
 import time
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
-from kalshi_sim.schemas import OrderSide
+from app_3_autonomous_chef.bot_deployment_auditor import BotDeploymentAuditor, BotAuditReport
+from shared.schemas import OrderSide
 
 logger = logging.getLogger("kalshi_sim.incubator_agent")
 

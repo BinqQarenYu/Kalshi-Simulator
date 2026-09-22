@@ -7,12 +7,12 @@ Kalshi settlement tie exploitation, and anti-pin defense.
 from decimal import Decimal
 import pytest
 
-from kalshi_sim.ml.dominion_2_bot import (
+from app_1_machine_engine.ml.dominion_2_bot import (
     Dominion2Bot,
     Dominion2Decision,
     Dominion2ExitDecision,
 )
-from kalshi_sim.schemas import L2BookState, OrderSide, TradeEvent
+from shared.schemas import L2BookState, OrderSide, TradeEvent
 
 
 @pytest.fixture

@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from kalshi_sim.ml.export_gold_onnx import export_gold_to_onnx
-from kalshi_sim.ml.gold_onnx_bot import GoldONNXBot
-from kalshi_sim.schemas import L2BookState, MarketInfo, MarketStatus, OrderSide, OrderType
+from app_1_machine_engine.ml.export_gold_onnx import export_gold_to_onnx
+from app_1_machine_engine.ml.gold_onnx_bot import GoldONNXBot
+from shared.schemas import L2BookState, MarketInfo, MarketStatus, OrderSide, OrderType
 
 
 @pytest.fixture

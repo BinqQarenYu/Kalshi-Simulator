@@ -12,8 +12,8 @@ from pathlib import Path
 
 import torch
 
-from kalshi_sim.ml.export_onnx import benchmark_onnx_inference, export_to_onnx
-from kalshi_sim.ml.model import QuoLasMicroscopeNet
+from app_1_machine_engine.ml.export_onnx import benchmark_onnx_inference, export_to_onnx
+from app_1_machine_engine.ml.model import QuoLasMicroscopeNet
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("export_onnx")
