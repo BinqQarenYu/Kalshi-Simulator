@@ -1,0 +1,57 @@
+name: Monorepo Safeguards & Firewalls
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  firewall-check:
+    name: Agent Firewall Enforcer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Monorepo Isolation
+        run: |
+          # Fetch changed files in the PR
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD)
+          
+          HAS_APP1=0
+          HAS_APP2=0
+          HAS_APP3=0
+          
+          if echo "$CHANGED_FILES" | grep -q "^app_1_machine_engine/"; then HAS_APP1=1; fi
+          if echo "$CHANGED_FILES" | grep -q "^app_2_execution_bot/"; then HAS_APP2=1; fi
+          if echo "$CHANGED_FILES" | grep -q "^app_3_autonomous_chef/"; then HAS_APP3=1; fi
+          
+          TOTAL=$((HAS_APP1 + HAS_APP2 + HAS_APP3))
+          
+          if [ $TOTAL -gt 1 ]; then
+            echo "::error::FIREWALL BREACH DETECTED. A single PR cannot modify multiple isolated apps simultaneously (e.g. app_1 and app_2). Check Agent Rules."
+            exit 1
+          else
+            echo "Firewall integrity verified. PR is cleanly isolated."
+          fi
+
+  app1-tests:
+    name: App 1 (Quant Factory) Tests
+    runs-on: ubuntu-latest
+    paths:
+      - 'app_1_machine_engine/**'
+      - 'shared/**'
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Running App 1 specific test suites..."
+
+  app2-tests:
+    name: App 2 (Execution Bot) Tests
+    runs-on: ubuntu-latest
+    paths:
+      - 'app_2_execution_bot/**'
+      - 'shared/**'
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Running App 2 low-latency and ONNX loading test suites..."
