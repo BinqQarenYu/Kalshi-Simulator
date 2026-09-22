@@ -22,6 +22,7 @@ jobs:
           APP1_TOUCHED=0
           APP2_TOUCHED=0
           APP3_TOUCHED=0
+          SHARED_TOUCHED=0
 
           # Check which directories contain modified files
           for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
@@ -31,23 +32,31 @@ jobs:
               APP2_TOUCHED=1
             elif [[ $file == app_3_autonomous_chef/* ]]; then
               APP3_TOUCHED=1
+            elif [[ $file == shared/* ]]; then
+              SHARED_TOUCHED=1
             fi
           done
 
-          # Count how many distinct app directories are in this PR
           TOTAL_TOUCHED=$((APP1_TOUCHED + APP2_TOUCHED + APP3_TOUCHED))
-          
-          # We isolate logic by actor type, catching any bot or automated agent 
-          # (e.g., github-actions[bot], jules-agent, dependabot)
           ACTOR="${{ github.actor }}"
           
+          # Isolate logic by actor type (catch bots, Jules, Choppingblock, etc.)
           if [[ "$ACTOR" == *"[bot]"* || "$ACTOR" == *"agent"* || "$ACTOR" == *"choppingblock"* ]]; then
+            
+            # RULE 1: Forbid modification of the /shared directory
+            if [ "$SHARED_TOUCHED" -eq 1 ]; then
+              echo "::error::SHARED FOLDER BREACH DETECTED!"
+              echo "::error::The agent '$ACTOR' is attempting to modify the /shared/ directory."
+              echo "::error::Automated agents are strictly read-only for shared data schemas to prevent catastrophic downstream failures."
+              exit 1
+            fi
+
+            # RULE 2: Forbid cross-app modifications in a single PR
             if [ "$TOTAL_TOUCHED" -gt 1 ]; then
               echo "::error::FIREWALL BREACH DETECTED!"
-              echo "::error::The agent '$ACTOR' is attempting to modify $TOTAL_TOUCHED isolated applications in a single Pull Request."
-              echo "::error::To prevent cross-contamination and hallucinated dependencies, automated agents must submit separate PRs for app_1, app_2, and app_3."
+              echo "::error::The agent '$ACTOR' is attempting to modify $TOTAL_TOUCHED isolated applications simultaneously."
               exit 1
             fi
           fi
           
-          echo "Firewall check passed. Agent scoping is valid."
+          echo "Firewall check passed. Agent scoping and shared folder integrity are valid."
