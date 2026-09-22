@@ -498,7 +498,7 @@ class L2BookState:
     """In-memory reconstructed L2 order book for a single market.
 
     Not a Pydantic model — mutable state optimised for fast updates.
-    Uses version-backed dict tracking (_BookDict) to cache top-of-book levels,
+    Uses version-backed dict tracking (FastBook) to cache top-of-book levels,
     eliminating redundant O(N) dict scans on repeated best_yes_bid / best_yes_ask / spread reads.
     """
 
