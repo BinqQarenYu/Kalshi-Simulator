@@ -1,0 +1,76 @@
+name: React UI Builder
+
+# Only trigger this workflow if files in a dashboard or shared UI folder change
+on:
+  pull_request:
+    paths:
+      - 'app_1_machine_engine/dashboard/**'
+      - 'app_2_execution_bot/dashboard/**'
+      - 'app_3_autonomous_chef/dashboard/**'
+      - 'shared/ui_components/**'
+
+jobs:
+  build-dashboards:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Adjust to your React environment
+          cache: 'npm'
+
+      - name: Get Changed Files
+        id: changed-files
+        uses: tj-actions/changed-files@v42
+
+      - name: Install and Build Modified Dashboards
+        run: |
+          # Detect which dashboard needs building
+          BUILD_APP1=0
+          BUILD_APP2=0
+          BUILD_APP3=0
+          
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ $file == app_1_machine_engine/dashboard/* ]]; then BUILD_APP1=1; fi
+            if [[ $file == app_2_execution_bot/dashboard/* ]]; then BUILD_APP2=1; fi
+            if [[ $file == app_3_autonomous_chef/dashboard/* ]]; then BUILD_APP3=1; fi
+            
+            # If shared UI components change, rebuild all dashboards to ensure compatibility
+            if [[ $file == shared/ui_components/* ]]; then
+              BUILD_APP1=1
+              BUILD_APP2=1
+              BUILD_APP3=1
+            fi
+          done
+
+          # Execute builds dynamically
+          if [ "$BUILD_APP1" -eq 1 ]; then
+            echo "Building App 1 (Quant Lab) Dashboard..."
+            cd app_1_machine_engine/dashboard
+            npm ci
+            npm run build
+            cd ../..
+          fi
+
+          if [ "$BUILD_APP2" -eq 1 ]; then
+            echo "Building App 2 (Live Cockpit) Dashboard..."
+            cd app_2_execution_bot/dashboard
+            npm ci
+            npm run build
+            cd ../..
+          fi
+
+          if [ "$BUILD_APP3" -eq 1 ]; then
+            echo "Building App 3 (Command Center) Dashboard..."
+            cd app_3_autonomous_chef/dashboard
+            npm ci
+            npm run build
+            cd ../..
+          fi
+          
+          echo "All targeted frontend builds completed successfully."
