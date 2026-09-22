@@ -69,3 +69,31 @@ def test_fastbook_top_of_book_tracking_after_pop():
     # Inserting a new top price level should update _best
     fb[Decimal("0.60")] = Decimal("5")
     assert fb.best_bid == Decimal("0.60")
+
+
+def test_l2_book_state_get_depth_float_tuples_caching():
+    from kalshi_sim.schemas import L2BookState
+
+    book = L2BookState("KXBTC15M-T78650")
+    book.yes_book[Decimal("0.50")] = Decimal("10.0")
+    book.yes_book[Decimal("0.45")] = Decimal("15.0")
+    book.no_book[Decimal("0.40")] = Decimal("20.0")
+
+    bids_f1, asks_f1 = book.get_depth_float_tuples(n=5)
+    assert len(bids_f1) == 2
+    assert len(asks_f1) == 1
+    assert bids_f1[0] == (0.50, 10.0)
+    assert bids_f1[1] == (0.45, 15.0)
+    assert asks_f1[0] == (0.40, 20.0)
+    assert isinstance(bids_f1[0][0], float)
+
+    # Repeat query: should return cached tuple object reference
+    bids_f2, asks_f2 = book.get_depth_float_tuples(n=5)
+    assert bids_f1 is bids_f2
+    assert asks_f1 is asks_f2
+
+    # Mutate order book state: version updates and cache invalidates
+    book.yes_book[Decimal("0.55")] = Decimal("30.0")
+    bids_f3, asks_f3 = book.get_depth_float_tuples(n=5)
+    assert bids_f3 is not bids_f1
+    assert bids_f3[0] == (0.55, 30.0)
