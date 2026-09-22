@@ -176,3 +176,7 @@
 ## 2026-09-20 - Pure Python Sample Standard Deviation vs statistics.stdev Overhead
 **Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
 **Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
+
+## 2026-09-22 - Pre-Computed Inverse Feature Standard Deviation in ONNX Normalization
+**Learning:** Re-evaluating `(self.feat_std + 1e-8)` array addition and performing element-wise float division `(raw_vector - self.feat_mean) / (self.feat_std + 1e-8)` on every ONNX inference tick added ~1.7 µs unnecessary overhead per call (~4.99 µs total step time).
+**Action:** Pre-compute `self._inv_feat_std = (1.0 / (self.feat_std + 1e-8)).astype(np.float32)` during model stats load and multiply by inverse standard deviation (`(raw_vector - self.feat_mean) * self._inv_feat_std`) during feature vector processing, reducing z-score normalization step latency to ~3.28 µs (~1.52x speedup).

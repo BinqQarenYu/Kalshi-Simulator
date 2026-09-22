@@ -5692,21 +5692,6 @@ init_strategies_router(
 )
 app.include_router(strategies_router)
 
-    # Synchronize active strategy bot on Mother Server
-    canonical_strat = bot_id
-    if bot_id in ("the_onnx_strategy", "dual_onnx", "dual_onnx_bot", "dual_onnx_arbitrage", "dual_onnx_arbitrage_bot", "onnx_macro_v2"):
-        canonical_strat = "dual_onnx"
-    elif bot_id in ("macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion"):
-        canonical_strat = "macro_onnx"
-    elif bot_id in ("macro_trend", "macro_trend_dominion", "macro_trend_dominion_bot"):
-        canonical_strat = "macro_trend_dominion"
-    elif bot_id in ("dominion2", "dominion_v2", "dominion_2_bot"):
-        canonical_strat = "dominion_2_bot"
-    elif bot_id in ("bot1_ver_4", "3_step_domination_bot_v4"):
-        canonical_strat = "bot1_ver_4"
-    elif bot_id in ("3_step_domination_bot", "domination_bot", "domination"):
-        canonical_strat = "3_step_domination_bot"
-
 from kalshi_sim.routers.presets import (
     router as presets_router,
     init_presets_router,

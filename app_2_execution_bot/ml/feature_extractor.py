@@ -45,6 +45,7 @@ class KalshiOrderflowFeatureExtractor:
         # Performance optimization: Dedicated float deque for trade quantities eliminates dict key lookup
         # overhead in entropy and dynamic whale calculations.
         self.rolling_trade_quantities: deque[float] = deque(maxlen=100)
+        self.sorted_rolling_trade_quantities: List[float] = []
 
         # Volume baseline tracking (rolling median)
         # Performance optimization: Maintain a synchronized sorted list alongside deque to enable
@@ -133,6 +134,7 @@ class KalshiOrderflowFeatureExtractor:
             else:
                 self.sorted_rolling_trade_quantities.remove(old_qty)
         self.rolling_trade_quantities.append(qty)
+        bisect.insort(self.sorted_rolling_trade_quantities, qty)
 
         self._update_cached_entropy()
 
