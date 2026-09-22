@@ -326,6 +326,9 @@ class KalshiOrderflowFeatureExtractor:
         b0, a0 = bid_sizes[0], ask_sizes[0]
         ofi_l1 = (b0 - a0) / (b0 + a0 + 1e-9)
 
+        sum_bids = sum(bid_sizes)
+        sum_asks = sum(ask_sizes)
+
         # Performance optimization: Direct index addition for top-5 volume summation avoids list slicing [:5]
         # and sum() function call overhead (~0.66 µs saved per tick). Safe since bid_sizes/ask_sizes are padded to target_depth (15).
         vol_b5 = bid_sizes[0] + bid_sizes[1] + bid_sizes[2] + bid_sizes[3] + bid_sizes[4]
