@@ -465,7 +465,15 @@ class FastBook(dict):
     def __setitem__(self, key: Decimal, value: Decimal) -> None:
         super().__setitem__(key, value)
         self._version += 1
-        if self._best is None or key > self._best:
+        # Performance & Correctness Optimization:
+        # Only update _best directly if _best is valid and key exceeds it, or if this is the sole key.
+        # If _best was invalidated (None due to pop/deletion of top price), leave _best as None so
+        # that best_bid lazily recomputes max(keys()) on demand. Setting _best = key when _best is None
+        # on a book with existing higher keys would incorrectly corrupt top-of-book tracking.
+        if self._best is not None:
+            if key > self._best:
+                self._best = key
+        elif len(self) == 1:
             self._best = key
 
     def __delitem__(self, key: Decimal) -> None:
@@ -514,6 +522,10 @@ class L2BookState:
         "_cached_yes_version",
         "_cached_best_no_bid",
         "_cached_no_version",
+        "_cached_best_yes_ask",
+        "_cached_bya_no_version",
+        "_cached_best_no_ask",
+        "_cached_bna_yes_version",
         "_cached_best_yes_ask_spot",
         "_cached_spot_ask_version",
         "_cached_depth_key",
@@ -549,6 +561,10 @@ class L2BookState:
         self._cached_yes_version: int = -1
         self._cached_best_no_bid: Decimal | None = None
         self._cached_no_version: int = -1
+        self._cached_best_yes_ask: Decimal | None = None
+        self._cached_bya_no_version: int = -1
+        self._cached_best_no_ask: Decimal | None = None
+        self._cached_bna_yes_version: int = -1
         self._cached_best_yes_ask_spot: Decimal | None = None
         self._cached_spot_ask_version: int = -1
         self._cached_binary_yes_ask: Decimal | None = None
