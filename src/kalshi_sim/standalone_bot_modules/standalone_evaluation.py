@@ -389,7 +389,7 @@ class StandaloneEvaluationCoordinator(_BaseCoordinator):
                 # Institutional Pre-Trade Guardrail Check
                 rec_side = decision.recommended_side
                 rec_size = min(decision.recommended_contracts, 1)  # Micro-Bankroll Sizing Armor: Strictly 1 contract
-                est_price = Decimal(str(decision.limit_price))
+                est_price = Decimal(str(getattr(decision, 'limit_price', None) or getattr(decision, 'entry_discount_depth', None) or "0.52"))
                 target_ticker = cand_ticker
 
                 is_allowed, g_reason, approved_size, _ = self.guardrails.validate_pre_trade_intent(

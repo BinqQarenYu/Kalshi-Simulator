@@ -21,7 +21,9 @@ from kalshi_sim.incubator_manager import get_incubator_manager
 from kalshi_sim.preset_manager import get_preset_manager
 from kalshi_sim.schemas import CryptoAsset, get_asset_config
 from kalshi_sim.standalone_bot_modules.config import QRCODE_PATH, TEMPLATE_PATH
-import kalshi_sim.standalone_bot as sb
+def _get_sb():
+    import kalshi_sim.standalone_bot as _sb
+    return _sb
 
 
 logger = logging.getLogger("StandaloneBot.Routes")
@@ -783,11 +785,11 @@ async def delete_bot_preset(preset_id: str) -> Dict[str, Any]:
 @router.get("/api/window/status")
 async def get_window_status() -> Dict[str, Any]:
     """Check if Cockpit window is found and pinned as Always on Top."""
-    windows = sb.find_cockpit_windows()
+    windows = _get_sb().find_cockpit_windows()
     if not windows:
         return {"available": False, "is_topmost": False, "windows_count": 0}
     hwnd, title = windows[0]
-    topmost = sb.is_always_on_top(hwnd)
+    topmost = _get_sb().is_always_on_top(hwnd)
     return {
         "available": True,
         "is_topmost": topmost,
@@ -800,14 +802,14 @@ async def get_window_status() -> Dict[str, Any]:
 @router.post("/api/window/pin")
 async def pin_window(req: WindowPinRequest) -> Dict[str, Any]:
     """Toggle Always on Top (HWND_TOPMOST) for Cockpit window."""
-    windows = sb.find_cockpit_windows()
+    windows = _get_sb().find_cockpit_windows()
     if not windows:
         raise HTTPException(status_code=404, detail="No Pocket Cockpit window found")
     results = []
     for hwnd, title in windows:
-        ok = sb.set_always_on_top(hwnd, req.topmost)
+        ok = _get_sb().set_always_on_top(hwnd, req.topmost)
         if req.width and req.height:
-            sb.resize_window(hwnd, req.width, req.height, topmost=req.topmost)
+            _get_sb().resize_window(hwnd, req.width, req.height, topmost=req.topmost)
         results.append({"hwnd": hwnd, "title": title, "topmost": req.topmost, "success": ok})
     return {"status": "SUCCESS", "topmost": req.topmost, "windows": results}
 
@@ -815,12 +817,12 @@ async def pin_window(req: WindowPinRequest) -> Dict[str, Any]:
 @router.post("/api/window/resize")
 async def resize_cockpit_window(req: WindowResizeRequest) -> Dict[str, Any]:
     """Resize Cockpit window (e.g. for Minimized widget or Expanded mode)."""
-    windows = sb.find_cockpit_windows()
+    windows = _get_sb().find_cockpit_windows()
     if not windows:
         raise HTTPException(status_code=404, detail="No Pocket Cockpit window found")
     results = []
     for hwnd, title in windows:
-        ok = sb.resize_window(hwnd, req.width, req.height, topmost=req.topmost)
+        ok = _get_sb().resize_window(hwnd, req.width, req.height, topmost=req.topmost)
         results.append({"hwnd": hwnd, "success": ok})
     return {"status": "SUCCESS", "width": req.width, "height": req.height, "windows": results}
 
@@ -829,7 +831,7 @@ async def resize_cockpit_window(req: WindowResizeRequest) -> Dict[str, Any]:
 async def spawn_widget_window() -> Dict[str, Any]:
     """Launch Microsoft Edge or Chrome in chromeless app mode pinned as a floating desktop widget."""
     port = 8001
-    ok = sb.launch_widget_window(port=port, view="minimized")
+    ok = _get_sb().launch_widget_window(port=port, view="minimized")
     return {"status": "LAUNCHED" if ok else "FAILED", "success": ok}
 
 

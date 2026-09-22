@@ -1,0 +1,15 @@
+{
+  "ticker": "KXBTC15M-26SEP221300-00",
+  "active_side": "no",
+  "created_ts": 1790095653.5561626,
+  "expiry_ts": 1790096400.0,
+  "trades": [
+    {
+      "bot_id": "macro_trend_dominion",
+      "side": "no",
+      "contracts": 1,
+      "price": 0.52,
+      "timestamp": 1790095653.5561626
+    }
+  ]
+}
