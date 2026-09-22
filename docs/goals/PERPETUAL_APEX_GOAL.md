@@ -17,10 +17,10 @@ Transform the `perpetualtrading` branch into an institutional-grade, TradingView
    - Dynamic 8-hour TWAP funding rate accrual and settlement mechanism.
    - Multi-asset perpetual contract support: BTC-PERP, ETH-PERP, SOL-PERP, DOGE-PERP.
 
-## 3. Strict Boundary & Quarantine Invariant
-The Deer Family operates **STRICTLY** within the perpetual vertical:
+## 3. Unified Dominion V2 Architecture (Quarantine Lifted)
+The Deer Family now operates across the unified Dominion V2 architecture (Binary + Perpetuals):
 - **Permitted**: `src/kalshi_sim/perpetuals/**`, `src/kalshi_sim/routers/perpetuals.py`, `frontend/src/components/perpetual/**`, `frontend/src/context/PerpetualTradingContext.tsx`, `tests/test_perpetuals*.py`.
-- **Sacred Binary Core Forbidden**: Zero modifications to binary options bots (`domination_bot`, `macro_trend`), binary servers, or settlement engines.
+- **Sacred Binary Core UNLOCKED**: Modifications to binary options bots (`domination_bot`, `macro_trend`), binary servers, or settlement engines.
 
 ## 4. The 5 Maturity Horizons
 - [ ] **Horizon 1: Mathematical Decimal Armor** (Eliminate all float casts & divisions in perpetual router).
