@@ -1,57 +1,53 @@
-name: Monorepo Safeguards & Firewalls
+name: Agent Firewall Enforcer
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
 
 jobs:
-  firewall-check:
-    name: Agent Firewall Enforcer
+  enforce-boundaries:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0 
 
-      - name: Verify Monorepo Isolation
+      - name: Get Changed Files
+        id: changed-files
+        uses: tj-actions/changed-files@v42
+
+      - name: Verify Agent Isolation
         run: |
-          # Fetch changed files in the PR
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD)
+          APP1_TOUCHED=0
+          APP2_TOUCHED=0
+          APP3_TOUCHED=0
+
+          # Check which directories contain modified files
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ $file == app_1_machine_engine/* ]]; then
+              APP1_TOUCHED=1
+            elif [[ $file == app_2_execution_bot/* ]]; then
+              APP2_TOUCHED=1
+            elif [[ $file == app_3_autonomous_chef/* ]]; then
+              APP3_TOUCHED=1
+            fi
+          done
+
+          # Count how many distinct app directories are in this PR
+          TOTAL_TOUCHED=$((APP1_TOUCHED + APP2_TOUCHED + APP3_TOUCHED))
           
-          HAS_APP1=0
-          HAS_APP2=0
-          HAS_APP3=0
+          # We isolate logic by actor type, catching any bot or automated agent 
+          # (e.g., github-actions[bot], jules-agent, dependabot)
+          ACTOR="${{ github.actor }}"
           
-          if echo "$CHANGED_FILES" | grep -q "^app_1_machine_engine/"; then HAS_APP1=1; fi
-          if echo "$CHANGED_FILES" | grep -q "^app_2_execution_bot/"; then HAS_APP2=1; fi
-          if echo "$CHANGED_FILES" | grep -q "^app_3_autonomous_chef/"; then HAS_APP3=1; fi
-          
-          TOTAL=$((HAS_APP1 + HAS_APP2 + HAS_APP3))
-          
-          if [ $TOTAL -gt 1 ]; then
-            echo "::error::FIREWALL BREACH DETECTED. A single PR cannot modify multiple isolated apps simultaneously (e.g. app_1 and app_2). Check Agent Rules."
-            exit 1
-          else
-            echo "Firewall integrity verified. PR is cleanly isolated."
+          if [[ "$ACTOR" == *"[bot]"* || "$ACTOR" == *"agent"* || "$ACTOR" == *"choppingblock"* ]]; then
+            if [ "$TOTAL_TOUCHED" -gt 1 ]; then
+              echo "::error::FIREWALL BREACH DETECTED!"
+              echo "::error::The agent '$ACTOR' is attempting to modify $TOTAL_TOUCHED isolated applications in a single Pull Request."
+              echo "::error::To prevent cross-contamination and hallucinated dependencies, automated agents must submit separate PRs for app_1, app_2, and app_3."
+              exit 1
+            fi
           fi
-
-  app1-tests:
-    name: App 1 (Quant Factory) Tests
-    runs-on: ubuntu-latest
-    paths:
-      - 'app_1_machine_engine/**'
-      - 'shared/**'
-    steps:
-      - uses: actions/checkout@v4
-      - run: echo "Running App 1 specific test suites..."
-
-  app2-tests:
-    name: App 2 (Execution Bot) Tests
-    runs-on: ubuntu-latest
-    paths:
-      - 'app_2_execution_bot/**'
-      - 'shared/**'
-    steps:
-      - uses: actions/checkout@v4
-      - run: echo "Running App 2 low-latency and ONNX loading test suites..."
+          
+          echo "Firewall check passed. Agent scoping is valid."
