@@ -1,6 +1,7 @@
 {
   "keys": [
+    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:245:BOUNDARY_SINGULARITY_RISK",
     "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:297:FLOAT_CAST_LEAK",
-    "F:\\012D_TRADE\\Kalshi Simulator\\src\\kalshi_sim\\agent_guardrails.py:245:BOUNDARY_SINGULARITY_RISK"
+    "C:\\Users\\Admin\\OneDrive\\Documents\\GitHub\\Kalshi-Simulator\\src\\kalshi_sim\\routers\\perpetuals.py:140:FLOAT_CAST_LEAK"
   ]
 }

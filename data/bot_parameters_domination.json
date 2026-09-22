@@ -46,7 +46,11 @@
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 1.25,
       "twap_fading_quarantine_seconds": 15.0,
-      "twap_fading_window_seconds": 60.0
+      "twap_fading_window_seconds": 60.0,
+      "bot_id": "macro_trend_dominion",
+      "limit_price_cents": 51,
+      "min_confidence_pct": 70.0,
+      "volatility_moat_dollars": 30.0
     },
     "ETH": {
       "discount_limit_price": 0.48,
@@ -240,5 +244,9 @@
   "velocity_z_score_threshold": 2.5,
   "moneyness_moat_multiplier": 1.25,
   "twap_fading_quarantine_seconds": 15.0,
-  "twap_fading_window_seconds": 60.0
+  "twap_fading_window_seconds": 60.0,
+  "bot_id": "macro_trend_dominion",
+  "limit_price_cents": 51,
+  "min_confidence_pct": 70.0,
+  "volatility_moat_dollars": 30.0
 }

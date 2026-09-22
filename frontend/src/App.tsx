@@ -9,6 +9,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useKalshiWebSocket } from './hooks/useKalshiWebSocket';
 import { ParentHub } from './components/ParentHub';
 import { BabyBotConsole } from './components/BabyBotConsole';
+import PerpetualTerminal from './components/perpetual/PerpetualTerminal';
 import { soundFX } from './utils/audioFX';
 
 export function App() {
@@ -45,10 +46,10 @@ export function App() {
 
   const isLive = tradingMode === 'live';
 
-  // Detect if current window is running as standalone Baby Bot pop-out
-  const isStandaloneBabyBot =
-    typeof window !== 'undefined' &&
-    (window.location.search.includes('view=baby-bot') || window.name === 'BabyBot');
+  // Detect if current window is running as standalone Baby Bot pop-out or Perpetual Terminal
+  const viewParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('view') : null;
+  const isStandaloneBabyBot = viewParam === 'baby-bot' || (typeof window !== 'undefined' && window.name === 'BabyBot');
+  const isPerpetualTerminal = viewParam === 'perpetual';
 
   // Support URL bot parameter or fallback to server active strategy
   const urlBotParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('bot') : null;
@@ -211,6 +212,11 @@ export function App() {
         />
       </div>
     );
+  }
+
+  // 1.5 PERPETUAL TRADING TERMINAL
+  if (isPerpetualTerminal) {
+    return <PerpetualTerminal />;
   }
 
   // 2. THE PARENT HUB (Factory / Lab Multi-Column Architecture)

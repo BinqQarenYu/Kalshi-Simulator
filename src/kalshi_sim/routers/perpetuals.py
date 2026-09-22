@@ -62,6 +62,10 @@ class PerpBotConfigRequest(BaseModel):
     is_armed: Optional[bool] = None
 
 
+class ActiveBotRequest(BaseModel):
+    bot_id: str
+
+
 _ASSET_BASE_PRICES = {
     "BTC": 84250.00,
     "ETH": 2280.00,
@@ -327,3 +331,42 @@ async def update_perp_bot_config(req: PerpBotConfigRequest) -> Dict[str, Any]:
     if req.is_armed is not None:
         cfg["is_armed"] = req.is_armed
     return {"status": "ok", "bot": cfg}
+
+
+@router.get("/chart")
+async def get_perp_chart(asset: str = Query("BTC"), timeframe: str = Query("15m")) -> Dict[str, Any]:
+    """OHLCV chart data placeholder."""
+    now_sec = int(time.time())
+    candles = []
+    base_price = Decimal(str(_ASSET_BASE_PRICES.get(asset, 84250.00)))
+    for i in range(50):
+        t = now_sec - (50 - i) * 900
+        candles.append({
+            "time": t,
+            "open": float(base_price - Decimal("10")),
+            "high": float(base_price + Decimal("20")),
+            "low": float(base_price - Decimal("30")),
+            "close": float(base_price + Decimal("5")),
+            "volume": 1000 + i * 10
+        })
+    return {"status": "ok", "asset": asset, "timeframe": timeframe, "candles": candles}
+
+
+@router.get("/funding")
+async def get_perp_funding(asset: str = Query("BTC")) -> Dict[str, Any]:
+    """Current funding rate."""
+    now_sec = time.time()
+    next_funding_secs = int(28800 - (int(now_sec) % 28800))
+    return {
+        "status": "ok",
+        "asset": asset,
+        "funding_rate": float(Decimal("0.0001")),
+        "funding_rate_annualized": float(Decimal("0.1095")),
+        "next_funding_in": next_funding_secs
+    }
+@ r o u t e r . p o s t ( ' / b o t s / a c t i v e ' ) 
+ a s y n c   d e f   s e t _ a c t i v e _ b o t ( r e q :   A c t i v e B o t R e q u e s t )   - >   D i c t [ s t r ,   A n y ] : 
+         l o g g e r . i n f o ( ' [ P E R P E T U A L S ]   A c t i v e   b o t   e n g i n e   s w i t c h e d   t o   % s ' ,   r e q . b o t _ i d ) 
+         r e t u r n   { ' s t a t u s ' :   ' o k ' ,   ' a c t i v e _ b o t ' :   r e q . b o t _ i d } 
+  
+ 
