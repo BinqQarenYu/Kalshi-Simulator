@@ -721,6 +721,36 @@ class L2BookState:
         asks = [OrderBookLevel(price=p, quantity=q) for p, q in top_no]
         return bids, asks
 
+    def get_depth_tuples(
+        self, n: int = 15
+    ) -> tuple[list[tuple[Decimal, Decimal]], list[tuple[Decimal, Decimal]]]:
+        """Return top *n* bid and ask (price, quantity) Decimal tuples with O(1) version caching."""
+        key = (n, self._yes_book._version, self._no_book._version)
+        if key == self._cached_depth_key and self._cached_depth_tuples is not None:
+            return self._cached_depth_tuples
+
+        top_yes, top_no = self.get_depth_raw(n)
+        res = (top_yes, top_no)
+        self._cached_depth_key = key
+        self._cached_depth_tuples = res
+        return res
+
+    def get_depth_float_tuples(
+        self, n: int = 15
+    ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+        """Return top *n* bid and ask (price, quantity) float tuples with O(1) version caching."""
+        key = (n, self._yes_book._version, self._no_book._version)
+        if key == self._cached_depth_float_key and self._cached_depth_float_tuples is not None:
+            return self._cached_depth_float_tuples
+
+        top_yes, top_no = self.get_depth_raw(n)
+        float_yes = [(float(p), float(q)) for p, q in top_yes]
+        float_no = [(float(p), float(q)) for p, q in top_no]
+        res = (float_yes, float_no)
+        self._cached_depth_float_key = key
+        self._cached_depth_float_tuples = res
+        return res
+
 
 # ---------------------------------------------------------------------------
 # Simulation — Enums

@@ -300,8 +300,6 @@ class KalshiOrderflowFeatureExtractor:
         n_v = len(vols)
         median_volume = vols[n_v // 2] if n_v % 2 == 1 else (vols[n_v // 2 - 1] + vols[n_v // 2]) * 0.5
         baseline_volume = max(median_volume, 1e-9)
-
-        # Precompute reciprocal multiplier to replace division with fast floating-point multiplication
         inv_baseline = 1.0 / baseline_volume
 
         # 3. Order Flow Imbalance (OFI)
