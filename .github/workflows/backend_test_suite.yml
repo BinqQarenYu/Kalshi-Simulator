@@ -1,0 +1,82 @@
+name: Backend ML & Trading Test Suite
+
+on:
+  pull_request:
+    paths:
+      - 'app_1_machine_engine/**'
+      - 'app_2_execution_bot/**'
+      - 'app_3_autonomous_chef/**'
+      - 'shared/**'
+      # Explicitly ignore all UI directories so this never runs for frontend PRs
+      - '!**/dashboard/**'
+      - '!shared/ui_components/**'
+
+jobs:
+  test-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Get Changed Files
+        id: changed-files
+        uses: tj-actions/changed-files@v42
+
+      - name: Execute Targeted Python Tests
+        run: |
+          TEST_APP1=0
+          TEST_APP2=0
+          TEST_APP3=0
+          
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            # Ignore dashboard files just in case the workflow trigger let something slip
+            if [[ $file == */dashboard/* ]] || [[ $file == shared/ui_components/* ]]; then continue; fi
+
+            if [[ $file == app_1_machine_engine/* ]]; then TEST_APP1=1; fi
+            if [[ $file == app_2_execution_bot/* ]]; then TEST_APP2=1; fi
+            if [[ $file == app_3_autonomous_chef/* ]]; then TEST_APP3=1; fi
+            
+            # If core schemas change, run a full fan-out test across all backend apps
+            if [[ $file == shared/* ]]; then
+              TEST_APP1=1
+              TEST_APP2=1
+              TEST_APP3=1
+            fi
+          done
+
+          if [ "$TEST_APP1" -eq 1 ]; then
+            echo "Testing App 1 (Quant Factory)..."
+            cd app_1_machine_engine
+            pip install -r requirements.txt
+            # Validates model training pipelines, footprint data extraction, and ONNX exports
+            pytest tests/ --maxfail=1 --disable-warnings
+            cd ..
+          fi
+
+          if [ "$TEST_APP2" -eq 1 ]; then
+            echo "Testing App 2 (Live Cockpit)..."
+            cd app_2_execution_bot
+            pip install -r requirements.txt
+            # Validates local ONNX runtime inference, WebSocket ingestion, and latency benchmarks
+            pytest tests/ --maxfail=1 --disable-warnings
+            cd ..
+          fi
+
+          if [ "$TEST_APP3" -eq 1 ]; then
+            echo "Testing App 3 (Autonomous Chef)..."
+            cd app_3_autonomous_chef
+            pip install -r requirements.txt
+            # Validates meta-parameter tuning logic and orchestrator signals
+            pytest tests/ --maxfail=1 --disable-warnings
+            cd ..
+          fi
+          
+          echo "All targeted backend tests passed."
