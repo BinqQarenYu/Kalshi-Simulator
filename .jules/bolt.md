@@ -176,3 +176,7 @@
 ## 2026-09-20 - Pure Python Sample Standard Deviation vs statistics.stdev Overhead
 **Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
 **Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
+
+## 2026-09-22 - Synchronized Bisect Sorted List for Dynamic Whale Quantity Threshold Lookup
+**Learning:** Converting a 100-element `rolling_trade_quantities` deque into a list and sorting it (`list(deque).sort()`) on every ingested public trade print in `KalshiOrderflowFeatureExtractor` created per-trade memory allocation and sorting overhead (~75% of dynamic whale calculation time).
+**Action:** Maintained a synchronized sorted list (`sorted_rolling_trade_quantities`) alongside `rolling_trade_quantities` using `bisect.insort` ($O(\log N)$ insertion) and `bisect_left` eviction ($O(\log N)$ deletion). Enabled $O(1)$ index access for trade size median calculation without temporary list allocations.
