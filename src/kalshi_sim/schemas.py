@@ -10,6 +10,7 @@ import operator
 from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
+import operator
 from typing import Any, Literal, Optional
 
 # Module-level fast item getter for order book sorting and pre-allocated Decimal constants
@@ -446,6 +447,13 @@ class FastBook(dict):
         dict.update(res, self)
         res._best = self._best
         res._version = self._version
+        return res
+
+    def copy(self) -> FastBook:
+        """Create a fast shallow copy preserving `_best` in O(N) C-level dict update."""
+        res = FastBook.__new__(FastBook)
+        dict.update(res, self)
+        res._best = self._best
         return res
 
     @property
