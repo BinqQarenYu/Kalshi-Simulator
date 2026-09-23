@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MarketState, PreflightGates } from '../types';
 import { Info, Hourglass, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { soundFX } from '../utils/audioFX';
 
 interface PriceHeroProps {
   market: MarketState;
@@ -44,14 +45,22 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market, preflig
           {/* NOW Spot Price */}
           <div>
             <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-[#8b949e]">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" aria-hidden="true" />
               <span>NOW {market.active_asset || 'BTC'}</span>
-              <Info className="h-3 w-3 text-[#8b949e]" />
+              <button
+                type="button"
+                aria-label="CF Benchmarks BRTI 5Hz real-time spot feed info"
+                title="CF Benchmarks BRTI 5Hz real-time spot feed"
+                onClick={() => soundFX.playClickSound()}
+                className="p-0.5 rounded text-[#8b949e] hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084]"
+              >
+                <Info className="h-3 w-3" />
+              </button>
             </div>
-            <div className={`text-xl sm:text-2xl font-extrabold tracking-tight font-mono ${deltaColor}`}>
+            <div className={`text-xl sm:text-2xl font-extrabold tracking-tight font-mono tabular-nums ${deltaColor}`}>
               {market.current_btc_price_str}
             </div>
-            <div className={`text-xs font-semibold flex items-center gap-1 ${deltaColor}`}>
+            <div className={`text-xs font-semibold flex items-center gap-1 font-mono tabular-nums ${deltaColor}`}>
               {viewMode === '$' ? (
                 <>
                   <span className="font-bold">{formattedDiff}</span>
@@ -77,22 +86,28 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market, preflig
           >
             <button
               type="button"
-              onClick={() => setViewMode('$')}
+              onClick={() => {
+                soundFX.playClickSound();
+                setViewMode('$');
+              }}
               aria-label="Display price change in dollars"
               aria-pressed={viewMode === '$'}
               className={`px-2.5 py-0.5 text-xs font-bold rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
-                viewMode === '$' ? 'bg-[#30363d] text-white' : 'text-[#8b949e] hover:text-white'
+                viewMode === '$' ? 'bg-[#30363d] text-white shadow-sm' : 'text-[#8b949e] hover:text-white'
               }`}
             >
               $
             </button>
             <button
               type="button"
-              onClick={() => setViewMode('%')}
+              onClick={() => {
+                soundFX.playClickSound();
+                setViewMode('%');
+              }}
               aria-label="Display price change in percent"
               aria-pressed={viewMode === '%'}
               className={`px-2.5 py-0.5 text-xs font-bold rounded transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00d084] ${
-                viewMode === '%' ? 'bg-[#30363d] text-white' : 'text-[#8b949e] hover:text-white'
+                viewMode === '%' ? 'bg-[#30363d] text-white shadow-sm' : 'text-[#8b949e] hover:text-white'
               }`}
             >
               %
@@ -144,11 +159,15 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market, preflig
               <span>2.15x Ceiling: <strong className="text-cyan-400">${moatCeiling.toFixed(2)}</strong></span>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full uppercase tracking-wider ${
-                isClearOfMoat
-                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                  : 'bg-rose-500/15 text-rose-300 border border-rose-500/30 animate-pulse'
-              }`}>
+              <span
+                role="status"
+                aria-live="polite"
+                className={`px-2 py-0.5 text-[9px] font-bold rounded-full uppercase tracking-wider ${
+                  isClearOfMoat
+                    ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                    : 'bg-rose-500/15 text-rose-300 border border-rose-500/30 animate-pulse'
+                }`}
+              >
                 {isClearOfMoat ? 'CLEAR OF STRIKE NOISE' : 'TRAPPED IN NOISE CHOP'}
               </span>
               <span className="text-gray-400">
@@ -158,7 +177,15 @@ export const PriceHero: React.FC<PriceHeroProps> = React.memo(({ market, preflig
           </div>
 
           {/* Horizontal Gauge Bar */}
-          <div className="relative h-3.5 bg-[#0a0d12] rounded-full overflow-hidden border border-[#262d35] flex items-center shadow-inner">
+          <div
+            role="meter"
+            aria-label="Volatility Moat Tunnel separation from target strike"
+            aria-valuenow={Math.round(Math.abs(diffVal))}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuetext={`${formattedDiff} separation. ${isClearOfMoat ? 'Clear of strike noise' : 'Trapped in noise chop'}`}
+            className="relative h-3.5 bg-[#0a0d12] rounded-full overflow-hidden border border-[#262d35] flex items-center shadow-inner"
+          >
             {/* Center 0.00 Strike Target Anchor */}
             <div className="absolute left-1/2 top-0 bottom-0 w-0.5 bg-gray-400 z-10 -translate-x-1/2 shadow" title="Target Strike K ($0.00)" />
             

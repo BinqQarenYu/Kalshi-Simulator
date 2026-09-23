@@ -58,3 +58,7 @@
 ## 2026-09-08 - Scrollable Data Table Feed Focusability & Table Row Semantics
 **Learning:** Scrollable container wrappers holding live data feeds (such as real-time trade tape tables) require `tabIndex={0}` and focus ring styles so keyboard users can navigate and scroll the container. Non-interactive `<tr>` rows should NOT receive `tabIndex={0}` or `aria-label` overrides, as doing so pollutes the document tab sequence and breaks standard screen reader table navigation semantics.
 **Action:** Place `tabIndex={0}`, `aria-label`, and `focus-visible:ring-*` on the scrollable container `<div>`, use `scope="col"` on `<th>`, and preserve semantic table row/cell structure without forcing non-interactive rows into the tab order.
+
+## 2026-09-22 - Visual Financial Gauges & Live Noise Horizon Telemetry
+**Learning:** Visual separation gauges (such as the Volatility Moat Tunnel Horizon in PriceHero) that visualize spot price distance from strike targets are completely opaque to assistive technology unless decorated with `role="meter"`, `aria-label`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, and dynamic `aria-valuetext`. Additionally, combining this with `role="status"` and `aria-live="polite"` on status badges ensures screen reader users receive automatic audible notifications when market spot exits noise chop.
+**Action:** Always provide `role="meter"`, `aria-label`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, and `aria-valuetext` on visual range/gauge bars, and couple them with `role="status"` and `aria-live="polite"` on live condition badges.
