@@ -28,9 +28,12 @@ from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, 
 logger = logging.getLogger("kalshi_sim.domination_bot")
 
 
+_SQRT_2_INV = 1.0 / math.sqrt(2.0)
+
+
 def _standard_normal_cdf(x: float) -> float:
-    """Standard normal cumulative distribution function Phi(x)."""
-    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+    """Standard normal cumulative distribution function Phi(x). Uses pre-computed static inverse constant for fast evaluation."""
+    return 0.5 * (1.0 + math.erf(x * _SQRT_2_INV))
 
 
 @dataclass(frozen=True)
@@ -414,20 +417,19 @@ class ThreeStepDominationBot:
     def _get_queue_ahead(
         book: Optional[L2BookState],
         side: Optional[OrderSide],
-        target_price: Decimal,
+        target_price: Decimal | float | str,
     ) -> int:
-        """Calculate existing resting contract depth ahead at target limit price (matching order_simulator)."""
+        """Calculate existing resting contract depth ahead at target limit price (matching order_simulator). Fast-paths direct book property access."""
         if not book or not side:
             return 0
         try:
-            target_dec = Decimal(str(target_price))
-            if side == OrderSide.YES and hasattr(book, "yes_book") and book.yes_book:
-                return int(book.yes_book.get(target_dec, 0))
-            elif side == OrderSide.NO and hasattr(book, "no_book") and book.no_book:
-                return int(book.no_book.get(target_dec, 0))
+            side_book = book.yes_book if side == OrderSide.YES else (book.no_book if side == OrderSide.NO else None)
+            if side_book is None:
+                return 0
+            target_dec = target_price if isinstance(target_price, Decimal) else Decimal(str(target_price))
+            return int(side_book.get(target_dec, 0))
         except Exception:
             return 0
-        return 0
 
     def evaluate(
         self,
