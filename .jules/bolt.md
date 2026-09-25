@@ -176,3 +176,7 @@
 ## 2026-09-20 - Pure Python Sample Standard Deviation vs statistics.stdev Overhead
 **Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
 **Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
+
+## 2026-09-25 - Single-Pass Depth & Spread Calculation in Kalshi Orderflow Feature Extractor
+**Learning:** In `KalshiOrderflowFeatureExtractor.extract_features_from_book`, executing fast-path `get_depth_float_tuples` inside `if hasattr(book, "get_depth_float_tuples"):` calculated depth sizes, best bid/ask, and spread BPS, but then execution dropped into outer code that re-calculated `best_bid`, `best_ask`, `spread_bps`, and re-converted float quantities a second time.
+**Action:** Restructured depth extraction into clean `if/elif/else` branches so depth extraction, spread calculation, and size list construction execute strictly once per tick. Reduced feature extraction latency from 15.04 µs to 10.87 µs per tick (~1.38x throughput speedup / ~27.7% latency reduction).
