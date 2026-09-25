@@ -495,7 +495,7 @@ def test_macro_trend_dominion_paper_authorization_and_live_blocking() -> None:
     cycle = "KXBTC15M-26SEP101800-00"
 
     # Simulate unsealed state on disk
-    with patch("kalshi_sim.bot_deployment_auditor.BotDeploymentAuditor.check_live_authorization_on_disk", return_value=(False, "UNSEALED")):
+    with patch("app_3_autonomous_chef.bot_deployment_auditor.BotDeploymentAuditor.check_live_authorization_on_disk", return_value=(False, "UNSEALED")):
         for macro_alias in ("macro_trend_dominion", "macro_onnx", "macro_trend"):
             # 1. In Paper Mode (is_live=False): Authorized and capped to 1 contract
             ok_paper, reason_paper, size_paper, _ = guardrails.validate_pre_trade_intent(

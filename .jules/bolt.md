@@ -176,3 +176,7 @@
 ## 2026-09-20 - Pure Python Sample Standard Deviation vs statistics.stdev Overhead
 **Learning:** Calling `statistics.stdev` on a small collection converts elements into Python `Fraction` objects for exact rational arithmetic, adding ~50 µs of fraction construction and conversion overhead per call in trade ingestion loops.
 **Action:** Replaced `statistics.stdev` in VPIN price change processing with pure Python arithmetic standard deviation (`sum` and `sum((x - mean)**2)`). Reduced `process_trade` average latency from ~72.3 µs to ~22.9 µs per trade call (~3.15x speedup / 68% latency reduction).
+
+## 2026-09-21 - Deferred ISO Timestamp Formatting & Pre-Allocated Constants in AgentGuardrails
+**Learning:** Unconditionally creating ISO 8601 timestamp strings (`datetime.now(timezone.utc).isoformat()`), instantiating temporary `Decimal` objects (`Decimal("25.00")`, `Decimal("100.00")`), and performing sequence containment scans in high-frequency pre-trade guardrail checks added ~6.1 µs per validation call (~12.7 µs -> ~6.6 µs).
+**Action:** Defer timestamp formatting in `validate_pre_trade_intent` until a rejection occurs, pre-allocate module-level `Decimal` and `datetime.time` boundary constants, and use static set lookups for authorized bot categories. Reduced guardrail validation latency from ~12.7 µs to ~6.6 µs per call (~1.92x speedup).
