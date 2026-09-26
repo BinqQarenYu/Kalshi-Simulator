@@ -2,7 +2,7 @@ import logging
 from decimal import Decimal, InvalidOperation
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-from .config import CryptoAsset
+from kalshi_sim.schemas import CryptoAsset
 
 logger = logging.getLogger(__name__)
 
