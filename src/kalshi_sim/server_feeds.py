@@ -243,9 +243,7 @@ async def live_kalshi_public_sync_loop() -> None:
 
 
 
-async def standalone_sync_loop() -> None:
-    """Retired in Option C: Mother Server is the monolithic trading engine on Port 8000."""
-    return
+
 
 
 
@@ -298,13 +296,20 @@ async def stop_current_feed() -> None:
 
 
 
+from .data_scrubber import DataScrubber
+
 async def live_btc_spot_ws_loop() -> None:
     """Streams real-time crypto spot price ticks prioritizing official CF Benchmarks 5Hz feed."""
     state = _get_state()
     def _on_cf_asset(asset: CryptoAsset, price: Decimal, twap: Optional[Decimal], source: str) -> None:
         if asset == state.active_asset:
-            if price != state.current_btc_price:
-                state.current_btc_price = price
+            # 🧹 Quoquo's Pet: Scrub the incoming price tick
+            scrubbed_price = DataScrubber.scrub_tick(asset, price)
+            if scrubbed_price is None:
+                return # Vetoed by Scrubber!
+
+            if scrubbed_price != state.current_btc_price:
+                state.current_btc_price = scrubbed_price
                 if twap is not None:
                     state.twap_60s_price = twap
                 state.coinbase_connected = True  # Marks spot feed healthy
@@ -358,17 +363,23 @@ async def live_btc_spot_ws_loop() -> None:
                                 pid = data.get("product_id")
                                 matched_asset = product_map.get(pid)
                                 if matched_asset == state.active_asset and not (state.cf_sync and state.cf_sync.is_connected):
-                                    p = Decimal(str(data["price"]))
-                                    if p != state.current_btc_price:
-                                        state.current_btc_price = p
+                                    # 🧹 Quoquo's Pet: Scrub the incoming tick
+                                    raw_price = data["price"]
+                                    raw_time = data.get("time") # e.g. "2023-09-01T12:00:00.000Z"
+                                    scrubbed_price = DataScrubber.scrub_tick(matched_asset, raw_price, raw_time)
+                                    if scrubbed_price is None:
+                                        continue # Vetoed by Scrubber!
+
+                                    if scrubbed_price != state.current_btc_price:
+                                        state.current_btc_price = scrubbed_price
                                         now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
                                         state.price_history.append({
                                             "time": now_t,
-                                            "price": float(p),
+                                            "price": float(scrubbed_price),
                                             "target": float(state.target_strike),
                                         })
                                         if state.mode != "live":
-                                            update_dynamic_clob_ladder(p, state.target_strike, state.active_ticker)
+                                            update_dynamic_clob_ladder(scrubbed_price, state.target_strike, state.active_ticker)
                                         state.is_dirty = True
                                         if state.connected_websockets:
                                             asyncio.create_task(_trigger_broadcast())
@@ -389,17 +400,25 @@ async def live_btc_spot_ws_loop() -> None:
                         if msg.type == aiohttp.WSMsgType.TEXT:
                             data = json.loads(msg.data)
                             if "c" in data and not (state.cf_sync and state.cf_sync.is_connected) and not state.coinbase_connected:
-                                p = Decimal(str(data["c"]))
-                                if p != state.current_btc_price:
-                                    state.current_btc_price = p
+                                # 🧹 Quoquo's Pet: Scrub the incoming tick
+                                raw_price = data["c"]
+                                raw_time = data.get("E") # Binance event time in ms
+                                if raw_time:
+                                    raw_time = datetime.fromtimestamp(raw_time / 1000.0, tz=timezone.utc).isoformat()
+                                scrubbed_price = DataScrubber.scrub_tick(CryptoAsset.BTC, raw_price, raw_time)
+                                if scrubbed_price is None:
+                                    continue # Vetoed by Scrubber!
+                                    
+                                if scrubbed_price != state.current_btc_price:
+                                    state.current_btc_price = scrubbed_price
                                     now_t = datetime.now(timezone.utc).strftime("%H:%M:%S")
                                     state.price_history.append({
                                         "time": now_t,
-                                        "price": float(p),
+                                        "price": float(scrubbed_price),
                                         "target": float(state.target_strike),
                                     })
                                     if state.mode != "live":
-                                        update_dynamic_clob_ladder(p, state.target_strike, state.active_ticker)
+                                        update_dynamic_clob_ladder(scrubbed_price, state.target_strike, state.active_ticker)
                                     state.is_dirty = True
                                     if state.connected_websockets:
                                         asyncio.create_task(_trigger_broadcast())
