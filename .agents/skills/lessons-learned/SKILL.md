@@ -278,3 +278,18 @@ $$\begin{aligned}
   1. **Halt & Rest Doctrine**: When cognitive fatigue sets in, trading systems must be placed on automated conservative hold (1 contract cap, strict streak breaker) rather than undergoing live refactoring during late hours.
   2. **Root Cause Over Surface Patching**: When an offset or mismatch appears, trace the physics (e.g. OS NTP clock drift vs. API calculation) before modifying production math.
   3. **The Law of Parsimony**: If an algorithmic architecture requires external background servers, inter-port bridges, and file-lock handoffs, it is fundamentally flawed. The simplest architecture (single process, single port, modular classes, strict Decimal math) is always the most profitable, maintainable, and resilient.
+
+---
+
+### Lesson 19: Infinite Memory Leaks in Automated Testing & Rogue Child Processes (The 14GB RAM Incident)
+
+#### The Incident (2026-09-26)
+* **Symptom**: The host machine felt completely frozen, unresponsive, and heavy. Resource monitors revealed an orphaned `python.exe` background process (PID 17000) consuming **14.36 GB of RAM** and maxing out the CPU across 15+ cores.
+* **Forensic Root Cause (Agent POE Analysis)**:
+  1. The automated backend test suite (`python -m pytest`) was invoked via background task runners. The suite included heavy PyTorch and ONNX machine learning module exports (`test_onnx_export.py`, `test_continuous_trainer.py`).
+  2. A race condition inside an async SQLite teardown triggered an unhandled `RuntimeError: Event loop is closed` in `aiosqlite/_connection_worker_thread`.
+  3. Pytest attempted to terminate but encountered a `PermissionError` in its file teardown hook (`cleanup_numbered_dir`). 
+  4. These compounding faults caused the Python child process to zombie out instead of gracefully terminating. The PyTorch tensor allocations from the ONNX models were never garbage collected, holding 14GB of RAM indefinitely.
+* **Hardened Invariant**:
+  1. **Strict Process Cleanup (Kill on Sight)**: When automated test suites running heavy tensor/GPU workloads exit unexpectedly or hang, you must aggressively hunt and terminate orphaned Python processes (`taskkill /F /IM python.exe /T` on Windows or `pkill -9 python` on Linux) to reclaim resources.
+  2. **Memory Governor Exemption**: The system's internal `MemoryGovernor` (designed to throttle chart ticks) cannot protect the host machine from unhandled C++ extension memory leaks (like PyTorch tensor allocations) that occur outside the Python garbage collector's purview. Heavy tests must cleanly `del` large models and manually invoke `gc.collect()` in their teardown hooks.
