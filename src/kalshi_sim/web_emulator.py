@@ -75,7 +75,7 @@ class KalshiWebEmulator:
         self.market_expiry_seconds: int = 188
 
         # Zero-Copy Ring Buffers & Memory Manager
-        self.price_history = ZeroCopyRingBuffer[dict](capacity=100)
+        self.price_history = ZeroCopyRingBuffer[dict](capacity=1000)
         self.trade_tape = ZeroCopyRingBuffer[dict](capacity=50)
         self.memory_manager = MarketDataMemoryManager(
             data_dir=self.data_dir,
@@ -99,14 +99,19 @@ class KalshiWebEmulator:
 
         # Seed initial chart points
         now = datetime.now(timezone.utc)
-        for i in range(40, 0, -1):
-            t_str = (now - timedelta(seconds=i * 2)).strftime("%H:%M:%S")
-            jitter = round(random.gauss(0, 1.2), 2)
-            self.price_history.append({
+        walk_price = float(self.current_btc_price)
+        history_buffer = []
+        for i in range(900, 0, -1):
+            t_str = (now - timedelta(seconds=i)).strftime("%H:%M:%S")
+            history_buffer.append({
                 "time": t_str,
-                "price": float(self.current_btc_price) + jitter,
+                "price": walk_price,
                 "target": float(self.target_strike),
             })
+            walk_price -= round(random.gauss(0, 0.5), 2)
+        
+        for pt in reversed(history_buffer):
+            self.price_history.append(pt)
 
     def step(
         self,
@@ -292,7 +297,7 @@ class KalshiWebEmulator:
                 "yes_cents_str": f"{best_yes_ask * 100:.1f}¢",
                 "no_cents_str": f"{best_no_ask * 100:.1f}¢",
             },
-            "chart": self.price_history.to_list()[-60:],
+            "chart": self.price_history.to_list()[-900:],
             "trade_tape": self.trade_tape.to_list()[-15:],
             "orderbook_ladder": ladder,
             "ai_signals": ai_data,

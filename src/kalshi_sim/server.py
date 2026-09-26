@@ -121,7 +121,6 @@ from kalshi_sim.server_settlements import (
 from kalshi_sim.server_feeds import (
     start_live_feed,
     live_kalshi_public_sync_loop,
-    standalone_sync_loop,
     start_live_public_feed,
     start_mock_feed,
     stop_current_feed,
@@ -268,19 +267,25 @@ class ServerState:
         self.current_btc_price = Decimal("78900.00")
         self.cycle_open_strikes: dict[str, Decimal] = {}
         self.volume_24h_str = "$1,547,966"
-        self.price_history: deque[dict[str, Any]] = deque(maxlen=120)
+        self.price_history: deque[dict[str, Any]] = deque(maxlen=1000)
         self.trade_tape: deque[dict[str, Any]] = deque(maxlen=50)
         self.connected_websockets: set[WebSocket] = set()
 
         # Seed initial price history
         now = datetime.now(timezone.utc)
-        for i in range(40, 0, -1):
-            t_str = (now - timedelta(seconds=i * 2)).strftime("%H:%M:%S")
-            self.price_history.append({
+        import random
+        walk_price = float(self.current_btc_price)
+        history_buffer = []
+        for i in range(900, 0, -1):
+            t_str = (now - timedelta(seconds=i)).strftime("%H:%M:%S")
+            history_buffer.append({
                 "time": t_str,
-                "price": float(self.current_btc_price),
+                "price": walk_price,
                 "target": float(self.target_strike),
             })
+            walk_price -= round(random.gauss(0, 0.5), 2)
+        
+        self.price_history.extend(reversed(history_buffer))
         
         # System Resource & CPU/Memory Governor
         self.system_governor = get_system_governor()
@@ -328,13 +333,6 @@ class ServerState:
         self.last_twap_second: int = -1
         self.active_asset: CryptoAsset = CryptoAsset.BTC
         self.cf_sync: Optional[CFBenchmarksSync] = None
-        self._standalone_data: Optional[dict[str, Any]] = None
-        self._last_standalone_sync: float = 0.0
-        self._standalone_onnx_data: Optional[dict[str, Any]] = None
-        self._last_standalone_onnx_sync: float = 0.0
-        self._standalone_macro_data: Optional[dict[str, Any]] = None
-        self._last_standalone_macro_sync: float = 0.0
-        self.standalone_sync_task: Optional[asyncio.Task] = None
         self.keep_alive_task: Optional[asyncio.Task] = None
 
 
@@ -1107,8 +1105,8 @@ async def start_background_simulation() -> None:
     state.btc_ws_task = asyncio.create_task(live_btc_spot_ws_loop(), name="btc_spot_ws")
     state.btc_spot_task = asyncio.create_task(live_btc_spot_sync_loop(), name="btc_spot_sync")
     state.integrity_task = asyncio.create_task(integrity_audit_loop(), name="integrity_audit")
+
     state.live_balance_task = asyncio.create_task(live_balance_sync_loop(), name="live_balance_sync")
-    state.standalone_sync_task = None
     state.hmm_regime_task = asyncio.create_task(hmm_macro_regime_loop(), name="hmm_macro_regime")
     if state.mode == "live":
         asyncio.create_task(sync_live_settlements(), name="initial_settlement_sync")
@@ -1158,8 +1156,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state.keep_alive_task.cancel()
     if hasattr(state, "hmm_regime_task") and state.hmm_regime_task:
         state.hmm_regime_task.cancel()
-    if state.standalone_sync_task:
-        state.standalone_sync_task.cancel()
+
     if state.broadcast_task:
         state.broadcast_task.cancel()
     if state.ticker_timer_task:

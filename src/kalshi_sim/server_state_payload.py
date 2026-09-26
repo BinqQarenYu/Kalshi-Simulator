@@ -424,7 +424,7 @@ def _build_full_state_payload() -> dict[str, Any]:
             "is_twap_active": bool(state.twap_60s_price is not None),
         },
 
-        "chart": list(state.price_history)[-60:],
+        "chart": list(state.price_history)[-900:],
         "trade_tape": list(state.trade_tape)[-15:],
         "orderbook_ladder": ladder,
         "ai_signals": ai_data,
