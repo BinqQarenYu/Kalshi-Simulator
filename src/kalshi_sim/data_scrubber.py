@@ -7,10 +7,10 @@ from .config import CryptoAsset
 logger = logging.getLogger(__name__)
 
 class DataScrubber:
-    "\""
+    """
     Quoquo's Pet: The Always-On Data Hygiene Gatekeeper.
     Intercepts and cleanses all raw tick data from exchanges before they reach the execution engine.
-    "\""
+    """
     
     # Absolute Sanity Bounds (Hardcoded zero-hallucination physics)
     SANITY_BOUNDS = {
@@ -22,10 +22,10 @@ class DataScrubber:
 
     @staticmethod
     def scrub_tick(asset: CryptoAsset, raw_price: Any, raw_time: Optional[str] = None) -> Optional[Decimal]:
-        "\""
+        """
         Takes raw tick data, sanitizes it, enforces invariants, and returns a clean Decimal.
         Returns None if the tick is invalid (glitch, stale, or malformed).
-        "\""
+        """
         # 1. Type Coercion: Enforce Decimal (Zero-Float Invariant)
         try:
             if isinstance(raw_price, float):
