@@ -16,6 +16,10 @@
 
 ## 📜 Architectural Learnings & Micro-UX Log
 
+## 2026-09-26 - Pre-Trade Guardrail Status Regions & Emergency Action Controls
+**Learning:** Institutional live pre-trade risk guardrail cards (such as LiveGuardrailsCard) require explicit `role="status"` with `aria-live="polite"` on status badges (e.g. ARMED vs HALTED) so screen reader users receive automatic status updates. Additionally, emergency action buttons (Kill Switch and Circuit Breaker Reset) need explicit `type="button"`, descriptive `aria-label` text, and `focus-visible:ring-2` focus outlines (`focus-visible:ring-rose-400` / `focus-visible:ring-emerald-400`), while financial metrics require `tabular-nums` for precise alignment.
+**Action:** When building live risk management cards, wrap live status badges in `role="status"` with `aria-live="polite"`, supply descriptive `aria-label` text and focus-visible rings for emergency action buttons, and apply `font-mono tabular-nums` to financial limit figures.
+
 ## 2026-09-21 - Live Scanner Status Regions & Async Action Controls
 **Learning:** Live monitoring views with async toggle controls (such as the Cross-Exchange Arbitrage Radar) require explicit `role="status"` with `aria-live="polite"` for automatic screen reader announcements of status transitions (e.g., PAUSED vs SCANNING vs MISPRICING DETECTED), alongside loading states (`isToggling`) and focus-visible rings (`focus-visible:ring-2 focus-visible:ring-cyan-400`) on the toggle button.
 **Action:** When building live monitoring panels with toggle buttons, wrap live status badges in `role="status"` elements with `aria-live="polite"` and add `aria-label`, async loading spinners, and focus rings to action buttons.

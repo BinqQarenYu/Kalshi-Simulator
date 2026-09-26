@@ -11,7 +11,7 @@
 
 import React from 'react';
 import { PerpetualTradingProvider, usePerpetualTrading } from '../../context/PerpetualTradingContext';
-import { PerpetualChart } from './PerpetualChart';
+import PerpetualChart from './PerpetualChart';
 import { PerpetualOrderTicket } from './PerpetualOrderTicket';
 import { PerpetualBotPanel } from './PerpetualBotPanel';
 import { PerpetualPositionsTable } from './PerpetualPositionsTable';

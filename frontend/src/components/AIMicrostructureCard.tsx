@@ -84,6 +84,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
   const isMacroOnnx = !isDualOnnx && (activeStrategy === 'macro_onnx' || activeStrategy === 'macro_onnx_bot' || activeStrategy === 'macro_trend_onnx_fusion');
   const isMacroTrend = !isDualOnnx && !isMacroOnnx && (activeStrategy === 'macro_trend_dominion' || activeStrategy === 'macro_trend');
   const is3StepBot = activeStrategy === '3_step_domination_bot';
+  const isGoldOnnx = activeStrategy === 'gold_onnx_bot' || activeStrategy === 'gold_onnx';
   const isBot1V4 = activeStrategy === 'bot1_ver_4' || activeStrategy === '3_step_domination_bot_v4';
   const isDominion2 = false; // Deprecated and unregistered
   const isOnnxBot = activeStrategy === 'onnx_microstructure_bot';

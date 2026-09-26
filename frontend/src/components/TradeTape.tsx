@@ -1,11 +1,7 @@
 /**
  * @file TradeTape.tsx
  * @description Institutional real-time trade tape component showing continuous trade prints,
-<<<<<<< HEAD
- * contract counts, price points, and side indicators (YES / NO) with glanceable telemetry and accessibility enhancements.
-=======
  * contract counts, price points, side indicators (YES / NO), and full keyboard/screen reader accessibility.
->>>>>>> origin/palette-trade-tape-ux-accessibility-sweep-6787729153568931860
  */
 
 import React, { useMemo } from 'react';

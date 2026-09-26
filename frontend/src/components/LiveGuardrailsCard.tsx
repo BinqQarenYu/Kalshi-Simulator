@@ -51,7 +51,12 @@ export const LiveGuardrailsCard: React.FC<LiveGuardrailsCardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#161b22] border border-emerald-500/30 text-[11px] font-mono">
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label="Live Pre-Trade Guardrails status: ARMED"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#161b22] border border-emerald-500/30 text-[11px] font-mono"
+        >
           <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-emerald-400 font-bold">ARMED</span>
         </div>
@@ -118,22 +123,26 @@ export const LiveGuardrailsCard: React.FC<LiveGuardrailsCardProps> = ({
 
         {isKillSwitchTripped ? (
           <button
+            type="button"
+            aria-label="Reset trading circuit breaker and resume live execution"
             onClick={() => {
               soundFX.playClickSound();
               onResumeTrading();
             }}
-            className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold rounded-xl shadow-md shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
+            className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-extrabold rounded-xl shadow-md shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
           >
             <Play className="h-4 w-4 fill-current" />
             <span>RESET CIRCUIT BREAKER & RESUME TRADING</span>
           </button>
         ) : (
           <button
+            type="button"
+            aria-label="Trigger emergency kill switch and halt all live trading"
             onClick={() => {
               soundFX.playLossSound();
               onKillSwitch();
             }}
-            className="w-full py-2.5 px-4 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white text-xs font-extrabold rounded-xl shadow-md shadow-red-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 animate-pulse"
+            className="w-full py-2.5 px-4 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white text-xs font-extrabold rounded-xl shadow-md shadow-red-500/30 active:scale-95 transition-all flex items-center justify-center gap-2 animate-pulse focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
           >
             <AlertOctagon className="h-4 w-4 fill-current" />
             <span>🛑 EMERGENCY KILL SWITCH (HALT ALL)</span>
@@ -145,22 +154,22 @@ export const LiveGuardrailsCard: React.FC<LiveGuardrailsCardProps> = ({
       <div className="grid grid-cols-2 gap-2.5">
         <div className="bg-[#161b22] border border-[#21262d] p-3 rounded-xl">
           <div className="text-[10px] text-[#8b949e] uppercase font-semibold">Max Sizing Cap</div>
-          <div className="text-sm font-bold text-white font-mono mt-0.5">1 Contract / Asset</div>
-          <div className="text-[10px] text-emerald-400 mt-0.5 font-mono">$1.00 Max Risk / Event</div>
+          <div className="text-sm font-bold text-white font-mono tabular-nums mt-0.5">1 Contract / Asset</div>
+          <div className="text-[10px] text-emerald-400 mt-0.5 font-mono tabular-nums">$1.00 Max Risk / Event</div>
         </div>
 
         <div className="bg-[#161b22] border border-[#21262d] p-3 rounded-xl">
           <div className="text-[10px] text-[#8b949e] uppercase font-semibold">Daily Loss Limit</div>
-          <div className="text-sm font-bold text-rose-400 font-mono mt-0.5">-$10.00 Limit</div>
+          <div className="text-sm font-bold text-rose-400 font-mono tabular-nums mt-0.5">-$10.00 Limit</div>
           <div className="text-[10px] text-[#8b949e] mt-0.5 font-mono">Auto Kill-Switch</div>
         </div>
 
         <div className="bg-[#161b22] border border-[#21262d] p-3 rounded-xl">
           <div className="text-[10px] text-[#8b949e] uppercase font-semibold">Available Cash</div>
-          <div className={`text-sm font-bold font-mono mt-0.5 ${isBalanceDepleted ? 'text-amber-400' : 'text-emerald-400'}`}>
+          <div className={`text-sm font-bold font-mono tabular-nums mt-0.5 ${isBalanceDepleted ? 'text-amber-400' : 'text-emerald-400'}`}>
             ${balance.toFixed(2)}
           </div>
-          <div className="text-[10px] text-[#8b949e] mt-0.5 font-mono">Margin: ${margin.toFixed(2)}</div>
+          <div className="text-[10px] text-[#8b949e] mt-0.5 font-mono tabular-nums">Margin: ${margin.toFixed(2)}</div>
         </div>
 
         <div className="bg-[#161b22] border border-[#21262d] p-3 rounded-xl">
@@ -177,7 +186,7 @@ export const LiveGuardrailsCard: React.FC<LiveGuardrailsCardProps> = ({
             <CheckCircle2 className="h-3.5 w-3.5 text-cyan-400" />
             <span>Mathematical Invariant Audit</span>
           </span>
-          <span className="font-mono font-bold text-cyan-400">
+          <span className="font-mono tabular-nums font-bold text-cyan-400">
             {integrityStatus?.score ? `${integrityStatus.score.toFixed(0)}%` : '100%'} ({integrityStatus?.status || 'HEALTHY'})
           </span>
         </div>
@@ -187,7 +196,7 @@ export const LiveGuardrailsCard: React.FC<LiveGuardrailsCardProps> = ({
             <CheckCircle2 className="h-3.5 w-3.5 text-purple-400" />
             <span>CFTC & Wash Trading Shield</span>
           </span>
-          <span className="font-mono font-bold text-purple-400">
+          <span className="font-mono tabular-nums font-bold text-purple-400">
             {complianceStatus?.score ? `${complianceStatus.score.toFixed(0)}%` : '100%'} (ACTIVE)
           </span>
         </div>
@@ -197,7 +206,7 @@ export const LiveGuardrailsCard: React.FC<LiveGuardrailsCardProps> = ({
             <Activity className="h-3.5 w-3.5 text-emerald-400" />
             <span>VPIN Toxicity Veto</span>
           </span>
-          <span className="font-mono font-bold text-emerald-400">
+          <span className="font-mono tabular-nums font-bold text-emerald-400">
             Threshold &gt; 0.65
           </span>
         </div>
