@@ -1,0 +1,153 @@
+# =============================================================================
+# Three-Expert MoE for Kalshi-Simulator-refactor-3-pillar-monorepo
+#
+# Each expert owns a directory and cannot write outside it. That is what makes
+# them safe to run concurrently — they physically cannot collide.
+# =============================================================================
+
+monorepo_root: Kalshi-Simulator-refactor-3-pillar-monorepo
+
+experts:
+
+  # ---------------------------------------------------------------------------
+  # 1. FRONTEND — the design follower
+  # ---------------------------------------------------------------------------
+  deer_frontend:
+    role: "UI/UX implementation from a measured design"
+    model_pool: local_vision           # must SEE Dashboard.jpeg
+    fallback_pool: cloud_flash
+
+    inputs:
+      design_image: frontend/Dashboard.jpeg
+      sketches_dir: frontend/design_notes/     # your annotations + explanations
+    owns:
+      - frontend/src/**
+      - frontend/styles/**
+    reads_only:
+      - backend/api/schema.json          # needs to know what data exists
+    never_touches:
+      - backend/**
+      - bots/**
+
+    workflow: design_ladder              # tokens -> primitives -> layout -> regions
+    concurrency: 1
+    requires_human_approval: true
+
+    # Your sketches are treated as INTENT, the JPEG as MEASUREMENT.
+    # Where they disagree, the pixels win and the agent asks about the gap.
+    annotation_handling:
+      sketch_role: intent
+      image_role: ground_truth
+      on_conflict: escalate_question
+
+  # ---------------------------------------------------------------------------
+  # 2. BACKEND — correctness, contracts, data integrity
+  # ---------------------------------------------------------------------------
+  deer_backend:
+    role: "API correctness, typing, data integrity, test coverage"
+    model_pool: local_coder
+    fallback_pool: cloud_flash
+
+    owns:
+      - backend/**
+      - tests/backend/**
+    reads_only:
+      - frontend/src/api/**              # must keep contracts in sync
+    never_touches:
+      - frontend/src/components/**
+      - bots/**
+      - .env*
+
+    # Backend flaws are machine-verifiable, so this expert may auto-fix
+    # a narrow, provable class of defects without asking.
+    autonomous_fixes:
+      - missing_type_annotation
+      - unhandled_exception_path
+      - bare_except_clause
+      - mutable_default_argument
+      - float_used_for_money         # CRITICAL in this repo — must be Decimal
+      - missing_test_for_public_fn
+      - sql_string_concatenation
+
+    escalate_never_fix:
+      - api_contract_change          # breaks the frontend
+      - schema_migration
+      - auth_or_permission_logic
+      - anything_touching_order_placement
+
+  # ---------------------------------------------------------------------------
+  # 3. QUANT — the bot researcher. Heaviest guardrails in the system.
+  # ---------------------------------------------------------------------------
+  deer_quant:
+    role: "Strategy research under strict anti-overfitting discipline"
+    model_pool: local_coder
+    fallback_pool: cloud_flash
+
+    owns:
+      - bots/candidates/**             # proposals only
+      - research/**
+    reads_only:
+      - bots/live/**                   # may READ the existing bot, never edit
+      - data/train/**
+    never_touches:
+      - bots/live/**                   # live bots are human-promoted only
+      - data/holdout/**                # SEALED — see trial_registry.py
+      - policy/**
+
+    # -------------------------------------------------------------------------
+    # The objective. This is the part that matters most.
+    #
+    # DO NOT optimize win rate. On binary contracts a high win rate is
+    # trivially achievable by buying heavy favourites, and it loses money.
+    # Verified arithmetic (Kalshi taker fee = ceil(0.07*C*P*(1-P))):
+    #
+    #     75% win rate @ price 0.70  ->  EV +0.030/contract   profitable
+    #     75% win rate @ price 0.80  ->  EV -0.070/contract   LOSES
+    #     75% win rate @ price 0.90  ->  EV -0.160/contract   LOSES badly
+    #
+    # An optimizer told "reach 75% WR" will discover that buying at 0.90
+    # yields ~90% WR, declare spectacular success, and drain the account.
+    # -------------------------------------------------------------------------
+    objective:
+      primary: expected_value_per_contract_net_of_fees
+      secondary: profit_factor
+      win_rate: diagnostic_only        # reported, NEVER optimized
+      forbidden_objectives:
+        - win_rate
+        - total_return
+        - max_consecutive_wins
+
+    # Hard stops on the search itself
+    trial_budget:
+      max_variants_per_run: 40
+      max_variants_lifetime: 400       # every trial is registered; see registry
+      deflate_by_trial_count: true     # Bailey & Lopez de Prado DSR
+
+    validation:
+      train_window_pct: 60
+      validation_window_pct: 20
+      holdout_pct: 20                  # sealed, one-shot, human-unsealed only
+      walk_forward_folds: 5
+      require_positive_ev_in_all_folds: true
+
+    promotion_gate:
+      # Mirrors YOUR EXISTING auditor: backtests never authorize live trading.
+      backtest_can_authorize_live: false
+      requires_paper_forward_cycles: 30
+      requires_paper_profit_factor: 1.10
+      requires_deflated_metric_positive: true
+      final_step: human_promotion_only
+
+# =============================================================================
+# Routing — who picks up which finding
+# =============================================================================
+routing:
+  by_path:
+    "frontend/**": deer_frontend
+    "backend/**": deer_backend
+    "bots/**": deer_quant
+  on_cross_cutting: escalate_to_human    # e.g. an API change breaking the UI
+
+  concurrency:
+    frontend_and_backend: parallel       # disjoint dirs, safe
+    quant: serial                        # one hypothesis at a time, always

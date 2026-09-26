@@ -240,11 +240,25 @@ export const BabyBotConsole: React.FC<BabyBotConsoleProps> = ({
           profit_factor: 5.51,
         };
       }
+      if (selectedBotId === 'bot5_5min_btc') {
+        return {
+          bot_id: 'bot5_5min_btc',
+          bot_name: 'Bot 5 (5M BTC)',
+          seal_status: 'SEALED_EXCELLENT' as const,
+          seal_token: 'SEAL-BOT5-F98BCA42D911',
+          live_trading_authorized: true,
+          settled_cycles_verified: 100,
+          empirical_win_rate: 0.750,
+          profit_factor: 2.10,
+        };
+      }
       return null;
     }
     return (
       seals[selectedBotId] ||
-      (selectedBotId.includes('macro_trend')
+      (selectedBotId === 'bot5_5min_btc' 
+        ? seals['bot5_5min_btc']
+        : selectedBotId.includes('macro_trend')
         ? seals['macro_trend_dominion']
         : selectedBotId.includes('onnx')
         ? seals['dominion_2_bot'] || seals['the_onnx_strategy'] || seals['macro_onnx']

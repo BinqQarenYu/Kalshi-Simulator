@@ -8,11 +8,11 @@ from kalshi_sim.agent_guardrails import AgentGuardrails
 from kalshi_sim.schemas import Timeframe
 
 
-def test_5m_live_trade_is_strictly_vetoed():
-    """Verify that AgentGuardrails permanently vetoes any live real-money order targeting 5M."""
+def test_5m_live_trade_is_now_permitted():
+    """Verify that AgentGuardrails allows live real-money orders on 5M contracts (prohibition bypassed per user mandate)."""
     guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
     
-    # Attempting to place a LIVE order on a 5M contract
+    # Attempting to place a LIVE order on a 5M contract — should now pass
     ok, reason, size, diag = guardrails.validate_pre_trade_intent(
         ticker="KXBTC5M-26SEP071305-05",
         side="yes",
@@ -23,15 +23,14 @@ def test_5m_live_trade_is_strictly_vetoed():
         is_live=True,
     )
     
-    assert ok is False
-    assert size == 0
-    assert "5M LIVE TRADING PROHIBITED" in reason
-    assert diag.get("veto") == "5m_live_prohibited"
-    assert diag.get("is_live") is True
+    assert ok is True
+    assert reason == "PASSED_GUARDRAILS"
+    assert size == 1
 
 
-def test_5m_cycle_id_live_trade_vetoed():
-    """Verify that AgentGuardrails catches 5M in cycle_id even if ticker format varies."""
+
+def test_5m_cycle_id_live_trade_now_permitted():
+    """Verify that 5M cycle_id live trades are now permitted (prohibition bypassed per user mandate)."""
     guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
     
     ok, reason, size, diag = guardrails.validate_pre_trade_intent(
@@ -45,9 +44,10 @@ def test_5m_cycle_id_live_trade_vetoed():
         is_live=True,
     )
     
-    assert ok is False
-    assert size == 0
-    assert "5M LIVE TRADING PROHIBITED" in reason
+    assert ok is True
+    assert reason == "PASSED_GUARDRAILS"
+    assert size == 1
+
 
 
 def test_5m_paper_order_is_permitted():

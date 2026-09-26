@@ -63,7 +63,7 @@ def get_active_lock_holder(lock_path: Path = DEFAULT_LOCK_FILE) -> Optional[Tupl
 class TradingEngineLock:
     """Mutual exclusion file-lock ensuring exclusive live order routing."""
 
-    def __init__(self, lock_path: Path = DEFAULT_LOCK_FILE, owner_name: str = "standalone_bot") -> None:
+    def __init__(self, lock_path: Path = DEFAULT_LOCK_FILE, owner_name: str = "kalshi_engine") -> None:
         self.lock_path = lock_path
         self.owner_name = owner_name
         self.acquired = False

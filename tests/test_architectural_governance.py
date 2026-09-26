@@ -13,14 +13,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 REFACTORED_FILE_LIMITS = {
     # Backend Core Monoliths
     "src/kalshi_sim/server.py": 1500,
-    "src/kalshi_sim/standalone_bot.py": 1100,
     "src/kalshi_sim/simulation_agent.py": 700,
     "src/kalshi_sim/ml/domination_bot.py": 1350,
     "src/kalshi_sim/routers/strategies.py": 1250,
     
     # Frontend Component Monoliths
     "frontend/src/components/ParentHub.tsx": 1550,
-    "frontend/src/components/ClobTerminalView.tsx": 1400,
     "frontend/src/components/HistoricalAnalyticsTab.tsx": 800,
     "frontend/src/components/baby_bot/BabyBotParametersDrawer.tsx": 300,
     "frontend/src/components/ONNXSettingsPanel.tsx": 350,

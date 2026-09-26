@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 
 TOKEN_THROTTLE_FILE = Path("docs/audits/lead_deer_throttle.json")
-MAX_CALLS_PER_HOUR = 2
+MAX_CALLS_PER_HOUR = 30
 
 
 class LeadDeerReviewer:

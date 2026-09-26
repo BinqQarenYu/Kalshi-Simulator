@@ -89,7 +89,7 @@ import { TradeJournalView } from './parenthub/TradeJournalView';
 import { BabyBotRightRail } from './parenthub/BabyBotRightRail';
 import { SprintBotView } from './parenthub/SprintBotView';
 
-type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'sprint' | 'settings';
+type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'sprint' | 'settings' | 'dual_onnx' | 'macro_dominion' | 'dominion_v2' | 'v4_domination';
 type SettingsSubNav =
   | 'account'
   | 'keys'

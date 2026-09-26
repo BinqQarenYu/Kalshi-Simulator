@@ -111,6 +111,7 @@ export const BabyBotHeaderActions: React.FC<BabyBotHeaderActionsProps> = ({
           BOT_PROFILES['dual_onnx'] || BOT_PROFILES['the_onnx_strategy'] || BOT_PROFILES['macro_onnx'],
           BOT_PROFILES['macro_trend_dominion'],
           BOT_PROFILES['gold_onnx_bot'],
+          BOT_PROFILES['bot5_5min_btc'],
         ].filter(Boolean).map((profile) => {
           const profileSeal =
             sealOfExcellence?.seals?.[profile.id] ||

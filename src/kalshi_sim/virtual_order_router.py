@@ -161,11 +161,11 @@ class VirtualOrderRouter:
                 live_side = side.value if hasattr(side, "value") else str(side).lower()
                 live_count = 1  # Strictly 1 contract for each asset
 
-                # Check if standalone trading engine holds exclusive lock
+                # Check if another trading engine holds exclusive lock
                 holder = get_active_lock_holder()
                 if holder and holder[1] != os.getpid():
                     logger.warning(
-                        "🛑 [LOCKOUT] Standalone engine holds lock (%s, PID: %d). Suppressing main dash live order.",
+                        "🛑 [LOCKOUT] Another engine holds lock (%s, PID: %d). Suppressing main dash live order.",
                         holder[0], holder[1]
                     )
                     self._guardrails.release_in_flight_intent(ticker)

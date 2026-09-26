@@ -189,8 +189,8 @@ def sentinel_cycle():
             )
 
 
-def run_sentinel_forever(interval_seconds: int = 600):
-    """24/7 Continuous Autonomous Watchman Loop (WF-006 'Project Hephaestus'). 10m Cadence."""
+def run_sentinel_forever(interval_seconds: int = 120):
+    """24/7 Continuous Autonomous Watchman Loop. 2m Cadence."""
     print(f"[*] Autonomous Self-Healing Sentinel Daemon engaged. Alternating Cadence: {interval_seconds // 60}m.")
     while True:
         try:
@@ -202,5 +202,5 @@ def run_sentinel_forever(interval_seconds: int = 600):
 
 
 if __name__ == "__main__":
-    run_sentinel_forever(interval_seconds=600)
+    run_sentinel_forever(interval_seconds=120)
 

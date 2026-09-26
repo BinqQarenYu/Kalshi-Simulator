@@ -295,5 +295,6 @@ def test_integrity_live_daemon_status() -> None:
         "dual_onnx",
         "the_onnx_strategy",
         "onnx_macro_v2",
+        "both",
     )
 

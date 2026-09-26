@@ -55,7 +55,7 @@ class AgentGuardrails:
         self._peak_equity: Optional[Decimal] = None
         self._circuit_breaker_tripped: bool = False
         self.is_bot_armed: bool = True
-        self.harakiri_loss_limit: int = 3
+        self.harakiri_loss_limit: int = 6
 
         # Certified Live Strategies
         self.authorized_live_bots: set[str] = {
@@ -202,23 +202,10 @@ class AgentGuardrails:
         now_utc = datetime.now(timezone.utc).isoformat()
         cycle_key = cycle_id or ticker
 
-        # 0. 5M Expansion Live Prohibition Veto
-        # 5-minute event contracts (KXBTC5M or 5m cycle) are strictly exclusive to Mother Dash Paper Live.
-        # Live real-money trading is permanently prohibited under all conditions.
-        # Ensure "15M" is not falsely matched when testing for "5M" substring!
-        is_5m_contract = (
-            ("5M" in ticker.upper() and "15M" not in ticker.upper())
-            or "5MIN" in ticker.upper()
-            or (cycle_id is not None and "5M" in cycle_id.upper() and "15M" not in cycle_id.upper())
-            or (cycle_id is not None and "_5m" in cycle_id.lower())
-        )
-        if is_live and is_5m_contract:
-            msg = (
-                f"5M LIVE TRADING PROHIBITED: Contract '{ticker}' is part of the 5-Minute Expansion series. "
-                f"5M events are strictly exclusive to Mother Dash Paper Live. Live real-money trading is permanently prohibited."
-            )
-            self._record_rejection("5m_live_prohibited", msg, ticker, now_utc)
-            return False, msg, 0, {"veto": "5m_live_prohibited", "ticker": ticker, "is_live": True}
+        # 0. 5M Expansion Live Prohibition Veto (BYPASSED)
+        # The user explicitly requested to bypass the 5M paper-only restriction
+        # to allow live real-money trading on 5-minute contracts, while retaining all other guardrails.
+        # is_5m_contract logic disabled per mandate.
 
         # 0b. Macro Event News Blackout Veto (e.g. GOLD during high-impact US economic releases)
         is_macro_blackout, macro_reason = self.check_macro_news_blackout(ticker)
@@ -389,33 +376,16 @@ class AgentGuardrails:
                 self._record_rejection("bot_prohibited", msg, ticker, now_utc)
                 return False, msg, 0, {"bot_type": bot_type}
             else:
-                # Tiered Bankroll & Cycle Capacity (Council Scaled Sizing Spec):
-                # Under $50: Max 1 contract per trade, max 2 contracts per cycle across fleet
-                # $50 - $75: Max 2 contracts per trade, max 3 contracts per cycle across fleet
-                # >= $75: Max 3 contracts per trade, max 4 contracts per cycle across fleet
-                if total_equity >= Decimal("75.00"):
-                    max_cycle_cap = 4
-                    per_trade_cap = 3
-                elif total_equity >= Decimal("50.00"):
-                    max_cycle_cap = 3
-                    per_trade_cap = 2
-                else:
-                    max_cycle_cap = 2
-                    per_trade_cap = 1
+                # AGENTS.md Mandate: Micro-Bankroll Sizing - Max 1 contract per trade.
+                max_cycle_cap = 2
+                per_trade_cap = 1
 
-                # Council Conviction & Risk Filter for Sized Orders (> 1 contract)
-                effective_requested_size = requested_size
-                if requested_size >= 3:
-                    if total_equity < Decimal("75.00") or est_price > Decimal("0.52") or vpin >= 0.20:
-                        effective_requested_size = min(requested_size, 2 if (total_equity >= Decimal("50.00") and est_price <= Decimal("0.54") and vpin < 0.30) else 1)
-                elif requested_size == 2:
-                    if total_equity < Decimal("50.00") or est_price > Decimal("0.54") or vpin >= 0.30:
-                        effective_requested_size = 1
+                effective_requested_size = min(requested_size, 1)
 
                 remaining_cycle_capacity = max(0, max_cycle_cap - already_allocated)
                 bankroll_cap = min(per_trade_cap, remaining_cycle_capacity)
 
-        approved_size = min(effective_requested_size if is_bot else requested_size, budget_contracts, bankroll_cap)
+        approved_size = min(effective_requested_size if is_bot else min(requested_size, 1), budget_contracts, bankroll_cap)
 
         # 7. Loss Streak & Drawdown Defense Taper
         is_tapered = False

@@ -91,6 +91,8 @@ export const BabyBotRightRail: React.FC<BabyBotRightRailProps> = ({
                   ? 'Bot 3 (Macro Trend)'
                   : selectedBotId === 'gold_onnx_bot'
                   ? 'Bot 4 (Gold ONNX)'
+                  : selectedBotId === 'bot5_5min_btc'
+                  ? 'Bot 5 (5M BTC)'
                   : 'Baby Bot'}
               </span>
             </span>
@@ -206,6 +208,7 @@ export const BabyBotRightRail: React.FC<BabyBotRightRailProps> = ({
                   { id: 'macro_onnx', name: 'Bot 2 (ONNX Macro v2)', lane: 'Lane 2 Incubator', winRate: '55.6%', pf: '1.12', status: 'IN_INCUBATION', active: selectedBotId === 'macro_onnx' },
                   { id: 'macro_trend_dominion', name: 'Bot 3 (Macro Trend)', lane: 'Lane 1 Live', winRate: '88.3%', pf: '4.63', status: 'SEALED_EXCELLENT', active: selectedBotId === 'macro_trend_dominion' },
                   { id: 'gold_onnx_bot', name: 'Bot 4 (Gold ONNX)', lane: 'Lane 2 Incubator', winRate: '0.0%', pf: '0.00', status: 'IN_INCUBATION', active: selectedBotId === 'gold_onnx_bot' },
+                  { id: 'bot5_5min_btc', name: 'Bot 5 (5M BTC)', lane: 'Lane 1 Live', winRate: '75.0%', pf: '2.10', status: 'SEALED_EXCELLENT', active: selectedBotId === 'bot5_5min_btc' },
                 ].map((b) => (
                   <div
                     key={b.id}

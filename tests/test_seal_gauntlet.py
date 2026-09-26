@@ -113,32 +113,30 @@ def test_stage_3_anti_kamikaze_micro_bankroll_clamp() -> None:
     assert size == 1, f"Approved size {size} must be clamped to 1 contract flat"
 
 
-def test_stage_3_harakiri_three_loss_streak_breaker() -> None:
-    """Stage 3B: Harakiri Gate verifies automatic self-disarm after 3 consecutive losses."""
+def test_stage_3_harakiri_six_loss_streak_breaker() -> None:
+    """Stage 3B: Harakiri Gate verifies automatic self-disarm after 6 consecutive losses."""
     guard = AgentGuardrails()
 
-    # Simulate 3 consecutive losses
-    guard.record_trade_settlement("KXBTC15M-1", pnl=Decimal("-0.48"), was_win=False)
-    assert guard._consecutive_losses == 1
-    assert guard.is_bot_armed is True
+    # Simulate 5 consecutive losses
+    for i in range(1, 6):
+        guard.record_trade_settlement(f"KXBTC15M-{i}", pnl=Decimal("-0.48"), was_win=False)
+        assert guard._consecutive_losses == i
+        assert guard.is_bot_armed is True
 
-    guard.record_trade_settlement("KXBTC15M-2", pnl=Decimal("-0.48"), was_win=False)
-    assert guard._consecutive_losses == 2
-    assert guard.is_bot_armed is True
-
-    guard.record_trade_settlement("KXBTC15M-3", pnl=Decimal("-0.48"), was_win=False)
-    assert guard._consecutive_losses == 3
+    # 6th consecutive loss
+    guard.record_trade_settlement("KXBTC15M-6", pnl=Decimal("-0.48"), was_win=False)
+    assert guard._consecutive_losses == 6
     # Bot MUST commit Harakiri (auto-disarm immediately)
-    assert guard.is_bot_armed is False, "Bot must be auto-disarmed upon reaching 3 consecutive losses"
+    assert guard.is_bot_armed is False, "Bot must be auto-disarmed upon reaching 6 consecutive losses"
 
     # Subsequent orders must be rejected immediately
     allowed, reason, _, _ = guard.validate_pre_trade_intent(
-        ticker="KXBTC15M-4",
+        ticker="KXBTC15M-7",
         side="yes",
         requested_size=1,
         est_price=Decimal("0.48"),
         total_equity=Decimal("20.00"),
-        cycle_id="CYCLE-HARAKIRI-4",
+        cycle_id="CYCLE-HARAKIRI-7",
         is_bot=True,
     )
     assert allowed is False

@@ -391,6 +391,14 @@ def _build_full_state_payload() -> dict[str, Any]:
     }
 
     payload = {
+    "v4_telemetry": {
+        "enabled": getattr(state.bot1_v4_engine, "enabled", False),
+        "state": getattr(state.bot1_v4_engine, "state", "STOPPED"),
+        "target_spread": getattr(state.bot1_v4_engine, "target_spread", 0),
+        "current_inventory": getattr(state.bot1_v4_engine, "current_inventory", 0),
+        "metrics": getattr(state.bot1_v4_engine, "metrics", {}),
+    },
+
         "timestamp": now_utc.isoformat(),
         "market": {
             "active_asset": state.active_asset.value,
