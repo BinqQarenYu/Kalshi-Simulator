@@ -7,7 +7,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { ONNXSettingsPanel } from './ONNXSettingsPanel';
-import { UniversalTerminalView } from './UniversalTerminalView';
 import { ResizableSplitPane } from './ResizableSplitPane';
 import {
   MarketState,
@@ -59,6 +58,7 @@ import {
   TrendingUp,
   TrendingDown,
   Sliders,
+  Timer,
 } from 'lucide-react';
 import { PresetVaultModal } from './PresetVaultModal';
 import { PriceHero } from './PriceHero';
@@ -83,16 +83,13 @@ import {
 } from './WinLossReportsModal';
 import { soundFX } from '../utils/audioFX';
 import { ContinuousTrainingTelemetry, MacroDominionTelemetry, HMMMacroRegimeTelemetry } from '../types';
-import { EngineRoomMatrix, EngineViewTab } from './EngineRoomMatrix';
-import { ClobTerminalView } from './ClobTerminalView';
-import { ArbitrageRadarView } from './ArbitrageRadarView';
 import { SettingsView } from './parenthub/SettingsView';
 import { BotsBenchmarkingView } from './parenthub/BotsBenchmarkingView';
 import { TradeJournalView } from './parenthub/TradeJournalView';
 import { BabyBotRightRail } from './parenthub/BabyBotRightRail';
+import { SprintBotView } from './parenthub/SprintBotView';
 
-type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'engine' | 'clob_terminal' | 'omni' | 'arbitrage' | 'settings';
-type ClobTerminalSubNav = 'terminal' | 'heatmap' | 'event_book' | 'spot_book' | 'pine_editor';
+type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'sprint' | 'settings';
 type SettingsSubNav =
   | 'account'
   | 'keys'
@@ -138,6 +135,7 @@ interface ParentHubProps {
   onClosePosition?: (ticker: string, executionMode?: 'paper' | 'live') => Promise<any>;
   onCancelOrder?: (orderId: string, executionMode?: 'paper' | 'live') => Promise<any>;
   onResetCircuitBreaker?: () => Promise<any>;
+  onResyncMemory?: () => Promise<any>;
   dualOnnxTelemetry?: DualONNXTelemetry;
   preflightGates?: PreflightGates;
   macroDominionTelemetry?: MacroDominionTelemetry;
@@ -177,6 +175,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   onClosePosition,
   onCancelOrder,
   onResetCircuitBreaker,
+  onResyncMemory,
   dualOnnxTelemetry,
   preflightGates,
   macroDominionTelemetry,
@@ -187,8 +186,6 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   const [primaryNav, setPrimaryNav] = useState<PrimaryNav>('analytics');
   const [settingsSubNav, setSettingsSubNav] = useState<SettingsSubNav>('defaults');
   const [botsSubNav, setBotsSubNav] = useState<BotsSubNav>('matrix');
-  const [engineSubNav, setEngineSubNav] = useState<EngineViewTab>('matrix');
-  const [clobSubNav, setClobSubNav] = useState<ClobTerminalSubNav>('terminal');
   const [isBabyBotRailHidden, setIsBabyBotRailHidden] = useState<boolean>(false);
   const [isBabyBotConsoleMinimized, setIsBabyBotConsoleMinimized] = useState<boolean>(false);
   const [journalSubNav, setJournalSubNav] = useState<JournalSubNav>('trades');
@@ -676,70 +673,19 @@ export const ParentHub: React.FC<ParentHubProps> = ({
             <button
               onClick={() => {
                 soundFX.playClickSound();
-                setPrimaryNav('engine');
+                setPrimaryNav('sprint');
               }}
               className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
-                primaryNav === 'engine'
-                  ? 'bg-[#38bdf8]/10 text-white border-l-2 border-[#38bdf8] font-bold'
+                primaryNav === 'sprint'
+                  ? 'bg-orange-500/15 text-white border-l-2 border-orange-400 font-bold'
                   : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
               }`}
             >
-              <Cpu className={`w-4 h-4 ${primaryNav === 'engine' ? 'text-[#38bdf8]' : 'text-[#8c9ba5]'}`} />
-              <span>Engine Room</span>
-              <span className="ml-auto text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-[#171c22] text-[#38bdf8]">
-                3 CYL
+              <Timer className={`w-4 h-4 ${primaryNav === 'sprint' ? 'text-orange-400' : 'text-[#8c9ba5]'}`} />
+              <span>Bot 5 Sprint</span>
+              <span className="ml-auto text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-orange-500/20 text-orange-300 font-bold border border-orange-500/30">
+                5M
               </span>
-            </button>
-
-            <button
-              onClick={() => {
-                soundFX.playClickSound();
-                setPrimaryNav('clob_terminal');
-              }}
-              className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
-                primaryNav === 'clob_terminal'
-                  ? 'bg-[#00c978]/10 text-white border-l-2 border-[#00c978] font-bold'
-                  : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
-              }`}
-            >
-              <Activity className={`w-4 h-4 ${primaryNav === 'clob_terminal' ? 'text-[#00c978]' : 'text-[#8c9ba5]'}`} />
-              <span>CLOB Terminal</span>
-              <span className="ml-auto text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-[#171c22] text-[#00c978]">
-                DOM
-              </span>
-            </button>
-
-            <button
-              onClick={() => {
-                soundFX.playClickSound();
-                setPrimaryNav('omni');
-              }}
-              className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
-                primaryNav === 'omni'
-                  ? 'bg-cyan-500/15 text-white border-l-2 border-cyan-400 font-bold'
-                  : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
-              }`}
-            >
-              <Globe className={`w-4 h-4 ${primaryNav === 'omni' ? 'text-cyan-400' : 'text-[#8c9ba5]'}`} />
-              <span>Omni Terminal</span>
-              <span className="ml-auto text-[8px] font-mono px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">
-                6 EX
-              </span>
-            </button>
-
-            <button
-              onClick={() => {
-                soundFX.playClickSound();
-                setPrimaryNav('arbitrage');
-              }}
-              className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
-                primaryNav === 'arbitrage'
-                  ? 'bg-amber-500/15 text-white border-l-2 border-amber-400 font-bold'
-                  : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
-              }`}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={primaryNav === 'arbitrage' ? 'text-amber-400' : 'text-[#8c9ba5]'}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-              <span>Arbitrage Scanner</span>
             </button>
 
             <button
@@ -840,61 +786,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
           </nav>
         )}
 
-        {/* Sub-nav: Engine Room */}
-        {primaryNav === 'engine' && (
-          <nav className="flex flex-col gap-1 text-xs">
-            {[
-              { id: 'matrix', label: 'Master Visual Matrix' },
-              { id: 'cylinder1', label: 'Cylinder 1: Spot Orderflow' },
-              { id: 'cylinder2', label: 'Cylinder 2: Kalshi CLOB' },
-              { id: 'cylinder3', label: 'Cylinder 3: HMM Macro' },
-              { id: 'wiring', label: 'Bot Wiring Harness' },
-            ].map((item) => (
-              <button
-                key={item.id}
-                onClick={() => {
-                  soundFX.playClickSound();
-                  setEngineSubNav(item.id as EngineViewTab);
-                }}
-                className={`w-full px-3 py-2 rounded-md transition-all text-left flex items-center justify-between ${
-                  engineSubNav === item.id
-                    ? 'bg-[#38bdf8]/10 text-white border-l-2 border-[#38bdf8] font-bold'
-                    : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
-                }`}
-              >
-                <span>{item.label}</span>
-              </button>
-            ))}
-          </nav>
-        )}
 
-        {/* Sub-nav: CLOB Terminal */}
-        {primaryNav === 'clob_terminal' && (
-          <nav className="flex flex-col gap-1 text-xs">
-            {[
-              { id: 'terminal', label: 'Institutional Cockpit' },
-              { id: 'heatmap', label: 'Liquidity Heatmap (DOM)' },
-              { id: 'event_book', label: '15M Event Order Book' },
-              { id: 'spot_book', label: 'Underlying L2 Spot Book' },
-              { id: 'pine_editor', label: 'Pine Script Editor' },
-            ].map((item) => (
-              <button
-                key={item.id}
-                onClick={() => {
-                  soundFX.playClickSound();
-                  setClobSubNav(item.id as ClobTerminalSubNav);
-                }}
-                className={`w-full px-3 py-2 rounded-md transition-all text-left flex items-center justify-between ${
-                  clobSubNav === item.id
-                    ? 'bg-[#00c978]/10 text-white border-l-2 border-[#00c978] font-bold'
-                    : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
-                }`}
-              >
-                <span>{item.label}</span>
-              </button>
-            ))}
-          </nav>
-        )}
 
         {/* Sub-nav: Journal */}
         {primaryNav === 'journal' && (
@@ -964,14 +856,8 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                   ? settingsSubNav.toUpperCase()
                   : primaryNav === 'bots'
                   ? botsSubNav.toUpperCase()
-                  : primaryNav === 'engine'
-                  ? engineSubNav.toUpperCase()
-                  : primaryNav === 'clob_terminal'
-                  ? clobSubNav.toUpperCase()
                   : primaryNav === 'journal'
                   ? journalSubNav.toUpperCase()
-                  : primaryNav === 'omni'
-                  ? 'MULTI-EXCHANGE CAPITAL POOL & ARBITRAGE'
                   : analyticsSubNav.toUpperCase()}
               </b>
             </div>
@@ -980,11 +866,9 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               {primaryNav === 'settings' && settingsSubNav === 'killswitch' && 'SETTINGS / GLOBAL KILL-SWITCH'}
               {primaryNav === 'settings' && settingsSubNav !== 'defaults' && settingsSubNav !== 'killswitch' && `SETTINGS / ${settingsSubNav.toUpperCase()}`}
               {primaryNav === 'bots' && 'BOT MANAGEMENT & BENCHMARKING MATRIX'}
-              {primaryNav === 'engine' && 'ENGINE ROOM / 3-CYLINDER POWERTRAIN MATRIX'}
-              {primaryNav === 'clob_terminal' && 'CLOB TERMINAL / INSTITUTIONAL WEBCLOB & HEATMAP'}
               {primaryNav === 'journal' && "TRADE JOURNAL & TODAY'S TIMELINE"}
               {primaryNav === 'analytics' && 'LIVE WORKBENCH & MICROSTRUCTURE RADAR'}
-              {primaryNav === 'omni' && 'THE UNIVERSAL MULTI-EXCHANGE TERMINAL & CAPITAL POOL'}
+              {primaryNav === 'sprint' && 'BOT 5 / 5-MINUTE SPRINT LIVE EXECUTION'}
             </h1>
           </div>
 
@@ -1067,16 +951,28 @@ export const ParentHub: React.FC<ParentHubProps> = ({
                 </button>
               ))}
             </div>
+
+            <div className="flex gap-1 ml-2">
+              <button
+                onClick={() => onResyncMemory?.()}
+                className="px-2.5 py-1 text-xs font-mono font-bold rounded bg-[#171c22] border border-[#262d35] text-[#8c9ba5] hover:text-white hover:border-[#00bda5]"
+                title="Force reload and resync 900 points of memory history from backend"
+              >
+                ⟳ RESYNC MEMORY
+              </button>
+            </div>
           </div>
         </header>
 
         {/* DYNAMIC VIEW BODY */}
         <div className="p-6 space-y-6">
-          {/* 0. OMNI UNIVERSAL TERMINAL VIEW */}
-          {primaryNav === 'omni' && <UniversalTerminalView />}
-
-          {/* ARBITRAGE RADAR VIEW */}
-          {primaryNav === 'arbitrage' && <ArbitrageRadarView />}
+          {/* BOT 5 SPRINT VIEW */}
+          {primaryNav === 'sprint' && (
+            <SprintBotView
+              reports={reports}
+              tradingMode={tradingMode}
+            />
+          )}
 
           {/* 1. SETTINGS VIEW (From HTML Proposal) */}
           {primaryNav === 'settings' && (
@@ -1103,40 +999,6 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               trainerActionLoading={trainerActionLoading}
               handleToggleTrainer={handleToggleTrainer}
             />
-          )}
-
-          {/* ENGINE ROOM: 3-CYLINDER POWERTRAIN VIEW */}
-          {primaryNav === 'engine' && (
-            <EngineRoomMatrix
-              activeTab={engineSubNav}
-              onTabChange={(tab) => setEngineSubNav(tab)}
-            />
-          )}
-
-          {/* CLOB TERMINAL: INSTITUTIONAL COCKPIT & LIQUIDITY HEATMAP */}
-          {primaryNav === 'clob_terminal' && (
-            <div className="h-[calc(100vh-140px)] -m-6 flex flex-col overflow-hidden">
-              <ClobTerminalView
-                market={market}
-                ladder={ladder}
-                aiSignals={aiSignals}
-                activePosition={activePosition}
-                tradeTape={tradeTape}
-                chartPoints={chartPoints}
-                tradingMode={tradingMode}
-                timeframe={timeframe}
-                onQuickTrade={onQuickTrade}
-                onSelectAsset={onSelectAsset}
-                onSelectTimeframe={onSelectTimeframe}
-                onClosePosition={onClosePosition}
-                onCancelOrder={onCancelOrder}
-                isRightPanelHidden={isBabyBotRailHidden}
-                onToggleRightPanel={() => {
-                  soundFX.playClickSound();
-                  setIsBabyBotRailHidden((prev) => !prev);
-                }}
-              />
-            </div>
           )}
 
           {/* 3. JOURNAL VIEW */}

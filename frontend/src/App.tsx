@@ -22,6 +22,7 @@ export function App() {
     toggleFeedMode,
     changeTimeframe,
     resetPortfolio,
+    resyncMemory,
     resetCircuitBreaker,
     triggerKillSwitch,
     selectStrategyBot,
@@ -246,6 +247,7 @@ export function App() {
       onClosePosition={closePosition}
       onCancelOrder={cancelOrder}
       onResetCircuitBreaker={resetCircuitBreaker}
+      onResyncMemory={resyncMemory}
       dualOnnxTelemetry={data.dual_onnx_telemetry}
       preflightGates={data.preflight_gates}
       macroDominionTelemetry={data.macro_trend_dominion_telemetry}

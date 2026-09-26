@@ -4,52 +4,43 @@ import { DashboardState, CryptoAsset } from '../types';
 const INITIAL_STATE: DashboardState = {
   timestamp: new Date().toISOString(),
   market: {
-    title: 'BTC 15 min',
-    series: 'KXBTC15M',
-    ticker: 'KXBTC15M-T78650',
-    target_strike: 77645.14,
-    target_strike_str: '$77,645.14',
-    current_btc_price: 78500.22,
-    current_btc_price_str: '$78,500.22',
-    diff: 855.08,
-    diff_pct: 1.10,
-    expiry_countdown_seconds: 87,
-    expiry_countdown_str: '01:27',
-    market_chance_pct: 5.9,
-    volume_24h_str: '$1,547,966',
-    best_yes_ask: 0.034,
-    best_yes_bid: 0.031,
-    best_no_ask: 0.969,
-    best_no_bid: 0.966,
-    yes_cents_str: '3.4¢',
-    no_cents_str: '96.9¢',
+    title: 'Loading...',
+    series: '-',
+    ticker: '-',
+    target_strike: 0,
+    target_strike_str: '$0.00',
+    current_btc_price: 0,
+    current_btc_price_str: '$0.00',
+    diff: 0,
+    diff_pct: 0,
+    expiry_countdown_seconds: 0,
+    expiry_countdown_str: '00:00',
+    market_chance_pct: 0,
+    volume_24h_str: '$0',
+    best_yes_ask: 0,
+    best_yes_bid: 0,
+    best_no_ask: 0,
+    best_no_bid: 0,
+    yes_cents_str: '0.0¢',
+    no_cents_str: '0.0¢',
   },
   chart: [],
   trade_tape: [],
-  orderbook_ladder: [
-    { side: 'yes', price_cents: '4.9¢', price_raw: 0.049, contracts: 2200, total: '$107.80', depth_pct: 44 },
-    { side: 'yes', price_cents: '4.8¢', price_raw: 0.048, contracts: 1, total: '$0.05', depth_pct: 2 },
-    { side: 'yes', price_cents: '4.6¢', price_raw: 0.046, contracts: 2001, total: '$92.05', depth_pct: 40 },
-    { side: 'yes', price_cents: '4.4¢', price_raw: 0.044, contracts: 3054, total: '$134.38', depth_pct: 61 },
-    { side: 'yes', price_cents: '4.2¢', price_raw: 0.042, contracts: 16, total: '$0.67', depth_pct: 5 },
-    { side: 'yes', price_cents: '4.1¢', price_raw: 0.041, contracts: 516, total: '$21.16', depth_pct: 12 },
-    { side: 'yes', price_cents: '4.0¢', price_raw: 0.040, contracts: 1002, total: '$40.08', depth_pct: 20 },
-    { side: 'yes', price_cents: '3.9¢', price_raw: 0.039, contracts: 16, total: '$0.62', depth_pct: 5 },
-  ],
+  orderbook_ladder: [],
   ai_signals: {
-    p_up: 0.684,
-    p_down: 0.211,
-    p_wait: 0.105,
-    vpin: 0.18,
-    vpin_is_safe: true,
-    ev_yes: 0.042,
-    ev_no: -0.015,
-    edge_yes: 0.065,
-    edge_no: -0.02,
-    kelly_f_yes: 0.125,
-    kelly_f_no: 0.0,
-    recommended_side: 'yes',
-    rationale: 'High OFI buyer pressure & positive EV edge (+4.2¢)',
+    p_up: 0,
+    p_down: 0,
+    p_wait: 0,
+    vpin: 0,
+    vpin_is_safe: false,
+    ev_yes: 0,
+    ev_no: 0,
+    edge_yes: 0,
+    edge_no: 0,
+    kelly_f_yes: 0,
+    kelly_f_no: 0,
+    recommended_side: 'wait',
+    rationale: 'Connecting to engine...',
   },
   portfolio: {
     balance: 100,
@@ -273,6 +264,16 @@ export function useKalshiWebSocket() {
     }
   };
 
+  const resyncMemory = async () => {
+    try {
+      await fetch('/api/system/resync', {
+        method: 'POST',
+      });
+    } catch (err) {
+      console.error('Failed to resync system memory:', err);
+    }
+  };
+
   const closePosition = async (ticker: string, executionMode: 'paper' | 'live' = 'paper') => {
     try {
       const resp = await fetch('/api/positions/close', {
@@ -425,6 +426,7 @@ export function useKalshiWebSocket() {
     toggleFeedMode,
     changeTimeframe,
     resetPortfolio,
+    resyncMemory,
     resetCircuitBreaker,
     triggerKillSwitch,
     selectStrategyBot,

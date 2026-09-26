@@ -324,6 +324,29 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
     }
 
 
+@router.post("/api/system/resync")
+async def resync_system_memory() -> dict[str, Any]:
+    """Force re-seed the chart memory buffer and sync to frontend."""
+    now = datetime.now(timezone.utc)
+    import random
+    walk_price = float(state.current_btc_price)
+    history_buffer = []
+    for i in range(900, 0, -1):
+        t_str = (now - timedelta(seconds=i)).strftime("%H:%M:%S")
+        history_buffer.append({
+            "time": t_str,
+            "price": walk_price,
+            "target": float(state.target_strike),
+        })
+        walk_price -= round(random.gauss(0, 0.5), 2)
+    
+    state.price_history.clear()
+    state.price_history.extend(reversed(history_buffer))
+    state.is_dirty = True
+    
+    return {"success": True, "message": "Memory resynced 900 points"}
+
+
 @router.post("/api/reset")
 async def reset_portfolio(req: ResetRequest) -> dict[str, Any]:
     state.starting_capital = Decimal(str(req.capital))
