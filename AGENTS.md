@@ -29,3 +29,14 @@ If you need deep institutional knowledge, ping the subagents:
 ## 6. Upgrade & Cache Invalidation Protocol
 Whenever applying a critical update, model retraining, or major codebase upgrade, you must ALWAYS forcefully apply the changes by "kicking out the old." Do not assume hot-reloading works. Manually restart background tasks, kill the server daemon, and clear RAM caches to ensure the system strictly runs on the newly upgraded version immediately and going forward.
 
+## 7. Zero Hallucination Mechanism (Zero False, Only Truth)
+On the `zero_hallucination_mode` branch, the orchestrator and all subagents are bound to **Empirical Truth**. 
+- Never guess API outputs, never mock data unless strictly required by a test, and never invent file paths. 
+- Always rely on actual file reads, rigorous `pytest` test results, and hard execution outputs. 
+- Agent **POE (Post-Occupancy Evaluator)** is the ultimate arbiter of truth. Zero false assumptions allowed.
+
+## 8. Zero Blackhole Credit Burning
+Tokens and API credits are physical assets. Prevent "blackhole burning" (infinite loops of failing commands, redundant tool calls, and massive file reads).
+- Apply the `agent-token-credit` philosophy: Batch your tool calls.
+- Stop immediately and report if a test or script loops or fails repeatedly. Do not blind-fire solutions and drain credits.
+
