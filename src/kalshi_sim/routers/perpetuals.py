@@ -149,22 +149,22 @@ _BOT_CONFIGS: Dict[str, Dict[str, Any]] = {
 }
 
 
-async def _get_current_mark_price(asset: str) -> float:
+async def _get_current_mark_price(asset: str) -> Decimal:
     if _margin_client:
         try:
             kalshi_ticker = 'KXBTCPERP' if asset == 'BTC' else asset
             price = await _margin_client.get_margin_mark_price(kalshi_ticker)
-            if price: return price
+            if price: return Decimal(str(price))
         except: pass
     try:
         s = get_state()
         if asset == "BTC" and hasattr(s, "current_btc_price"):
             val = Decimal(str(s.current_btc_price))
-            if val > 1000.0:
+            if val > Decimal("1000.0"):
                 return val
     except Exception:
         pass
-    return _ASSET_BASE_PRICES.get(asset, 84250.00)
+    return Decimal(str(_ASSET_BASE_PRICES.get(asset, 84250.00)))
 
 
 def _calc_liquidation_price(entry_price: Decimal, side: str, leverage: Decimal) -> Decimal:
@@ -303,9 +303,11 @@ async def place_perp_order(req: PerpOrderRequest) -> Dict[str, Any]:
         fill_price = mark_price * (1 + PERP_SPREAD_RATE) if req.side.lower() == "long" else mark_price * (1 - PERP_SPREAD_RATE)
     
     fill_price = round(fill_price, 2)
-    notional_value = fill_price * req.size
-    margin = notional_value / req.leverage
-    liq_price = _calc_liquidation_price(fill_price, req.side, req.leverage)
+    req_size_dec = Decimal(str(req.size))
+    req_lev_dec = Decimal(str(req.leverage))
+    notional_value = fill_price * req_size_dec
+    margin = notional_value / req_lev_dec
+    liq_price = _calc_liquidation_price(fill_price, req.side, req_lev_dec)
     
     if _margin_client:
         logger.info(f"Submitting LIVE Kalshi Margin Order for {req.asset}")
@@ -316,7 +318,7 @@ async def place_perp_order(req: PerpOrderRequest) -> Dict[str, Any]:
             count=req.size,
             leverage=req.leverage,
             order_type=req.order_type,
-            price_dollars=Decimal(f'{fill_price * 0.0001:.4f}') if req.asset == 'BTC' else Decimal(f'{fill_price:.2f}')
+            price_dollars=Decimal(f'{fill_price * Decimal("0.0001"):.4f}') if req.asset == 'BTC' else Decimal(f'{fill_price:.2f}')
         )
         if res:
             # Attempt to extract order_id from nested JSON response
@@ -369,13 +371,9 @@ async def place_perp_order(req: PerpOrderRequest) -> Dict[str, Any]:
 
 @router.post("/position/close")
 async def close_perp_position(req: PerpClosePositionRequest) -> Dict[str, Any]:
-    if _margin_client:
-        res = await _margin_client.close_margin_position(req.position_id)
-        if not res:
-            logger.warning(f"Failed to close LIVE margin position {req.position_id} on Kalshi. We will still mark it closed locally for sync.")
-            
     db = get_db()
     try:
+        # Phase 1: Read position from DB
         async with db.get_connection() as conn:
             async with conn.execute(
                 "SELECT asset, side, size, entry_price, margin FROM perp_positions WHERE id = ? AND status = 'open'",
@@ -385,25 +383,40 @@ async def close_perp_position(req: PerpClosePositionRequest) -> Dict[str, Any]:
                 if not row:
                     raise HTTPException(status_code=404, detail="Position not found or already closed")
                 asset, side, size, entry_p, margin = row
-
-            curr_mark = await _get_current_mark_price(asset)
-            realized_pnl = _calc_pnl_with_fees(entry_p, curr_mark, size, side)
-
-            await conn.execute(
-                "UPDATE perp_positions SET status = 'closed', realized_pnl = ?, mark_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (realized_pnl, curr_mark, req.position_id)
+                
+        # Phase 2: Close on Kalshi (outside DB lock)
+        if _margin_client:
+            opposing_side = "sell" if side.lower() == "long" else "buy"
+            kalshi_ticker = f"KX{asset}PERP"
+            res = await _margin_client.place_margin_order(
+                ticker=kalshi_ticker,
+                side=opposing_side,
+                count=size,
+                order_type="market"
             )
-            await conn.commit()
+            if not res:
+                logger.warning(f"Failed to close LIVE margin position {req.position_id} on Kalshi. We will still mark it closed locally for sync.")
 
-            logger.info("[PERP CLOSED] Position %s closed @ $%.2f | Realized PnL: %+.2f",
-                        req.position_id, curr_mark, realized_pnl)
+        # Phase 3: Update DB with fresh connection
+        curr_mark = await _get_current_mark_price(asset)
+        realized_pnl = _calc_pnl_with_fees(Decimal(str(entry_p)), curr_mark, Decimal(str(size)), side)
 
-            return {
-                "status": "ok",
-                "position_id": req.position_id,
-                "realized_pnl": round(realized_pnl, 2),
-                "exit_price": curr_mark,
-            }
+        async with db.get_connection() as conn2:
+            await conn2.execute(
+                "UPDATE perp_positions SET status = 'closed', realized_pnl = ?, mark_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (str(realized_pnl), str(curr_mark), req.position_id)
+            )
+            await conn2.commit()
+
+        logger.info("[PERP CLOSED] Position %s closed @ $%.2f | Realized PnL: %+.2f",
+                    req.position_id, curr_mark, realized_pnl)
+
+        return {
+            "status": "ok",
+            "position_id": req.position_id,
+            "realized_pnl": round(realized_pnl, 2),
+            "exit_price": curr_mark,
+        }
     except HTTPException:
         raise
     except Exception as exc:
@@ -506,9 +519,9 @@ async def perpetual_auto_trade_loop() -> None:
                             entry = Decimal(str(entry_price))
                             spot = Decimal(str(current_spot))
                             lev = Decimal(str(cfg.get("leverage", 10.0)))
-                            raw_pnl = _calc_pnl_with_fees(entry, spot, 1.0, pos_side)
+                            raw_pnl = _calc_pnl_with_fees(entry, spot, Decimal("1"), pos_side)
                             margin = entry / lev
-                            pnl_pct = (raw_pnl / margin) * 100.0 if margin > 0 else 0.0
+                            pnl_pct = (raw_pnl / margin) * Decimal("100") if margin > 0 else Decimal("0")
 
                             if pnl_pct <= -Decimal(str(cfg.get("stop_loss_pct", 5.0))):
                                 should_close = True
@@ -519,5 +532,6 @@ async def perpetual_auto_trade_loop() -> None:
                             c_req = PerpClosePositionRequest(position_id=pos_id)
                             await close_perp_position(c_req)
         except Exception as e:
-            logger.error(f"Perpetual Auto-Trader error: {e}")
+            import traceback
+            logger.error(f"Perpetual Auto-Trader error: {e}\n{traceback.format_exc()}")
             await asyncio.sleep(5)
