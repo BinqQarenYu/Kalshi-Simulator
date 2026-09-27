@@ -627,3 +627,153 @@ class KalshiLiveOrderClient:
 # Backwards compatibility alias
 KalshiDemoOrderClient = KalshiLiveOrderClient
 
+from kalshi_sim.auth import PROD_MARGIN_REST_BASE
+
+class KalshiMarginOrderClient(KalshiLiveOrderClient):
+    """Client for Kalshi's live perpetual futures (margin) API."""
+    def __init__(
+        self,
+        api_key_id: str,
+        private_key_path: str | Path | Any,
+        base_url: str = PROD_MARGIN_REST_BASE,
+    ) -> None:
+        super().__init__(api_key_id, private_key_path, base_url)
+
+    async def get_margin_balance(self) -> Dict[str, Any]:
+        endpoint = "/trade-api/v2/margin/balance"
+        url = f"{self.base_url}/balance"
+        headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
+
+        session = await self._get_session()
+        async with session.get(url, headers=headers) as resp:
+            if resp.status != 200:
+                err_text = await resp.text()
+                logger.error("Failed to fetch margin balance (HTTP %d): %s", resp.status, err_text)
+                return {"balance": 0, "status": resp.status, "error": err_text}
+            data = await resp.json()
+            return data
+
+    async def place_margin_order(
+        self,
+        ticker: str,
+        side: str,
+        count: float,
+        leverage: float = 10.0,
+        order_type: str = "market",
+        price_dollars: Optional[Decimal] = None,
+        client_order_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        endpoint = "/trade-api/v2/margin/orders"
+        url = f"{self.base_url}/orders"
+
+        order_uuid = client_order_id or str(uuid.uuid4())
+        
+        payload: Dict[str, Any] = {
+            "ticker": ticker,
+            "client_order_id": order_uuid,
+            "side": side.lower(),
+            "action": "buy" if side.lower() == "long" else "sell",
+            "type": order_type.lower(),
+            "count": str(int(count)),
+            "leverage": str(leverage),
+            "time_in_force": "immediate_or_cancel" if order_type.lower() == "market" else "good_till_canceled",
+            "self_trade_prevention_type": "maker"
+        }
+        
+        if price_dollars is not None:
+            payload["price"] = str(price_dollars)
+
+        session = await self._get_session()
+        headers = get_auth_headers(self.api_key_id, self.private_key, "POST", endpoint)
+        headers["Content-Type"] = "application/json"
+
+        try:
+            async with session.post(url, json=payload, headers=headers) as resp:
+                if resp.status in (200, 201):
+                    order_data = await resp.json()
+                    logger.info(
+                        "[KALSHI LIVE MARGIN] ORDER EXECUTED: %s %s %s @ lev %.1fx | ID: %s",
+                        side.upper(), count, ticker, leverage,
+                        order_data.get("order_id", order_uuid)
+                    )
+                    return order_data
+                else:
+                    err_text = await resp.text()
+                    logger.error("Margin order rejected (HTTP %d): %s", resp.status, err_text)
+                    return None
+        except Exception as exc:
+            logger.error("Network error placing margin order: %s", exc)
+            return None
+
+    async def close_margin_position(self, position_id: str) -> bool:
+        # For simplicity, Kalshi margin api likely allows closing by ID or placing counter order
+        # Assuming an endpoint to close position directly if supported, else this is a stub.
+        endpoint = f"/trade-api/v2/margin/positions/{position_id}/close"
+        url = f"{self.base_url}/positions/{position_id}/close"
+        headers = get_auth_headers(self.api_key_id, self.private_key, "POST", endpoint)
+
+        session = await self._get_session()
+        try:
+            async with session.post(url, headers=headers) as resp:
+                if resp.status in (200, 201):
+                    logger.info("Successfully closed margin position: %s", position_id)
+                    return True
+                else:
+                    err_text = await resp.text()
+                    logger.error("Failed to close margin position %s (HTTP %d): %s", position_id, resp.status, err_text)
+                    return False
+        except Exception as exc:
+            logger.error("Error closing margin position: %s", exc)
+            return False
+
+    async def get_margin_positions(self) -> List[Dict[str, Any]]:
+        endpoint = "/trade-api/v2/margin/positions"
+        url = f"{self.base_url}/positions"
+        headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
+
+        session = await self._get_session()
+        async with session.get(url, headers=headers) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data.get("margin_positions", [])
+            else:
+                err = await resp.text()
+                logger.error(f"Failed to fetch margin positions: {err}")
+                return []
+
+    async def get_margin_mark_price(self, ticker: str) -> Optional[float]:
+        endpoint = f"/trade-api/v2/margin/markets/{ticker}"
+        url = f"{self.base_url}/markets/{ticker}"
+        headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
+
+        session = await self._get_session()
+        try:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    market = data.get("market", {})
+                    price = market.get("price")
+                    contract_size = float(market.get("contract_size", 0.0001))
+                    if price:
+                        return float(price) / contract_size
+                    return None
+                return None
+        except Exception:
+            return None
+
+    async def get_server_time(self) -> float:
+        """Fetch official Kalshi exchange time."""
+        # We can use /exchange/status or just rely on response Date headers. 
+        # Using status for explicit time if available, else local time.
+        endpoint = "/trade-api/v2/exchange/status"
+        url = f"{PROD_REST_BASE}/exchange/status"
+        session = await self._get_session()
+        try:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    ts = data.get("exchange_time", time.time())
+                    return float(ts)
+        except Exception:
+            pass
+        return time.time()

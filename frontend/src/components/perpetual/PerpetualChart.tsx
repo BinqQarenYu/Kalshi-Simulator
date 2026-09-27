@@ -1,19 +1,7 @@
-/**
- * @file PerpetualChart.tsx
- * @description High-performance interactive HTML5 Canvas chart for Perpetual Trading.
- * Features:
- * 1. Candlestick rendering with dynamic auto-scaling
- * 2. Independent multi-asset switching (BTC, ETH, SOL, DOGE)
- * 3. Volume histogram with buyer/seller delta coloring
- * 4. Heatmap liquidity overlay (DOM depth clouds)
- * 5. Exponential Moving Averages (EMA 20 & EMA 50)
- * 6. Interactive crosshair with time & price tracking HUD
- * 7. Live current price ticker line
- */
-
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { usePerpetualTrading } from '../../context/PerpetualTradingContext';
-import { Volume2, Layers, Activity, TrendingUp, Maximize2, RefreshCw } from 'lucide-react';
+import { Volume2, Layers, TrendingUp } from 'lucide-react';
+import { createChart, IChartApi, ISeriesApi, Time, LineStyle, CrosshairMode, ColorType, CandlestickSeries, HistogramSeries, LineSeries } from 'lightweight-charts';
 
 export const PerpetualChart: React.FC = () => {
   const {
@@ -29,278 +17,165 @@ export const PerpetualChart: React.FC = () => {
     setShowHeatmap,
     showEma,
     setShowEma,
-    showVpin,
-    setShowVpin,
   } = usePerpetualTrading();
 
-  const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [crosshair, setCrosshair] = useState<{ x: number; y: number; price: number; time: number } | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartInstanceRef = useRef<IChartApi | null>(null);
+  
+  const candlestickSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const ema20SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const ema50SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
 
-  // Calculate EMA series helper
+  // Initialize the chart
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
+
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: '#0b0e14' },
+        textColor: '#64748b',
+      },
+      grid: {
+        vertLines: { color: '#1a2230', style: LineStyle.Dashed },
+        horzLines: { color: '#1a2230', style: LineStyle.Dashed },
+      },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: {
+          color: '#94a3b8',
+          width: 1,
+          style: LineStyle.Dotted,
+          labelBackgroundColor: '#334155',
+        },
+        horzLine: {
+          color: '#94a3b8',
+          width: 1,
+          style: LineStyle.Dotted,
+          labelBackgroundColor: '#334155',
+        },
+      },
+      rightPriceScale: {
+        borderColor: '#1f2937',
+      },
+      timeScale: {
+        borderColor: '#1f2937',
+        timeVisible: true,
+      },
+    });
+
+    const candlestickSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#10b981',
+      downColor: '#f43f5e',
+      borderVisible: false,
+      wickUpColor: '#10b981',
+      wickDownColor: '#f43f5e',
+    });
+
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: {
+        type: 'volume',
+      },
+      priceScaleId: '', // overlay
+    });
+
+    chart.priceScale('').applyOptions({
+      scaleMargins: {
+        top: 0.78,
+        bottom: 0,
+      },
+    });
+
+    const ema20Series = chart.addSeries(LineSeries, {
+      color: '#06b6d4',
+      lineWidth: 2,
+      crosshairMarkerVisible: false,
+    });
+
+    const ema50Series = chart.addSeries(LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 2,
+      crosshairMarkerVisible: false,
+    });
+
+    chartInstanceRef.current = chart;
+    candlestickSeriesRef.current = candlestickSeries;
+    volumeSeriesRef.current = volumeSeries;
+    ema20SeriesRef.current = ema20Series;
+    ema50SeriesRef.current = ema50Series;
+
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({
+          width: chartContainerRef.current.clientWidth,
+          height: chartContainerRef.current.clientHeight,
+        });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize();
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      chart.remove();
+    };
+  }, []);
+
+  // Compute EMA helper
   const calculateEMA = (period: number) => {
     if (candles.length === 0) return [];
     const k = 2 / (period + 1);
-    const emaValues: (number | null)[] = [];
+    const emaData: { time: Time; value: number }[] = [];
     let prevEma = candles[0].close;
-    emaValues.push(prevEma);
+
+    emaData.push({ time: candles[0].time as Time, value: prevEma });
 
     for (let i = 1; i < candles.length; i++) {
-      const currentClose = candles[i].close;
-      const currentEma = currentClose * k + prevEma * (1 - k);
-      emaValues.push(currentEma);
+      const c = candles[i];
+      const currentEma = c.close * k + prevEma * (1 - k);
+      emaData.push({ time: c.time as Time, value: currentEma });
       prevEma = currentEma;
     }
-    return emaValues;
+    return emaData;
   };
 
-  const ema20 = useMemo(() => calculateEMA(20), [candles]);
-  const ema50 = useMemo(() => calculateEMA(50), [candles]);
-
-  // Main Canvas Render Loop
+  // Sync data whenever candles change
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!candlestickSeriesRef.current || !volumeSeriesRef.current || candles.length === 0) return;
 
-    // Handle high DPI displays
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.scale(dpr, dpr);
+    // Candlesticks
+    const cData = candles.map(c => ({
+      time: c.time as Time,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+    candlestickSeriesRef.current.setData(cData);
 
-    const width = rect.width;
-    const height = rect.height;
-    const padding = { top: 30, right: 65, bottom: 45, left: 10 };
-    const chartWidth = width - padding.left - padding.right;
-    const chartHeight = height - padding.top - padding.bottom;
-
-    // Clear background
-    ctx.fillStyle = '#0b0e14';
-    ctx.fillRect(0, 0, width, height);
-
-    if (candles.length === 0) return;
-
-    // Min and Max price bounds
-    let minPrice = Infinity;
-    let maxPrice = -Infinity;
-    let maxVol = 0;
-
-    candles.forEach((c) => {
-      if (c.low < minPrice) minPrice = c.low;
-      if (c.high > maxPrice) maxPrice = c.high;
-      if (c.volume > maxVol) maxVol = c.volume;
-    });
-
-    const priceRange = maxPrice - minPrice || 1;
-    minPrice -= priceRange * 0.05;
-    maxPrice += priceRange * 0.05;
-    const adjustedRange = maxPrice - minPrice;
-
-    const getY = (price: number) => {
-      return padding.top + chartHeight - ((price - minPrice) / adjustedRange) * chartHeight;
-    };
-
-    const getX = (index: number) => {
-      const step = chartWidth / candles.length;
-      return padding.left + index * step + step / 2;
-    };
-
-    const candleWidth = Math.max(2, (chartWidth / candles.length) * 0.72);
-
-    // 1. Grid Lines
-    ctx.strokeStyle = '#1a2230';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-
-    const gridSteps = 6;
-    for (let i = 0; i <= gridSteps; i++) {
-      const p = minPrice + (adjustedRange / gridSteps) * i;
-      const y = getY(p);
-      ctx.beginPath();
-      ctx.moveTo(padding.left, y);
-      ctx.lineTo(width - padding.right, y);
-      ctx.stroke();
-
-      // Price labels on right axis
-      ctx.fillStyle = '#64748b';
-      ctx.font = '10px JetBrains Mono, monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(p.toFixed(selectedAsset === 'DOGE' ? 5 : 2), width - padding.right + 6, y + 3);
-    }
-    ctx.setLineDash([]);
-
-    // 2. Heatmap / Liquidity Cloud Overlay
-    if (showHeatmap) {
-      const heatmapBands = 8;
-      for (let i = 0; i < heatmapBands; i++) {
-        const bandPrice = minPrice + (adjustedRange / heatmapBands) * i;
-        const y = getY(bandPrice);
-        const intensity = Math.sin((i / heatmapBands) * Math.PI) * 0.12;
-        ctx.fillStyle = i % 2 === 0 ? `rgba(16, 185, 129, ${intensity})` : `rgba(244, 63, 94, ${intensity})`;
-        ctx.fillRect(padding.left, y - 8, chartWidth, 16);
-      }
+    // Volume
+    if (showVolume) {
+      const vData = candles.map(c => ({
+        time: c.time as Time,
+        value: c.volume,
+        color: c.close >= c.open ? 'rgba(16, 185, 129, 0.4)' : 'rgba(244, 63, 94, 0.4)',
+      }));
+      volumeSeriesRef.current.setData(vData);
+    } else {
+      volumeSeriesRef.current.setData([]);
     }
 
-    // 3. Volume Sub-panel at Bottom
-    if (showVolume && maxVol > 0) {
-      const volHeight = chartHeight * 0.22;
-      const volBaseY = padding.top + chartHeight;
-
-      candles.forEach((c, idx) => {
-        const x = getX(idx);
-        const vH = (c.volume / maxVol) * volHeight;
-        const isUp = c.close >= c.open;
-        ctx.fillStyle = isUp ? 'rgba(16, 185, 129, 0.35)' : 'rgba(244, 63, 94, 0.35)';
-        ctx.fillRect(x - candleWidth / 2, volBaseY - vH, candleWidth, vH);
-      });
+    // EMA
+    if (showEma && ema20SeriesRef.current && ema50SeriesRef.current) {
+      ema20SeriesRef.current.setData(calculateEMA(20));
+      ema50SeriesRef.current.setData(calculateEMA(50));
+    } else {
+      ema20SeriesRef.current?.setData([]);
+      ema50SeriesRef.current?.setData([]);
     }
-
-    // 4. Candlesticks
-    candles.forEach((c, idx) => {
-      const x = getX(idx);
-      const openY = getY(c.open);
-      const closeY = getY(c.close);
-      const highY = getY(c.high);
-      const lowY = getY(c.low);
-      const isUp = c.close >= c.open;
-      const color = isUp ? '#10b981' : '#f43f5e';
-
-      // Wick
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(x, highY);
-      ctx.lineTo(x, lowY);
-      ctx.stroke();
-
-      // Body
-      ctx.fillStyle = color;
-      const bodyTop = Math.min(openY, closeY);
-      const bodyHeight = Math.max(1.5, Math.abs(closeY - openY));
-      ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
-    });
-
-    // 5. EMA Lines
-    if (showEma) {
-      // EMA 20 (Cyan)
-      ctx.strokeStyle = '#06b6d4';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      let started = false;
-      ema20.forEach((val, idx) => {
-        if (val !== null) {
-          const x = getX(idx);
-          const y = getY(val);
-          if (!started) {
-            ctx.moveTo(x, y);
-            started = true;
-          } else {
-            ctx.lineTo(x, y);
-          }
-        }
-      });
-      ctx.stroke();
-
-      // EMA 50 (Orange)
-      ctx.strokeStyle = '#f59e0b';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      started = false;
-      ema50.forEach((val, idx) => {
-        if (val !== null) {
-          const x = getX(idx);
-          const y = getY(val);
-          if (!started) {
-            ctx.moveTo(x, y);
-            started = true;
-          } else {
-            ctx.lineTo(x, y);
-          }
-        }
-      });
-      ctx.stroke();
-    }
-
-    // 6. Current Price Line (Dashed Emerald / Crimson)
-    const currentY = getY(currentPrice);
-    ctx.strokeStyle = '#34d399';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath();
-    ctx.moveTo(padding.left, currentY);
-    ctx.lineTo(width - padding.right, currentY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Current Price Badge
-    ctx.fillStyle = '#10b981';
-    ctx.fillRect(width - padding.right, currentY - 9, padding.right - 2, 18);
-    ctx.fillStyle = '#000000';
-    ctx.font = 'bold 10px JetBrains Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText(currentPrice.toFixed(selectedAsset === 'DOGE' ? 5 : 2), width - padding.right + 4, currentY + 3.5);
-
-    // 7. Interactive Crosshair
-    if (crosshair) {
-      ctx.strokeStyle = '#94a3b8';
-      ctx.lineWidth = 0.8;
-      ctx.setLineDash([2, 2]);
-
-      // Vertical line
-      ctx.beginPath();
-      ctx.moveTo(crosshair.x, padding.top);
-      ctx.lineTo(crosshair.x, height - padding.bottom);
-      ctx.stroke();
-
-      // Horizontal line
-      ctx.beginPath();
-      ctx.moveTo(padding.left, crosshair.y);
-      ctx.lineTo(width - padding.right, crosshair.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Axis Price Pill
-      ctx.fillStyle = '#334155';
-      ctx.fillRect(width - padding.right, crosshair.y - 9, padding.right - 2, 18);
-      ctx.fillStyle = '#f8fafc';
-      ctx.font = '10px JetBrains Mono, monospace';
-      ctx.textAlign = 'left';
-      ctx.fillText(crosshair.price.toFixed(selectedAsset === 'DOGE' ? 5 : 2), width - padding.right + 4, crosshair.y + 3.5);
-    }
-  }, [candles, currentPrice, showVolume, showHeatmap, showEma, crosshair, selectedAsset]);
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas || candles.length === 0) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const padding = { top: 30, right: 65, bottom: 45, left: 10 };
-    const chartHeight = rect.height - padding.top - padding.bottom;
-
-    let minPrice = Infinity;
-    let maxPrice = -Infinity;
-    candles.forEach((c) => {
-      if (c.low < minPrice) minPrice = c.low;
-      if (c.high > maxPrice) maxPrice = c.high;
-    });
-    const priceRange = maxPrice - minPrice || 1;
-    minPrice -= priceRange * 0.05;
-    maxPrice += priceRange * 0.05;
-
-    const normalizedY = Math.max(padding.top, Math.min(rect.height - padding.bottom, y));
-    const price = maxPrice - ((normalizedY - padding.top) / chartHeight) * (maxPrice - minPrice);
-
-    setCrosshair({ x, y: normalizedY, price, time: Date.now() });
-  };
-
-  const handleMouseLeave = () => {
-    setCrosshair(null);
-  };
+    
+  }, [candles, showVolume, showEma]);
 
   return (
     <div className="flex flex-col h-full bg-[#0b0e14] border border-[#1f2937] rounded-xl overflow-hidden shadow-2xl">
@@ -383,26 +258,24 @@ export const PerpetualChart: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Canvas Viewport */}
-      <div ref={containerRef} className="relative flex-1 w-full min-h-[360px] overflow-hidden">
+      {/* Main Lightweight Charts Viewport */}
+      <div className="relative flex-1 w-full min-h-[360px] overflow-hidden">
         {/* Floating Legend */}
-        <div className="absolute top-2 left-3 z-10 flex items-center gap-3 text-[11px] font-mono select-none pointer-events-none">
-          <span className="text-white font-bold">{selectedAsset}-PERPETUAL</span>
-          <span className="text-emerald-400 font-bold">${currentPrice.toFixed(selectedAsset === 'DOGE' ? 5 : 2)}</span>
+        <div className="absolute top-2 left-3 z-10 flex flex-col gap-1 text-[11px] font-mono select-none pointer-events-none">
+          <div className="flex items-center gap-3">
+            <span className="text-white font-bold">{selectedAsset}-PERPETUAL</span>
+            <span className="text-emerald-400 font-bold">${currentPrice.toFixed(selectedAsset === 'DOGE' ? 5 : 2)}</span>
+          </div>
           {showEma && (
-            <>
-              <span className="text-cyan-400">EMA(20): {ema20[ema20.length - 1]?.toFixed(2) || '—'}</span>
-              <span className="text-amber-400">EMA(50): {ema50[ema50.length - 1]?.toFixed(2) || '—'}</span>
-            </>
+            <div className="flex items-center gap-3 mt-1">
+              <span className="text-cyan-400">EMA(20)</span>
+              <span className="text-amber-400">EMA(50)</span>
+            </div>
           )}
         </div>
-
-        <canvas
-          ref={canvasRef}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-          className="w-full h-full cursor-crosshair block"
-        />
+        
+        {/* Container for Lightweight Charts */}
+        <div ref={chartContainerRef} className="w-full h-full" />
       </div>
     </div>
   );

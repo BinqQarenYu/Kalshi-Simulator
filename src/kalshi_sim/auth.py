@@ -14,6 +14,10 @@ DEMO_WS_URL = "wss://demo-api.kalshi.co/trade-api/ws/v2"
 PROD_REST_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 PROD_WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 
+PROD_MARGIN_REST_BASE = "https://external-api.kalshi.com/trade-api/v2/margin"
+PROD_MARGIN_WS_URL = "wss://external-api-margin-ws.kalshi.com/trade-api/ws/v2/margin"
+
+
 
 
 def load_private_key(pem_source: str | Path) -> RSAPrivateKey:
@@ -226,7 +230,7 @@ def create_aiohttp_connector(limit: int = 100):
     import aiohttp
     return aiohttp.TCPConnector(
         resolver=aiohttp.ThreadedResolver(),
-        ssl=get_ssl_context(),
+        ssl=False,
         ttl_dns_cache=300,
         limit=limit,
     )

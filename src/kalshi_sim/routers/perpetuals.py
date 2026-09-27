@@ -17,14 +17,30 @@ import uuid
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Optional
 
+import os
+from dotenv import load_dotenv
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from kalshi_sim.db import get_db
+from kalshi_sim.order_client import KalshiMarginOrderClient
+
+load_dotenv()
+_margin_client: Optional[KalshiMarginOrderClient] = None
+if os.getenv("KALSHI_API_KEY_ID") and os.getenv("KALSHI_PRIVATE_KEY_PATH"):
+    try:
+        _margin_client = KalshiMarginOrderClient(
+            api_key_id=os.getenv("KALSHI_API_KEY_ID"),
+            private_key_path=os.getenv("KALSHI_PRIVATE_KEY_PATH")
+        )
+    except Exception as e:
+        logger = logging.getLogger("kalshi_sim.routers.perpetuals")
+        logger.warning(f"Failed to init KalshiMarginOrderClient: {e}")
 
 logger = logging.getLogger("kalshi_sim.routers.perpetuals")
 
-router = APIRouter(prefix="/api/perpetuals", tags=["perpetuals"])
+router = APIRouter(tags=["perpetuals"])
 
 _state_getter = None
 
@@ -74,10 +90,10 @@ _BOT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "id": "macro_dominion_perp",
         "name": "Macro Dominion Perp",
         "strategy_type": "Macro Trend and Spot Velocity",
-        "leverage": 10.0,
-        "min_confidence": 0.65,
+        "leverage": 2.0,
+        "min_confidence": 0.85,
         "take_profit_pct": 4.5,
-        "stop_loss_pct": 2.0,
+        "stop_loss_pct": 1.0,
         "trailing_stop_pct": 1.2,
         "dynamic_moat": 1.8,
         "vpin_toxic_threshold": 0.60,
@@ -94,10 +110,10 @@ _BOT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "id": "dual_onnx_perp",
         "name": "Dual ONNX Micro Perp",
         "strategy_type": "High-Frequency Neural Microstructure",
-        "leverage": 20.0,
-        "min_confidence": 0.75,
+        "leverage": 5.0,
+        "min_confidence": 0.88,
         "take_profit_pct": 2.0,
-        "stop_loss_pct": 1.0,
+        "stop_loss_pct": 0.5,
         "trailing_stop_pct": 0.5,
         "dynamic_moat": 2.5,
         "vpin_toxic_threshold": 0.45,
@@ -114,10 +130,10 @@ _BOT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "id": "retail_inversion_perp",
         "name": "Retail Inversion Perp",
         "strategy_type": "Extreme Sentiment Fader",
-        "leverage": 5.0,
-        "min_confidence": 0.60,
+        "leverage": 2.0,
+        "min_confidence": 0.80,
         "take_profit_pct": 6.0,
-        "stop_loss_pct": 3.0,
+        "stop_loss_pct": 1.5,
         "trailing_stop_pct": 2.0,
         "dynamic_moat": 1.2,
         "vpin_toxic_threshold": 0.70,
@@ -133,11 +149,17 @@ _BOT_CONFIGS: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _get_current_mark_price(asset: str) -> float:
+async def _get_current_mark_price(asset: str) -> float:
+    if _margin_client:
+        try:
+            kalshi_ticker = 'KXBTCPERP' if asset == 'BTC' else asset
+            price = await _margin_client.get_margin_mark_price(kalshi_ticker)
+            if price: return price
+        except: pass
     try:
         s = get_state()
         if asset == "BTC" and hasattr(s, "current_btc_price"):
-            val = float(s.current_btc_price)
+            val = Decimal(str(s.current_btc_price))
             if val > 1000.0:
                 return val
     except Exception:
@@ -145,12 +167,26 @@ def _get_current_mark_price(asset: str) -> float:
     return _ASSET_BASE_PRICES.get(asset, 84250.00)
 
 
-def _calc_liquidation_price(entry_price: float, side: str, leverage: float) -> float:
-    mm = 0.005
+def _calc_liquidation_price(entry_price: Decimal, side: str, leverage: Decimal) -> Decimal:
+    mm = Decimal("0.005")
     if side.lower() == "long":
-        return round(entry_price * (1.0 - (1.0 / leverage) + mm), 2)
+        return round(entry_price * (Decimal("1.0") - (Decimal("1.0") / leverage) + mm), 2)
     else:
-        return round(entry_price * (1.0 + (1.0 / leverage) - mm), 2)
+        return round(entry_price * (Decimal("1.0") + (Decimal("1.0") / leverage) - mm), 2)
+
+PERP_FEE_RATE = Decimal("0.0005")   # 0.05% taker fee
+PERP_SPREAD_RATE = Decimal("0.0002") # 0.02% half-spread
+
+def _calc_pnl_with_fees(entry_p: Decimal, curr_mark: Decimal, size: Decimal, side: str) -> Decimal:
+    if side.lower() == "long":
+        exit_price = curr_mark * (Decimal("1.0") - PERP_SPREAD_RATE)
+        gross_pnl = (exit_price - entry_p) * size
+    else:
+        exit_price = curr_mark * (Decimal("1.0") + PERP_SPREAD_RATE)
+        gross_pnl = (entry_p - exit_price) * size
+
+    fees = (entry_p * size * PERP_FEE_RATE) + (exit_price * size * PERP_FEE_RATE)
+    return gross_pnl - fees
 
 
 @router.get("/markets")
@@ -159,7 +195,7 @@ async def get_perp_markets() -> Dict[str, Any]:
     next_funding_secs = 28800 - (int(now_sec) % 28800)
     markets = {}
     for asset, base in _ASSET_BASE_PRICES.items():
-        price = _get_current_mark_price(asset)
+        price = await _get_current_mark_price(asset)
         markets[asset] = {
             "asset": asset,
             "ticker": f"{asset}-PERP",
@@ -196,8 +232,8 @@ async def get_perp_positions() -> Dict[str, Any]:
                     created_at = r[10]
                     bot_id = r[11]
 
-                    curr_mark = _get_current_mark_price(asset)
-                    pnl = (curr_mark - entry_p) * size if side.lower() == "long" else (entry_p - curr_mark) * size
+                    curr_mark = await _get_current_mark_price(asset)
+                    pnl = _calc_pnl_with_fees(entry_p, curr_mark, size, side)
                     pnl_pct = (pnl / margin * 100.0) if margin > 0 else 0.0
 
                     positions.append({
@@ -215,6 +251,43 @@ async def get_perp_positions() -> Dict[str, Any]:
                         "timestamp": created_at,
                         "botId": bot_id,
                     })
+
+        if _margin_client:
+            try:
+                live_pos = await _margin_client.get_margin_positions()
+                if live_pos and len(live_pos) > 0:
+                    positions = [] # Nuke local mock
+                    for p in live_pos:
+                        pos_id = p.get("position_id", p.get("id", "live-pos"))
+                        ticker = p.get("ticker", "BTC")
+                        asset = "BTC" if "BTC" in ticker else ticker
+                        side = "long" if Decimal(str(p.get("position", 0))) > 0 else "short"
+                        size = abs(Decimal(str(p.get("position", 0))))
+                        entry_p = Decimal(str(p.get("average_price", 0)))
+                        lev = Decimal(str(p.get("leverage", 10.0)))
+                        
+                        curr_mark = Decimal(str(await _get_current_mark_price(asset)) or entry_p)
+                        pnl = _calc_pnl_with_fees(entry_p, curr_mark, size, side)
+                        margin_val = (entry_p * size) / lev if lev else 0
+                        pnl_pct = (pnl / margin_val * 100.0) if margin_val > 0 else 0.0
+
+                        positions.append({
+                            "id": pos_id,
+                            "asset": asset,
+                            "side": side,
+                            "size": size,
+                            "entryPrice": entry_p,
+                            "markPrice": curr_mark,
+                            "leverage": lev,
+                            "liquidationPrice": Decimal(str(p.get("liquidation_price", 0))),
+                            "margin": margin_val,
+                            "unrealizedPnl": round(pnl, 2),
+                            "unrealizedPnlPct": round(pnl_pct, 2),
+                            "timestamp": p.get("created_ts", ""),
+                            "botId": "live"
+                        })
+            except Exception as e:
+                pass
     except Exception as exc:
         logger.warning("Error querying perp_positions: %s", exc)
     return {"status": "ok", "positions": positions}
@@ -222,12 +295,39 @@ async def get_perp_positions() -> Dict[str, Any]:
 
 @router.post("/order")
 async def place_perp_order(req: PerpOrderRequest) -> Dict[str, Any]:
-    mark_price = _get_current_mark_price(req.asset)
-    fill_price = req.price if req.order_type == "limit" and req.price is not None else mark_price
+    mark_price = await _get_current_mark_price(req.asset)
+    if req.order_type == "limit" and req.price is not None:
+        fill_price = req.price
+    else:
+        # Market order crosses the spread
+        fill_price = mark_price * (1 + PERP_SPREAD_RATE) if req.side.lower() == "long" else mark_price * (1 - PERP_SPREAD_RATE)
+    
+    fill_price = round(fill_price, 2)
     notional_value = fill_price * req.size
     margin = notional_value / req.leverage
     liq_price = _calc_liquidation_price(fill_price, req.side, req.leverage)
-    order_id = f"PERP-{req.asset}-{uuid.uuid4().hex[:8].upper()}"
+    
+    if _margin_client:
+        logger.info(f"Submitting LIVE Kalshi Margin Order for {req.asset}")
+        kalshi_ticker = 'KXBTCPERP' if req.asset == 'BTC' else req.asset
+        res = await _margin_client.place_margin_order(
+            ticker=kalshi_ticker,
+            side=req.side,
+            count=req.size,
+            leverage=req.leverage,
+            order_type=req.order_type,
+            price_dollars=Decimal(f'{fill_price * 0.0001:.4f}') if req.asset == 'BTC' else Decimal(f'{fill_price:.2f}')
+        )
+        if res:
+            # Attempt to extract order_id from nested JSON response
+            if "order" in res and "order_id" in res["order"]:
+                order_id = res["order"]["order_id"]
+            else:
+                order_id = res.get("order_id", f"PERP-{req.asset}-{uuid.uuid4().hex[:8].upper()}")
+        else:
+            raise HTTPException(status_code=500, detail="Failed to place live margin order on Kalshi.")
+    else:
+        order_id = f"PERP-{req.asset}-{uuid.uuid4().hex[:8].upper()}"
 
     db = get_db()
     try:
@@ -261,7 +361,7 @@ async def place_perp_order(req: PerpOrderRequest) -> Dict[str, Any]:
             "margin": round(margin, 2),
             "unrealizedPnl": 0.0,
             "unrealizedPnlPct": 0.0,
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(await _margin_client.get_server_time() if _margin_client else time.time())),
             "botId": req.bot_id,
         }
     }
@@ -269,6 +369,11 @@ async def place_perp_order(req: PerpOrderRequest) -> Dict[str, Any]:
 
 @router.post("/position/close")
 async def close_perp_position(req: PerpClosePositionRequest) -> Dict[str, Any]:
+    if _margin_client:
+        res = await _margin_client.close_margin_position(req.position_id)
+        if not res:
+            logger.warning(f"Failed to close LIVE margin position {req.position_id} on Kalshi. We will still mark it closed locally for sync.")
+            
     db = get_db()
     try:
         async with db.get_connection() as conn:
@@ -281,12 +386,12 @@ async def close_perp_position(req: PerpClosePositionRequest) -> Dict[str, Any]:
                     raise HTTPException(status_code=404, detail="Position not found or already closed")
                 asset, side, size, entry_p, margin = row
 
-            curr_mark = _get_current_mark_price(asset)
-            realized_pnl = (curr_mark - entry_p) * size if side.lower() == "long" else (entry_p - curr_mark) * size
+            curr_mark = await _get_current_mark_price(asset)
+            realized_pnl = _calc_pnl_with_fees(entry_p, curr_mark, size, side)
 
             await conn.execute(
                 "UPDATE perp_positions SET status = 'closed', realized_pnl = ?, mark_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (realized_pnl, curr_mark, req.position_id),
+                (realized_pnl, curr_mark, req.position_id)
             )
             await conn.commit()
 
@@ -349,9 +454,13 @@ async def perpetual_auto_trade_loop() -> None:
             p_down = ai_data.get("p_down", 0.5)
             vpin_safe = ai_data.get("vpin_is_safe", True)
             
+            db = get_db()
+            async with db.get_connection() as conn:
+                async with conn.execute("SELECT COUNT(*) FROM perp_positions WHERE status = 'open'") as cursor:
+                    global_open_count = (await cursor.fetchone())[0]
+
             for bot_id, cfg in _BOT_CONFIGS.items():
                 if cfg.get("is_armed"):
-                    db = get_db()
                     async with db.get_connection() as conn:
                         async with conn.execute(
                             "SELECT id, side, entry_price FROM perp_positions WHERE status = 'open' AND bot_id = ?",
@@ -359,23 +468,24 @@ async def perpetual_auto_trade_loop() -> None:
                         ) as cursor:
                             row = await cursor.fetchone()
                     
-                    if not row:
+                    if not row and global_open_count == 0:
                         # Open new position if confidence is high and VPIN safe
+                        min_conf = Decimal(str(cfg.get("min_confidence", 0.70)))
                         if vpin_safe:
-                            if p_up > 0.70:
+                            if p_up > min_conf:
                                 side = "long"
-                            elif p_down > 0.70:
+                            elif p_down > min_conf:
                                 side = "short"
                             else:
                                 side = None
                                 
                             if side:
-                                lev = float(cfg.get("leverage", 10.0))
+                                lev = Decimal(str(cfg.get("leverage", 10.0)))
                                 req = PerpOrderRequest(
                                     asset="BTC",
                                     side=side,
                                     order_type="market",
-                                    size=0.01,
+                                    size=1.0,
                                     leverage=lev,
                                     bot_id=bot_id
                                 )
@@ -393,17 +503,16 @@ async def perpetual_auto_trade_loop() -> None:
                         # Extremely basic fake PnL check based on current spot for stop loss
                         current_spot = getattr(state, "current_btc_price", 0)
                         if current_spot > 0:
-                            entry = float(entry_price)
-                            spot = float(current_spot)
-                            lev = float(cfg.get("leverage", 10.0))
-                            if pos_side == "long":
-                                pnl_pct = ((spot - entry) / entry) * lev * 100
-                            else:
-                                pnl_pct = ((entry - spot) / entry) * lev * 100
-                                
-                            if pnl_pct <= -float(cfg.get("stop_loss_pct", 5.0)):
+                            entry = Decimal(str(entry_price))
+                            spot = Decimal(str(current_spot))
+                            lev = Decimal(str(cfg.get("leverage", 10.0)))
+                            raw_pnl = _calc_pnl_with_fees(entry, spot, 1.0, pos_side)
+                            margin = entry / lev
+                            pnl_pct = (raw_pnl / margin) * 100.0 if margin > 0 else 0.0
+
+                            if pnl_pct <= -Decimal(str(cfg.get("stop_loss_pct", 5.0))):
                                 should_close = True
-                            elif pnl_pct >= float(cfg.get("take_profit_pct", 10.0)):
+                            elif pnl_pct >= Decimal(str(cfg.get("take_profit_pct", 10.0))):
                                 should_close = True
                                 
                         if should_close:
