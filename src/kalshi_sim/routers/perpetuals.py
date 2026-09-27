@@ -327,3 +327,88 @@ async def update_perp_bot_config(req: PerpBotConfigRequest) -> Dict[str, Any]:
     if req.is_armed is not None:
         cfg["is_armed"] = req.is_armed
     return {"status": "ok", "bot": cfg}
+
+import random
+import asyncio
+from kalshi_sim.db import get_db
+
+async def perpetual_auto_trade_loop() -> None:
+    logger.info("dY [PERPETUAL AUTO-TRADER] Background loop started (Interval: 1s).")
+    while True:
+        try:
+            await asyncio.sleep(1.0)
+            
+            # Get latest ONNX state
+            from kalshi_sim.server import state
+            try:
+                ai_data = state.ai_worker.get_cached_signals()
+            except:
+                ai_data = {}
+                
+            p_up = ai_data.get("p_up", 0.5)
+            p_down = ai_data.get("p_down", 0.5)
+            vpin_safe = ai_data.get("vpin_is_safe", True)
+            
+            for bot_id, cfg in _BOT_CONFIGS.items():
+                if cfg.get("is_armed"):
+                    db = get_db()
+                    async with db.get_connection() as conn:
+                        async with conn.execute(
+                            "SELECT id, side, entry_price FROM perp_positions WHERE status = 'open' AND bot_id = ?",
+                            (bot_id,)
+                        ) as cursor:
+                            row = await cursor.fetchone()
+                    
+                    if not row:
+                        # Open new position if confidence is high and VPIN safe
+                        if vpin_safe:
+                            if p_up > 0.70:
+                                side = "long"
+                            elif p_down > 0.70:
+                                side = "short"
+                            else:
+                                side = None
+                                
+                            if side:
+                                lev = float(cfg.get("leverage", 10.0))
+                                req = PerpOrderRequest(
+                                    asset="BTC",
+                                    side=side,
+                                    order_type="market",
+                                    size=0.01,
+                                    leverage=lev,
+                                    bot_id=bot_id
+                                )
+                                await place_perp_order(req)
+                    else:
+                        pos_id, pos_side, entry_price = row
+                        
+                        # Close position if confidence inverted or taking profit / stop loss
+                        should_close = False
+                        if pos_side == "long" and p_up < 0.55:
+                            should_close = True
+                        elif pos_side == "short" and p_down < 0.55:
+                            should_close = True
+                            
+                        # Extremely basic fake PnL check based on current spot for stop loss
+                        current_spot = getattr(state, "current_btc_price", 0)
+                        if current_spot > 0:
+                            entry = float(entry_price)
+                            spot = float(current_spot)
+                            lev = float(cfg.get("leverage", 10.0))
+                            if pos_side == "long":
+                                pnl_pct = ((spot - entry) / entry) * lev * 100
+                            else:
+                                pnl_pct = ((entry - spot) / entry) * lev * 100
+                                
+                            if pnl_pct <= -float(cfg.get("stop_loss_pct", 5.0)):
+                                should_close = True
+                            elif pnl_pct >= float(cfg.get("take_profit_pct", 10.0)):
+                                should_close = True
+                                
+                        if should_close:
+                            c_req = PerpClosePositionRequest(position_id=pos_id)
+                            await close_perp_position(c_req)
+        except Exception as e:
+            logger.error(f"Perpetual Auto-Trader error: {e}")
+            await asyncio.sleep(5)

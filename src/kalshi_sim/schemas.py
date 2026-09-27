@@ -834,6 +834,8 @@ class Position(BaseModel):
     current_price: Decimal | None = None
     unrealized_pnl: Decimal = Decimal("0")
     timeframe: Timeframe
+    entry_confidence: float = 0.0
+    entry_vpin: float = 0.0
 
     model_config = {"extra": "ignore"}
 

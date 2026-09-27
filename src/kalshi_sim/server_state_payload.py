@@ -390,13 +390,15 @@ def _build_full_state_payload() -> dict[str, Any]:
         "parameters": macro_params,
     }
 
+    v4_engine = getattr(state, "bot1_v4_engine", None)
+    
     payload = {
     "v4_telemetry": {
-        "enabled": getattr(state.bot1_v4_engine, "enabled", False),
-        "state": getattr(state.bot1_v4_engine, "state", "STOPPED"),
-        "target_spread": getattr(state.bot1_v4_engine, "target_spread", 0),
-        "current_inventory": getattr(state.bot1_v4_engine, "current_inventory", 0),
-        "metrics": getattr(state.bot1_v4_engine, "metrics", {}),
+        "enabled": getattr(v4_engine, "enabled", False) if v4_engine else False,
+        "state": getattr(v4_engine, "state", "STOPPED") if v4_engine else "STOPPED",
+        "target_spread": getattr(v4_engine, "target_spread", 0) if v4_engine else 0,
+        "current_inventory": getattr(v4_engine, "current_inventory", 0) if v4_engine else 0,
+        "metrics": getattr(v4_engine, "metrics", {}) if v4_engine else {},
     },
 
         "timestamp": now_utc.isoformat(),

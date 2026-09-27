@@ -11,6 +11,7 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import { useKalshiWebSocket } from '../hooks/useKalshiWebSocket';
 
 export type PerpAsset = 'BTC' | 'ETH' | 'SOL' | 'DOGE';
 
@@ -167,6 +168,7 @@ const DEFAULT_BOTS: Record<string, PerpBotConfig> = {
 const PerpetualTradingContext = createContext<PerpetualContextType | null>(null);
 
 export const PerpetualTradingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { data: kalshiData } = useKalshiWebSocket();
   const [selectedAsset, setSelectedAsset] = useState<PerpAsset>('BTC');
   const [timeframe, setTimeframe] = useState<string>('5m');
   const [showVolume, setShowVolume] = useState<boolean>(true);
@@ -175,7 +177,7 @@ export const PerpetualTradingProvider: React.FC<{ children: React.ReactNode }> =
   const [showVpin, setShowVpin] = useState<boolean>(false);
   const [activeBotId, setActiveBotId] = useState<string>('dominion_perp');
   const [botConfigs, setBotConfigs] = useState<Record<string, PerpBotConfig>>(DEFAULT_BOTS);
-  const [balance, setBalance] = useState<number>(10000.00);
+  const [balance, setBalance] = useState<number>(10.00);
 
   // Generate initial candle history
   const [candles, setCandles] = useState<PerpCandle[]>(() => {
@@ -251,29 +253,50 @@ export const PerpetualTradingProvider: React.FC<{ children: React.ReactNode }> =
     setCandles(arr);
   }, [selectedAsset]);
 
-  // Real-time micro-tick price simulation
+  // Real-time tick updates driven by actual Backend State / WebSocket
   useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentPrice((prev) => {
-        const volatility = prev * 0.0002;
-        const delta = (Math.random() - 0.495) * volatility;
-        const newPrice = Number((prev + delta).toFixed(selectedAsset === 'DOGE' ? 5 : 2));
-
-        setCandles((prevCandles) => {
-          if (prevCandles.length === 0) return prevCandles;
-          const last = { ...prevCandles[prevCandles.length - 1] };
+    const dataAny = kalshiData as any;
+    if (selectedAsset === 'BTC' && dataAny?.current_btc_price) {
+      const newPrice = Number(dataAny.current_btc_price);
+      setCurrentPrice(newPrice);
+      
+      setCandles((prevCandles) => {
+        if (prevCandles.length === 0) return prevCandles;
+        const last = { ...prevCandles[prevCandles.length - 1] };
+        // Only update if price actually moved to prevent unnecessary renders
+        if (last.close !== newPrice) {
           last.close = newPrice;
           last.high = Math.max(last.high, newPrice);
           last.low = Math.min(last.low, newPrice);
-          last.volume += Math.floor(Math.random() * 2);
+          last.volume += 1;
           return [...prevCandles.slice(0, -1), last];
-        });
-
-        return newPrice;
+        }
+        return prevCandles;
       });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [selectedAsset]);
+    } else {
+      // Fallback for non-BTC assets (or if WS disconnected), using a slower tick
+      const timer = setInterval(() => {
+        setCurrentPrice((prev) => {
+          const volatility = prev * 0.0002;
+          const delta = (Math.random() - 0.495) * volatility;
+          const newPrice = Number((prev + delta).toFixed(selectedAsset === 'DOGE' ? 5 : 2));
+  
+          setCandles((prevCandles) => {
+            if (prevCandles.length === 0) return prevCandles;
+            const last = { ...prevCandles[prevCandles.length - 1] };
+            last.close = newPrice;
+            last.high = Math.max(last.high, newPrice);
+            last.low = Math.min(last.low, newPrice);
+            last.volume += Math.floor(Math.random() * 2);
+            return [...prevCandles.slice(0, -1), last];
+          });
+  
+          return newPrice;
+        });
+      }, 3000);
+      return () => clearInterval(timer);
+    }
+  }, [selectedAsset, (kalshiData as any)?.current_btc_price]);
 
   // Positions state
   const [positions, setPositions] = useState<PerpPosition[]>([
@@ -327,12 +350,22 @@ export const PerpetualTradingProvider: React.FC<{ children: React.ReactNode }> =
     setBotConfigs((prev) => {
       const current = prev[botId];
       if (!current) return prev;
+      
+      const newIsArmed = !current.isArmed;
+      
+      // Fire and forget to backend
+      fetch('/api/perpetuals/bot/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_id: botId, is_armed: newIsArmed })
+      }).catch(err => console.error("Failed to arm bot on backend:", err));
+
       return {
         ...prev,
         [botId]: {
           ...current,
-          isArmed: !current.isArmed,
-          status: !current.isArmed ? 'active' : 'standby',
+          isArmed: newIsArmed,
+          status: newIsArmed ? 'active' : 'standby',
         },
       };
     });

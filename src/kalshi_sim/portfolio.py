@@ -151,7 +151,7 @@ class Portfolio:
 
     # -- Position Management -------------------------------------------------
 
-    def open_position(self, fill: SimulatedFill, timeframe: Timeframe) -> Position:
+    def open_position(self, fill: SimulatedFill, timeframe: Timeframe, entry_confidence: float = 0.0, entry_vpin: float = 0.0) -> Position:
         """Open or add to a position based on a simulated fill.
 
         Deducts the fill cost + exchange fee from the cash balance.
@@ -159,6 +159,8 @@ class Portfolio:
         Args:
             fill: The simulated execution fill.
             timeframe: Timeframe the trade belongs to.
+            entry_confidence: ONNX probability confidence of the entry.
+            entry_vpin: VPIN score at time of entry.
 
         Returns:
             The updated Position.
@@ -188,6 +190,11 @@ class Portfolio:
 
             existing.size = total_size
             existing.avg_entry_price = avg_price
+            
+            if entry_confidence > 0:
+                existing.entry_confidence = entry_confidence
+                existing.entry_vpin = entry_vpin
+
             logger.info(
                 "Position averaged: %s %s %d contracts @ $%s (balance: $%s)",
                 fill.ticker, fill.side.value, total_size, avg_price, self._balance,
@@ -201,6 +208,8 @@ class Portfolio:
                 size=fill.size,
                 avg_entry_price=fill.fill_price,
                 timeframe=timeframe,
+                entry_confidence=entry_confidence,
+                entry_vpin=entry_vpin,
             )
             self._positions[fill.ticker] = position
             logger.info(

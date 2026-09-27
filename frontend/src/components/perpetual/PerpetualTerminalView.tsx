@@ -15,6 +15,7 @@ import { PerpetualChart } from './PerpetualChart';
 import { PerpetualOrderTicket } from './PerpetualOrderTicket';
 import { PerpetualBotPanel } from './PerpetualBotPanel';
 import { PerpetualPositionsTable } from './PerpetualPositionsTable';
+import { PerpetualIncubationReport } from './PerpetualIncubationReport';
 import { Bot, Clock, ArrowUpRight, TrendingUp, ShieldAlert, Cpu } from 'lucide-react';
 import { soundFX } from '../../utils/audioFX';
 
@@ -112,6 +113,9 @@ const PerpetualTerminalContent: React.FC = () => {
 
       {/* Bottom Ledger: Open Positions Table */}
       <PerpetualPositionsTable />
+      
+      {/* Incubation Reports */}
+      <PerpetualIncubationReport />
     </div>
   );
 };

@@ -25,3 +25,7 @@ If you need deep institutional knowledge, ping the subagents:
 - **`agent-law-order`**: CFTC compliance, rate limits, wash trading logic.
 - **`poe_evaluator`**: Cold, unvarnished codebase audits.
 - **`lessons_archivist`**: Past bugs, post-mortems, and fixes.
+
+## 6. Upgrade & Cache Invalidation Protocol
+Whenever applying a critical update, model retraining, or major codebase upgrade, you must ALWAYS forcefully apply the changes by "kicking out the old." Do not assume hot-reloading works. Manually restart background tasks, kill the server daemon, and clear RAM caches to ensure the system strictly runs on the newly upgraded version immediately and going forward.
+

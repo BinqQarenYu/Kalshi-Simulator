@@ -162,6 +162,30 @@ class KalshiONNXEngine:
             np.nan_to_num(self._toxic_buffer, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
         if not np.isfinite(self._spatial_buffer).all():
             np.nan_to_num(self._spatial_buffer, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+            
+        # 5.5 Guardrails: Frozen Sensor Check (Zero Variance)
+        # If the L2 order book delta is completely static, the tensor variance hits 0.0.
+        if np.var(raw_vector) == 0.0:
+            logger.warning("[KalshiONNX] Guardrails triggered: Input tensor variance is 0.0. Frozen sensor detected.")
+            # Halt trading by returning a confident WAIT signal.
+            return {
+                "signal": "WAIT",
+                "confidence": 0.999,
+                "prob_long": 0.0005,
+                "prob_short": 0.0005,
+                "prob_wait": 0.999,
+                "rel_long": 0.0,
+                "rel_short": 0.0,
+                "vpin_score": 0.0,
+                "vpin_veto": False,
+                "veto_reason": "FROZEN_SENSOR_ZERO_VARIANCE",
+                "spread_bps": 0.0,
+                "ofi_l1": 0.0,
+                "ofi_l5": 0.0,
+                "cvd": 0.0,
+                "entropy": 0.0,
+                "whale_tx": 0.0,
+            }
 
         # 6. Execute ONNX graph with persistent inputs dictionary
         if self.session is not None:
