@@ -88,8 +88,9 @@ import { BotsBenchmarkingView } from './parenthub/BotsBenchmarkingView';
 import { TradeJournalView } from './parenthub/TradeJournalView';
 import { BabyBotRightRail } from './parenthub/BabyBotRightRail';
 import { SprintBotView } from './parenthub/SprintBotView';
+import { PerpetualTerminalView } from './perpetual/PerpetualTerminalView';
 
-type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'sprint' | 'settings' | 'dual_onnx' | 'macro_dominion' | 'dominion_v2' | 'v4_domination';
+type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'sprint' | 'settings' | 'dual_onnx' | 'macro_dominion' | 'dominion_v2' | 'v4_domination' | 'perpetuals';
 type SettingsSubNav =
   | 'account'
   | 'keys'
@@ -702,6 +703,23 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               <SettingsIcon className={`w-4 h-4 ${primaryNav === 'settings' ? 'text-[#00bda5]' : 'text-[#8c9ba5]'}`} />
               <span>Settings</span>
             </button>
+
+            <button
+              onClick={() => {
+                soundFX.playClickSound();
+                setPrimaryNav('perpetuals');
+              }}
+              className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
+                primaryNav === 'perpetuals'
+                  ? 'bg-purple-500/10 text-white border-l-2 border-purple-400 font-bold'
+                  : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
+              }`}
+            >
+              <div className="flex items-center justify-center w-6 h-6 rounded bg-purple-500/10 text-purple-400">
+                <span className="text-xs">8</span>
+              </div>
+              <span className="tracking-wide">Perpetual Trading</span>
+            </button>
           </nav>
         </div>
 
@@ -869,6 +887,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               {primaryNav === 'journal' && "TRADE JOURNAL & TODAY'S TIMELINE"}
               {primaryNav === 'analytics' && 'LIVE WORKBENCH & MICROSTRUCTURE RADAR'}
               {primaryNav === 'sprint' && 'BOT 5 / 5-MINUTE SPRINT LIVE EXECUTION'}
+              {primaryNav === 'perpetuals' && 'PERPETUAL TRADING TERMINAL / LEVERAGE & BOTS'}
             </h1>
           </div>
 
@@ -973,6 +992,9 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               tradingMode={tradingMode}
             />
           )}
+
+          {/* PERPETUAL TRADING TERMINAL */}
+          {primaryNav === 'perpetuals' && <PerpetualTerminalView />}
 
           {/* 1. SETTINGS VIEW (From HTML Proposal) */}
           {primaryNav === 'settings' && (
