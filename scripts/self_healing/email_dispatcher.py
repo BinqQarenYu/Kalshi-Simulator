@@ -5,6 +5,7 @@ Dispatches clean, formatted HTML & Text alerts when fatal flaws are isolated.
 
 import os
 import smtplib
+from typing import Optional
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -34,7 +35,7 @@ def send_sentinel_email_alert(
         print("[!] Email credentials missing in .env. Skipping dispatch.")
         return False
 
-    status_prefix = "🚨 [FATAL FLAW ISOLATED]" if is_fatal else "🎨 [UI/UX ERGONOMIC POLISH]" if "Architect" in agent_role else "⚠️ [SUSPECT CODE FLAGGED]"
+    status_prefix = "🚨 [PERP-FATAL FLAW]" if is_fatal else "🎨 [PERP-UI/UX POLISH]" if "Architect" in agent_role else "⚠️ [PERP-FLAGGED]"
     subject = f"{status_prefix} {Path(file_path).name}:{line_no} [{agent_role.split(' ')[0]}]"
 
     # Strip whitespace from app password just in case
@@ -42,7 +43,7 @@ def send_sentinel_email_alert(
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
-    msg["From"] = f"Kalshi Sentinel <{sender}>"
+    msg["From"] = f"Perpetual Sentinel <{sender}>"
     msg["To"] = recipient
 
     plain_text = f"""
@@ -113,13 +114,97 @@ Action: Autonomous ASVL verification gate commencing in 60 seconds...
         return False
 
 
+def send_perpetual_shift_report(
+    subject: str,
+    summary_markdown: str,
+    recipient: Optional[str] = None
+) -> bool:
+    """
+    Dispatches a comprehensive job report for Project Apex Perpetual.
+    """
+    sender = os.getenv("ALERT_EMAIL_SENDER")
+    password = os.getenv("ALERT_EMAIL_PASSWORD")
+    target_recipient = recipient or os.getenv("ALERT_EMAIL_RECIPIENT")
+
+    if not sender or not password or not target_recipient:
+        print("[!] Email credentials (ALERT_EMAIL_SENDER, ALERT_EMAIL_PASSWORD, ALERT_EMAIL_RECIPIENT) missing in .env or environment.")
+        return False
+
+    clean_password = password.replace(" ", "")
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"🦌 [APEX-PERPETUAL REPORT] {subject}"
+    msg["From"] = f"Project Apex Perpetual Sentinel <{sender}>"
+    msg["To"] = target_recipient
+
+    plain_text = f"""
+🦌 PROJECT APEX PERPETUAL — 24/7 DEERFAMILY REPORT
+Subject: {subject}
+Status: 24/7 Watchman Operational (30-Minute Infinite Kaizen Loop)
+
+{summary_markdown}
+
+Target Boundary: perpetualtrading branch exclusively
+Sanctuary Mutex: Active (Windows IDLE_PRIORITY_CLASS)
+"""
+
+    html_body = f"""
+    <!DOCTYPE html>
+    <html>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0f17; color: #f8fafc; padding: 24px;">
+        <div style="max-width: 650px; margin: 0 auto; background: #131b2e; border-radius: 12px; border: 1px solid #1e293b; padding: 24px;">
+            <div style="display: flex; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #1e293b; padding-bottom: 14px;">
+                <span style="font-size: 28px; margin-right: 12px;">🦌</span>
+                <div>
+                    <h2 style="margin: 0; color: #38bdf8; font-size: 18px; text-transform: uppercase; letter-spacing: 0.05em;">
+                        Project Apex Perpetual — Job Report
+                    </h2>
+                    <p style="margin: 2px 0 0; color: #94a3b8; font-size: 12px;">24/7 Autonomous DeerFamily Continuous Kaizen Loop</p>
+                </div>
+            </div>
+
+            <div style="background: #0f172a; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; font-family: monospace; font-size: 13px;">
+                <p style="margin: 4px 0;"><span style="color: #94a3b8;">Branch Boundary:</span> <b style="color: #4ade80;">perpetualtrading (Strict Silo)</b></p>
+                <p style="margin: 4px 0;"><span style="color: #94a3b8;">Cadence:</span> <b style="color: #fbbf24;">30 Minutes Alternating (Lead Deer & Deer Architect)</b></p>
+                <p style="margin: 4px 0;"><span style="color: #94a3b8;">Status:</span> <b style="color: #38bdf8;">ACTIVE / OPERATIONAL (IDLE Priority)</b></p>
+            </div>
+
+            <div style="background: #182234; border-radius: 8px; padding: 16px; margin-bottom: 20px; font-size: 13px; line-height: 1.6; border-left: 4px solid #38bdf8;">
+                <pre style="margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; white-space: pre-wrap; color: #e2e8f0;">{summary_markdown}</pre>
+            </div>
+
+            <div style="border-top: 1px solid #1e293b; padding-top: 14px; font-size: 12px; color: #64748b;">
+                <p style="margin: 2px 0;">🛡️ <b>Live Sanctuary:</b> Windows IDLE_PRIORITY_CLASS (Zero CPU or training interference)</p>
+                <p style="margin: 2px 0;">📜 <b>Charter:</b> docs/goals/PERPETUAL_APEX_GOAL.md</p>
+                <p style="margin: 2px 0;">📖 <b>Kaizen Journal:</b> docs/audits/PERPETUAL_KAIZEN_JOURNAL.md</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+    msg.attach(MIMEText(plain_text, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        with smtplib.SMTP("smtp.gmail.com", 587, timeout=10.0) as server:
+            server.starttls()
+            server.login(sender, clean_password)
+            server.sendmail(sender, target_recipient, msg.as_string())
+        print(f"[+] Perpetual shift report successfully sent to {target_recipient}")
+        return True
+    except Exception as exc:
+        print(f"[-] Failed to send perpetual report via Google SMTP: {exc}")
+        return False
+
+
 if __name__ == "__main__":
     print("[*] Testing Google SMTP Email Dispatcher...")
     send_sentinel_email_alert(
-        file_path="src/kalshi_sim/agent_guardrails.py",
-        line_no=297,
-        category="IEEE_754_FLOAT_CAST_LEAK",
-        explanation="Naked float(est_price) risks sub-cent IEEE-754 precision drift, triggering HTTP 400 rejection during order execution.",
-        proposed_fix='- return False, msg, 0, {"price": float(est_price)}\n+ return False, msg, 0, {"price": str(est_price.quantize(Decimal("0.01")))}',
+        file_path="src/kalshi_sim/routers/perpetuals.py",
+        line_no=140,
+        category="FLOAT_CAST_LEAK",
+        explanation="Naked float(s.current_btc_price) risks IEEE-754 precision drift, violating strict decimal financial math.",
+        proposed_fix="current_price = Decimal(str(s.current_btc_price))",
         is_fatal=True
     )

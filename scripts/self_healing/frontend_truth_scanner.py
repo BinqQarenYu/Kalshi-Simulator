@@ -59,7 +59,8 @@ def scan_frontend_file(file_path: Path) -> List[UIReviewFinding]:
 
 def scan_all_frontend_components() -> List[UIReviewFinding]:
     findings = []
-    comp_dir = FRONTEND_SRC / "components"
+    # STRICT BOUNDARY: Perpetual Trading Components Only
+    comp_dir = FRONTEND_SRC / "components" / "perpetual"
     if not comp_dir.exists():
         return findings
     for ext in ["*.tsx", "*.ts"]:
