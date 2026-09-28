@@ -1121,8 +1121,9 @@ async def start_background_simulation() -> None:
     state.live_balance_task = asyncio.create_task(live_balance_sync_loop(), name="live_balance_sync")
     state.hmm_regime_task = asyncio.create_task(hmm_macro_regime_loop(), name="hmm_macro_regime")
     
-    from kalshi_sim.routers.perpetuals import perpetual_auto_trade_loop
-    asyncio.create_task(perpetual_auto_trade_loop(), name="perpetual_auto_trade")
+    # Perpetuals permanently stopped for good by user directive
+    # from kalshi_sim.routers.perpetuals import perpetual_auto_trade_loop
+    # asyncio.create_task(perpetual_auto_trade_loop(), name="perpetual_auto_trade")
     
     if state.mode == "live":
         asyncio.create_task(sync_live_settlements(), name="initial_settlement_sync")
