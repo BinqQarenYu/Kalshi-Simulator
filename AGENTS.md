@@ -40,3 +40,8 @@ Tokens and API credits are physical assets. Prevent "blackhole burning" (infinit
 - Apply the `agent-token-credit` philosophy: Batch your tool calls.
 - Stop immediately and report if a test or script loops or fails repeatedly. Do not blind-fire solutions and drain credits.
 
+## 9. Immutable Brain & Working Code Protection (Explicit Permission Gate)
+All ONNX models (`models/*.onnx`), PyTorch weights (`models/*.pt`), and active bot strategy engines (e.g., `bot1_v4_engine.py`, `ai_worker.py`, `strategy_evaluator.py`, `statistical_ev.py`) and their quantitative parameters (Kelly fraction, discount limits, VPIN thresholds, Take Profit / Stop Loss, EV hurdles) are **PROTECTED FINANCIAL INFRASTRUCTURE**.
+- **HARD STOP & ASK:** You (and any subagent) MUST NEVER modify, overwrite, refactor, retrain-replace, or tweak working brain logic or bot parameters WITHOUT explicitly stopping and asking the user for permission first.
+- **NO SILENT REFACTORS:** Even if you think an edit improves code quality or fixes an edge case, you must present the exact rationale and proposed diff, then wait for explicit user approval before touching working code.
+
