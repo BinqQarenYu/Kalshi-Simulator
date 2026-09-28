@@ -90,6 +90,8 @@ class AIWorker:
     def set_sim_agent(self, sim_agent: Any) -> None:
         """Update reference to the simulation execution agent."""
         self._sim_agent = sim_agent
+        if hasattr(self, "_bot1_v4_engine") and hasattr(sim_agent, "_onnx_engine"):
+            self._bot1_v4_engine.onnx_engine = sim_agent._onnx_engine
 
     def set_active_strategy(self, strategy_id: str) -> None:
         """Switch active strategy bot ('dual_onnx', 'macro_onnx', 'macro_trend_dominion', '3_step_domination_bot', 'dominion_2_bot', or 'onnx_microstructure_bot')."""
