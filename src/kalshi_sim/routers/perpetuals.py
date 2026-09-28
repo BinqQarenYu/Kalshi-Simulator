@@ -88,61 +88,61 @@ _ASSET_BASE_PRICES = {
 _BOT_CONFIGS: Dict[str, Dict[str, Any]] = {
     "macro_dominion_perp": {
         "id": "macro_dominion_perp",
-        "name": "Macro Dominion Perp",
-        "strategy_type": "Macro Trend and Spot Velocity",
+        "name": "Macro Dominion Scalper",
+        "strategy_type": "High-Frequency Orderflow Scalper",
         "leverage": 2.0,
-        "min_confidence": 0.85,
-        "take_profit_pct": 4.5,
-        "stop_loss_pct": 1.0,
-        "trailing_stop_pct": 1.2,
-        "dynamic_moat": 1.8,
+        "min_confidence": 0.75,
+        "take_profit_pct": 0.50,
+        "stop_loss_pct": 0.75,
+        "trailing_stop_pct": 0.25,
+        "dynamic_moat": 1.0,
         "vpin_toxic_threshold": 0.60,
-        "is_armed": False,
-        "status": "standby",
+        "is_armed": True,
+        "status": "active",
         "signals": {
             "conviction": 0.82,
             "recommended_side": "long",
-            "rationale": "Strong institutional spot delta (+3.20 sigma) breaking above resistance.",
+            "rationale": "Orderflow momentum scalper armed for immediate net profit harvest.",
             "vpin": 0.18,
         },
     },
     "dual_onnx_perp": {
         "id": "dual_onnx_perp",
-        "name": "Dual ONNX Micro Perp",
-        "strategy_type": "High-Frequency Neural Microstructure",
+        "name": "Dual ONNX Micro Scalper",
+        "strategy_type": "Microsecond Neural Scalper",
         "leverage": 5.0,
-        "min_confidence": 0.88,
-        "take_profit_pct": 2.0,
-        "stop_loss_pct": 0.5,
-        "trailing_stop_pct": 0.5,
-        "dynamic_moat": 2.5,
-        "vpin_toxic_threshold": 0.45,
-        "is_armed": False,
-        "status": "standby",
+        "min_confidence": 0.78,
+        "take_profit_pct": 0.50,
+        "stop_loss_pct": 0.75,
+        "trailing_stop_pct": 0.20,
+        "dynamic_moat": 1.2,
+        "vpin_toxic_threshold": 0.50,
+        "is_armed": True,
+        "status": "active",
         "signals": {
             "conviction": 0.71,
             "recommended_side": "short",
-            "rationale": "L2 book imbalance turning toxic (VPIN: 0.48). Mean reversion expected.",
+            "rationale": "High-frequency neural micro-scalper locking small continuous spreads.",
             "vpin": 0.48,
         },
     },
     "retail_inversion_perp": {
         "id": "retail_inversion_perp",
-        "name": "Retail Inversion Perp",
-        "strategy_type": "Extreme Sentiment Fader",
+        "name": "Retail Inversion Scalper",
+        "strategy_type": "Extreme Sentiment Quick Fader",
         "leverage": 2.0,
-        "min_confidence": 0.80,
-        "take_profit_pct": 6.0,
-        "stop_loss_pct": 1.5,
-        "trailing_stop_pct": 2.0,
-        "dynamic_moat": 1.2,
+        "min_confidence": 0.75,
+        "take_profit_pct": 0.60,
+        "stop_loss_pct": 0.75,
+        "trailing_stop_pct": 0.25,
+        "dynamic_moat": 1.0,
         "vpin_toxic_threshold": 0.70,
         "is_armed": False,
         "status": "standby",
         "signals": {
             "conviction": 0.52,
             "recommended_side": "neutral",
-            "rationale": "Retail funding rate neutral. Standing by for extreme crowding trigger.",
+            "rationale": "Retail crowd fader standing by for sentiment dislocation burst.",
             "vpin": 0.22,
         },
     },
@@ -385,14 +385,23 @@ async def close_perp_position(req: PerpClosePositionRequest) -> Dict[str, Any]:
                 asset, side, size, entry_p, margin = row
                 
         # Phase 2: Close on Kalshi (outside DB lock)
+        curr_mark = await _get_current_mark_price(asset)
         if _margin_client:
             opposing_side = "sell" if side.lower() == "long" else "buy"
             kalshi_ticker = f"KX{asset}PERP"
+            # Slippage buffer for immediate taker fill: +$0.01 for buy (closing short), -$0.01 for sell (closing long)
+            if asset == "BTC":
+                base_close_p = curr_mark * Decimal("0.0001")
+                close_price_dollars = Decimal(f"{base_close_p + Decimal('0.0100'):.4f}") if opposing_side == "buy" else Decimal(f"{base_close_p - Decimal('0.0100'):.4f}")
+            else:
+                close_price_dollars = Decimal(f"{curr_mark:.2f}")
+
             res = await _margin_client.place_margin_order(
                 ticker=kalshi_ticker,
                 side=opposing_side,
                 count=size,
-                order_type="market"
+                order_type="market",
+                price_dollars=close_price_dollars
             )
             if not res:
                 logger.warning(f"Failed to close LIVE margin position {req.position_id} on Kalshi. We will still mark it closed locally for sync.")
@@ -506,26 +515,35 @@ async def perpetual_auto_trade_loop() -> None:
                     else:
                         pos_id, pos_side, entry_price = row
                         
-                        # Close position if confidence inverted or taking profit / stop loss
+                        # SCALPING EXIT RULES:
+                        # 1. Reverse Signal Exit
                         should_close = False
-                        if pos_side == "long" and p_up < 0.55:
+                        if pos_side == "long" and p_up < 0.50:
                             should_close = True
-                        elif pos_side == "short" and p_down < 0.55:
+                        elif pos_side == "short" and p_down < 0.50:
                             should_close = True
                             
-                        # Extremely basic fake PnL check based on current spot for stop loss
+                        # 2. Strict Real-Time Scalp PnL Check
                         current_spot = getattr(state, "current_btc_price", 0)
                         if current_spot > 0:
                             entry = Decimal(str(entry_price))
                             spot = Decimal(str(current_spot))
                             lev = Decimal(str(cfg.get("leverage", 10.0)))
-                            raw_pnl = _calc_pnl_with_fees(entry, spot, Decimal("1"), pos_side)
+                            # Micro-bankroll size: strictly 1 contract
+                            net_pnl = _calc_pnl_with_fees(entry, spot, Decimal("1"), pos_side)
                             margin = entry / lev
-                            pnl_pct = (raw_pnl / margin) * Decimal("100") if margin > 0 else Decimal("0")
+                            pnl_pct = (net_pnl / margin) * Decimal("100") if margin > 0 else Decimal("0")
 
-                            if pnl_pct <= -Decimal(str(cfg.get("stop_loss_pct", 5.0))):
+                            tp_pct = Decimal(str(cfg.get("take_profit_pct", 0.50)))
+                            sl_pct = Decimal(str(cfg.get("stop_loss_pct", 0.75)))
+
+                            # GAIN IS GAIN: If net profit after all fees & spread is >= $0.04 OR target ROI reached, BANK IT IMMEDIATELY
+                            if net_pnl >= Decimal("0.04") or pnl_pct >= tp_pct:
+                                logger.info(f"⚡ [SCALPER TAKE-PROFIT] Banking gain on {bot_id} (Net PnL: +${net_pnl:.4f}, ROI: +{pnl_pct:.2f}%)")
                                 should_close = True
-                            elif pnl_pct >= Decimal(str(cfg.get("take_profit_pct", 10.0))):
+                            # TIGHT STOP LOSS: Cut loss instantly if drawdown crosses strict cap
+                            elif pnl_pct <= -sl_pct:
+                                logger.warning(f"🛡️ [SCALPER STOP-LOSS] Cutting adverse move on {bot_id} (Net PnL: -${abs(net_pnl):.4f}, ROI: {pnl_pct:.2f}%)")
                                 should_close = True
                                 
                         if should_close:

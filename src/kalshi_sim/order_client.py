@@ -668,11 +668,13 @@ class KalshiMarginOrderClient(KalshiLiveOrderClient):
 
         order_uuid = client_order_id or str(uuid.uuid4())
         
+        # Kalshi margin matching engine expects side='bid' (buy) or side='ask' (sell)
+        margin_side = "bid" if side.lower() in ("long", "buy", "bid") else "ask"
         payload: Dict[str, Any] = {
             "ticker": ticker,
             "client_order_id": order_uuid,
-            "side": side.lower(),
-            "action": "buy" if side.lower() == "long" else "sell",
+            "side": margin_side,
+            "action": "buy" if margin_side == "bid" else "sell",
             "type": order_type.lower(),
             "count": str(int(count)),
             "leverage": str(leverage),
