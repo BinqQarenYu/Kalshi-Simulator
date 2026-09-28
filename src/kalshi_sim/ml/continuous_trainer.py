@@ -201,7 +201,8 @@ class ContinuousModelTrainer:
         learning_rate: float = 2e-4,
         epochs_per_cycle: int = 4,
         max_recent_tick_files: int = 15,
-        max_frames_per_file: int = 500,
+        max_frames_per_file: int = 5000,
+        sample_stride: int = 25,
         min_samples_to_train: int = 64,
         file_pattern: str = "stream_*.jsonl",
         enabled: bool = True,
@@ -218,6 +219,7 @@ class ContinuousModelTrainer:
         self.epochs_per_cycle = epochs_per_cycle
         self.max_recent_tick_files = max_recent_tick_files
         self.max_frames_per_file = max_frames_per_file
+        self.sample_stride = sample_stride
         self.min_samples_to_train = min_samples_to_train
         self.file_pattern = file_pattern
 
@@ -413,7 +415,7 @@ class ContinuousModelTrainer:
             horizon_steps=15,
             horizon_seconds=20.0,
             price_diff_threshold=0.03,
-            sample_stride=5,
+            sample_stride=self.sample_stride,
             max_frames_per_file=self.max_frames_per_file,
             max_wait_ratio=0.50,
         )
