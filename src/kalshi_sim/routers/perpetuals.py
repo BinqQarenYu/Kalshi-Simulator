@@ -97,8 +97,8 @@ _BOT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "trailing_stop_pct": 1.2,
         "dynamic_moat": 1.8,
         "vpin_toxic_threshold": 0.60,
-        "is_armed": True,
-        "status": "active",
+        "is_armed": False,
+        "status": "standby",
         "signals": {
             "conviction": 0.82,
             "recommended_side": "long",
@@ -117,8 +117,8 @@ _BOT_CONFIGS: Dict[str, Dict[str, Any]] = {
         "trailing_stop_pct": 0.5,
         "dynamic_moat": 2.5,
         "vpin_toxic_threshold": 0.45,
-        "is_armed": True,
-        "status": "active",
+        "is_armed": False,
+        "status": "standby",
         "signals": {
             "conviction": 0.71,
             "recommended_side": "short",
@@ -338,7 +338,7 @@ async def place_perp_order(req: PerpOrderRequest) -> Dict[str, Any]:
                 """INSERT INTO perp_positions 
                 (id, asset, side, size, entry_price, mark_price, leverage, liquidation_price, margin, unrealized_pnl, status, bot_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 'open', ?)""",
-                (order_id, req.asset, req.side.lower(), req.size, fill_price, mark_price, req.leverage, liq_price, margin, req.bot_id),
+                (order_id, req.asset, req.side.lower(), float(req.size), str(fill_price), str(mark_price), float(req.leverage), str(liq_price), str(margin), req.bot_id),
             )
             await conn.commit()
     except Exception as exc:
