@@ -40,8 +40,9 @@ Tokens and API credits are physical assets. Prevent "blackhole burning" (infinit
 - Apply the `agent-token-credit` philosophy: Batch your tool calls.
 - Stop immediately and report if a test or script loops or fails repeatedly. Do not blind-fire solutions and drain credits.
 
-## 9. Immutable Brain & Working Code Protection (Explicit Permission Gate)
-All ONNX models (`models/*.onnx`), PyTorch weights (`models/*.pt`), and active bot strategy engines (e.g., `bot1_v4_engine.py`, `ai_worker.py`, `strategy_evaluator.py`, `statistical_ev.py`) and their quantitative parameters (Kelly fraction, discount limits, VPIN thresholds, Take Profit / Stop Loss, EV hurdles) are **PROTECTED FINANCIAL INFRASTRUCTURE**.
-- **HARD STOP & ASK:** You (and any subagent) MUST NEVER modify, overwrite, refactor, retrain-replace, or tweak working brain logic or bot parameters WITHOUT explicitly stopping and asking the user for permission first.
+## 9. Immutable Brain Code & Working Strategy Protection (Explicit Permission Gate)
+All active bot strategy code (e.g., `bot1_v4_engine.py`, `ai_worker.py`, `strategy_evaluator.py`, `statistical_ev.py`), neural architectures, loss definitions, and their quantitative trading parameters (Kelly fraction, discount limits, VPIN thresholds, Take Profit / Stop Loss, EV hurdles) are **PROTECTED FINANCIAL INFRASTRUCTURE**.
+- **Continuous Learning Is Encouraged:** Background autonomous data harvesting, continuous retraining, weight optimization, and performance-gated model promotion (`continuous_trainer.py`, `gold_continuous_trainer.py`) are core operations that **must continuously run, learn, and improve**.
+- **HARD STOP & ASK ON CODE/PARAMETER CHANGES:** You (and any subagent) MUST NEVER modify, rewrite, refactor, or tweak working brain *code*, logic, formulas, or bot parameters WITHOUT explicitly stopping and asking the user for permission first.
 - **NO SILENT REFACTORS:** Even if you think an edit improves code quality or fixes an edge case, you must present the exact rationale and proposed diff, then wait for explicit user approval before touching working code.
 
