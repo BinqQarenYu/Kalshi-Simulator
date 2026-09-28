@@ -224,30 +224,30 @@ async def get_perp_positions() -> Dict[str, Any]:
                 for r in rows:
                     asset = r[1]
                     side = r[2]
-                    size = r[3]
-                    entry_p = r[4]
-                    lev = r[6]
-                    liq_p = r[7]
-                    margin = r[8]
+                    size = Decimal(str(r[3]))
+                    entry_p = Decimal(str(r[4]))
+                    lev = Decimal(str(r[6]))
+                    liq_p = Decimal(str(r[7]))
+                    margin = Decimal(str(r[8]))
                     created_at = r[10]
                     bot_id = r[11]
 
                     curr_mark = await _get_current_mark_price(asset)
                     pnl = _calc_pnl_with_fees(entry_p, curr_mark, size, side)
-                    pnl_pct = (pnl / margin * 100.0) if margin > 0 else 0.0
+                    pnl_pct = (pnl / margin * Decimal("100")) if margin > 0 else Decimal("0")
 
                     positions.append({
                         "id": r[0],
                         "asset": asset,
                         "side": side,
-                        "size": size,
-                        "entryPrice": entry_p,
-                        "markPrice": curr_mark,
-                        "leverage": lev,
-                        "liquidationPrice": liq_p,
-                        "margin": margin,
-                        "unrealizedPnl": round(pnl, 2),
-                        "unrealizedPnlPct": round(pnl_pct, 2),
+                        "size": float(size),
+                        "entryPrice": float(entry_p),
+                        "markPrice": float(curr_mark),
+                        "leverage": float(lev),
+                        "liquidationPrice": float(liq_p),
+                        "margin": float(margin),
+                        "unrealizedPnl": float(round(pnl, 2)),
+                        "unrealizedPnlPct": float(round(pnl_pct, 2)),
                         "timestamp": created_at,
                         "botId": bot_id,
                     })
@@ -512,7 +512,7 @@ async def perpetual_auto_trade_loop() -> None:
                                     bot_id=bot_id
                                 )
                                 await place_perp_order(req)
-                    else:
+                    if row:
                         pos_id, pos_side, entry_price = row
                         
                         # SCALPING EXIT RULES:
