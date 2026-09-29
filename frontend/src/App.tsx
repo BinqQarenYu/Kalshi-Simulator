@@ -254,6 +254,8 @@ export function App() {
       hmmMacroRegime={data.hmm_macro_regime}
       sealOfExcellence={data.seal_of_excellence}
       botAuditStatus={data.bot_audit_status}
+      settings={data.settings}
+      v4Telemetry={data.v4_telemetry}
     />
   );
 }

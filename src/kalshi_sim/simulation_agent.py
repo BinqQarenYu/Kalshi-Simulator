@@ -30,6 +30,7 @@ from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
 from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
+from kalshi_sim.quant.market_maker_engine import MarketMakerEngine
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
@@ -99,6 +100,7 @@ class SimulationAgent:
         self._portfolio_domination = Portfolio(starting_balance=starting_capital)
         self._portfolio_onnx = Portfolio(starting_balance=starting_capital)
         self._portfolio_dual_onnx = Portfolio(starting_balance=starting_capital)
+        self._portfolio_market_maker = Portfolio(starting_balance=starting_capital)
         if simulator is not None:
             self._simulator = simulator
         elif realistic_simulation:
@@ -196,6 +198,8 @@ class SimulationAgent:
             return self._portfolio_macro_trend
         elif self.active_strategy_bot in ("dominion_2_bot", "dominion2", "dominion_v2"):
             return self._portfolio_dominion2
+        elif self.active_strategy_bot == "market_maker":
+            return self._portfolio_market_maker
         elif self.active_strategy_bot == "onnx_microstructure_bot":
             return self._portfolio_onnx
         elif self.active_strategy_bot in (
@@ -386,6 +390,7 @@ class SimulationAgent:
             portfolio_domination=self._portfolio_domination,
             portfolio_onnx=self._portfolio_onnx,
             portfolio_dual_onnx=self._portfolio_dual_onnx,
+            portfolio_market_maker=self._portfolio_market_maker,
             place_order_fn=self._place_virtual_order,
         )
 
@@ -404,6 +409,7 @@ class SimulationAgent:
             self._portfolio_macro_trend.mark_to_market(update.market_ticker, update.yes_bid)
             self._portfolio_domination.mark_to_market(update.market_ticker, update.yes_bid)
             self._portfolio_onnx.mark_to_market(update.market_ticker, update.yes_bid)
+            self._portfolio_market_maker.mark_to_market(update.market_ticker, update.yes_bid)
             if hasattr(self, "_portfolio_dominion2") and self._portfolio_dominion2 is not None:
                 self._portfolio_dominion2.mark_to_market(update.market_ticker, update.yes_bid)
             if hasattr(self, "_portfolio_dual_onnx") and self._portfolio_dual_onnx is not None:
@@ -418,6 +424,7 @@ class SimulationAgent:
             (self._portfolio_macro_trend, active_macro_tag),
             (self._portfolio_domination, "3_step_domination_bot"),
             (self._portfolio_onnx, "onnx_microstructure_bot"),
+            (self._portfolio_market_maker, "market_maker"),
         ]
         if hasattr(self, "_portfolio_dominion2") and self._portfolio_dominion2 is not None:
             portfolios_to_settle.append((self._portfolio_dominion2, "dominion_2_bot"))
@@ -546,6 +553,7 @@ class SimulationAgent:
                     (self._portfolio_dominion2, "dominion_2_bot"),
                     (self._portfolio_domination, "3_step_domination_bot"),
                     (self._portfolio_onnx, "onnx_microstructure_bot"),
+            (self._portfolio_market_maker, "market_maker"),
                 ]
                 if hasattr(self, "_portfolio_dual_onnx") and self._portfolio_dual_onnx is not None:
                     portfolios_to_check.append((self._portfolio_dual_onnx, "onnx_macro_v2"))

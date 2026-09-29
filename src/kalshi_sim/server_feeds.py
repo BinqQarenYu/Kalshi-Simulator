@@ -145,94 +145,109 @@ async def live_kalshi_public_sync_loop() -> None:
                 now_utc = datetime.now(timezone.utc)
 
                 # 1. Discover active live Kalshi 15M open markets every 2.0s
-                active_cfg = get_asset_config(state.active_asset)
                 if now_mono - last_market_poll >= 2.0:
                     last_market_poll = now_mono
-                    url = f"{PROD_REST_BASE}/markets?series_ticker={active_cfg.series_ticker_15m}&status=open&limit=10"
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            raw_markets = data.get("markets", [])
-                            open_m: list[tuple[datetime, dict[str, Any]]] = []
-                            for m in raw_markets:
-                                ticker = m.get("ticker")
-                                if not ticker:
-                                    continue
-                                close_str = m.get("close_time")
-                                open_str = m.get("open_time")
-                                close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00")) if close_str else None
-                                open_dt = datetime.fromisoformat(open_str.replace("Z", "+00:00")) if open_str else None
-                                floor_str = m.get("floor_strike")
-                                floor_dec = Decimal(str(floor_str)) if floor_str is not None else None
-                                
-                                minfo = MarketInfo(
-                                    ticker=ticker,
-                                    series_ticker=m.get("series_ticker", active_cfg.series_ticker_15m),
-                                    title=m.get("title", ""),
-                                    subtitle=m.get("subtitle", ""),
-                                    status=MarketStatus.OPEN,
-                                    open_time=open_dt,
-                                    close_time=close_dt,
-                                    expiration_time=close_dt,
-                                    floor_strike=floor_dec,
-                                    cap_strike=None,
-                                    strike_type="greater",
-                                )
-                                if state.sim_agent:
-                                    state.sim_agent._market_cache[ticker] = minfo
-                                    state.sim_agent._ticker_timeframe_map[ticker] = Timeframe.FIFTEEN_MIN
-                                if close_dt and close_dt > now_utc:
-                                    open_m.append((close_dt, m))
+                    assets_to_poll = list(getattr(state, "active_assets", [state.active_asset]) or [state.active_asset])
+                    for asset_sym in assets_to_poll:
+                        try:
+                            a_cfg = get_asset_config(asset_sym)
+                            url = f"{PROD_REST_BASE}/markets?series_ticker={a_cfg.series_ticker_15m}&status=open&limit=10"
+                            async with session.get(url, timeout=aiohttp.ClientTimeout(total=3.0)) as resp:
+                                if resp.status == 200:
+                                    data = await resp.json()
+                                    raw_markets = data.get("markets", [])
+                                    open_m: list[tuple[datetime, dict[str, Any]]] = []
+                                    for m in raw_markets:
+                                        ticker = m.get("ticker")
+                                        if not ticker:
+                                            continue
+                                        close_str = m.get("close_time")
+                                        open_str = m.get("open_time")
+                                        close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00")) if close_str else None
+                                        open_dt = datetime.fromisoformat(open_str.replace("Z", "+00:00")) if open_str else None
+                                        floor_str = m.get("floor_strike")
+                                        floor_dec = Decimal(str(floor_str)) if floor_str is not None else None
+                                        
+                                        minfo = MarketInfo(
+                                            ticker=ticker,
+                                            series_ticker=m.get("series_ticker", a_cfg.series_ticker_15m),
+                                            title=m.get("title", ""),
+                                            subtitle=m.get("subtitle", ""),
+                                            status=MarketStatus.OPEN,
+                                            open_time=open_dt,
+                                            close_time=close_dt,
+                                            expiration_time=close_dt,
+                                            floor_strike=floor_dec,
+                                            cap_strike=None,
+                                            strike_type="greater",
+                                        )
+                                        if state.sim_agent:
+                                            state.sim_agent._market_cache[ticker] = minfo
+                                            state.sim_agent._ticker_timeframe_map[ticker] = Timeframe.FIFTEEN_MIN
+                                        if close_dt and close_dt > now_utc:
+                                            open_m.append((close_dt, m))
 
-                            if open_m:
-                                open_m.sort(key=lambda x: x[0])
-                                active_close, active_m = open_m[0]
-                                new_ticker = active_m.get("ticker", "")
-                                if new_ticker:
-                                    state.active_ticker = new_ticker
-                                    fl = active_m.get("floor_strike")
-                                    if fl is not None:
-                                        state.target_strike = Decimal(str(fl))
+                                    if open_m:
+                                        open_m.sort(key=lambda x: x[0])
+                                        active_close, active_m = open_m[0]
+                                        cand_ticker = active_m.get("ticker", "")
+                                        if cand_ticker:
+                                            if not hasattr(state, "active_tickers"):
+                                                state.active_tickers = {}
+                                            state.active_tickers[asset_sym] = cand_ticker
+                                            if asset_sym == state.active_asset:
+                                                state.active_ticker = cand_ticker
+                                                fl = active_m.get("floor_strike")
+                                                if fl is not None:
+                                                    state.target_strike = Decimal(str(fl))
+                        except Exception as poll_ex:
+                            logger.debug("[LIVE KALSHI SYNC] Error polling asset %s: %s", asset_sym, poll_ex)
 
                 # 2. Fetch live Level-2 Orderbook Snapshot from Kalshi public API every 500ms
-                active_ticker = state.active_ticker
-                if active_ticker and any(active_ticker.startswith(pfx) for pfx in ["KXBTC", "KXETH", "KXSOL", "KXDOGE"]):
-                    ob_url = f"{PROD_REST_BASE}/markets/{active_ticker}/orderbook"
-                    async with session.get(ob_url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
-                        if resp2.status == 200:
-                            ob_data = await resp2.json()
-                            raw_book = ob_data.get("orderbook_fp") or ob_data.get("orderbook") or {}
-                            bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []
-                            asks = raw_book.get("no_dollars") or raw_book.get("no") or []
+                tickers_to_query = set()
+                if hasattr(state, "active_tickers") and state.active_tickers:
+                    tickers_to_query.update(state.active_tickers.values())
+                elif state.active_ticker:
+                    tickers_to_query.add(state.active_ticker)
 
-                            book = state.orderbook.get_book(active_ticker)
-                            if not book:
-                                book = L2BookState(active_ticker)
-                                state.orderbook._books[active_ticker] = book
+                for active_ticker in tickers_to_query:
+                    if active_ticker and any(active_ticker.startswith(pfx) for pfx in ["KXBTC", "KXETH", "KXSOL", "KXDOGE"]):
+                        ob_url = f"{PROD_REST_BASE}/markets/{active_ticker}/orderbook"
+                        async with session.get(ob_url, timeout=aiohttp.ClientTimeout(total=2.0)) as resp2:
+                            if resp2.status == 200:
+                                ob_data = await resp2.json()
+                                raw_book = ob_data.get("orderbook_fp") or ob_data.get("orderbook") or {}
+                                bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []
+                                asks = raw_book.get("no_dollars") or raw_book.get("no") or []
 
-                            # Parse real yes bids and no bids into Decimal CLOB
-                            new_yes_book: dict[Decimal, Decimal] = {}
-                            for pr_str, qty_str in bids:
-                                new_yes_book[Decimal(str(pr_str))] = Decimal(str(qty_str))
+                                book = state.orderbook.get_book(active_ticker)
+                                if not book:
+                                    book = L2BookState(active_ticker)
+                                    state.orderbook._books[active_ticker] = book
 
-                            new_no_book: dict[Decimal, Decimal] = {}
-                            for pr_str, qty_str in asks:
-                                new_no_book[Decimal(str(pr_str))] = Decimal(str(qty_str))
+                                # Parse real yes bids and no bids into Decimal CLOB
+                                new_yes_book: dict[Decimal, Decimal] = {}
+                                for pr_str, qty_str in bids:
+                                    new_yes_book[Decimal(str(pr_str))] = Decimal(str(qty_str))
 
-                            book.yes_book = new_yes_book
-                            book.no_book = new_no_book
+                                new_no_book: dict[Decimal, Decimal] = {}
+                                for pr_str, qty_str in asks:
+                                    new_no_book[Decimal(str(pr_str))] = Decimal(str(qty_str))
 
-                            # Trigger bot evaluation against real live orderbook (suppressed only if sim_agent is in real live execution mode and standalone bot holds lock)
-                            if state.sim_agent and state.ai_auto_trade:
-                                is_live_exec = getattr(state.sim_agent, "execution_mode", "simulated") == "live"
-                                if is_live_exec:
-                                    holder = get_active_lock_holder()
-                                    if not (holder and holder[1] != os.getpid()):
+                                book.yes_book = new_yes_book
+                                book.no_book = new_no_book
+
+                                # Trigger bot evaluation against real live orderbook (suppressed only if sim_agent is in real live execution mode and standalone bot holds lock)
+                                if state.sim_agent and state.ai_auto_trade:
+                                    is_live_exec = getattr(state.sim_agent, "execution_mode", "simulated") == "live"
+                                    if is_live_exec:
+                                        holder = get_active_lock_holder()
+                                        if not (holder and holder[1] != os.getpid()):
+                                            asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
+                                    else:
                                         asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
-                                else:
-                                    asyncio.create_task(state.sim_agent._evaluate_market(active_ticker, book))
 
-                            state.is_dirty = True
+                                state.is_dirty = True
 
             except asyncio.CancelledError:
                 break

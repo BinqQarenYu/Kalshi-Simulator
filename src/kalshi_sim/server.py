@@ -210,6 +210,12 @@ def resolve_bot_instance(bot_id: str) -> Any:
         if hasattr(state, "domination_bot") and state.domination_bot:
             return state.domination_bot
         return getattr(state, "domination_bot", None)
+    elif bot_id in ("market_maker", "bot6_market_maker"):
+        if hasattr(state, "market_maker_engine") and state.market_maker_engine:
+            return state.market_maker_engine
+        from kalshi_sim.quant.market_maker_engine import MarketMakerEngine
+        state.market_maker_engine = MarketMakerEngine()
+        return state.market_maker_engine
     return None
 
 

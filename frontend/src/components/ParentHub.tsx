@@ -88,9 +88,10 @@ import { BotsBenchmarkingView } from './parenthub/BotsBenchmarkingView';
 import { TradeJournalView } from './parenthub/TradeJournalView';
 import { BabyBotRightRail } from './parenthub/BabyBotRightRail';
 import { SprintBotView } from './parenthub/SprintBotView';
+import { MarketMakerView } from './parenthub/MarketMakerView';
 import { PerpetualTerminalView } from './perpetual/PerpetualTerminalView';
 
-type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'sprint' | 'settings' | 'dual_onnx' | 'macro_dominion' | 'dominion_v2' | 'v4_domination' | 'perpetuals';
+type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'sprint' | 'marketmaker' | 'settings' | 'dual_onnx' | 'macro_dominion' | 'dominion_v2' | 'v4_domination' | 'perpetuals';
 type SettingsSubNav =
   | 'account'
   | 'keys'
@@ -143,6 +144,8 @@ interface ParentHubProps {
   hmmMacroRegime?: HMMMacroRegimeTelemetry;
   sealOfExcellence?: SealRegistry;
   botAuditStatus?: any;
+    settings?: any;
+    v4Telemetry?: any;
 }
 
 export const ParentHub: React.FC<ParentHubProps> = ({
@@ -692,6 +695,24 @@ export const ParentHub: React.FC<ParentHubProps> = ({
             <button
               onClick={() => {
                 soundFX.playClickSound();
+                setPrimaryNav('marketmaker');
+              }}
+              className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
+                primaryNav === 'marketmaker'
+                  ? 'bg-purple-500/15 text-white border-l-2 border-purple-400 font-bold'
+                  : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
+              }`}
+            >
+              <Zap className={`w-4 h-4 ${primaryNav === 'marketmaker' ? 'text-purple-400' : 'text-[#8c9ba5]'}`} />
+              <span>Bot 6 MM</span>
+              <span className="ml-auto text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
+                L2
+              </span>
+            </button>
+
+            <button
+              onClick={() => {
+                soundFX.playClickSound();
                 setPrimaryNav('settings');
               }}
               className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
@@ -887,6 +908,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               {primaryNav === 'journal' && "TRADE JOURNAL & TODAY'S TIMELINE"}
               {primaryNav === 'analytics' && 'LIVE WORKBENCH & MICROSTRUCTURE RADAR'}
               {primaryNav === 'sprint' && 'BOT 5 / 5-MINUTE SPRINT LIVE EXECUTION'}
+                {primaryNav === 'marketmaker' && 'BOT 6 / MARKET MAKER LIVE EXECUTION'}
               {primaryNav === 'perpetuals' && 'PERPETUAL TRADING TERMINAL / LEVERAGE & BOTS'}
             </h1>
           </div>
@@ -992,6 +1014,16 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               tradingMode={tradingMode}
             />
           )}
+
+          {/* BOT 6 MARKET MAKER VIEW */}
+          {primaryNav === 'marketmaker' && (
+            <MarketMakerView
+              reports={reports || []}
+              tradingMode={tradingMode || 'paper'}
+              portfolio={tradingMode === 'live' ? livePortfolio : portfolio}
+            />
+          )}
+
 
           {/* PERPETUAL TRADING TERMINAL */}
           {primaryNav === 'perpetuals' && <PerpetualTerminalView />}

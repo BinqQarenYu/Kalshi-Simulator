@@ -981,6 +981,20 @@ async def get_bot_strategies() -> dict[str, Any]:
         "active_strategy": state.active_strategy_bot,
         "strategies": [
             {
+        "id": "market_maker",
+        "name": "Bot 6 MM (Market Maker)",
+        "description": "L2 Market Maker Strategy targeting spread capture with inventory skew and volatility protection. Operates exclusively via limit orders.",
+        "active": False,
+        "badge": "L2 Limit Spread",
+        "icon": "Zap",
+        "features": [
+            "L2 Orderbook Inventory Skew",
+            "Volatility-Moat Spreads",
+            "Adverse Movement Protection",
+            "Unbound Limit Scaling (10+ Contracts)"
+        ]
+    },
+    {
                 "id": "dual_onnx",
                 "strategy_id": "the_onnx_strategy",
                 "name": "The ONNX Strategy (Dual-Brain Arbitrage)",
@@ -1115,7 +1129,7 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
     elif strat_id in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
         strat_id = "bot1_v4_domination"
 
-    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot"):
+    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot", "market_maker", "bot6_market_maker"):
         raise HTTPException(status_code=400, detail=f"Invalid strategy_id: {req.strategy_id}")
 
     # Enforce Pre-Deployment Audit Certification Gate

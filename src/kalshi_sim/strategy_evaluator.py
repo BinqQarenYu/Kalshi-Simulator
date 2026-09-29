@@ -26,6 +26,7 @@ from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
 from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
+from kalshi_sim.quant.market_maker_engine import MarketMakerEngine
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
@@ -56,6 +57,7 @@ class StrategyEvaluationCoordinator:
         btc_orderflow_feed: BtcOrderflowFeed,
         spot_price_getter: Optional[Callable[[], Decimal]] = None,
         bot1_v4_engine: Optional[Any] = None,
+        market_maker_engine: Optional[MarketMakerEngine] = None,
     ) -> None:
         self._guardrails = guardrails
         self._simulator = simulator
@@ -69,6 +71,7 @@ class StrategyEvaluationCoordinator:
         self._btc_orderflow_feed = btc_orderflow_feed
         self._spot_price_getter = spot_price_getter
         self._bot1_v4_engine = bot1_v4_engine
+        self._market_maker_engine = market_maker_engine or MarketMakerEngine()
 
         # Cooldown and rate-limiting caches
         self._last_macro_eval_time: dict[str, float] = {}
@@ -94,6 +97,7 @@ class StrategyEvaluationCoordinator:
         portfolio_domination: Portfolio,
         portfolio_onnx: Portfolio,
         portfolio_dual_onnx: Portfolio,
+        portfolio_market_maker: Portfolio,
         place_order_fn: Callable[..., Any],
     ) -> None:
         """Evaluate trading decisions concurrently for active strategy bots."""
@@ -116,8 +120,13 @@ class StrategyEvaluationCoordinator:
 
         # STRICT ISOLATION: In LIVE mode, execute only active bot on active 15M contract
         is_live = execution_mode == "live"
-        if is_live and not ticker.startswith("KXBTC15M"):
-            return
+        is_mm = active_strategy_bot in ("market_maker", "bot6_market_maker")
+        if is_live:
+            if is_mm:
+                if not (ticker.startswith("KXBTC15M") or ticker.startswith("KXDOGE15M")):
+                    return
+            elif not ticker.startswith("KXBTC15M"):
+                return
 
         # If another engine holds exclusive live lock, silence Mother evaluations
         if is_live:
@@ -125,9 +134,9 @@ class StrategyEvaluationCoordinator:
             if holder and holder[1] != os.getpid():
                 return
 
-        # Guardrails cycle lock check
+        # Guardrails cycle lock check (exempt market maker to permit two-sided continuous liquidity)
         cycle_key = market_info.event_ticker if (market_info and market_info.event_ticker) else ticker
-        if is_live and (cycle_key in self._guardrails._cycle_locks or ticker in self._guardrails._cycle_locks):
+        if is_live and not is_mm and (cycle_key in self._guardrails._cycle_locks or ticker in self._guardrails._cycle_locks):
             return
 
         # BOT 3: Macro ONNX & Macro Trend Dominion
@@ -165,6 +174,18 @@ class StrategyEvaluationCoordinator:
             )
 
         # BOT 1: 3-Step Domination Bot / Bot 1 V4 Engine / Dual Bot Fleet
+        
+        # BOT 6: Market Maker
+        if active_strategy_bot in ("market_maker", "bot6_market_maker", "all"):
+            await self._eval_market_maker(
+                ticker=ticker,
+                book=book,
+                market_info=market_info,
+                timeframe=timeframe,
+                portfolio=portfolio_market_maker,
+                place_order_fn=place_order_fn,
+            )
+
         if active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination", "bot1_v4_domination", "bot1_v4", "both", "dual", "all", "dual_domination", "dual_fleet"):
             await self._eval_domination(
                 ticker=ticker,
@@ -839,3 +860,36 @@ class StrategyEvaluationCoordinator:
                         )
             except Exception as exc:
                 logger.debug("ONNX bot evaluation error: %s", exc)
+
+
+    async def _eval_market_maker(
+        self,
+        ticker: str,
+        book: L2BookState,
+        market_info: Optional[MarketInfo],
+        timeframe: Timeframe,
+        portfolio: Portfolio,
+        place_order_fn: Callable[..., Any],
+    ) -> None:
+        if portfolio.circuit_breaker_tripped:
+            return
+            
+        intents = self._market_maker_engine.evaluate(
+            ticker=ticker,
+            yes_bid=book.yes_bid,
+            yes_ask=book.yes_ask,
+        )
+        
+        for intent in intents:
+            await place_order_fn(
+                book=book,
+                ticker=ticker,
+                side=intent["side"],
+                max_size=1,
+                timeframe=timeframe,
+                reasoning=intent["reasoning"],
+                portfolio=portfolio,
+                bot_type="market_maker",
+                order_type="limit",
+                limit_price=intent["price"],
+            )

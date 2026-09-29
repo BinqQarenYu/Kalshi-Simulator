@@ -59,6 +59,8 @@ class AgentGuardrails:
 
         # Certified Live Strategies
         self.authorized_live_bots: set[str] = {
+            "market_maker",
+            "bot6_market_maker",
             "3_step_domination_bot",
             "3_step_domination",
             "domination",
@@ -289,7 +291,10 @@ class AgentGuardrails:
                 self._record_rejection("max_cycle_exposure", msg, ticker, now_utc)
                 return False, msg, 0, {"already_allocated": already_allocated, "cycle_cap": cycle_cap}
         elif is_bot:
-            if cycle_key in self._cycle_locks or already_allocated >= 2:
+            # Bot 6 Market Maker bypasses cycle exposure limits per user mandate
+            is_mm = bot_type in ("market_maker", "bot6_market_maker")
+            
+            if not is_mm and (cycle_key in self._cycle_locks or already_allocated >= 2):
                 locked_trade = self._cycle_locks.get(cycle_key, f"{already_allocated}_contracts")
                 msg = f"1-TRADE-PER-CYCLE LOCKOUT: Cycle '{cycle_key}' already has active trade '{locked_trade}'. Further entries blocked until expiration."
                 self._record_rejection("cycle_locked", msg, ticker, now_utc)
@@ -376,14 +381,18 @@ class AgentGuardrails:
                 self._record_rejection("bot_prohibited", msg, ticker, now_utc)
                 return False, msg, 0, {"bot_type": bot_type}
             else:
-                # AGENTS.md Mandate: Micro-Bankroll Sizing - Max 1 contract per trade.
-                max_cycle_cap = 2
-                per_trade_cap = 1
-
-                effective_requested_size = min(requested_size, 1)
-
-                remaining_cycle_capacity = max(0, max_cycle_cap - already_allocated)
-                bankroll_cap = min(per_trade_cap, remaining_cycle_capacity)
+                if bot_type in ('market_maker', 'bot6_market_maker'):
+                    bankroll_cap = requested_size
+                    effective_requested_size = requested_size
+                else:
+                    # AGENTS.md Mandate: Micro-Bankroll Sizing - Max 1 contract per trade.
+                    max_cycle_cap = 2
+                    per_trade_cap = 1
+                    remaining_cycle_capacity = max(0, max_cycle_cap - already_allocated)
+                    bankroll_cap = min(per_trade_cap, remaining_cycle_capacity)
+                    effective_requested_size = min(requested_size, 1)
+        else:
+            effective_requested_size = min(requested_size, 1)
 
         approved_size = min(effective_requested_size if is_bot else min(requested_size, 1), budget_contracts, bankroll_cap)
 

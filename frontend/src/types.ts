@@ -438,6 +438,7 @@ export interface DashboardState {
   macro_trend_dominion_telemetry?: MacroDominionTelemetry;
   hmm_macro_regime?: HMMMacroRegimeTelemetry;
   preflight_gates?: PreflightGates;
+  v4_telemetry?: any;
 }
 
 export interface HMMMacroRegimeTelemetry {
