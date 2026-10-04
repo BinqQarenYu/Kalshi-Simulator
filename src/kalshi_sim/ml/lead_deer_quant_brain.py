@@ -127,20 +127,28 @@ class LeadDeerQuantBrain:
                 f"VETO: Razor-tight spot chop (|Diff|= <  floor). Preservation of capital."
             )
 
+        # 4b. 3D Mistake Quadrant Pruning Gate (True Experience Learning)
+        if self.experience_buffer.is_quadrant_pruned(time_to_expiry_s, spot_diff):
+            return self._build_wait_decision(
+                brier, pruned, onnx_consensus,
+                f"VETO: Empirical Mistake Pruning. State quadrant historically unprofitable under current horizon/separation."
+            )
+
         # 5. Mistake Decile Pruning Gate
         limit_str = f"{target_maker_limit}¢"
         if limit_str in pruned:
             target_maker_limit = min(48, target_maker_limit - 2)
 
-        # 6. Mathematical EV Calculation (Dr. Nash Gate)
-        # EV = P(win) * (.00 - Price) - P(loss) * Price - Fee (.00 Maker)
+        # 6. Mathematical EV Calculation with Online Platt Calibration
+        # Corrects raw ONNX confidence if model was historically overconfident
+        calibrated_conf = self.experience_buffer.calibrate_probability(raw_conf)
         entry_dollar = target_maker_limit / 100.0
-        p_win = raw_conf
+        p_win = calibrated_conf
         p_loss = 1.0 - p_win
         net_ev = (p_win * (1.00 - entry_dollar)) - (p_loss * entry_dollar)
 
-        # Check Gates
-        gate_passed = (net_ev >= self.min_ev_dollars) and (raw_conf >= self.min_confidence) and (vpin <= 0.65)
+        # Check Gates (Using calibrated confidence rather than uncalibrated raw score)
+        gate_passed = (net_ev >= self.min_ev_dollars) and (calibrated_conf >= self.min_confidence) and (vpin <= 0.65)
 
         if not gate_passed:
             reason = f"EV Hurdle Veto: Net EV + < + or Conf {raw_conf*100:.1f}% < {self.min_confidence*100:.0f}%"

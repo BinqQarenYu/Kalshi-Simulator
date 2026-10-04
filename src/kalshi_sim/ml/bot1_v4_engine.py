@@ -97,7 +97,7 @@ class Bot1V4DominationEngine:
         enable_doubt_harvest: bool = True,
         doubt_threshold: float = 0.80,
         upside_capture_ratio_threshold: float = 0.50,
-        asymmetric_peak_bid: Decimal = Decimal("0.88"),
+        asymmetric_peak_bid: Decimal = Decimal("0.85"),  # Council recommendation: 85c asymmetric ceiling
         onnx_engine: Optional[Any] = None,
         fusion_weight_micro: float = 0.40,
         opening_quarantine_seconds: float = 90.0,  # 90s opening noise quarantine (V3.2 shield)
@@ -212,12 +212,18 @@ class Bot1V4DominationEngine:
         try:
             cfg = get_asset_config(self.asset)
             baseline_vol = float(cfg.typical_1m_volatility)
+            base_min_diff = float(cfg.min_spot_diff)
         except Exception:
             baseline_vol = 14.0
+            base_min_diff = 25.0
         live_vol = self.default_btc_1m_volatility if self.default_btc_1m_volatility > 0 else baseline_vol
 
-        floor_moat = self.min_spot_diff * 1.15
-        ceiling_moat = self.min_spot_diff * 2.15
+        # Dynamic Strike Distance Scaling: Scale minimum separation proportionally with spot price
+        # Baseline is self.min_spot_diff (or asset config default), scaling dynamically to prevent tight noise trades
+        base_diff = float(self.min_spot_diff) if getattr(self, "min_spot_diff", None) is not None else base_min_diff
+        effective_min_diff = max(base_diff, getattr(self, "_last_spot_price", 0.0) * 0.00025)
+        floor_moat = effective_min_diff * 1.15
+        ceiling_moat = effective_min_diff * 2.15
 
         expected_full_cycle_noise = baseline_vol * math.sqrt(cycle_mins)
         if expected_full_cycle_noise > 1e-9:
@@ -424,6 +430,7 @@ class Bot1V4DominationEngine:
         except Exception:
             pass
 
+        self._last_spot_price = spot_price
         spot_diff = spot_price - target_strike
         turnovers = self.get_completed_turnovers(cycle_id)
 

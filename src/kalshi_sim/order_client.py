@@ -165,7 +165,7 @@ class KalshiLiveOrderClient:
             await self._session.close()
             self._session = None
 
-    async def get_balance(self) -> Dict[str, Any]:
+    async def get_balance(self, is_retry: bool = False) -> Dict[str, Any]:
         """Fetch current demo/live account cash balance and update primary exchange index."""
         endpoint = "/trade-api/v2/portfolio/balance"
         url = f"{self.base_url}/portfolio/balance"
@@ -175,6 +175,10 @@ class KalshiLiveOrderClient:
         async with session.get(url, headers=headers) as resp:
             if resp.status != 200:
                 err_text = await resp.text()
+                if "header_timestamp_expired" in err_text and not is_retry:
+                    logger.warning("Clock drift detected. Auto-resyncing with Kalshi time...")
+                    resync_time_offset()
+                    return await self.get_balance(is_retry=True)
                 logger.error("Failed to fetch balance (HTTP %d): %s", resp.status, err_text)
                 return {"balance": 0, "status": resp.status, "error": err_text}
             data = await resp.json()

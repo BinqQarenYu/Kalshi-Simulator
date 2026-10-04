@@ -120,7 +120,7 @@ class StrategyEvaluationCoordinator:
 
         # STRICT ISOLATION: In LIVE mode, execute only active bot on active 15M contract
         is_live = execution_mode == "live"
-        is_mm = active_strategy_bot in ("market_maker", "bot6_market_maker")
+        is_mm = active_strategy_bot in ("market_maker", "bot6_market_maker", "dual_fleet", "both")
         if is_live:
             if is_mm:
                 if not (ticker.startswith("KXBTC15M") or ticker.startswith("KXDOGE15M")):
@@ -136,7 +136,7 @@ class StrategyEvaluationCoordinator:
 
         # Guardrails cycle lock check (exempt market maker to permit two-sided continuous liquidity)
         cycle_key = market_info.event_ticker if (market_info and market_info.event_ticker) else ticker
-        if is_live and not is_mm and (cycle_key in self._guardrails._cycle_locks or ticker in self._guardrails._cycle_locks):
+        if is_live and active_strategy_bot not in ("market_maker", "bot6_market_maker", "dual_fleet", "both") and (cycle_key in self._guardrails._cycle_locks or ticker in self._guardrails._cycle_locks):
             return
 
         # BOT 3: Macro ONNX & Macro Trend Dominion
@@ -176,7 +176,7 @@ class StrategyEvaluationCoordinator:
         # BOT 1: 3-Step Domination Bot / Bot 1 V4 Engine / Dual Bot Fleet
         
         # BOT 6: Market Maker
-        if active_strategy_bot in ("market_maker", "bot6_market_maker", "all"):
+        if active_strategy_bot in ("market_maker", "bot6_market_maker", "both", "dual_fleet", "all"):
             await self._eval_market_maker(
                 ticker=ticker,
                 book=book,
@@ -874,10 +874,17 @@ class StrategyEvaluationCoordinator:
         if portfolio.circuit_breaker_tripped:
             return
             
+        y_bid = float(book.best_yes_bid) if book.best_yes_bid is not None else None
+        y_ask = float(book.best_yes_ask) if book.best_yes_ask is not None else None
+        if y_bid is None or y_ask is None:
+            return
+
         intents = self._market_maker_engine.evaluate(
             ticker=ticker,
-            yes_bid=book.yes_bid,
-            yes_ask=book.yes_ask,
+            yes_bid=y_bid,
+            yes_ask=y_ask,
+            min_spread_cents=1,
+            max_inventory=3,
         )
         
         for intent in intents:

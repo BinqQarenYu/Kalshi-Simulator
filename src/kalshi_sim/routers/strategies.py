@@ -1128,8 +1128,10 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
         strat_id = "dominion_2_bot"
     elif strat_id in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
         strat_id = "bot1_v4_domination"
+    elif strat_id in ("both", "dual", "dual_fleet", "dual_domination"):
+        strat_id = "both"
 
-    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot", "market_maker", "bot6_market_maker"):
+    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot", "market_maker", "bot6_market_maker", "both"):
         raise HTTPException(status_code=400, detail=f"Invalid strategy_id: {req.strategy_id}")
 
     # Enforce Pre-Deployment Audit Certification Gate

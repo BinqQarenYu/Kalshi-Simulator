@@ -150,6 +150,8 @@ def sign_request(
     return base64.b64encode(signature).decode("utf-8")
 
 
+TIME_OFFSET_MS = 0
+
 def get_auth_headers(
     api_key_id: str,
     private_key: RSAPrivateKey,
@@ -168,7 +170,8 @@ def get_auth_headers(
         dict[str, str]: Dictionary containing `KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-TIMESTAMP`,
             and `KALSHI-ACCESS-SIGNATURE`.
     """
-    timestamp_ms = str(int(time.time() * 1000))
+    global TIME_OFFSET_MS
+    timestamp_ms = str(int(time.time() * 1000) + TIME_OFFSET_MS)
     signature = sign_request(
         private_key=private_key,
         timestamp_ms=timestamp_ms,
@@ -298,3 +301,21 @@ async def async_validate_credentials(
         return False, f"Network or SSL error connecting to Kalshi: {exc}", {}
 
 
+
+
+def resync_time_offset():
+    """Fetches the Kalshi server time from the Date header and updates TIME_OFFSET_MS."""
+    import urllib.request
+    from email.utils import parsedate_to_datetime
+    global TIME_OFFSET_MS
+    try:
+        req = urllib.request.Request("https://api.elections.kalshi.com/trade-api/v2/exchange/status")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            date_header = resp.headers.get('Date')
+            if date_header:
+                kalshi_dt = parsedate_to_datetime(date_header)
+                kalshi_ms = int(kalshi_dt.timestamp() * 1000)
+                local_ms = int(time.time() * 1000)
+                TIME_OFFSET_MS = kalshi_ms - local_ms
+    except Exception:
+        pass

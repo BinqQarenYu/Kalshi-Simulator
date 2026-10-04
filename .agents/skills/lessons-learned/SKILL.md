@@ -293,3 +293,25 @@ $$\begin{aligned}
 * **Hardened Invariant**:
   1. **Strict Process Cleanup (Kill on Sight)**: When automated test suites running heavy tensor/GPU workloads exit unexpectedly or hang, you must aggressively hunt and terminate orphaned Python processes (`taskkill /F /IM python.exe /T` on Windows or `pkill -9 python` on Linux) to reclaim resources.
   2. **Memory Governor Exemption**: The system's internal `MemoryGovernor` (designed to throttle chart ticks) cannot protect the host machine from unhandled C++ extension memory leaks (like PyTorch tensor allocations) that occur outside the Python garbage collector's purview. Heavy tests must cleanly `del` large models and manually invoke `gc.collect()` in their teardown hooks.
+
+### Lesson 20: The 24/7 Trading Auto-Restart Guardrail
+
+#### The Incident (2026-09-29)
+* **Symptom**: The live execution daemon on Port 8000 suffered a fatal event-loop deadlock at 09:17 AM due to an unhandled 60s timeout in a background clone sync process (clone command timed out after 60s). While the socket remained open, the FastAPI event loop was completely frozen, leaving the system deaf to new WebSocket ticks and entirely halting live execution.
+* **Forensic Root Cause**:
+  - Background shell subprocess calls (like backup or data sync operations) that block or timeout can monopolize thread execution in Python's syncio unless strictly isolated or aggressively killed on timeout.
+  - No active watchdog was continuously probing the /api/kalshi/orders/live/open REST endpoint to ensure the event loop was cycling. When the server froze, it silently died without crashing the host process, causing significant lost market opportunity.
+* **Hardened Invariant (Rule 6.1 — 24/7 Resilience Protocol)**:
+  1. **Strict Timeout Wrapping**: All clone and disk I/O subprocesses must be forcefully killed by the OS if they exceed temporal bounds, rather than letting the Python event loop hang.
+  2. **Automated "Kill-on-Sight" Deadlock Recovery**: If the system is detected to be non-functioning, hanging, or deadlocked (e.g., API requests take >5 seconds), it is strictly preferred to ruthlessly kill the old process (	askkill /F /IM python.exe), wipe memory (__pycache__), and immediately restart the bot. There is zero tolerance for downtime in 24/7 trading.
+
+## Lesson 7: Time-of-Day Execution Weakness (Bot 1)
+* **Incident / Observation**: Quantitative evaluation of 883 trades executed over a 48-hour period revealed that Bot 1 (3-Step Domination Bot) suffers severe degradation in statistical edge during US daytime trading hours.
+* **Symptom**: Win rate collapsed to 33% - 45% between 9 AM and 10 PM EST. The bot absorbed heavy losses during the Mid-Morning, Noon/Early Afternoon, and Evening sessions, completely offsetting the profits accumulated overnight.
+* **Forensic Root Cause**:
+  - The mathematical foundation of Bot 1 relies on 15-minute mean-reversion and structural drift mechanics.
+  - During US trading hours (9 AM - 10 PM EST), Bitcoin is subjected to high-volume directional institutional flow and macro news events, destroying the short-term mean-reversion premise.
+  - Conversely, during the Asian session / US Overnight window (10 PM - 9 AM EST), volatility compresses into predictable, algorithmic ranges, allowing the bot to execute with a razor-sharp 60.9% win rate.
+* **Hardened Invariant (Rule 7.1 — Temporal Disarmament)**:
+  - Bot 1's live execution logic is now strictly bounded by a Time-of-Day Guardrail. It is hardcoded at the engine level to reject all entry signals between 9 AM and 10 PM EST, forcing it to wait for the overnight session.
+

@@ -112,6 +112,8 @@ export interface AISignals {
   dual_onnx_regime?: 'MOMENTUM_SCALP' | 'CONTRADICTION_ARBITRAGE' | 'CHOP_WAIT' | 'TOXIC_VETO' | string;
   is_sealed?: boolean;
   bot_sealed?: boolean;
+  turnovers_completed?: number;
+  max_turnovers?: number;
 }
 
 export interface BtcOrderflowSummary {
@@ -129,6 +131,7 @@ export interface BtcOrderflowSummary {
 }
 
 export type StrategyBotId =
+  | 'bot1_v4_domination'
   | 'dual_onnx'
   | 'macro_onnx'
   | 'macro_trend_dominion'

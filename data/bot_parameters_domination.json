@@ -51,7 +51,8 @@
       "bot_id": "macro_trend_dominion",
       "limit_price_cents": 51,
       "min_confidence_pct": 70.0,
-      "volatility_moat_dollars": 30.0
+      "volatility_moat_dollars": 30.0,
+      "max_temporal_skew_ms": 500.0
     },
     "ETH": {
       "discount_limit_price": 0.48,
@@ -258,5 +259,6 @@
     "volatility_multiplier": 2.0,
     "max_inventory": 3,
     "adverse_move_threshold": 0.03
-  }
+  },
+  "max_temporal_skew_ms": 500.0
 }

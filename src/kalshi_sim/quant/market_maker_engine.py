@@ -60,7 +60,7 @@ class MarketMakerEngine:
     def notify_fill(self, ticker: str, side: OrderSide, size: int) -> None:
         """Update inventory immediately upon local or live fill."""
         current_inv = self.inventory.get(ticker, 0)
-        if side == OrderSide.BUY:
+        if side == OrderSide.YES:
             self.inventory[ticker] = current_inv + size
         else:
             self.inventory[ticker] = current_inv - size
@@ -70,11 +70,11 @@ class MarketMakerEngine:
         ticker: str,
         yes_bid: float,
         yes_ask: float,
-        min_spread_cents: int = 2,
+        min_spread_cents: int = 1,
         inventory_skew_cents: int = 1,
-        volatility_multiplier: float = 2.0,
+        volatility_multiplier: float = 0.8,
         adverse_move_threshold: float = 0.03,
-        max_inventory: int = 1,
+        max_inventory: int = 10,
     ) -> List[dict]:
         """Returns a list of order intents (raw dicts) representing optimal quotes."""
         now = time.monotonic()
@@ -118,7 +118,7 @@ class MarketMakerEngine:
             bid_price = yes_bid + max(0.01, spread * 0.3) - skew
             bid_price = max(0.01, min(0.99, bid_price))
             intents.append({
-                "side": OrderSide.BUY,
+                "side": OrderSide.YES,
                 "price": Decimal(f"{bid_price:.2f}"),
                 "reasoning": f"MM Bid (Spread: ${spread:.2f}, Skew: ${skew:.2f})",
             })
@@ -128,7 +128,7 @@ class MarketMakerEngine:
             ask_price = yes_ask - max(0.01, spread * 0.3) - skew
             ask_price = max(0.01, min(0.99, ask_price))
             intents.append({
-                "side": OrderSide.SELL,
+                "side": OrderSide.NO,
                 "price": Decimal(f"{ask_price:.2f}"),
                 "reasoning": f"MM Ask (Spread: ${spread:.2f}, Skew: ${skew:.2f})",
             })

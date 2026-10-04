@@ -78,10 +78,10 @@ class ThreeStepDominationBot:
         default_btc_1m_volatility: float = 14.0,  # $14 typical 1-min BTC spot std dev
         take_profit_price_threshold: Decimal = Decimal("0.92"),  # 92c tail risk ceiling (Historical best)
         enable_take_profit_ceiling: bool = True,  # Take profit price ceiling toggle
-        require_reversal_for_tp_ceiling: bool = True,  # Only exit at ceiling if indicators >= 85% reverse; if not, continue to expiry
-        enable_reverse_take_profit_roi: bool = True,  # Only take profit on min_take_profit_roi if indicators >= 85% reverse
+        require_reversal_for_tp_ceiling: bool = True,  # Only exit at ceiling if indicators >= reversal threshold; if not, continue to expiry
+        enable_reverse_take_profit_roi: bool = True,  # Only take profit on min_take_profit_roi if indicators >= 80% reverse
         reverse_indicator_threshold: float = 0.85,  # 85% conviction in opposite direction required
-        min_take_profit_roi: float = 0.40,  # +40% minimum ROI for early exit (Historical best)
+        min_take_profit_roi: float = 0.35,  # +35% minimum ROI for early exit (bank early profit)
         late_cycle_roi: float = 0.15,  # +15% minimum ROI in final 120s
         fee_per_contract: Decimal = Decimal("0.01"),  # $0.01 standard taker fee for early exits
         min_spot_diff: Optional[float] = None,  # Scaled by asset if None
@@ -158,7 +158,7 @@ class ThreeStepDominationBot:
         self.enable_doubt_harvest = bool(enable_doubt_harvest)
         self.doubt_threshold = float(doubt_threshold)
         self.upside_capture_ratio_threshold = 0.50
-        self.asymmetric_peak_bid = Decimal("0.88")
+        self.asymmetric_peak_bid = Decimal("0.85")  # Council recommendation: 85c asymmetric ceiling (lock in 60%+ ROI)
 
         # Lead Deer Quant Brain & Continuous Experience Buffer (Council Weapon)
         self.lead_deer_brain = LeadDeerQuantBrain(
@@ -179,6 +179,25 @@ class ThreeStepDominationBot:
             vpin_safe_threshold=vpin_safe_threshold,
             vpin_toxic_threshold=vpin_toxic_threshold,
         )
+
+        # Quantitative Recommendation 1: 1-Trade-Per-Cycle State Guardrail
+        self.max_turnover_per_event = 1
+        self._current_cycle_id: Optional[str] = None
+        self._completed_turnovers_map: dict[str, int] = {}
+
+    def reset_cycle_turnover(self, cycle_id: str) -> None:
+        """Reset turnover count for a new 15M cycle."""
+        self._current_cycle_id = cycle_id
+        self._completed_turnovers_map[cycle_id] = 0
+
+    def get_completed_turnovers(self, cycle_id: str) -> int:
+        """Get number of completed round-trip trades for a cycle."""
+        return self._completed_turnovers_map.get(cycle_id, 0)
+
+    def record_completed_turnover(self, cycle_id: str) -> None:
+        """Record a completed round-trip trade."""
+        current = self._completed_turnovers_map.get(cycle_id, 0)
+        self._completed_turnovers_map[cycle_id] = current + 1
 
     def set_asset(self, asset: CryptoAsset | str) -> None:
         """Calibrate bot parameters for a specific crypto asset."""
@@ -473,6 +492,25 @@ class ThreeStepDominationBot:
 
         spot_diff = spot_price - target_strike
         is_vpin_safe = estimated_vpin <= self.vpin_toxic_threshold
+
+        # Step -2: 1-Trade-Per-Cycle State Guardrail
+        cycle_id = kwargs.get("cycle_id", getattr(book, "market_ticker", "DEFAULT_CYCLE"))
+        turnovers = self.get_completed_turnovers(cycle_id)
+        if turnovers >= self.max_turnover_per_event:
+            return self._build_wait_decision(
+                time_to_expiry_s=time_to_expiry_s,
+                spot_diff=spot_diff,
+                vpin=estimated_vpin,
+                rationale=f"Max Turnover Cap Hit ({turnovers}/{self.max_turnover_per_event} trades completed in this cycle). Locking cycle to prevent capital churn.",
+            )
+
+        # Dynamic Strike Distance Scaling: scale min_spot_diff dynamically with underlying spot level (0.05% of spot)
+        cfg_dyn = get_asset_config(self.asset)
+        base_spot_diff = float(cfg_dyn.min_spot_diff) if hasattr(cfg_dyn, "min_spot_diff") else 25.0
+        dynamic_spot_scale = max(base_spot_diff, spot_price * 0.0005) if spot_price > 0 else base_spot_diff
+        self.min_spot_diff = dynamic_spot_scale
+
+        # Step -1: Time-of-Day Guardrail — DISABLED per user request (24/7 trading)
 
         # Step 0: VPIN Toxicity Guardrail Check
         if not is_vpin_safe:
