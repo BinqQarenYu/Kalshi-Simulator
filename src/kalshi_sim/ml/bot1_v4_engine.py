@@ -73,8 +73,8 @@ class Bot1V4DominationEngine:
         min_ev_hurdle_dollars: Decimal = Decimal("0.02"),  # $0.02 minimum net EV hurdle
         discount_limit_price: Decimal = Decimal("0.52"),  # 52c maker discount floor (V3.2 standard)
         min_edge_pct: float = 0.015,  # 1.5% min edge
-        vpin_toxic_threshold: float = 0.60,
-        vpin_safe_threshold: float = 0.35,
+        vpin_toxic_threshold: float = 0.35,  # Council Veto: Hard kill orders above 0.35 toxic flow
+        vpin_safe_threshold: float = 0.28,
         default_btc_1m_volatility: float = 14.0,
         take_profit_price_threshold: Decimal = Decimal("0.92"),
         enable_take_profit_ceiling: bool = True,
@@ -97,7 +97,7 @@ class Bot1V4DominationEngine:
         enable_doubt_harvest: bool = True,
         doubt_threshold: float = 0.80,
         upside_capture_ratio_threshold: float = 0.50,
-        asymmetric_peak_bid: Decimal = Decimal("0.85"),  # Council recommendation: 85c asymmetric ceiling
+        asymmetric_peak_bid: Decimal = Decimal("0.75"),  # Council recommendation: $0.75 asymmetric chop harvest (+50% ROI)
         onnx_engine: Optional[Any] = None,
         fusion_weight_micro: float = 0.40,
         opening_quarantine_seconds: float = 90.0,  # 90s opening noise quarantine (V3.2 shield)
@@ -186,15 +186,20 @@ class Bot1V4DominationEngine:
         scaled = 0.50 + 0.035 * tau_mins
         return min(self.reverse_indicator_threshold, scaled)
 
-    def compute_dynamic_limit_price(self, win_prob: float) -> Decimal:
-        """Dynamic EV Math Coupling:
-        Entry Limit = min(win_prob - EV_hurdle, max_entry_price)
-        Dynamically scales entry ceiling up to max_entry_price ($0.55) when model conviction is high,
-        while maintaining at least min_ev_hurdle_dollars ($0.02) net EV edge.
-        Strictly hard-vetoes > $0.55 entry orders to eliminate negative risk/reward asymmetry.
+    def compute_dynamic_limit_price(self, win_prob: float, vpin: float = 0.20) -> Decimal:
+        """Dual-Regime Dynamic EV Math Coupling:
+        - High Conviction / Trend Regime (VPIN <= 0.28 and win_prob >= 0.75):
+            Entry Limit up to $0.55 max cap to capture explosive breakouts.
+        - Chop / High-Entropy Regime (VPIN > 0.28 or win_prob < 0.75):
+            Entry Limit capped strictly at $0.48 to eliminate adverse selection in whipsaw markets.
+        - Absolute Toxicity Veto: VPIN > 0.35 hard blocks order entry.
         """
         ev_hurdle = float(self.min_ev_hurdle_dollars)
-        max_cap = min(float(self.max_entry_price), 0.55)  # Hard $0.55 limit ceiling
+        # Chop regime detection:
+        is_chop = (vpin > 0.28) or (win_prob < 0.75)
+        regime_max = 0.48 if is_chop else 0.55
+
+        max_cap = min(float(self.max_entry_price), regime_max)
         base_floor = float(self.discount_limit_price)
 
         dynamic_price = win_prob - ev_hurdle
@@ -556,8 +561,8 @@ class Bot1V4DominationEngine:
 
         # 3. Dynamic EV & Win Probability Coupling
         req_p_win_base = self.compute_required_win_probability(self.discount_limit_price)
-        dynamic_limit_yes = self.compute_dynamic_limit_price(p_up)
-        dynamic_limit_no = self.compute_dynamic_limit_price(p_down)
+        dynamic_limit_yes = self.compute_dynamic_limit_price(p_up, vpin=vpin_eval)
+        dynamic_limit_no = self.compute_dynamic_limit_price(p_down, vpin=vpin_eval)
 
         recommended_side = "wait"
         rationale = "No edge meeting EV hurdle"
@@ -567,16 +572,21 @@ class Bot1V4DominationEngine:
         ev_no = p_down * 1.0 - float(dynamic_limit_no)
 
         ai_tag = f" [AI Conf {onnx_conf*100:.0f}%]" if fused_source == "bayesian_fusion" else ""
+        is_chop_yes = (vpin_eval > 0.28) or (p_up < 0.75)
+        is_chop_no = (vpin_eval > 0.28) or (p_down < 0.75)
+        regime_tag_yes = " [Chop Sniper $0.48]" if is_chop_yes else " [Trend Breakout $0.55]"
+        regime_tag_no = " [Chop Sniper $0.48]" if is_chop_no else " [Trend Breakout $0.55]"
+
         if p_up >= (float(dynamic_limit_yes) + float(self.min_ev_hurdle_dollars)) or ev_yes >= float(self.min_ev_hurdle_dollars):
             if p_up >= req_p_win_base:
                 recommended_side = "yes"
                 chosen_limit_price = min(float(dynamic_limit_yes), float(self.max_entry_price))
-                rationale = f"Bot 1 V4 YES Signal{ai_tag}: P_win {p_up:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_yes:.3f})"
+                rationale = f"Bot 1 V4 YES Signal{ai_tag}{regime_tag_yes}: P_win {p_up:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_yes:.3f})"
         elif p_down >= (float(dynamic_limit_no) + float(self.min_ev_hurdle_dollars)) or ev_no >= float(self.min_ev_hurdle_dollars):
             if p_down >= req_p_win_base:
                 recommended_side = "no"
                 chosen_limit_price = min(float(dynamic_limit_no), float(self.max_entry_price))
-                rationale = f"Bot 1 V4 NO Signal{ai_tag}: P_win {p_down:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_no:.3f})"
+                rationale = f"Bot 1 V4 NO Signal{ai_tag}{regime_tag_no}: P_win {p_down:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_no:.3f})"
 
         return Bot1V4Decision(
             strategy_id=self.STRATEGY_ID,

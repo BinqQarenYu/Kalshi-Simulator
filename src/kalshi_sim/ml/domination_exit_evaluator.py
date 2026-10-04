@@ -422,14 +422,28 @@ class DominationExitEvaluator:
 
         enable_doubt_harvest = getattr(bot, "enable_doubt_harvest", True)
         doubt_thresh = getattr(bot, "doubt_threshold", 0.80)
-        upside_thresh = getattr(bot, "upside_capture_ratio_threshold", 0.50)
-        asymmetric_peak = getattr(bot, "asymmetric_peak_bid", Decimal("0.88"))
+        asymmetric_peak = getattr(bot, "asymmetric_peak_bid", Decimal("0.75"))
 
         twap_safe_itm = False
         if time_to_expiry_s <= 120.0 and twap_60s is not None and twap_60s > 0.0 and target_strike > 0.0:
             delta_twap = (twap_60s - target_strike) if side_is_yes else (target_strike - twap_60s)
             if delta_twap >= 10.0:
                 twap_safe_itm = True
+
+        # Asymmetric Peak Harvest Floor: In choppy regimes or after +50% ROI, risking 75c for 25c upside is negative EV.
+        if bot.enable_take_profit_ceiling and best_bid >= asymmetric_peak and net_pnl_per_ct > Decimal("0.02") and not twap_safe_itm and reverse_prob >= dyn_reversal_threshold:
+            return DominationExitDecision(
+                should_exit=True,
+                exit_reason="ASYMMETRIC_PEAK_HARVEST",
+                exit_price=best_bid,
+                profit_pct=round(roi * 100.0, 2),
+                unrealized_pnl=round(total_net_pnl, 4),
+                rationale=(
+                    f"⛰️ [ASYMMETRIC PEAK HARVEST] Bid ${best_bid:.2f} >= ${asymmetric_peak:.2f} ceiling reached | "
+                    f"Remaining upside only +${(Decimal('1.00')-best_bid):.2f} vs -${best_bid:.2f} downside | "
+                    f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | Harvesting optimal EV peak."
+                ),
+            )
 
         if enable_doubt_harvest and net_pnl_per_ct > Decimal("0.04") and not twap_safe_itm:
             # Condition A: 50% Profit reached AND Directional Reversal Doubt confirmed
@@ -444,21 +458,6 @@ class DominationExitEvaluator:
                         f"🧠 [DOUBT-HARVEST TRIGGERED] Upside captured {upside_capture_ratio*100:.1f}% (Bid ${best_bid:.2f}) | "
                         f"Doubt Score {doubt_score:.2f} >= {doubt_thresh:.2f} (Brain prob {our_prob*100:.1f}%, AdvVel {adverse_vel:+.1f}) | "
                         f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | Locking in realized gains before reversal."
-                    ),
-                )
-
-            # Condition B: Asymmetric Peak Floor (Risking 88c for 12c upside is mathematically negative EV)
-            if best_bid >= asymmetric_peak:
-                return DominationExitDecision(
-                    should_exit=True,
-                    exit_reason="ASYMMETRIC_PEAK_HARVEST",
-                    exit_price=best_bid,
-                    profit_pct=round(roi * 100.0, 2),
-                    unrealized_pnl=round(total_net_pnl, 4),
-                    rationale=(
-                        f"⛰️ [ASYMMETRIC PEAK HARVEST] Bid ${best_bid:.2f} >= ${asymmetric_peak:.2f} ceiling reached | "
-                        f"Remaining upside only +${(Decimal('1.00')-best_bid):.2f} vs -${best_bid:.2f} downside | "
-                        f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | Harvesting optimal EV peak."
                     ),
                 )
 

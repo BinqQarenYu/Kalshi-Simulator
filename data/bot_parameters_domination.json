@@ -17,7 +17,7 @@
       "min_ev_dollars": 0.02,
       "min_spot_diff": 21.0,
       "typical_1m_volatility": 14.0,
-      "vpin_toxic_threshold": 0.6,
+      "vpin_toxic_threshold": 0.35,
       "take_profit_price_threshold": 0.92,
       "enable_take_profit_ceiling": true,
       "require_reversal_for_tp_ceiling": true,

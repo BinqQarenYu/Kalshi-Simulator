@@ -1072,6 +1072,32 @@ class ThreeStepDominationBot:
                     ),
                 )
 
+            # Dual-Regime Chop Protection & Toxicity Veto (exempts late-cycle Silas TWAP sniper which has its own immutability ceiling)
+            if stage != "twap_sniper":
+                if vpin > 0.35:
+                    return self._build_wait_decision(
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_diff=spot_diff,
+                        vpin=vpin,
+                        rationale=f"VPIN Toxicity Veto (Hard Kill): Orderbook VPIN {vpin:.2f} > 0.35 toxic flow threshold. Suppressing entry.",
+                    )
+
+                is_chop_regime = (vpin > 0.28) or (target_prob < 0.75)
+                chop_max_cap = 0.48 if is_chop_regime else float(self.max_entry_price)
+                # When resting as maker limit order, evaluate discount_price_val against chop cap; for taker/fill evaluate target_ask
+                effective_order_price = discount_price_val if (target_ask > discount_price_val and stage != "initial_10s_maker_park") else target_ask
+                if effective_order_price > chop_max_cap:
+                    regime_name = "Chop Regime ($0.48)" if is_chop_regime else f"Max Cap (${float(self.max_entry_price):.2f})"
+                    return self._build_wait_decision(
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_diff=spot_diff,
+                        vpin=vpin,
+                        rationale=(
+                            f"Price Cap Veto ({regime_name}): Proposed entry ${effective_order_price:.2f} "
+                            f"> ${chop_max_cap:.2f} allowable limit. Refusing adverse fill in {'choppy/low-conviction' if is_chop_regime else 'standard'} market."
+                        ),
+                    )
+
             if stage == "twap_sniper":
                 if target_ask > self.twap_immutability_sniper_cents:
                     return self._build_wait_decision(
