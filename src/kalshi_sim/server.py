@@ -426,6 +426,16 @@ class ServerState:
         # The ONNX Strategy Execution Instance (Dual-Brain Contradiction & Momentum Arbitrage)
         self.dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
 
+        # Autonomous 6-Trade Batch Supervisor (Parallel Evaluation & Evolution Daemon)
+        from kalshi_sim.batch_supervisor import AutonomousBatchSupervisor
+        self.batch_supervisor = AutonomousBatchSupervisor(
+            guardrails=self.guardrails_agent,
+            bot_parameters_path=self.data_dir / "bot_parameters_domination.json",
+            win_loss_path=self.data_dir / "win_loss_reports.json",
+            eval_batch_size=6,
+            poll_interval_s=5.0,
+        )
+
         # 15-Minute Event Win/Loss Reports Ledger (Disk-Persisted, No Auto-Reset)
         self.win_loss_reports: list[dict[str, Any]] = self.load_persisted_reports()
 
@@ -1165,11 +1175,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if hasattr(state, "gold_continuous_trainer") and state.gold_continuous_trainer:
         state.gold_continuous_trainer.start()
         logger.info("Gold 32-D ONNX Continuous Trainer started (Lane 2 Incubator).")
+    if hasattr(state, "batch_supervisor") and state.batch_supervisor:
+        state.batch_supervisor.start()
     yield
     try:
         engine_lock.release()
     except Exception:
         pass
+    if hasattr(state, "batch_supervisor") and state.batch_supervisor:
+        state.batch_supervisor.stop()
     if hasattr(state, "continuous_trainer") and state.continuous_trainer:
         state.continuous_trainer.stop()
     if hasattr(state, "gold_continuous_trainer") and state.gold_continuous_trainer:
