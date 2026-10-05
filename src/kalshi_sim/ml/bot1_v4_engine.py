@@ -200,7 +200,7 @@ class Bot1V4DominationEngine:
         regime_max = 0.48 if is_chop else 0.55
 
         max_cap = min(float(self.max_entry_price), regime_max)
-        base_floor = float(self.discount_limit_price)
+        base_floor = min(float(self.discount_limit_price), max_cap)
 
         dynamic_price = win_prob - ev_hurdle
         clamped_price = max(base_floor, min(dynamic_price, max_cap))
@@ -252,7 +252,9 @@ class Bot1V4DominationEngine:
         """
         vol = max(1.0, self.default_btc_1m_volatility)
         t_factor = math.sqrt(max(1.0, time_to_expiry_s / 60.0))
-        p_up_macro = 0.5 * (1.0 + math.erf(spot_diff / (vol * t_factor)))
+        # Mathematically exact Standard Normal CDF Phi(z) = 0.5 * (1 + erf(z / sqrt(2)))
+        z_norm = spot_diff / (vol * t_factor)
+        p_up_macro = 0.5 * (1.0 + math.erf(z_norm / math.sqrt(2.0)))
         p_down_macro = 1.0 - p_up_macro
 
         if self.onnx_engine is None or l2_book is None:
@@ -275,10 +277,10 @@ class Bot1V4DominationEngine:
                 p_up_micro, p_down_micro = 0.5, 0.5
 
             # Dynamic time decay weighting
-            # T_rem > 300s: orderflow micro has maximum weight
+            # T_rem > 300s: ONNX orderflow micro dominates at 60%
             # T_rem <= 60s: settlement TWAP moneyness dictates near 100%
             decay = min(1.0, max(0.0, time_to_expiry_s / 900.0))
-            w_micro = self.fusion_weight_micro * decay
+            w_micro = 0.60 * decay
             w_macro = 1.0 - w_micro
 
             p_up = float((w_macro * p_up_macro) + (w_micro * p_up_micro))

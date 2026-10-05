@@ -30,6 +30,7 @@ from kalshi_sim.schemas import (
     L2BookState,
     MarketInfo,
     OrderSide,
+    SimulatedFill,
     Timeframe,
 )
 
@@ -252,6 +253,31 @@ class VirtualOrderRouter:
                                 "Slippage from local book snapshot. Order: %s",
                                 ticker, avg_price, order_id,
                             )
+
+                        # Track position in portfolio for early-exit and lifecycle management
+                        try:
+                            side_enum = OrderSide.YES if live_side.lower() == "yes" else OrderSide.NO
+                            sim_fill = SimulatedFill(
+                                order_id=f"live_{order_id}",
+                                ticker=ticker,
+                                side=side_enum,
+                                size=actual_fills,
+                                fill_price=Decimal(str(avg_price)),
+                                cost=Decimal(str(cost)),
+                                fee=Decimal(str(fee)),
+                            )
+                            active_p.open_position(
+                                fill=sim_fill,
+                                timeframe=timeframe,
+                                entry_confidence=float(snapshot.win_rate or 0.70),
+                                entry_vpin=0.15,
+                            )
+                            logger.info(
+                                "[PORTFOLIO TRACKING] Live position registered: %s %d cts @ $%s on %s",
+                                live_side.upper(), actual_fills, avg_price, ticker
+                            )
+                        except Exception as p_err:
+                            logger.error("Failed to register live fill in portfolio: %s", p_err)
 
                         self._guardrails.record_trade_inception(
                             trade_id=f"live_{order_id}",

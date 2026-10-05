@@ -56,6 +56,8 @@ class AgentGuardrails:
         self._circuit_breaker_tripped: bool = False
         self.is_bot_armed: bool = True
         self.harakiri_loss_limit: int = 6
+        self.batch_trades_quota: int = 6
+        self.batch_trades_completed: int = 0
 
         # Certified Live Strategies
         self.authorized_live_bots: set[str] = {
@@ -227,6 +229,16 @@ class AgentGuardrails:
             msg = f"HARAKIRI STREAK BREAKER VETO: Bot is DISARMED after reaching {self._consecutive_losses} consecutive losses. Manual re-arming required."
             self._record_rejection("bot_disarmed", msg, ticker, now_utc)
             return False, msg, 0, {"veto": "harakiri_disarmed", "consecutive_losses": self._consecutive_losses}
+
+        # 0e. 6-Trade Evaluation Batch Quota Veto
+        if is_bot and self.batch_trades_quota > 0 and self.batch_trades_completed >= self.batch_trades_quota:
+            self.is_bot_armed = False
+            msg = (
+                f"BATCH EVALUATION QUOTA REACHED: Completed {self.batch_trades_completed}/{self.batch_trades_quota} live trades. "
+                "Trading halted automatically for post-batch quant evaluation."
+            )
+            self._record_rejection("batch_quota_reached", msg, ticker, now_utc)
+            return False, msg, 0, {"veto": "batch_quota_reached", "completed": self.batch_trades_completed}
 
         # Update peak equity
         if self._peak_equity is None or total_equity > self._peak_equity:
@@ -589,6 +601,17 @@ class AgentGuardrails:
         elif outcome.lower() == "win":
             self._consecutive_losses = 0
             logger.info("🛡️ [GUARDRAIL SETTLEMENT] Win recorded. Consecutive losses reset to 0.")
+
+        self.batch_trades_completed += 1
+        logger.info(
+            "🛡️ [GUARDRAIL BATCH] Completed trade %d/%d in current evaluation batch.",
+            self.batch_trades_completed, self.batch_trades_quota
+        )
+        if self.batch_trades_quota > 0 and self.batch_trades_completed >= self.batch_trades_quota:
+            self.is_bot_armed = False
+            logger.warning(
+                "🛑 [GUARDRAIL BATCH HALT] Completed 6/6 evaluation trades! Bot disarmed automatically for mandatory assessment."
+            )
 
         # Update peak equity and circuit breaker
         if self._peak_equity is None or balance_after > self._peak_equity:
