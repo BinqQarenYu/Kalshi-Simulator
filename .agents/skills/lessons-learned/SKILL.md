@@ -31,6 +31,10 @@ This document is the authoritative institutional repository of all quantitative 
 - [Lesson 16: The Multi-Port Microservice Trap (Port Sprawl & Localhost Bridge Collapse)](#lesson-16-the-multi-port-microservice-trap-port-sprawl--localhost-bridge-collapse)
 - [Lesson 17: The Zombie In-Flight Intent Lockout & Monotonic 15-Second TTL Circuit Breaker](#lesson-17-the-zombie-in-flight-intent-lockout--monotonic-15-second-ttl-circuit-breaker)
 - [Lesson 18: Human Cognitive Fatigue & The Anti-Complexity Doctrine ("Simple is More")](#lesson-18-human-cognitive-fatigue--the-anti-complexity-doctrine-simple-is-more)
+- [Lesson 21: Gaussian erf Mathematical Inversion & False 86% Overconfidence Spikes](#lesson-21-gaussian-erf-mathematical-inversion--false-86-overconfidence-spikes)
+- [Lesson 22: Limit Clamp Floor Inversion in Choppy Regimes (The 51c Floor Bug)](#lesson-22-limit-clamp-floor-inversion-in-choppy-regimes-the-51c-floor-bug)
+- [Lesson 23: Live Order Fill Portfolio Tracking Failure (The Missing Early Take-Profit Bug)](#lesson-23-live-order-fill-portfolio-tracking-failure-the-missing-early-take-profit-bug)
+- [Lesson 24: Autonomous 6-Trade Evaluation Batch Quota & Self-Disarming Loop](#lesson-24-autonomous-6-trade-evaluation-batch-quota--self-disarming-loop)
 
 ---
 
@@ -297,12 +301,15 @@ $$\begin{aligned}
 ### Lesson 20: The 24/7 Trading Auto-Restart Guardrail
 
 #### The Incident (2026-09-29)
-* **Symptom**: The live execution daemon on Port 8000 suffered a fatal event-loop deadlock at 09:17 AM due to an unhandled 60s timeout in a background clone sync process (clone command timed out after 60s). While the socket remained open, the FastAPI event loop was completely frozen, leaving the system deaf to new WebSocket ticks and entirely halting live execution.
+* **Symptom**: The live execution daemon on Port 8000 suffered a fatal event-loop deadlock at 09:17 AM due to an unhandled 60s timeout in a background 
+clone sync process (
+clone command timed out after 60s). While the socket remained open, the FastAPI event loop was completely frozen, leaving the system deaf to new WebSocket ticks and entirely halting live execution.
 * **Forensic Root Cause**:
   - Background shell subprocess calls (like backup or data sync operations) that block or timeout can monopolize thread execution in Python's syncio unless strictly isolated or aggressively killed on timeout.
   - No active watchdog was continuously probing the /api/kalshi/orders/live/open REST endpoint to ensure the event loop was cycling. When the server froze, it silently died without crashing the host process, causing significant lost market opportunity.
-* **Hardened Invariant (Rule 6.1 — 24/7 Resilience Protocol)**:
-  1. **Strict Timeout Wrapping**: All clone and disk I/O subprocesses must be forcefully killed by the OS if they exceed temporal bounds, rather than letting the Python event loop hang.
+* **Hardened Invariant (Rule 6.1 ï¿½ 24/7 Resilience Protocol)**:
+  1. **Strict Timeout Wrapping**: All 
+clone and disk I/O subprocesses must be forcefully killed by the OS if they exceed temporal bounds, rather than letting the Python event loop hang.
   2. **Automated "Kill-on-Sight" Deadlock Recovery**: If the system is detected to be non-functioning, hanging, or deadlocked (e.g., API requests take >5 seconds), it is strictly preferred to ruthlessly kill the old process (	askkill /F /IM python.exe), wipe memory (__pycache__), and immediately restart the bot. There is zero tolerance for downtime in 24/7 trading.
 
 ## Lesson 7: Time-of-Day Execution Weakness (Bot 1)
@@ -312,6 +319,70 @@ $$\begin{aligned}
   - The mathematical foundation of Bot 1 relies on 15-minute mean-reversion and structural drift mechanics.
   - During US trading hours (9 AM - 10 PM EST), Bitcoin is subjected to high-volume directional institutional flow and macro news events, destroying the short-term mean-reversion premise.
   - Conversely, during the Asian session / US Overnight window (10 PM - 9 AM EST), volatility compresses into predictable, algorithmic ranges, allowing the bot to execute with a razor-sharp 60.9% win rate.
-* **Hardened Invariant (Rule 7.1 — Temporal Disarmament)**:
+* **Hardened Invariant (Rule 7.1 ï¿½ Temporal Disarmament)**:
   - Bot 1's live execution logic is now strictly bounded by a Time-of-Day Guardrail. It is hardcoded at the engine level to reject all entry signals between 9 AM and 10 PM EST, forcing it to wait for the overnight session.
 
+---
+
+### Lesson 21: Gaussian erf Mathematical Inversion & False 86% Overconfidence Spikes
+
+#### The Incident (2026-10-05)
+* **Symptom**: The trading bot consistently lost money entering low-edge cycles, displaying an excessively high AI confidence (85% - 88%) right before sharp adverse market movements.
+* **Forensic Root Cause**:
+  - The analytical spot probability formula used:
+    `p_up_macro = 0.5 * (1.0 + math.erf(spot_diff / (vol * t_factor)))`
+  - In standard normal distribution theory, the cumulative distribution function is defined as:
+    `Phi(z) = 0.5 * (1 + erf(z / sqrt(2)))`
+  - Because `sqrt(2)` was missing from the divisor, the normalized z-score was artificially multiplied by `sqrt(2) ~ 1.414`.
+  - A small $35 spot move 10 minutes prior to expiry yielded a false 86.8% win probability instead of the true 78.5%.
+  - This overconfidence overpowered the micro-orderbook signals, causing the bot to buy expensive contracts right before reversals.
+* **Hardened Invariant (Rule 21.1 - Exact Error Function Normalization)**:
+  - All analytical Gaussian CDF calculations must strictly include `math.sqrt(2.0)`:
+    `z_norm = spot_diff / (vol * t_factor)`
+    `p_up_macro = 0.5 * (1.0 + math.erf(z_norm / math.sqrt(2.0)))`
+  - Micro-orderbook signals (ONNX) must retain a minimum 60% weighting decay over macro spot drift.
+
+---
+
+### Lesson 22: Limit Clamp Floor Inversion in Choppy Regimes (The 51c Floor Bug)
+
+#### The Incident (2026-10-05)
+* **Symptom**: During choppy market regimes where the bot was instructed to buy at deep discounts (<= 48c), orders were repeatedly routed and filled at 51c - 55c.
+* **Forensic Root Cause**:
+  - In `compute_dynamic_limit_price()` of `bot1_v4_engine.py`:
+    `max_cap = min(float(self.max_entry_price), regime_max)` (e.g. 0.48 in chop)
+    `base_floor = float(self.discount_limit_price)` (configured as 0.51)
+    `clamped_price = max(base_floor, min(dynamic_price, max_cap))`
+  - Because `base_floor` (0.51) was greater than `max_cap` (0.48), the outer `max()` function immediately evaluated to `0.51`! The chop discount was mathematically neutralized.
+* **Hardened Invariant (Rule 22.1 - Cap Precedence on Floors)**:
+  - A price floor must never exceed a risk ceiling. The floor calculation must be bounded by the maximum cap:
+    `base_floor = min(float(self.discount_limit_price), max_cap)`
+  - Parameter files must keep `discount_limit_price` in sync with chop ceilings (<= 0.48).
+
+---
+
+### Lesson 23: Live Order Fill Portfolio Tracking Failure (The Missing Early Take-Profit Bug)
+
+#### The Incident (2026-10-05)
+* **Symptom**: In live trading, orders that went in the money (reaching 75c - 92c) were never exited early to lock in profits. Instead, positions were held until expiration, where unexpected last-minute reversals wiped out 100% of the capital.
+* **Forensic Root Cause**:
+  - In `virtual_order_router.py`, when a live order filled on Kalshi, it enqueued a database trade and recorded trade inception in guardrails, but **never registered the fill into the portfolio instance** (`active_p.open_position()`).
+  - When the strategy evaluator checked open positions (`portfolio.get_position(ticker)`), it returned `None`.
+  - The entire early-exit logic (`_eval_domination_exit`), trailing ratchet armor, and take-profit sweep were completely skipped for live orders.
+* **Hardened Invariant (Rule 23.1 - Mandatory Live Position Registration)**:
+  - Every live fill on the exchange must immediately create a `SimulatedFill` and call `active_p.open_position(fill, timeframe, ...)` to ensure memory tracking, early-exit monitoring, and trailing ratchets actively protect live capital.
+
+---
+
+### Lesson 24: Autonomous 6-Trade Evaluation Batch Quota & Self-Disarming Loop
+
+#### The Incident (2026-10-05)
+* **Symptom**: Bots left running continuously overnight bled capital without any automated checkpoint to evaluate whether recent revisions actually improved performance or degraded it.
+* **Forensic Root Cause**:
+  - Previous guardrails had a consecutive loss limit (e.g. 6 losses in a row), but alternating win-loss-loss-loss-win patterns bypassed the streak breaker, resulting in persistent negative PnL.
+  - Lack of fixed-sample statistical batch gates prevented automated verification of newly deployed code.
+* **Hardened Invariant (Rule 24.1 - 6-Trade Evaluation Batch Gate)**:
+  - Every active bot operates under a strict 6-trade evaluation quota (`batch_trades_quota = 6`).
+  - On the settlement of the 6th trade, if the net batch PnL is <= $0.00, the bot **immediately auto-disarms** (`is_bot_armed = False`) and triggers veto `0e (batch_quota_reached)`.
+  - Trading is halted until a comprehensive multi-agent Quant Council audit evaluates the 6 trades, audits parameters, and upgrades the engine before re-arming.
+  - Only if the batch produces net positive profit does the system automatically extend for another 6 trades.
