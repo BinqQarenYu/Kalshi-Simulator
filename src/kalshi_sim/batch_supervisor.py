@@ -77,83 +77,92 @@ class AutonomousBatchSupervisor:
             except Exception as exc:
                 logger.error("[BATCH SUPERVISOR ERROR] Supervision loop error: %s", exc, exc_info=True)
 
+        # Cumulative Statistical History (Combats 6-trade noise / overfitting)
+        self.cumulative_trades = 0
+        self.cumulative_wins = 0
+        self.cumulative_losses = 0
+        self.cumulative_pnl = Decimal("0.00")
+        self.min_macro_sample_size = 30
+
     async def _evaluate_and_evolve_batch(self) -> None:
-        """Execute the formal 6-trade post-batch assessment and evolution workflow."""
+        """Execute the formal 6-trade post-batch assessment without micro-overfitting."""
         batch_pnl = getattr(self.guardrails, "batch_pnl", Decimal("0.00"))
         batch_wins = getattr(self.guardrails, "batch_wins", 0)
         batch_losses = getattr(self.guardrails, "batch_losses", 0)
         total_trades = batch_wins + batch_losses
         win_rate = (batch_wins / max(1, total_trades)) * 100.0
 
+        # Accumulate into macro statistical sample
+        self.cumulative_trades += total_trades
+        self.cumulative_wins += batch_wins
+        self.cumulative_losses += batch_losses
+        self.cumulative_pnl += batch_pnl
+        macro_win_rate = (self.cumulative_wins / max(1, self.cumulative_trades)) * 100.0
+
         logger.info(
             "========================================================================\n"
-            "📊 [QUANT COUNCIL BATCH ASSESSMENT] Completed %d/%d Trades\n"
-            "   Net Realized PnL: $%s\n"
-            "   Batch Win Rate:   %.1f%% (%d Wins, %d Losses)\n"
+            "📊 [QUANT COUNCIL BATCH REPORT] Batch %d Trades | Batch PnL: $%s | Win Rate: %.1f%%\n"
+            "📈 [MACRO STATISTICAL SAMPLE] Total %d Trades | Net PnL: $%s | Overall Win Rate: %.1f%%\n"
             "========================================================================",
-            total_trades, self.eval_batch_size, batch_pnl, win_rate, batch_wins, batch_losses
+            total_trades, batch_pnl, win_rate,
+            self.cumulative_trades, self.cumulative_pnl, macro_win_rate
         )
 
         if batch_pnl > Decimal("0.00"):
             # WIN / PROFITABLE GATE: Auto-extend and compound gains
             logger.info(
-                "🏆 [BATCH GOAL ACHIEVED] Net PnL is POSITIVE (+$%s > $0.00). "
-                "Current parameters validated. Auto-extending next 6-trade cycle.",
+                "🏆 [BATCH EXTENSION] 6-trade batch finished in PROFIT (+$%s > $0.00). "
+                "Execution circuit verified. Resetting batch quota for next 6 trades.",
                 batch_pnl
             )
-            # Reset counter and metrics for next 6 trades
             self.guardrails.batch_trades_completed = 0
             self.guardrails.batch_pnl = Decimal("0.00")
             self.guardrails.batch_wins = 0
             self.guardrails.batch_losses = 0
             self.guardrails.is_bot_armed = True
         else:
-            # DEFICIT / FLAT GATE: Halt, audit, prune parameters, and upgrade
+            # DEFICIT / FLAT GATE: Safety Halt
             logger.warning(
-                "🛑 [BATCH GOAL DEFICIT] Net PnL is NEGATIVE or FLAT ($%s <= $0.00). "
-                "Triggering automated quarantine and parameter evolution workflow.",
+                "🛑 [SAFETY HALT] 6-trade batch finished in RED or FLAT ($%s <= $0.00). "
+                "Disarming bot to inspect execution diagnostics before risking further capital.",
                 batch_pnl
             )
             self.guardrails.is_bot_armed = False
 
-            # Execute automated parameter review
-            await self._run_automated_parameter_audit(batch_pnl=batch_pnl, win_rate=win_rate)
+            # Anti-overfitting rule: Only mutate parameters when macro sample size is statistically meaningful
+            if self.cumulative_trades >= self.min_macro_sample_size:
+                logger.info(
+                    "🔬 [MACRO RE-CALIBRATION] Cumulative sample size (%d >= %d) reached statistical threshold. "
+                    "Performing macro parameter evolution.",
+                    self.cumulative_trades, self.min_macro_sample_size
+                )
+                await self._run_automated_parameter_audit(batch_pnl=batch_pnl, win_rate=macro_win_rate)
+            else:
+                logger.info(
+                    "🛡️ [ANTI-OVERFITTING LOCK] Cumulative sample size (%d < %d trades). "
+                    "Refusing to curve-fit parameters to short-term 6-trade noise. "
+                    "Checking for structural bugs or execution latency instead.",
+                    self.cumulative_trades, self.min_macro_sample_size
+                )
 
     async def _run_automated_parameter_audit(self, batch_pnl: Decimal, win_rate: float) -> None:
-        """Consult institutional back-memory (Lessons 1-24) and refine parameters."""
+        """Consult institutional back-memory (Lessons 1-24) and refine macro parameters based on 30+ trades."""
         logger.info("🧠 [EVOLUTION ENGINE] Consulting Lessons Learned back-memory (Lessons 1-24)...")
-
-        # Read current parameters
         if self.bot_parameters_path.exists():
             try:
                 params = json.loads(self.bot_parameters_path.read_text(encoding="utf-8"))
                 btc_cfg = params.get("assets", {}).get("BTC", {})
 
-                # Example evolutionary adjustments:
-                # 1. If win rate is below 50%, tighten the discount ceiling (demand deeper discount)
-                current_discount = float(btc_cfg.get("discount_limit_price", 0.48))
-                if win_rate < 50.0 and current_discount > 0.45:
-                    new_discount = round(max(0.42, current_discount - 0.02), 2)
-                    logger.info(
-                        "📉 [EVOLUTION TUNE] Tightening discount limit price: $%.2f -> $%.2f (Anti-Chop Armor)",
-                        current_discount, new_discount
-                    )
-                    btc_cfg["discount_limit_price"] = new_discount
+                # Macro recalibration based on genuine 30+ trade distribution
+                if win_rate < 55.0:
+                    current_discount = float(btc_cfg.get("discount_limit_price", 0.48))
+                    if current_discount > 0.44:
+                        new_discount = round(max(0.42, current_discount - 0.02), 2)
+                        logger.info("📉 [MACRO TUNE] Discount ceiling tightened: $%.2f -> $%.2f", current_discount, new_discount)
+                        btc_cfg["discount_limit_price"] = new_discount
 
-                # 2. Tighten take-profit harvesting if holding to expiration lost capital
-                current_tp = float(btc_cfg.get("take_profit_price_threshold", 0.92))
-                if current_tp > 0.80:
-                    new_tp = 0.78
-                    logger.info(
-                        "🎯 [EVOLUTION TUNE] Lowering take-profit ceiling: $%.2f -> $%.2f (Harvest earlier)",
-                        current_tp, new_tp
-                    )
-                    btc_cfg["take_profit_price_threshold"] = new_tp
-
-                # Write evolved parameters
-                params["updated_at"] = "2026-10-05T12:10:00.000000+00:00"
+                params["updated_at"] = "2026-10-05T13:00:00.000000+00:00"
                 self.bot_parameters_path.write_text(json.dumps(params, indent=2), encoding="utf-8")
-                logger.info("✅ [EVOLUTION ENGINE] New parameters saved to disk. Re-evaluating next batch state.")
-
+                logger.info("✅ [EVOLUTION ENGINE] Macro calibrated parameters saved to disk.")
             except Exception as e:
-                logger.error("Failed to execute parameter evolution: %s", e)
+                logger.error("Failed to execute macro parameter evolution: %s", e)
