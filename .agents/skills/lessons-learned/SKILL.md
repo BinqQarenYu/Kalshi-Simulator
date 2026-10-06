@@ -141,9 +141,13 @@ This document is the authoritative institutional repository of all quantitative 
 
 ---
 
-### Lesson T4: Harakiri Streak Breaker (Adverse Regime Emergency Disarm)
+### Lesson T4: Unified 6-Loss Harakiri Streak Breaker & Adverse Regime Lock
 * **The Rule**: Consecutive losses indicate an adverse microstructure regime (e.g., violent macro squeeze fighting local mean-reversion).
-* **Hard Stop**: After **3 consecutive losses** (`_consecutive_losses >= 3`), the bot is automatically **DISARMED** (`is_bot_armed = False`). Re-arming requires manual user action via `/api/guardrails/rearm`.
+* **Hard Stop**: After **6 consecutive losses** (`_consecutive_losses >= 6`), the Harakiri Streak Breaker triggers and the bot is automatically **DISARMED** (`is_bot_armed = False`).
+* **Unification with 6-Trade Batch Evaluation (Lesson T7)**:
+  1. *Streak Dimension (Harakiri)*: If a bot experiences 6 uninterrupted losses across cycles (`_consecutive_losses >= 6`), Harakiri halts execution immediately.
+  2. *Batch Dimension (Lesson T7)*: If a bot completes a 6-trade batch with mixed outcomes (e.g., 2W-4L or 3W-3L) that produces a flat or negative result (Net PnL $\le \$0.00$), the 6-Trade Evaluation Breaker halts execution at Trade #6.
+  3. *Re-Arming*: Calling `POST /api/guardrails/rearm` or `arm_bot()` resets both `_consecutive_losses = 0` and the batch counter (`batch_trades_completed = 0/6`) to initialize a clean evaluation slate.
 
 ---
 
