@@ -237,3 +237,27 @@ This document is the authoritative institutional repository of all quantitative 
   1. **6-Trade Boundary**: Used **strictly as a capital-preservation circuit breaker** (halt execution).
   2. **$\ge 30$-Trade Boundary**: Used **strictly for model parameter evolution and weight recalibration**.
   3. **The Anti-Overfitting Lock**: The system **refuses** to curve-fit parameters to short-term 6-trade noise until at least 30 verified trades are logged in the macro sample database.
+
+---
+
+# 📋 SECTION IV: GRADUAL DEFICIENCY INTEGRATION PROTOCOL (GDIP)
+
+To avoid breaking working systems through premature or chaotic refactoring, all identified architectural and mathematical deficiencies are logged into this **Active Deficiencies Matrix**.
+
+**Operational Directive for Every Future Assessment / 6-Trade Evaluation**:
+During every 6-trade batch review, Quant Council audit, or post-mortem, the agent **MUST** perform a deficiency look-back:
+1. Review the latest settled batch evidence against the **Active Deficiencies Matrix**.
+2. Ask: *"Did any loss in this batch directly stem from an unpatched deficiency (DEF-01 through DEF-04)?"*
+3. If the trigger condition is met, formulate and present the targeted, minimal-viable fix for that specific deficiency before proceeding.
+
+---
+
+### The Active Deficiencies Matrix
+
+| ID | Domain | Deficiency Description | Empirical Trigger Condition | Proposed Target Fix | Assessment Question for Next Fix |
+| :---: | :---: | :--- | :--- | :--- | :--- |
+| **DEF-01** | **Alpha / Trend** | **Macro Trend Blindness:** Micro Gaussian drift bets `NO` into powerful 1H/4H bullish institutional momentum. | $\ge 2$ losses in a 6-trade batch caused by betting against the 1-hour EMA / 15m trend slope. | Implement strict 1H EMA slope filter in `bot1_v4_engine.py` (veto `NO` when slope $> +0.15$). | *"Did the bot lose trades by taking counter-trend positions against macro momentum? Is it time to activate DEF-01?"* |
+| **DEF-02** | **Alpha / Vol** | **Static Volatility Assumption:** Using fixed $\sigma = \$14/\text{min}$ instead of live Parkinson/ATR realized volatility. | Proximity Moat pierced $\ge 2$ times during high-volatility sessions ($\sigma > \$35/\text{min}$). | Replace static $\sigma$ in Gaussian CDF and Moat calculation with live 15m ATR / Parkinson volatility. | *"Did volatility expand beyond the baseline $\sigma = \$14/\text{min}$, causing proximity traps? Is DEF-02 required?"* |
+| **DEF-03** | **Risk / Exit** | **Missing Early Stop-Loss:** Out-of-the-money positions held all the way to $\$0.00$ when spot breaks $> 3\sigma$ against entry. | Trade lost $100\%$ of capital where early exit was available at $\ge \$0.12$ with $> 8$ minutes remaining. | Implement adversarial $> 3\sigma$ early liquidation in `evaluate_exit()` to salvage $\$0.10 - \$0.15$/contract. | *"Did the bot hold a doomed position to \$0.00 that could have been salvaged early? Should we activate DEF-03?"* |
+| **DEF-04** | **Brain / State** | **Volatile Experience State:** `ContinuousExperienceBuffer` mistake counts and Platt alpha reset on cold server reboot. | Server restarts frequently or loses online Platt dampening history across sessions. | Persist `ContinuousExperienceBuffer` state to `data/experience_state.json` or SQLite table on shutdown/startup. | *"Did a server restart clear the experience buffer learning state? Should we implement DEF-04 cold storage?"* |
+
