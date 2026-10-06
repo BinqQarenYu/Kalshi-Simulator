@@ -76,7 +76,7 @@ class AutonomousBatchSupervisor:
                 quota = getattr(self.guardrails, "batch_trades_quota", self.eval_batch_size)
 
                 # Detect when a 6-trade batch completes its cycle
-                if completed >= quota and quota > 0:
+                if completed >= quota and quota > 0 and getattr(self.guardrails, "is_bot_armed", True):
                     await self._evaluate_and_evolve_batch()
 
             except asyncio.CancelledError:
@@ -130,6 +130,10 @@ class AutonomousBatchSupervisor:
                 batch_pnl
             )
             self.guardrails.is_bot_armed = False
+            self.guardrails.batch_trades_completed = 0
+            self.guardrails.batch_pnl = Decimal("0.00")
+            self.guardrails.batch_wins = 0
+            self.guardrails.batch_losses = 0
 
             # Anti-overfitting rule: Only mutate parameters when macro sample size is statistically meaningful
             if self.cumulative_trades >= self.min_macro_sample_size:

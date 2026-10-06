@@ -58,6 +58,10 @@ class AgentGuardrails:
         self.harakiri_loss_limit: int = 6
         self.batch_trades_quota: int = 6
         self.batch_trades_completed: int = 0
+        self.batch_pnl: Decimal = Decimal("0.00")
+        self.batch_wins: int = 0
+        self.batch_losses: int = 0
+        self.batch_eval_history: list[dict[str, Any]] = []
 
         # Certified Live Strategies
         self.authorized_live_bots: set[str] = {
@@ -602,16 +606,47 @@ class AgentGuardrails:
             self._consecutive_losses = 0
             logger.info("🛡️ [GUARDRAIL SETTLEMENT] Win recorded. Consecutive losses reset to 0.")
 
+        if outcome.lower() == "win":
+            self.batch_wins += 1
+        else:
+            self.batch_losses += 1
+
+        self.batch_pnl += pnl
         self.batch_trades_completed += 1
         logger.info(
-            "🛡️ [GUARDRAIL BATCH] Completed trade %d/%d in current evaluation batch.",
-            self.batch_trades_completed, self.batch_trades_quota
+            "🛡️ [GUARDRAIL BATCH] Completed trade %d/%d in current batch | Batch PnL: $%s (%dW / %dL)",
+            self.batch_trades_completed, self.batch_trades_quota, self.batch_pnl, self.batch_wins, self.batch_losses
         )
+
         if self.batch_trades_quota > 0 and self.batch_trades_completed >= self.batch_trades_quota:
-            self.is_bot_armed = False
-            logger.warning(
-                "🛑 [GUARDRAIL BATCH HALT] Completed 6/6 evaluation trades! Bot disarmed automatically for mandatory assessment."
-            )
+            batch_report = {
+                "trades": self.batch_trades_completed,
+                "wins": self.batch_wins,
+                "losses": self.batch_losses,
+                "net_pnl": float(self.batch_pnl),
+                "win_rate": round(self.batch_wins / max(1, self.batch_trades_completed), 4),
+            }
+            self.batch_eval_history.append(batch_report)
+
+            if self.batch_pnl > Decimal("0.00"):
+                # Profitable 6-trade batch: Auto-continue for another 6 trades!
+                logger.info(
+                    "🏆 [BATCH EVALUATION SUCCESS] 6-trade batch finished in PROFIT (+$%s, %dW/%dL)! Auto-extending for next 6 trades.",
+                    self.batch_pnl, self.batch_wins, self.batch_losses
+                )
+                self.batch_trades_completed = 0
+                self.batch_pnl = Decimal("0.00")
+                self.batch_wins = 0
+                self.batch_losses = 0
+                self.is_bot_armed = True
+            else:
+                # Break-even or negative: auto-disarm for mandatory re-assessment and parameter upgrade
+                self.is_bot_armed = False
+                logger.warning(
+                    "🛑 [BATCH EVALUATION HALT] 6-trade batch finished with NEGATIVE/FLAT PnL ($%s, %dW/%dL). "
+                    "Bot disarmed automatically for mandatory Quant/Brain-2 assessment and parameter upgrade.",
+                    self.batch_pnl, self.batch_wins, self.batch_losses
+                )
 
         # Update peak equity and circuit breaker
         if self._peak_equity is None or balance_after > self._peak_equity:
@@ -640,10 +675,15 @@ class AgentGuardrails:
         self.record_cycle_settlement(ticker, outcome=outcome, pnl=pnl, balance_after=curr_balance, cycle_id=cycle_id)
 
     def arm_bot(self) -> None:
-        """Manually re-arm the bot and reset consecutive loss streak."""
+        """Manually re-arm the bot, reset consecutive loss streak, and reset batch counters."""
         self.is_bot_armed = True
         self._consecutive_losses = 0
-        logger.info("🛡️ [GUARDRAIL ARM] Bot manually RE-ARMED. Consecutive loss counter reset.")
+        self.batch_trades_completed = 0
+        self.batch_pnl = Decimal("0.00")
+        self.batch_wins = 0
+        self.batch_losses = 0
+        self._circuit_breaker_tripped = False
+        logger.info("🛡️ [GUARDRAIL ARM] Bot manually RE-ARMED. Consecutive loss and batch counters reset to 0/6.")
 
     def disarm_bot(self) -> None:
         """Manually disarm the bot (emergency manual shutdown)."""

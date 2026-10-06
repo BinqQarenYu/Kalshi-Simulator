@@ -113,6 +113,22 @@ async def reset_guardrails_circuit_breaker_endpoint() -> dict[str, Any]:
     return {"success": True, "message": f"Guardrails circuit breaker reset to ${p_balance:.2f}.", "status": state.guardrails_agent.get_status()}
 
 
+@router.post("/api/guardrails/rearm")
+async def rearm_bot_guardrails_endpoint() -> dict[str, Any]:
+    """Manually re-arm the trading bot, clear consecutive losses, and reset 6-trade batch."""
+    state.guardrails_agent.arm_bot()
+    state.is_dirty = True
+    return {"success": True, "message": "Bot successfully RE-ARMED. Consecutive losses reset to 0, fresh 6-trade batch initialized.", "status": state.guardrails_agent.get_status()}
+
+
+@router.post("/api/guardrails/disarm")
+async def disarm_bot_guardrails_endpoint() -> dict[str, Any]:
+    """Manually disarm the trading bot."""
+    state.guardrails_agent.disarm_bot()
+    state.is_dirty = True
+    return {"success": True, "message": "Bot DISARMED.", "status": state.guardrails_agent.get_status()}
+
+
 # ---------------------------------------------------------------------------
 # Agent_Token_Credit (Conservation & Anti-Redundancy Guardian) Endpoints
 # ---------------------------------------------------------------------------

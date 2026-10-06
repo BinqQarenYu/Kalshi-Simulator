@@ -1033,6 +1033,7 @@ async def start_background_simulation() -> None:
         spot_price_getter=lambda: state.current_btc_price,
         order_client=order_client,
         btc_orderflow_feed=state.btc_orderflow_feed,
+        guardrails=state.guardrails_agent,
         bot_auditor=state.bot_auditor,
         hmm_brain=state.hmm_brain,
     )
@@ -1169,6 +1170,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await get_db_writer().start()
     await state.memory_manager.start()
     await start_background_simulation()
+    if hasattr(state, "guardrails_agent") and state.guardrails_agent:
+        state.guardrails_agent.arm_bot()
+        logger.info("🛡️ [STARTUP ARM] Bot armed on server startup with fresh 0/6 evaluation batch.")
     await state.gdrive_sync.start()
     if hasattr(state, "continuous_trainer") and state.continuous_trainer:
         state.continuous_trainer.start()
