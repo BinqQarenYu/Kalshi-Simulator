@@ -38,6 +38,13 @@ class AutonomousBatchSupervisor:
         self._task: Optional[asyncio.Task] = None
         self._last_processed_trade_count = 0
 
+        # Cumulative Statistical History (Combats 6-trade noise / overfitting)
+        self.cumulative_trades = 0
+        self.cumulative_wins = 0
+        self.cumulative_losses = 0
+        self.cumulative_pnl = Decimal("0.00")
+        self.min_macro_sample_size = 30
+
     def start(self) -> asyncio.Task:
         """Start the supervisor background evaluation loop."""
         if self._task and not self._task.done():
@@ -77,12 +84,7 @@ class AutonomousBatchSupervisor:
             except Exception as exc:
                 logger.error("[BATCH SUPERVISOR ERROR] Supervision loop error: %s", exc, exc_info=True)
 
-        # Cumulative Statistical History (Combats 6-trade noise / overfitting)
-        self.cumulative_trades = 0
-        self.cumulative_wins = 0
-        self.cumulative_losses = 0
-        self.cumulative_pnl = Decimal("0.00")
-        self.min_macro_sample_size = 30
+
 
     async def _evaluate_and_evolve_batch(self) -> None:
         """Execute the formal 6-trade post-batch assessment without micro-overfitting."""
