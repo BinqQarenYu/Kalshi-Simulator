@@ -203,7 +203,8 @@ def resolve_bot_instance(bot_id: str) -> Any:
         onnx_eng = getattr(state, "onnx_engine", None)
         if onnx_eng is None and hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
             onnx_eng = getattr(state.dual_onnx_bot, "gateway", None)
-        state.bot1_v4_engine = Bot1V4DominationEngine(onnx_engine=onnx_eng)
+        exp_buf = getattr(state, "experience_buffer", None)
+        state.bot1_v4_engine = Bot1V4DominationEngine(onnx_engine=onnx_eng, experience_buffer=exp_buf)
     elif bot_id in ("both", "dual", "dual_domination", "dual_fleet"):
         class DualFleetProxy:
             STRATEGY_ID = "both"
@@ -422,6 +423,12 @@ class ServerState:
 
         # Lane 2 Gold ONNX Shadow Runner (Paper Trading on Live Ticks)
         self.gold_shadow_runner = Lane2GoldShadowRunner(strategy_mode="ONNX")
+
+        # Project Odin Shadow Volatility Harvester (Lane 2 Shadow Fleet)
+        from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer
+        from kalshi_sim.ml.odin_shadow_harvester import OdinShadowHarvester
+        self.experience_buffer = ContinuousExperienceBuffer()
+        self.odin_shadow_harvester = OdinShadowHarvester(experience_buffer=self.experience_buffer)
 
         # The ONNX Strategy Execution Instance (Dual-Brain Contradiction & Momentum Arbitrage)
         self.dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
@@ -868,6 +875,17 @@ async def live_ticker_and_timer_loop() -> None:
                                     balance_after=p_inst.balance,
                                 )
 
+                    # Settle Project Odin Lane 2 Shadow Positions
+                    if hasattr(state, "odin_shadow_harvester") and state.odin_shadow_harvester:
+                        try:
+                            state.odin_shadow_harvester.record_settlement(
+                                cycle_id=state.active_ticker,
+                                settlement_spot=Decimal(str(state.current_btc_price)),
+                                strike_price=Decimal(str(state.target_strike)),
+                            )
+                        except Exception as e_odin_settle:
+                            logger.debug("Odin settlement error: %s", e_odin_settle)
+
                     if state.mode == "mock":
                         spot_float = float(state.current_btc_price)
                         rolled_strike = round(spot_float / 50.0) * 50.0 + (12.50 if random.random() > 0.5 else -12.50)
@@ -1099,6 +1117,8 @@ async def start_background_simulation() -> None:
 
     await state.sim_agent.start()
     state.ai_worker.set_sim_agent(state.sim_agent)
+    if hasattr(state, "odin_shadow_harvester") and state.odin_shadow_harvester:
+        state.ai_worker.set_odin_harvester(state.odin_shadow_harvester)
 
     def _get_market_context_for_ai() -> dict[str, Any]:
         now_utc = datetime.now(timezone.utc)

@@ -64,6 +64,7 @@ class AIWorker:
         self._dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
         from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
         self._bot1_v4_engine = Bot1V4DominationEngine()
+        self._odin_harvester: Any = None
 
         # Thread-safe in-memory cached AI signals
         self._cached_signals: dict[str, Any] = {
@@ -86,6 +87,12 @@ class AIWorker:
             "rationale": "3-Step Domination Bot (Playbook 1: Early Momentum, Playbook 2: Mid OFI Drift, Playbook 3: Gamma Snub) initialized.",
             "compute_latency_ms": 0.0,
         }
+
+    def set_odin_harvester(self, odin_harvester: Any) -> None:
+        """Assign Odin Shadow Volatility Harvester (Lane 2 Shadow Fleet)."""
+        self._odin_harvester = odin_harvester
+        if hasattr(self, "_bot1_v4_engine") and odin_harvester and getattr(odin_harvester, "experience_buffer", None):
+            self._bot1_v4_engine.lead_deer_brain.experience_buffer = odin_harvester.experience_buffer
 
     def set_sim_agent(self, sim_agent: Any) -> None:
         """Update reference to the simulation execution agent."""
@@ -436,6 +443,24 @@ class AIWorker:
                                 "max_turnovers": dec_v4.max_turnovers,
                                 "compute_latency_ms": round(compute_duration, 2),
                             }
+
+                            # Project Odin Shadow Harvester (Lane 2 Watch-and-Learn)
+                            if hasattr(self, "_odin_harvester") and self._odin_harvester:
+                                try:
+                                    self._odin_harvester.observe_and_harvest(
+                                        ticker=ticker,
+                                        cycle_id=ticker,
+                                        spot_price=Decimal(str(spot_price)),
+                                        strike_price=Decimal(str(target_strike)),
+                                        vpin=vpin_val,
+                                        time_to_expiry_s=time_to_expiry_s,
+                                        book_state=book,
+                                        live_bot_vetoed=(not dec_v4.vpin_is_safe or dec_v4.recommended_side == "wait"),
+                                        yes_ask=Decimal(str(best_yes_ask)) if best_yes_ask else None,
+                                        no_ask=Decimal(str(best_no_ask)) if best_no_ask else None,
+                                    )
+                                except Exception as e_odin:
+                                    logger.debug("Odin observation error: %s", e_odin)
 
                         # 4. Strategy: ONNX Microstructure Bot
                         else:

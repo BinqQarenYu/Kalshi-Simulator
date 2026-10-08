@@ -20,6 +20,7 @@ from kalshi_sim.ml.domination_exit_evaluator import (
     DominationExitDecision,
     DominationExitEvaluator,
 )
+from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer
 from kalshi_sim.ml.lead_deer_quant_brain import LeadDeerQuantBrain
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
 from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, get_asset_config
@@ -104,6 +105,7 @@ class Bot1V4DominationEngine:
         max_clob_spread_cents: float = 0.05,  # Max allowable bid-ask spread corridor cap ($0.05)
         moneyness_moat_multiplier: float = 1.36,  # 1.36x sigma*sqrt(t) deep ITM protection moat
         asset: CryptoAsset | str = CryptoAsset.BTC,
+        experience_buffer: Optional[ContinuousExperienceBuffer] = None,
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
         self.max_turnover_per_event = max_turnover_per_event
@@ -146,6 +148,7 @@ class Bot1V4DominationEngine:
         self.max_clob_spread_cents = max_clob_spread_cents
         self.enable_lead_deer_peak_harvester: bool = True
         self.lead_deer_brain = LeadDeerQuantBrain(
+            experience_buffer=experience_buffer,
             min_confidence=float(self.min_confidence),
             min_ev_dollars=float(self.min_ev_hurdle_dollars),
             maker_discount_ceiling=float(self.discount_limit_price),

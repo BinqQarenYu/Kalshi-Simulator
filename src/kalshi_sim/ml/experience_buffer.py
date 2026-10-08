@@ -72,8 +72,10 @@ class ContinuousExperienceBuffer:
         self.pruned_price_deciles: List[int] = []
         self.pruned_regime_quadrants: List[str] = []
         self.loss_cause_counts: Dict[str, int] = {
-            "STRIKE_PROXIMITY_TRAP": 0,
+            "EXTREME_VOLATILITY_SWEEP": 0,
             "ADVERSE_SELECTION_SWEEP": 0,
+            "STRIKE_PROXIMITY_TRAP": 0,
+            "GAMMA_PIN_CRUSH": 0,
             "LATE_CYCLE_GAMMA_REVERSAL": 0,
             "MOMENTUM_INVERSION": 0,
             "STANDARD_LOSS": 0,
@@ -118,6 +120,10 @@ class ContinuousExperienceBuffer:
         if outcome != "loss":
             return "none"
 
+        # Cause 0: Extreme Volatility Burst (Odin Harvest Region)
+        if vpin >= 0.70:
+            return "EXTREME_VOLATILITY_SWEEP"
+
         # Cause 1: Adverse Whale Selection (High VPIN toxicity at entry)
         if vpin >= 0.50:
             return "ADVERSE_SELECTION_SWEEP"
@@ -127,6 +133,8 @@ class ContinuousExperienceBuffer:
             return "STRIKE_PROXIMITY_TRAP"
 
         # Cause 3: Late-Cycle Gamma Cliff Reversal (Failed inside final 120s)
+        if time_to_expiry_s <= 90.0 and abs(spot_diff) < 20.0:
+            return "GAMMA_PIN_CRUSH"
         if time_to_expiry_s <= 120.0:
             return "LATE_CYCLE_GAMMA_REVERSAL"
 
@@ -201,6 +209,10 @@ class ContinuousExperienceBuffer:
             self.experiences.pop(0)
         self.recalibrate()
 
+    def add_experience(self, exp: CycleExperience) -> None:
+        """Alias for record_settled_cycle."""
+        self.record_settled_cycle(exp)
+
     def recalibrate(self) -> None:
         """Online Calibration, Multi-Dimensional Pruning, and Parameter Self-Tuning."""
         settled_trades = [e for e in self.experiences if e.outcome in ("win", "loss")]
@@ -216,8 +228,10 @@ class ContinuousExperienceBuffer:
         decile_pnl: Dict[int, List[float]] = {d: [] for d in range(1, 10)}
         quadrant_pnl: Dict[str, List[float]] = {}
         cause_counts: Dict[str, int] = {
-            "STRIKE_PROXIMITY_TRAP": 0,
+            "EXTREME_VOLATILITY_SWEEP": 0,
             "ADVERSE_SELECTION_SWEEP": 0,
+            "STRIKE_PROXIMITY_TRAP": 0,
+            "GAMMA_PIN_CRUSH": 0,
             "LATE_CYCLE_GAMMA_REVERSAL": 0,
             "MOMENTUM_INVERSION": 0,
             "STANDARD_LOSS": 0,

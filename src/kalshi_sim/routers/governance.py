@@ -341,3 +341,19 @@ async def audit_incubator_bot_promotion_endpoint(req: IncubatorAuditRequest) -> 
     return report
 
 
+@router.get("/api/odin/telemetry")
+async def get_odin_telemetry_endpoint() -> dict[str, Any]:
+    """Retrieve Project Odin Watch-and-Learn Volatility Shadow Harvester telemetry (Lane 2)."""
+    harvester = getattr(state, "odin_shadow_harvester", None)
+    if harvester:
+        return harvester.get_telemetry()
+    return {
+        "name": "Project Odin Shadow Volatility Harvester",
+        "lane": "Lane 2 Shadow (Simulation)",
+        "status": "UNINITIALIZED",
+        "total_observations": 0,
+        "total_shadow_trades": 0,
+        "active_positions_count": 0,
+    }
+
+
