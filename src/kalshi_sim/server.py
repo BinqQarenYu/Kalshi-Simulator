@@ -708,19 +708,7 @@ async def live_ticker_and_timer_loop() -> None:
     last_rollover_trigger_time = 0.0
     while True:
         try:
-            import time
-            from kalshi_sim.routers.perpetuals import _margin_client, _get_current_mark_price
-            if _margin_client:
-                now_m = time.monotonic()
-                if not hasattr(state, "last_live_fetch") or now_m - state.last_live_fetch >= 2.0:
-                    state.last_live_fetch = now_m
-                    try:
-                        live_price = await _get_current_mark_price("BTC")
-                        if live_price:
-                            state.current_btc_price = Decimal(str(live_price))
-                    except Exception as e:
-                        logger.error(f"[PRICE FETCH ERROR] {e}")
-            elif state.mode == "mock" and state.mock_feed and hasattr(state.mock_feed, "_btc_price"):
+            if state.mode == "mock" and state.mock_feed and hasattr(state.mock_feed, "_btc_price"):
                 state.current_btc_price = Decimal(str(state.mock_feed._btc_price))
 
             now_utc = datetime.now(timezone.utc)
@@ -1460,8 +1448,6 @@ from kalshi_sim.routers.presets import (
 init_presets_router(state_getter=lambda: state)
 app.include_router(presets_router)
 
-from kalshi_sim.routers.perpetuals import router as perpetuals_router
-app.include_router(perpetuals_router, prefix="/api/perpetuals")
 
 # ---------------------------------------------------------------------------
 # Frontend Static Mount (if built)
