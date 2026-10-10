@@ -906,7 +906,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               {primaryNav === 'settings' && settingsSubNav !== 'defaults' && settingsSubNav !== 'killswitch' && `SETTINGS / ${settingsSubNav.toUpperCase()}`}
               {primaryNav === 'bots' && 'BOT MANAGEMENT & BENCHMARKING MATRIX'}
               {primaryNav === 'journal' && "TRADE JOURNAL & TODAY'S TIMELINE"}
-              {primaryNav === 'analytics' && 'LIVE WORKBENCH & MICROSTRUCTURE RADAR'}
+              {primaryNav === 'analytics' && 'LIVE WORKBENCH & MICROSTRUCTURE'}
               {primaryNav === 'sprint' && 'BOT 5 / 5-MINUTE SPRINT LIVE EXECUTION'}
                 {primaryNav === 'marketmaker' && 'BOT 6 / MARKET MAKER LIVE EXECUTION'}
               {primaryNav === 'perpetuals' && 'PERPETUAL TRADING TERMINAL / LEVERAGE & BOTS'}
