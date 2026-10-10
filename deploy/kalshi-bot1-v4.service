@@ -1,0 +1,33 @@
+[Unit]
+Description=Kalshi Bot 1 V4 Autonomous Domination Trading Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/kalshi-simulator
+EnvironmentFile=/opt/kalshi-simulator/.env
+Environment=PYTHONPATH=/opt/kalshi-simulator/src
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/kalshi-simulator/venv/bin/python -u -m kalshi_sim.server
+Restart=always
+RestartSec=5s
+
+# Security Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=read-only
+PrivateTmp=true
+
+# Resource Limits
+LimitNOFILE=65536
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kalshi-bot1-v4
+
+[Install]
+WantedBy=multi-user.target
