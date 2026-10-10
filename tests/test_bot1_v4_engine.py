@@ -230,3 +230,193 @@ def test_dataset_builder_turnover_sniper_mode() -> None:
     # Pair (f2, f3): diff = 0.03 >= 0.028 -> UP (0)
     assert y[1] == 0
 
+
+def test_bot1_v4_frozen_sensor_veto() -> None:
+    """Verify Tier 1 Hard Veto triggers when order book sensor is frozen (np.var == 0.0)."""
+    frozen_onnx = MockONNXEngine(
+        signal="WAIT",
+        prob_long=0.0005,
+        prob_short=0.0005,
+        prob_wait=0.999,
+        confidence=0.999,
+    )
+    # Add veto_reason attribute simulation
+    orig_process = frozen_onnx.process_orderbook_tick
+    frozen_onnx.process_orderbook_tick = lambda book: {
+        **orig_process(book),
+        "veto_reason": "FROZEN_SENSOR_ZERO_VARIANCE",
+    }
+
+    engine = Bot1V4DominationEngine(onnx_engine=frozen_onnx)
+    l2 = L2BookState("KXBTC15M-TEST")
+
+    decision = engine.evaluate_market_opportunity(
+        spot_price=85020.0,
+        target_strike=85000.0,
+        time_to_expiry_s=300.0,
+        l2_book=l2,
+    )
+    assert decision.recommended_side == "wait"
+    assert decision.active_playbook == "frozen_sensor_veto"
+    assert "Frozen Sensor Veto" in decision.rationale
+
+
+def test_bot1_v4_warrior2_chop_harvester_pricing() -> None:
+    """Verify Warrior 2 (Chop Harvester) executes asymmetric deep discount ($0.38 - $0.42)."""
+    engine = Bot1V4DominationEngine()
+    l2 = L2BookState("KXBTC15M-TEST")
+
+    # Feed 10 calm ticks (range = $2, std < $1) to establish calm state
+    t0 = 1000.0
+    for i in range(10):
+        engine.detect_market_regime(
+            spot_price=85000.0 + (i % 2),
+            time_to_expiry_s=300.0,
+            cycle_id="CHOP_CYCLE_1",
+            spot_velocity_3s=0.5,
+            now_mono=t0 + i,
+        )
+
+    # Allow 45s hysteresis calm duration to switch to CHOP
+    regime, reason = engine.detect_market_regime(
+        spot_price=85001.0,
+        time_to_expiry_s=300.0,
+        cycle_id="CHOP_CYCLE_1",
+        spot_velocity_3s=0.5,
+        now_mono=t0 + 60.0,
+    )
+    assert regime == "CHOP"
+
+    # Evaluate inside sweet spot (T=300s, spot=$85008, strike=$85000)
+    decision = engine.evaluate_market_opportunity(
+        spot_price=85008.0,
+        target_strike=85000.0,
+        time_to_expiry_s=300.0,
+        l2_book=l2,
+        cycle_id="CHOP_CYCLE_1",
+        spot_velocity_3s=0.5,
+    )
+    assert decision.regime == "CHOP"
+    assert decision.active_playbook == "playbook4_chop_harvester"
+    assert decision.recommended_side == "yes"
+    # Price must be clamped between $0.38 and $0.42
+    assert 0.38 <= decision.limit_price <= 0.42
+
+
+def test_bot1_v4_warrior2_timing_gates() -> None:
+    """Verify Warrior 2 timing sweet spot gates: 150s <= T <= 450s."""
+    engine = Bot1V4DominationEngine()
+    l2 = L2BookState("KXBTC15M-TEST")
+    engine._current_regime = "CHOP"  # Force CHOP
+
+    # 1. Early noise quarantine (T = 500s > 450s)
+    d_early = engine.evaluate_market_opportunity(
+        spot_price=85005.0,
+        target_strike=85000.0,
+        time_to_expiry_s=500.0,
+        l2_book=l2,
+        cycle_id="GATE_CYCLE_1",
+    )
+    assert d_early.recommended_side == "wait"
+    assert d_early.active_playbook == "chop_early_noise_quarantine"
+
+    # 2. Late cycle freeze (T = 100s < 150s)
+    d_late = engine.evaluate_market_opportunity(
+        spot_price=85005.0,
+        target_strike=85000.0,
+        time_to_expiry_s=100.0,
+        l2_book=l2,
+        cycle_id="GATE_CYCLE_1",
+    )
+    assert d_late.recommended_side == "wait"
+    assert d_late.active_playbook == "chop_late_cycle_freeze"
+
+
+def test_bot1_v4_storm_onnx_wait_consensus() -> None:
+    """Verify Warrior 1 respects ONNX WAIT partner consensus unless massive macro edge."""
+    mock_onnx = MockONNXEngine(signal="WAIT", confidence=0.75, prob_wait=0.75)
+    engine = Bot1V4DominationEngine(onnx_engine=mock_onnx)
+    l2 = L2BookState("KXBTC15M-TEST")
+    engine._current_regime = "STORM"
+
+    # With moderate spot diff ($30 < $45 threshold), ONNX WAIT veto must hold
+    decision = engine.evaluate_market_opportunity(
+        spot_price=85030.0,
+        target_strike=85000.0,
+        time_to_expiry_s=500.0,
+        l2_book=l2,
+        cycle_id="CONSENSUS_CYCLE_1",
+    )
+    assert decision.recommended_side == "wait"
+    assert decision.active_playbook == "onnx_wait_veto"
+    assert "ONNX Consensus Veto" in decision.rationale
+
+
+def test_bot1_v4_phase_transition_volcano_and_cooldown() -> None:
+    """Verify dynamic phase transitions between Chop and Storm with 45s hysteresis."""
+    engine = Bot1V4DominationEngine(hysteresis_cooldown_seconds=45.0)
+
+    # 1. Transition into CHOP after calm
+    t = 2000.0
+    for i in range(10):
+        engine.detect_market_regime(
+            spot_price=85000.0 + (i % 2),
+            time_to_expiry_s=300.0,
+            cycle_id="TRANS_CYCLE_1",
+            spot_velocity_3s=0.2,
+            now_mono=t + i,
+        )
+    regime, _ = engine.detect_market_regime(
+        spot_price=85000.0,
+        time_to_expiry_s=300.0,
+        cycle_id="TRANS_CYCLE_1",
+        spot_velocity_3s=0.2,
+        now_mono=t + 55.0,
+    )
+    assert regime == "CHOP"
+
+    # 2. Fast-Path Volcano Trigger (velocity spike >= 15 $/s)
+    regime, reason = engine.detect_market_regime(
+        spot_price=85025.0,
+        time_to_expiry_s=300.0,
+        cycle_id="TRANS_CYCLE_1",
+        spot_velocity_3s=18.5,
+        now_mono=t + 60.0,
+    )
+    assert regime == "STORM"
+    assert "Volcano Breakout" in reason
+
+    # 3. Feed calm ticks at 85025 past the 60s rolling vol window (t + 130.0)
+    for i in range(5):
+        engine.detect_market_regime(
+            spot_price=85025.0,
+            time_to_expiry_s=300.0,
+            cycle_id="TRANS_CYCLE_1",
+            spot_velocity_3s=0.1,
+            now_mono=t + 125.0 + i,
+        )
+
+    # 4. At t + 150.0 (21s since calm established at t + 129), inside 45s hysteresis -> still STORM
+    regime, reason = engine.detect_market_regime(
+        spot_price=85025.0,
+        time_to_expiry_s=300.0,
+        cycle_id="TRANS_CYCLE_1",
+        spot_velocity_3s=0.1,
+        now_mono=t + 150.0,
+    )
+    assert regime == "STORM"
+    assert "cooling down" in reason
+
+    # 5. Sustained calm passes 45s (t + 180.0 is 51s of calm) -> transitions back to CHOP
+    regime, reason = engine.detect_market_regime(
+        spot_price=85025.0,
+        time_to_expiry_s=300.0,
+        cycle_id="TRANS_CYCLE_1",
+        spot_velocity_3s=0.1,
+        now_mono=t + 180.0,
+    )
+    assert regime == "CHOP"
+    assert "Cooldown Hysteresis Passed" in reason
+
+
+

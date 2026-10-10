@@ -20,8 +20,8 @@ def test_guardrail_allows_valid_order() -> None:
     )
     assert ok is True
     assert reason == "PASSED_GUARDRAILS"
-    # Micro bankroll cap is strictly 1 contract for each asset
-    assert size == 1
+    # Under Council Scaled Sizing Spec, equity 100 allows up to 3 contracts per trade
+    assert size == 3
     assert diag["is_tapered"] is False
 
 
@@ -262,7 +262,7 @@ def test_multi_asset_cycle_lock_isolation() -> None:
             vpin=0.12,
         )
         assert ok is True, f"Expected {ticker} to be allowed, but rejected: {reason}"
-        assert size == 1
+        assert size == 2
 
 
 def test_guardrail_3step_domination_sole_authorization_and_one_contract() -> None:
@@ -309,9 +309,10 @@ def test_guardrail_3step_domination_sole_authorization_and_one_contract() -> Non
                 bot_type=primary_type,
             )
             assert ok is True
-            assert size == 1, f"Expected 3-Step Dominion ({primary_type}) to receive strictly 1 contract, got {size}"
+            expected_sz = 3 if equity >= Decimal("75.00") else (2 if equity >= Decimal("50.00") else 1)
+            assert size == expected_sz
 
-    # 3. 3-Step Domination receives strictly 1 contract across all 4 crypto assets (BTC, ETH, SOL, DOGE)
+    # 3. 3-Step Domination receives contracts across all 4 crypto assets (BTC, ETH, SOL, DOGE)
     for asset_ticker in ["KXBTC15M-T1", "KXETH15M-T1", "KXSOL15M-T1", "KXDOGE15M-T1"]:
         g_asset = AgentGuardrails(min_order_interval_seconds=0.0)
         ok, reason, size, diag = g_asset.validate_pre_trade_intent(
@@ -325,7 +326,7 @@ def test_guardrail_3step_domination_sole_authorization_and_one_contract() -> Non
             bot_type="3_step_domination_bot",
         )
         assert ok is True
-        assert size == 1, f"Expected 1 contract for {asset_ticker}, got {size}"
+        assert size == 3
 
 
 def test_guardrail_in_flight_concurrency_lockout() -> None:
@@ -602,3 +603,94 @@ def test_guardrail_in_flight_lock_15s_ttl_expiration() -> None:
         bot_type="3_step_domination_bot",
     )
     assert ok3 is True, f"Expected lock to auto-release after 15s TTL, but got rejection: {reason3}"
+
+
+def test_simulated_settlements_do_not_trip_harakiri_breaker() -> None:
+    """Ensure simulated/paper losses never increment consecutive losses or disarm live trading."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    assert guardrails.is_bot_armed is True
+    assert guardrails._consecutive_losses == 0
+
+    # 5 consecutive simulated losses
+    for i in range(5):
+        guardrails.record_cycle_settlement(
+            ticker=f"KXBTC15M-SIM-LOSS-{i}",
+            outcome="loss",
+            pnl=Decimal("-1.00"),
+            balance_after=Decimal("50.00"),
+            cycle_id=f"KXBTC15M-SIM-LOSS-{i}",
+            execution_mode="simulated",
+        )
+
+    # Must remain armed and 0 consecutive losses
+    assert guardrails.is_bot_armed is True
+    assert guardrails._consecutive_losses == 0
+
+    ok, reason, size, _ = guardrails.validate_pre_trade_intent(
+        ticker="KXBTC15M-SIM-INTENT-TEST",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.50"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="3_step_domination_bot",
+    )
+    assert ok is True
+    assert reason == "PASSED_GUARDRAILS"
+
+
+def test_live_settlements_trip_harakiri_breaker_and_rearm() -> None:
+    """Ensure live losses trip harakiri breaker, veto intent, and can be manually re-armed."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    guardrails.harakiri_loss_limit = 3
+    assert guardrails.is_bot_armed is True
+
+    # 3 consecutive live losses
+    for i in range(3):
+        guardrails.record_cycle_settlement(
+            ticker=f"KXBTC15M-LIVE-LOSS-{i}",
+            outcome="loss",
+            pnl=Decimal("-1.00"),
+            balance_after=Decimal("50.00"),
+            cycle_id=f"KXBTC15M-LIVE-LOSS-{i}",
+            execution_mode="live",
+        )
+
+    assert guardrails._consecutive_losses == 3
+    assert guardrails.is_bot_armed is False
+
+    # Intent must now be vetoed
+    ok, reason, size, diag = guardrails.validate_pre_trade_intent(
+        ticker="KXBTC15M-LIVE-INTENT-TEST",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.50"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="3_step_domination_bot",
+    )
+    assert ok is False
+    assert "HARAKIRI STREAK BREAKER VETO" in reason
+    assert diag.get("veto") == "harakiri_disarmed"
+
+    # Operator manual re-arm
+    guardrails.arm_bot()
+    assert guardrails.is_bot_armed is True
+    assert guardrails._consecutive_losses == 0
+
+    # Intent must now pass
+    ok2, reason2, size2, _ = guardrails.validate_pre_trade_intent(
+        ticker="KXBTC15M-LIVE-INTENT-TEST-2",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.50"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="3_step_domination_bot",
+    )
+    assert ok2 is True
+    assert reason2 == "PASSED_GUARDRAILS"
+

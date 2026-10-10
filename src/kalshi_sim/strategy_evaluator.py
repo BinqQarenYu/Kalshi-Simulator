@@ -25,8 +25,10 @@ from kalshi_sim.db import DatabaseWriter
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
-from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
-from kalshi_sim.quant.market_maker_engine import MarketMakerEngine
+try:
+    from kalshi_sim.quant.market_maker_engine import MarketMakerEngine
+except (ImportError, ModuleNotFoundError):
+    MarketMakerEngine = None  # type: ignore
 from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
@@ -71,7 +73,7 @@ class StrategyEvaluationCoordinator:
         self._btc_orderflow_feed = btc_orderflow_feed
         self._spot_price_getter = spot_price_getter
         self._bot1_v4_engine = bot1_v4_engine
-        self._market_maker_engine = market_maker_engine or MarketMakerEngine()
+        self._market_maker_engine = market_maker_engine or (MarketMakerEngine() if MarketMakerEngine is not None else None)
 
         # Cooldown and rate-limiting caches
         self._last_macro_eval_time: dict[str, float] = {}
@@ -489,7 +491,7 @@ class StrategyEvaluationCoordinator:
                         time_to_expiry_s=time_to_expiry_s,
                         recent_trades=trades,
                         total_equity=portfolio.equity,
-                        max_position_size=1,
+                        max_position_size=4,
                         estimated_vpin=vpin_score,
                         cycle_id=ticker,
                     )
@@ -510,7 +512,7 @@ class StrategyEvaluationCoordinator:
                         )
 
                     if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
-                        order_size = max(1, min(3, int(getattr(decision, "recommended_contracts", 1))))
+                        order_size = max(1, min(4, int(getattr(decision, "recommended_contracts", 1))))
                         side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
                         bot_label = ("LIVE BOT 1 V4" if is_v4 else "LIVE 3-STEP BOT") if is_live else ("BOT 1 V4" if is_v4 else "3-STEP BOT")
                         logger.info(

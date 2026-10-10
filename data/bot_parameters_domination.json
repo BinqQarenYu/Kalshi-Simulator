@@ -6,11 +6,11 @@
   ],
   "asset_mode": "multi",
   "is_armed": true,
-  "updated_at": "2026-10-05T08:30:00.000000+00:00",
+  "updated_at": "2026-10-05T13:00:00.000000+00:00",
   "max_contracts": 1,
   "assets": {
     "BTC": {
-      "discount_limit_price": 0.48,
+      "discount_limit_price": 0.44,
       "momentum_max_price": 0.63,
       "min_confidence": 79.0,
       "min_edge_pct": 1.5,

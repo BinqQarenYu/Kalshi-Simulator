@@ -324,29 +324,6 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
     }
 
 
-@router.post("/api/system/resync")
-async def resync_system_memory() -> dict[str, Any]:
-    """Force re-seed the chart memory buffer and sync to frontend."""
-    now = datetime.now(timezone.utc)
-    import random
-    walk_price = float(state.current_btc_price)
-    history_buffer = []
-    for i in range(900, 0, -1):
-        t_str = (now - timedelta(seconds=i)).strftime("%H:%M:%S")
-        history_buffer.append({
-            "time": t_str,
-            "price": walk_price,
-            "target": float(state.target_strike),
-        })
-        walk_price -= round(random.gauss(0, 0.5), 2)
-    
-    state.price_history.clear()
-    state.price_history.extend(reversed(history_buffer))
-    state.is_dirty = True
-    
-    return {"success": True, "message": "Memory resynced 900 points"}
-
-
 @router.post("/api/reset")
 async def reset_portfolio(req: ResetRequest) -> dict[str, Any]:
     state.starting_capital = Decimal(str(req.capital))
@@ -614,6 +591,9 @@ async def arm_bot(req: BotControlRequest | None = None, bot_id: str | None = Que
         logger.info("🟢 [ALL BOTS ARMED] Order execution activated globally.")
         res_bot = "GLOBAL"
 
+    if hasattr(state, "guardrails_agent") and state.guardrails_agent:
+        state.guardrails_agent.arm_bot()
+
     state.is_dirty = True
     if state.connected_websockets:
         asyncio.create_task(trigger_instant_broadcast())
@@ -638,10 +618,16 @@ async def disarm_bot(req: BotControlRequest | None = None, bot_id: str | None = 
         state.bot_arm_states[norm_bot] = False
         logger.info("⏸️ [BOT DISARMED] Strategy '%s' independently halted. Other bots remain active.", norm_bot)
         res_bot = norm_bot
+        if not any(state.bot_arm_states.values()):
+            state.ai_auto_trade = False
+            if hasattr(state, "guardrails_agent") and state.guardrails_agent:
+                state.guardrails_agent.disarm_bot()
     else:
         state.ai_auto_trade = False
         for bid in list(state.bot_arm_states.keys()):
             state.bot_arm_states[bid] = False
+        if hasattr(state, "guardrails_agent") and state.guardrails_agent:
+            state.guardrails_agent.disarm_bot()
         logger.info("⏸️ [ALL BOTS DISARMED] Standby mode activated globally.")
         res_bot = "GLOBAL"
 
@@ -981,20 +967,6 @@ async def get_bot_strategies() -> dict[str, Any]:
         "active_strategy": state.active_strategy_bot,
         "strategies": [
             {
-        "id": "market_maker",
-        "name": "Bot 6 MM (Market Maker)",
-        "description": "L2 Market Maker Strategy targeting spread capture with inventory skew and volatility protection. Operates exclusively via limit orders.",
-        "active": False,
-        "badge": "L2 Limit Spread",
-        "icon": "Zap",
-        "features": [
-            "L2 Orderbook Inventory Skew",
-            "Volatility-Moat Spreads",
-            "Adverse Movement Protection",
-            "Unbound Limit Scaling (10+ Contracts)"
-        ]
-    },
-    {
                 "id": "dual_onnx",
                 "strategy_id": "the_onnx_strategy",
                 "name": "The ONNX Strategy (Dual-Brain Arbitrage)",
@@ -1128,10 +1100,8 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
         strat_id = "dominion_2_bot"
     elif strat_id in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
         strat_id = "bot1_v4_domination"
-    elif strat_id in ("both", "dual", "dual_fleet", "dual_domination"):
-        strat_id = "both"
 
-    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot", "market_maker", "bot6_market_maker", "both"):
+    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot"):
         raise HTTPException(status_code=400, detail=f"Invalid strategy_id: {req.strategy_id}")
 
     # Enforce Pre-Deployment Audit Certification Gate
@@ -1149,6 +1119,8 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
             )
 
     state.active_strategy_bot = strat_id
+    if state.guardrails_agent and not state.guardrails_agent.is_bot_armed:
+        state.guardrails_agent.arm_bot()
     if state.ai_worker:
         state.ai_worker.set_active_strategy(strat_id)
     if state.sim_agent and hasattr(state.sim_agent, "set_active_strategy"):

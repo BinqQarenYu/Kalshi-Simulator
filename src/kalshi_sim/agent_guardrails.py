@@ -55,18 +55,10 @@ class AgentGuardrails:
         self._peak_equity: Optional[Decimal] = None
         self._circuit_breaker_tripped: bool = False
         self.is_bot_armed: bool = True
-        self.harakiri_loss_limit: int = 6
-        self.batch_trades_quota: int = 6
-        self.batch_trades_completed: int = 0
-        self.batch_pnl: Decimal = Decimal("0.00")
-        self.batch_wins: int = 0
-        self.batch_losses: int = 0
-        self.batch_eval_history: list[dict[str, Any]] = []
+        self.harakiri_loss_limit: int = 3
 
         # Certified Live Strategies
         self.authorized_live_bots: set[str] = {
-            "market_maker",
-            "bot6_market_maker",
             "3_step_domination_bot",
             "3_step_domination",
             "domination",
@@ -210,10 +202,32 @@ class AgentGuardrails:
         now_utc = datetime.now(timezone.utc).isoformat()
         cycle_key = cycle_id or ticker
 
-        # 0. 5M Expansion Live Prohibition Veto (BYPASSED)
-        # The user explicitly requested to bypass the 5M paper-only restriction
-        # to allow live real-money trading on 5-minute contracts, while retaining all other guardrails.
-        # is_5m_contract logic disabled per mandate.
+        # 0. Load Seals & Auditor
+        is_brave = False
+        is_star_player = False
+        if is_bot and bot_type:
+            from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
+            temp_auditor = BotDeploymentAuditor(None, None, None, None)
+            is_brave = temp_auditor.has_seal_of_the_brave(bot_type)
+            is_star_player = temp_auditor.has_seal_of_star_player(bot_type)
+
+        # 0a. 5M Expansion Live Prohibition Veto
+        # 5-minute event contracts (KXBTC5M or 5m cycle) are strictly exclusive to Mother Dash Paper Live.
+        # Live real-money trading is permanently prohibited under all conditions.
+        # Ensure "15M" is not falsely matched when testing for "5M" substring!
+        is_5m_contract = (
+            ("5M" in ticker.upper() and "15M" not in ticker.upper())
+            or "5MIN" in ticker.upper()
+            or (cycle_id is not None and "5M" in cycle_id.upper() and "15M" not in cycle_id.upper())
+            or (cycle_id is not None and "_5m" in cycle_id.lower())
+        )
+        if is_live and is_5m_contract:
+            msg = (
+                f"5M LIVE TRADING PROHIBITED: Contract '{ticker}' is part of the 5-Minute Expansion series. "
+                f"5M events are strictly exclusive to Mother Dash Paper Live. Live real-money trading is permanently prohibited."
+            )
+            self._record_rejection("5m_live_prohibited", msg, ticker, now_utc)
+            return False, msg, 0, {"veto": "5m_live_prohibited", "ticker": ticker, "is_live": True}
 
         # 0b. Macro Event News Blackout Veto (e.g. GOLD during high-impact US economic releases)
         is_macro_blackout, macro_reason = self.check_macro_news_blackout(ticker)
@@ -233,16 +247,6 @@ class AgentGuardrails:
             msg = f"HARAKIRI STREAK BREAKER VETO: Bot is DISARMED after reaching {self._consecutive_losses} consecutive losses. Manual re-arming required."
             self._record_rejection("bot_disarmed", msg, ticker, now_utc)
             return False, msg, 0, {"veto": "harakiri_disarmed", "consecutive_losses": self._consecutive_losses}
-
-        # 0e. 6-Trade Evaluation Batch Quota Veto
-        if is_bot and self.batch_trades_quota > 0 and self.batch_trades_completed >= self.batch_trades_quota:
-            self.is_bot_armed = False
-            msg = (
-                f"BATCH EVALUATION QUOTA REACHED: Completed {self.batch_trades_completed}/{self.batch_trades_quota} live trades. "
-                "Trading halted automatically for post-batch quant evaluation."
-            )
-            self._record_rejection("batch_quota_reached", msg, ticker, now_utc)
-            return False, msg, 0, {"veto": "batch_quota_reached", "completed": self.batch_trades_completed}
 
         # Update peak equity
         if self._peak_equity is None or total_equity > self._peak_equity:
@@ -266,7 +270,7 @@ class AgentGuardrails:
             return False, msg, 0, {"vpin": vpin}
 
         # 2b. In-Flight Order Lockout (Anti-Burst Concurrency Protection with 15s Invariant TTL)
-        if is_bot and cycle_key in self._in_flight_locks:
+        if is_bot and cycle_key in self._in_flight_locks and not is_brave:
             lock_time = self._in_flight_lock_ts.get(cycle_key, 0.0)
             if now_mono - lock_time >= 15.0:
                 logger.warning(
@@ -294,23 +298,24 @@ class AgentGuardrails:
         already_allocated = self._cycle_contracts_count.get(cycle_key, 0)
         bot_key = bot_type.lower() if bot_type else None
 
-        if is_bot and bot_key:
+        if is_bot and bot_key and not is_brave:
             bot_lock_key = (cycle_key, bot_key)
             if bot_lock_key in self._bot_cycle_locks:
                 locked_trade = self._bot_cycle_locks[bot_lock_key]
                 msg = f"1-TRADE-PER-CYCLE LOCKOUT: Bot '{bot_type}' already has active trade '{locked_trade}' in cycle '{cycle_key}'. Further entries blocked until expiration."
                 self._record_rejection("cycle_locked", msg, ticker, now_utc)
                 return False, msg, 0, {"locked_trade": locked_trade, "already_allocated": already_allocated, "bot_type": bot_type}
+            
+            # Note: The brave skip this cap check!
             cycle_cap = 4 if total_equity >= Decimal("75.00") else (3 if total_equity >= Decimal("50.00") else 2)
+            if temp_auditor.has_seal_of_star_player(bot_type):
+                cycle_cap = max(cycle_cap, 4) # star player has high cap
             if already_allocated >= cycle_cap:
                 msg = f"CYCLE EXPOSURE CAP: Cycle '{cycle_key}' reached max {cycle_cap} contracts exposure ({already_allocated}/{cycle_cap} active)."
                 self._record_rejection("max_cycle_exposure", msg, ticker, now_utc)
                 return False, msg, 0, {"already_allocated": already_allocated, "cycle_cap": cycle_cap}
         elif is_bot:
-            # Bot 6 Market Maker bypasses cycle exposure limits per user mandate
-            is_mm = bot_type in ("market_maker", "bot6_market_maker")
-            
-            if not is_mm and (cycle_key in self._cycle_locks or already_allocated >= 2):
+            if cycle_key in self._cycle_locks or already_allocated >= 2:
                 locked_trade = self._cycle_locks.get(cycle_key, f"{already_allocated}_contracts")
                 msg = f"1-TRADE-PER-CYCLE LOCKOUT: Cycle '{cycle_key}' already has active trade '{locked_trade}'. Further entries blocked until expiration."
                 self._record_rejection("cycle_locked", msg, ticker, now_utc)
@@ -397,26 +402,49 @@ class AgentGuardrails:
                 self._record_rejection("bot_prohibited", msg, ticker, now_utc)
                 return False, msg, 0, {"bot_type": bot_type}
             else:
-                if bot_type in ('market_maker', 'bot6_market_maker'):
-                    bankroll_cap = requested_size
-                    effective_requested_size = requested_size
+                # Tiered Bankroll & Cycle Capacity (Council Scaled Sizing Spec):
+                # Under $50: Max 1 contract per trade, max 2 contracts per cycle across fleet
+                # $50 - $75: Max 2 contracts per trade, max 3 contracts per cycle across fleet
+                # >= $75: Max 3 contracts per trade, max 4 contracts per cycle across fleet
+                if total_equity >= Decimal("75.00"):
+                    max_cycle_cap = 4
+                    per_trade_cap = 3
+                elif total_equity >= Decimal("50.00"):
+                    max_cycle_cap = 3
+                    per_trade_cap = 2
                 else:
-                    # AGENTS.md Mandate: Micro-Bankroll Sizing - Max 1 contract per trade.
                     max_cycle_cap = 2
                     per_trade_cap = 1
-                    remaining_cycle_capacity = max(0, max_cycle_cap - already_allocated)
-                    bankroll_cap = min(per_trade_cap, remaining_cycle_capacity)
-                    effective_requested_size = min(requested_size, 1)
-        else:
-            effective_requested_size = min(requested_size, 1)
 
-        approved_size = min(effective_requested_size if is_bot else min(requested_size, 1), budget_contracts, bankroll_cap)
+                # Council Conviction & Risk Filter for Sized Orders (> 1 contract)
+                effective_requested_size = requested_size
+                if requested_size >= 3:
+                    if total_equity < Decimal("75.00") or est_price > Decimal("0.52") or vpin >= 0.20:
+                        effective_requested_size = min(requested_size, 2 if (total_equity >= Decimal("50.00") and est_price <= Decimal("0.54") and vpin < 0.30) else 1)
+                elif requested_size == 2:
+                    if total_equity < Decimal("50.00") or est_price > Decimal("0.54") or vpin >= 0.30:
+                        effective_requested_size = 1
+
+                remaining_cycle_capacity = max(0, max_cycle_cap - already_allocated)
+                bankroll_cap = min(per_trade_cap, remaining_cycle_capacity)
+
+                if is_brave:
+                    bankroll_cap = requested_size
+                    effective_requested_size = requested_size
+                    budget_contracts = max(budget_contracts, requested_size)
+                elif is_star_player:
+                    bankroll_cap = min(4, max(bankroll_cap, 2))  # Allow 2, 3, or 4 contracts
+                    effective_requested_size = max(2, requested_size) # Force at least 2 contracts for Star Player
+                    budget_contracts = max(budget_contracts, bankroll_cap)
+
+        approved_size = min(effective_requested_size if is_bot else requested_size, budget_contracts, bankroll_cap)
 
         # 7. Loss Streak & Drawdown Defense Taper
         is_tapered = False
-        if self._consecutive_losses >= self.consecutive_loss_taper_threshold or drawdown_pct >= self.drawdown_taper_threshold:
-            is_tapered = True
-            approved_size = min(approved_size, 1)  # Strict self-preservation: minimum size
+        if not is_brave and not is_star_player:
+            if self._consecutive_losses >= self.consecutive_loss_taper_threshold or drawdown_pct >= self.drawdown_taper_threshold:
+                is_tapered = True
+                approved_size = min(approved_size, 1)  # Strict self-preservation: minimum size
 
         if approved_size <= 0:
             if already_allocated >= max_cycle_cap:
@@ -581,6 +609,7 @@ class AgentGuardrails:
         pnl: Decimal,
         balance_after: Decimal,
         cycle_id: Optional[str] = None,
+        execution_mode: str = "live",
     ) -> None:
         """Release the cycle lock upon official contract expiration and update loss streaks."""
         cycle_key = cycle_id or ticker
@@ -593,73 +622,33 @@ class AgentGuardrails:
         for k in keys_to_remove:
             self._bot_cycle_locks.pop(k, None)
 
-        if outcome.lower() == "loss":
-            self._consecutive_losses += 1
-            logger.info("🛡️ [GUARDRAIL SETTLEMENT] Loss recorded. Consecutive losses = %d", self._consecutive_losses)
-            if self._consecutive_losses >= self.harakiri_loss_limit:
-                self.is_bot_armed = False
+        # Only live trades affect live Harakiri streak breaker and circuit breakers
+        if execution_mode.lower() == "live":
+            if outcome.lower() == "loss":
+                self._consecutive_losses += 1
+                logger.info("🛡️ [GUARDRAIL SETTLEMENT] Live loss recorded. Consecutive losses = %d", self._consecutive_losses)
+                if self._consecutive_losses >= self.harakiri_loss_limit:
+                    self.is_bot_armed = False
+                    logger.warning(
+                        "🚨 [GUARDRAIL HARAKIRI] Consecutive losses (%d) reached limit (%d)! Bot automatically DISARMED.",
+                        self._consecutive_losses, self.harakiri_loss_limit
+                    )
+            elif outcome.lower() == "win":
+                self._consecutive_losses = 0
+                logger.info("🛡️ [GUARDRAIL SETTLEMENT] Live win recorded. Consecutive losses reset to 0.")
+
+            # Update peak equity and circuit breaker
+            if self._peak_equity is None or balance_after > self._peak_equity:
+                self._peak_equity = balance_after
+
+            drawdown = max(Decimal("0"), self._peak_equity - balance_after)
+            drawdown_pct = (drawdown / self._peak_equity) if (self._peak_equity and self._peak_equity > 0) else Decimal("0")
+            if drawdown_pct >= self.emergency_drawdown_limit:
+                self._circuit_breaker_tripped = True
                 logger.warning(
-                    "🚨 [GUARDRAIL HARAKIRI] Consecutive losses (%d) reached limit (%d)! Bot automatically DISARMED.",
-                    self._consecutive_losses, self.harakiri_loss_limit
+                    "🚨 [GUARDRAIL EMERGENCY] Circuit breaker tripped on settlement! Drawdown %.1f%% >= %.0f%%",
+                    float(drawdown_pct * 100), float(self.emergency_drawdown_limit * 100)
                 )
-        elif outcome.lower() == "win":
-            self._consecutive_losses = 0
-            logger.info("🛡️ [GUARDRAIL SETTLEMENT] Win recorded. Consecutive losses reset to 0.")
-
-        if outcome.lower() == "win":
-            self.batch_wins += 1
-        else:
-            self.batch_losses += 1
-
-        self.batch_pnl += pnl
-        self.batch_trades_completed += 1
-        logger.info(
-            "🛡️ [GUARDRAIL BATCH] Completed trade %d/%d in current batch | Batch PnL: $%s (%dW / %dL)",
-            self.batch_trades_completed, self.batch_trades_quota, self.batch_pnl, self.batch_wins, self.batch_losses
-        )
-
-        if self.batch_trades_quota > 0 and self.batch_trades_completed >= self.batch_trades_quota:
-            batch_report = {
-                "trades": self.batch_trades_completed,
-                "wins": self.batch_wins,
-                "losses": self.batch_losses,
-                "net_pnl": float(self.batch_pnl),
-                "win_rate": round(self.batch_wins / max(1, self.batch_trades_completed), 4),
-            }
-            self.batch_eval_history.append(batch_report)
-
-            if self.batch_pnl > Decimal("0.00"):
-                # Profitable 6-trade batch: Auto-continue for another 6 trades!
-                logger.info(
-                    "🏆 [BATCH EVALUATION SUCCESS] 6-trade batch finished in PROFIT (+$%s, %dW/%dL)! Auto-extending for next 6 trades.",
-                    self.batch_pnl, self.batch_wins, self.batch_losses
-                )
-                self.batch_trades_completed = 0
-                self.batch_pnl = Decimal("0.00")
-                self.batch_wins = 0
-                self.batch_losses = 0
-                self.is_bot_armed = True
-            else:
-                # Break-even or negative: auto-disarm for mandatory re-assessment and parameter upgrade
-                self.is_bot_armed = False
-                logger.warning(
-                    "🛑 [BATCH EVALUATION HALT] 6-trade batch finished with NEGATIVE/FLAT PnL ($%s, %dW/%dL). "
-                    "Bot disarmed automatically for mandatory Quant/Brain-2 assessment and parameter upgrade.",
-                    self.batch_pnl, self.batch_wins, self.batch_losses
-                )
-
-        # Update peak equity and circuit breaker
-        if self._peak_equity is None or balance_after > self._peak_equity:
-            self._peak_equity = balance_after
-
-        drawdown = max(Decimal("0"), self._peak_equity - balance_after)
-        drawdown_pct = (drawdown / self._peak_equity) if (self._peak_equity and self._peak_equity > 0) else Decimal("0")
-        if drawdown_pct >= self.emergency_drawdown_limit:
-            self._circuit_breaker_tripped = True
-            logger.warning(
-                "🚨 [GUARDRAIL EMERGENCY] Circuit breaker tripped on settlement! Drawdown %.1f%% >= %.0f%%",
-                float(drawdown_pct * 100), float(self.emergency_drawdown_limit * 100)
-            )
 
     def record_trade_settlement(
         self,
@@ -668,22 +657,25 @@ class AgentGuardrails:
         was_win: bool,
         balance_after: Optional[Decimal] = None,
         cycle_id: Optional[str] = None,
+        execution_mode: str = "live",
     ) -> None:
         """Convenience method to record trade settlement with boolean outcome."""
         outcome = "win" if was_win else "loss"
         curr_balance = balance_after if balance_after is not None else (self._peak_equity or Decimal("100.00")) + pnl
-        self.record_cycle_settlement(ticker, outcome=outcome, pnl=pnl, balance_after=curr_balance, cycle_id=cycle_id)
+        self.record_cycle_settlement(
+            ticker,
+            outcome=outcome,
+            pnl=pnl,
+            balance_after=curr_balance,
+            cycle_id=cycle_id,
+            execution_mode=execution_mode,
+        )
 
     def arm_bot(self) -> None:
-        """Manually re-arm the bot, reset consecutive loss streak, and reset batch counters."""
+        """Manually re-arm the bot and reset consecutive loss streak."""
         self.is_bot_armed = True
         self._consecutive_losses = 0
-        self.batch_trades_completed = 0
-        self.batch_pnl = Decimal("0.00")
-        self.batch_wins = 0
-        self.batch_losses = 0
-        self._circuit_breaker_tripped = False
-        logger.info("🛡️ [GUARDRAIL ARM] Bot manually RE-ARMED. Consecutive loss and batch counters reset to 0/6.")
+        logger.info("🛡️ [GUARDRAIL ARM] Bot manually RE-ARMED. Consecutive loss counter reset.")
 
     def disarm_bot(self) -> None:
         """Manually disarm the bot (emergency manual shutdown)."""
@@ -705,7 +697,8 @@ class AgentGuardrails:
         self._circuit_breaker_tripped = False
         self._peak_equity = current_balance
         self._consecutive_losses = 0
-        logger.info("🛡️ [GUARDRAIL RESET] Circuit breaker reset. Peak equity re-anchored to $%.2f", float(current_balance))
+        self.is_bot_armed = True
+        logger.info("🛡️ [GUARDRAIL RESET] Circuit breaker reset. Peak equity re-anchored to $%.2f. Bot armed.", float(current_balance))
 
     # -------------------------------------------------------------------------
     # 4. Status & Diagnostics

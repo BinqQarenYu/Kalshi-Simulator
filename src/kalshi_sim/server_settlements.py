@@ -83,7 +83,7 @@ def record_win_loss_event_report(
     settlement_spot_price: Optional[Decimal] = None,
     asset: Optional[str] = None,
     bot_parameters: Optional[dict[str, Any]] = None,
-    record_in_guardrails: bool = True,
+    skip_guardrails: bool = False,
 ) -> dict[str, Any]:
     """Generate and persist a standardized event win/loss report (5m or 15m)."""
     state = _get_state()
@@ -239,14 +239,15 @@ def record_win_loss_event_report(
     state.win_loss_reports.insert(0, report)
     state.save_persisted_reports()
 
-    # Record settlement in Agent_Guardrails to unlock cycle and track streaks
-    if record_in_guardrails and getattr(state, "guardrails_agent", None):
+    if not skip_guardrails and hasattr(state, "guardrails_agent") and state.guardrails_agent:
+        # Record settlement in Agent_Guardrails to unlock cycle and track streaks
         state.guardrails_agent.record_cycle_settlement(
             ticker=ticker,
             outcome=outcome,
             pnl=pnl,
             balance_after=balance_after,
             cycle_id=ticker,
+            execution_mode=exec_mode_resolved,
         )
 
     try:
@@ -483,7 +484,7 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
                 timestamp_utc=settled_ts,
                 cycle_time=cycle_time,
                 balance_after=live_bal,
-                record_in_guardrails=False,
+                skip_guardrails=True,
             )
             new_reports.append(rep)
             existing_report_ids.add(report_id)
@@ -559,7 +560,7 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
                 timestamp_utc=settled_ts,
                 cycle_time=cycle_time,
                 balance_after=live_bal,
-                record_in_guardrails=False,
+                skip_guardrails=True,
             )
             rep["gross_pnl"] = float(revenue - cost)
             rep["fee"] = float(fee)

@@ -10,11 +10,18 @@ Distinct from historical 3-Step Dominion v3.2:
 
 from __future__ import annotations
 
+from collections import deque
+from datetime import datetime, timezone
+import json
 import logging
 import math
+from pathlib import Path
+import time
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 
 from kalshi_sim.ml.domination_exit_evaluator import (
     DominationExitDecision,
@@ -34,7 +41,7 @@ class Bot1V4Decision:
     strategy_id: str
     strategy_name: str
     active_playbook: str
-    playbook_stage: str  # 'breakout' | 'drift' | 'gamma_snub' | 'none'
+    playbook_stage: str  # 'breakout' | 'drift' | 'chop' | 'gamma_snub' | 'none'
     p_up: float
     p_down: float
     p_wait: float
@@ -60,6 +67,8 @@ class Bot1V4Decision:
     onnx_signal: str = "WAIT"
     onnx_confidence: float = 0.0
     fused_source: str = "macro_erf"
+    regime: str = "STORM"  # 'STORM' (Warrior 1) | 'CHOP' (Warrior 2)
+
 
 
 class Bot1V4DominationEngine:
@@ -105,6 +114,13 @@ class Bot1V4DominationEngine:
         max_clob_spread_cents: float = 0.05,  # Max allowable bid-ask spread corridor cap ($0.05)
         moneyness_moat_multiplier: float = 1.36,  # 1.36x sigma*sqrt(t) deep ITM protection moat
         asset: CryptoAsset | str = CryptoAsset.BTC,
+        chop_discount_limit_price: Decimal = Decimal("0.38"),  # Warrior 2 deep discount floor
+        chop_max_entry_price: Decimal = Decimal("0.42"),       # Warrior 2 discount ceiling
+        chop_min_time_s: float = 150.0,                       # Sweet Spot: 2.5 mins late bound
+        chop_max_time_s: float = 450.0,                       # Sweet Spot: 7.5 mins early bound
+        chop_range_threshold: float = 28.0,                   # Cycle range <= $28 box defines chop
+        chop_vol_threshold: float = 12.0,                     # 1m rolling vol < $12 defines low kinetic energy
+        hysteresis_cooldown_seconds: float = 45.0,            # 45s sustained calm to return to chop
         experience_buffer: Optional[ContinuousExperienceBuffer] = None,
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
@@ -147,6 +163,24 @@ class Bot1V4DominationEngine:
         self.opening_quarantine_seconds = opening_quarantine_seconds
         self.max_clob_spread_cents = max_clob_spread_cents
         self.enable_lead_deer_peak_harvester: bool = True
+
+        # Warrior 2 (Chop Harvester) parameters
+        self.chop_discount_limit_price = chop_discount_limit_price
+        self.chop_max_entry_price = chop_max_entry_price
+        self.chop_min_time_s = chop_min_time_s
+        self.chop_max_time_s = chop_max_time_s
+        self.chop_range_threshold = chop_range_threshold
+        self.chop_vol_threshold = chop_vol_threshold
+        self.hysteresis_cooldown_seconds = hysteresis_cooldown_seconds
+
+        # Dual Warrior dynamic regime state tracking
+        self._cycle_spot_high: Dict[str, float] = {}
+        self._cycle_spot_low: Dict[str, float] = {}
+        self._recent_spot_history: deque[Tuple[float, float]] = deque(maxlen=120)
+        self._current_regime: str = "STORM"
+        self._last_storm_ts: float = 0.0
+        self._regime_reason: str = "Session boot initial state"
+
         self.lead_deer_brain = LeadDeerQuantBrain(
             experience_buffer=experience_buffer,
             min_confidence=float(self.min_confidence),
@@ -162,6 +196,110 @@ class Bot1V4DominationEngine:
         self._current_cycle_id: Optional[str] = None
         self._completed_turnovers_map: dict[str, int] = {}
         self._last_exit_timestamp: float = 0.0
+
+    def compute_chop_limit_price(self, win_prob: float) -> Decimal:
+        """Warrior 2 Chop Harvester pricing coupling:
+        Guarantees asymmetric deep discount maker entry clamped strictly between $0.38 and $0.42.
+        """
+        ev_hurdle = float(self.min_ev_hurdle_dollars)
+        dynamic_price = win_prob - ev_hurdle
+        min_p = float(self.chop_discount_limit_price)
+        max_p = float(self.chop_max_entry_price)
+        clamped = max(min_p, min(dynamic_price, max_p))
+        return Decimal(str(round(clamped, 2)))
+
+    def detect_market_regime(
+        self,
+        spot_price: float,
+        time_to_expiry_s: float,
+        cycle_id: str,
+        spot_velocity_3s: float = 0.0,
+        vpin: float = 0.20,
+        onnx_res: Optional[Dict[str, Any]] = None,
+        now_mono: Optional[float] = None,
+        now_utc: Optional[datetime] = None,
+    ) -> Tuple[str, str]:
+        """Classify real-time market regime between STORM (Warrior 1) and CHOP (Warrior 2).
+
+        Evaluates:
+        1. Rolling 1m realized spot volatility (< $12.00 is compressed chop).
+        2. Cycle range span (High - Low <= $28.00 defines bounded channel).
+        3. Fast-Path Volcano Trigger (velocity >= $15/s or ONNX directional conf >= 0.70).
+        4. Cooldown Hysteresis (45s sustained calm to switch back to chop).
+
+        Returns:
+            (regime_name, rationale) -> e.g. ("CHOP", "Sustained range-bound box")
+        """
+        if now_mono is None:
+            now_mono = time.monotonic()
+        if now_utc is None:
+            now_utc = datetime.now(timezone.utc)
+
+        # 1. Update cycle high/low range
+        high = max(self._cycle_spot_high.get(cycle_id, spot_price), spot_price)
+        low = min(self._cycle_spot_low.get(cycle_id, spot_price), spot_price)
+        self._cycle_spot_high[cycle_id] = high
+        self._cycle_spot_low[cycle_id] = low
+        cycle_range = high - low
+
+        # 2. Update rolling spot history & compute rolling vol
+        self._recent_spot_history.append((now_mono, spot_price))
+        cutoff = now_mono - 60.0
+        recent_spots = [p for ts, p in self._recent_spot_history if ts >= cutoff]
+        if len(recent_spots) >= 5:
+            rolling_vol = float(np.std(recent_spots))
+        else:
+            rolling_vol = float(self.default_btc_1m_volatility)
+
+        # 3. Fast-Path Volcano Trigger (Chop -> Storm Breakout)
+        onnx_sig = str(onnx_res.get("signal", "WAIT")) if onnx_res else "NONE"
+        onnx_conf = float(onnx_res.get("confidence", 0.0)) if onnx_res else 0.0
+        vpin_eval = float(onnx_res.get("vpin_score", vpin)) if onnx_res else vpin
+
+        is_volcano = (
+            abs(spot_velocity_3s) >= 15.0
+            or cycle_range > self.chop_range_threshold
+            or (onnx_sig in ("LONG", "SHORT") and onnx_conf >= 0.70)
+            or vpin_eval >= self.vpin_safe_threshold
+            or rolling_vol >= self.chop_vol_threshold * 1.5
+        )
+
+        if is_volcano:
+            self._current_regime = "STORM"
+            self._last_storm_ts = now_mono
+            reason = (
+                f"Volcano Breakout detected: vel={spot_velocity_3s:+.1f}$/s, "
+                f"range=${cycle_range:.1f}, vol=${rolling_vol:.1f}, ONNX={onnx_sig}({onnx_conf:.0%})"
+            )
+            self._regime_reason = reason
+            return "STORM", reason
+
+        # 4. Cooldown Transition Check (Storm -> Chop with Hysteresis)
+        if self._current_regime == "STORM":
+            is_calm = (
+                cycle_range <= self.chop_range_threshold
+                and abs(spot_velocity_3s) < 5.0
+                and rolling_vol < self.chop_vol_threshold
+                and onnx_sig in ("WAIT", "NONE")
+            )
+            if is_calm:
+                calm_duration = now_mono - self._last_storm_ts
+                if calm_duration >= self.hysteresis_cooldown_seconds:
+                    self._current_regime = "CHOP"
+                    reason = f"Cooldown Hysteresis Passed: Sustained calm for {int(calm_duration)}s"
+                    self._regime_reason = reason
+                    return "CHOP", reason
+                else:
+                    rem = int(self.hysteresis_cooldown_seconds - calm_duration)
+                    return "STORM", f"Calm detected, cooling down ({rem}s remaining in hysteresis)"
+            else:
+                self._last_storm_ts = now_mono
+                return "STORM", "Active volatility expansion"
+
+        # 5. Sustained Chop
+        reason = f"Sustained Chop Box: range=${cycle_range:.1f} <= ${self.chop_range_threshold:.1f}, vol=${rolling_vol:.1f}"
+        self._regime_reason = reason
+        return "CHOP", reason
 
     def reset_cycle_turnover(self, cycle_id: str) -> None:
         """Reset turnover count for a new 15M cycle."""
@@ -363,6 +501,12 @@ class Bot1V4DominationEngine:
             "max_clob_spread_cents": float(self.max_clob_spread_cents),
             "max_turnover_per_event": int(self.max_turnover_per_event),
             "enable_doubt_harvest": bool(self.enable_doubt_harvest),
+            "chop_discount_limit_price": float(self.chop_discount_limit_price),
+            "chop_max_entry_price": float(self.chop_max_entry_price),
+            "chop_range_threshold": float(self.chop_range_threshold),
+            "chop_vol_threshold": float(self.chop_vol_threshold),
+            "current_regime": self._current_regime,
+            "regime_reason": self._regime_reason,
         }
 
     def update_parameters(
@@ -374,6 +518,10 @@ class Bot1V4DominationEngine:
         vpin_toxic_threshold: Optional[float] = None,
         opening_quarantine_seconds: Optional[float] = None,
         max_clob_spread_cents: Optional[float] = None,
+        chop_discount_limit_price: Optional[float] = None,
+        chop_max_entry_price: Optional[float] = None,
+        chop_range_threshold: Optional[float] = None,
+        chop_vol_threshold: Optional[float] = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Dynamically update strategy parameters on the fly."""
@@ -392,7 +540,48 @@ class Bot1V4DominationEngine:
             self.opening_quarantine_seconds = float(opening_quarantine_seconds)
         if max_clob_spread_cents is not None:
             self.max_clob_spread_cents = float(max_clob_spread_cents)
+        if chop_discount_limit_price is not None:
+            self.chop_discount_limit_price = Decimal(str(chop_discount_limit_price))
+        if chop_max_entry_price is not None:
+            self.chop_max_entry_price = Decimal(str(chop_max_entry_price))
+        if chop_range_threshold is not None:
+            self.chop_range_threshold = float(chop_range_threshold)
+        if chop_vol_threshold is not None:
+            self.chop_vol_threshold = float(chop_vol_threshold)
         return self.get_parameters()
+
+    def has_star_player_seal(self) -> bool:
+        """Check if bot holds Seal of Star Player on disk."""
+        try:
+            seal_path = Path("data/seal_of_excellence.json")
+            if seal_path.exists():
+                with open(seal_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                seals = data.get("seals", {})
+                bot_seal = seals.get(self.STRATEGY_ID, {})
+                seal_status = str(bot_seal.get("seal_status", ""))
+                seal_type = str(bot_seal.get("seal_type", ""))
+                if "STAR_PLAYER" in seal_status or "STAR_PLAYER" in seal_type or bot_seal.get("star_player_authorized", False):
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def has_seal_of_the_brave(self) -> bool:
+        """Check if bot holds Seal of the Brave on disk."""
+        try:
+            seal_path = Path("data/seal_of_excellence.json")
+            if seal_path.exists():
+                with open(seal_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                seals = data.get("seals", {})
+                bot_seal = seals.get(self.STRATEGY_ID, {})
+                seal_status = str(bot_seal.get("seal_status", ""))
+                if "BRAVE" in seal_status or bot_seal.get("brave_authorized", False):
+                    return True
+        except Exception:
+            pass
+        return False
 
     def evaluate(
         self,
@@ -401,7 +590,7 @@ class Bot1V4DominationEngine:
         target_strike: float,
         time_to_expiry_s: float,
         recent_trades: Optional[list[TradeEvent]] = None,
-        total_equity: Decimal = Decimal("100.00"),
+        total_equity: Decimal = Decimal("35.00"),
         max_position_size: int = 1,
         estimated_vpin: float = 0.20,
         cycle_id: str = "DEFAULT_CYCLE",
@@ -419,6 +608,7 @@ class Bot1V4DominationEngine:
             asset=asset,
             cycle_id=cycle_id,
             spot_velocity_3s=spot_velocity_3s,
+            total_equity=total_equity,
         )
 
     def evaluate_market_opportunity(
@@ -431,6 +621,7 @@ class Bot1V4DominationEngine:
         asset: CryptoAsset = CryptoAsset.BTC,
         cycle_id: str = "DEFAULT_CYCLE",
         spot_velocity_3s: float = 0.0,
+        total_equity: Decimal = Decimal("35.00"),
     ) -> Bot1V4Decision:
         """Evaluate Bot 1 V4 Quantitative Signal with Turnover and EV Math coupling."""
         # Auto-sync with Single Source of Truth on disk before evaluation
@@ -476,6 +667,31 @@ class Bot1V4DominationEngine:
         # Check VPIN Toxicity Veto (from book VPIN or ONNX VPIN)
         vpin_eval = float(onnx_res.get("vpin_score", vpin)) if onnx_res else vpin
         onnx_vpin_veto = bool(onnx_res.get("vpin_veto", False)) if onnx_res else False
+
+        # 2.0 ONNX Frozen Sensor Guardrail / Dead Book Veto (Tier 1 Guardrail)
+        if onnx_res is not None:
+            veto_reason = str(onnx_res.get("veto_reason", ""))
+            prob_wait = float(onnx_res.get("prob_wait", 0.0))
+            if veto_reason == "FROZEN_SENSOR_ZERO_VARIANCE" or (onnx_sig == "WAIT" and prob_wait >= 0.99):
+                return Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="frozen_sensor_veto",
+                    playbook_stage="none",
+                    p_up=p_up, p_down=p_down, p_wait=1.0,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale="Frozen Sensor Veto: Order book is static/zero variance. Suppressing trading into dead liquidity.",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=float(self.discount_limit_price),
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                    regime=self._current_regime,
+                )
+
         vpin_safe = (vpin_eval < self.vpin_toxic_threshold) and not onnx_vpin_veto
         if not vpin_safe:
             return Bot1V4Decision(
@@ -496,6 +712,7 @@ class Bot1V4DominationEngine:
                 onnx_signal=onnx_sig,
                 onnx_confidence=onnx_conf,
                 fused_source=fused_source,
+                regime=self._current_regime,
             )
 
         # 2.2 CLOB Spread Corridor Cap (Vance Liquidity Gate)
@@ -518,9 +735,139 @@ class Bot1V4DominationEngine:
                     turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
                     ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
                     onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                    regime=self._current_regime,
                 )
 
-        # 2.3 Opening Cycle Noise Quarantine Gate (Anti-False Breakout Shield)
+        # 2.3 Real-Time Market Regime Classification (One Boat, Two Warriors)
+        regime, regime_reason = self.detect_market_regime(
+            spot_price=spot_price,
+            time_to_expiry_s=time_to_expiry_s,
+            cycle_id=cycle_id,
+            spot_velocity_3s=spot_velocity_3s,
+            vpin=vpin_eval,
+            onnx_res=onnx_res,
+        )
+
+        ai_tag = f" [AI Conf {onnx_conf*100:.0f}%]" if fused_source == "bayesian_fusion" else ""
+
+        # =========================================================================
+        # WARRIOR 2: CHOP HARVESTER (Regime == 'CHOP')
+        # =========================================================================
+        if regime == "CHOP":
+            # A. Timing Window Gates
+            if time_to_expiry_s > self.chop_max_time_s:
+                return Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="chop_early_noise_quarantine",
+                    playbook_stage="none",
+                    p_up=p_up, p_down=p_down, p_wait=1.0,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale=f"Warrior 2 Chop Harvester: T={int(time_to_expiry_s)}s > {int(self.chop_max_time_s)}s. Waiting for range boundaries to solidify.",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=float(self.chop_discount_limit_price),
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                    regime="CHOP",
+                )
+            if time_to_expiry_s < self.chop_min_time_s:
+                return Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="chop_late_cycle_freeze",
+                    playbook_stage="none",
+                    p_up=p_up, p_down=p_down, p_wait=1.0,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale=f"Warrior 2 Chop Harvester: T={int(time_to_expiry_s)}s < {int(self.chop_min_time_s)}s. Near-settlement pin/jump freeze.",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=float(self.chop_discount_limit_price),
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                    regime="CHOP",
+                )
+
+            # B. Asymmetric Deep Discount Limit Pricing ($0.38 - $0.42)
+            dynamic_limit_yes = self.compute_chop_limit_price(p_up)
+            dynamic_limit_no = self.compute_chop_limit_price(p_down)
+
+            ev_yes = p_up * 1.0 - float(dynamic_limit_yes)
+            ev_no = p_down * 1.0 - float(dynamic_limit_no)
+
+            recommended_side = "wait"
+            chosen_limit_price = float(self.chop_discount_limit_price)
+            rationale = f"Warrior 2 Chop Harvester: No chop edge meeting EV hurdle ({regime_reason})"
+
+            req_p_win_yes = float(dynamic_limit_yes + self.min_ev_hurdle_dollars)
+            req_p_win_no = float(dynamic_limit_no + self.min_ev_hurdle_dollars)
+
+            if p_up >= req_p_win_yes and p_up >= p_down:
+                recommended_side = "yes"
+                chosen_limit_price = float(dynamic_limit_yes)
+                rationale = (
+                    f"Warrior 2 Chop Harvester YES Signal{ai_tag}: P_win {p_up:.1%} "
+                    f"(Deep Discount Limit ${chosen_limit_price:.2f}, Net EV +${ev_yes:.3f}, {regime_reason})"
+                )
+            elif p_down >= req_p_win_no and p_down > p_up:
+                recommended_side = "no"
+                chosen_limit_price = float(dynamic_limit_no)
+                rationale = (
+                    f"Warrior 2 Chop Harvester NO Signal{ai_tag}: P_win {p_down:.1%} "
+                    f"(Deep Discount Limit ${chosen_limit_price:.2f}, Net EV +${ev_no:.3f}, {regime_reason})"
+                )
+
+            return Bot1V4Decision(
+                strategy_id=self.STRATEGY_ID,
+                strategy_name=self.STRATEGY_NAME,
+                active_playbook="playbook4_chop_harvester",
+                playbook_stage="chop",
+                p_up=p_up, p_down=p_down, p_wait=1.0 - max(p_up, p_down),
+                vpin=vpin_eval, vpin_is_safe=True,
+                ev_yes=ev_yes, ev_no=ev_no,
+                edge_yes=p_up - chosen_limit_price,
+                edge_no=p_down - chosen_limit_price,
+                kelly_f_yes=0.25 if recommended_side == "yes" else 0.0,
+                kelly_f_no=0.25 if recommended_side == "no" else 0.0,
+                recommended_side=recommended_side,
+                recommended_contracts=(
+                    StatisticalEVEngine.compute_conviction_tier(
+                        ai_prob=p_up if recommended_side == "yes" else p_down,
+                        price=Decimal(str(chosen_limit_price)),
+                        vpin=vpin_eval,
+                        time_to_expiry_s=time_to_expiry_s,
+                        spot_distance_to_strike=spot_diff,
+                        total_equity=total_equity,
+                        regime="CHOP",
+                        has_star_player_seal=self.has_star_player_seal(),
+                        has_seal_of_the_brave=self.has_seal_of_the_brave(),
+                    )
+                    if recommended_side != "wait" else 0
+                ),
+                rationale=rationale,
+                edge_pct=max(p_up, p_down) - chosen_limit_price,
+                time_to_expiry_s=time_to_expiry_s,
+                spot_diff=spot_diff,
+                limit_price=chosen_limit_price,
+                turnovers_completed=turnovers,
+                max_turnovers=self.max_turnover_per_event,
+                ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                onnx_signal=onnx_sig,
+                onnx_confidence=onnx_conf,
+                fused_source=fused_source,
+                regime="CHOP",
+            )
+
+        # =========================================================================
+        # WARRIOR 1: STORM HUNTER (Regime == 'STORM')
+        # =========================================================================
+        # 3.1 Opening Cycle Noise Quarantine Gate (Anti-False Breakout Shield)
         cycle_duration_s = 900.0
         p1_max_s = cycle_duration_s - self.opening_quarantine_seconds
         if time_to_expiry_s > p1_max_s:
@@ -541,9 +888,33 @@ class Bot1V4DominationEngine:
                 turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
                 ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
                 onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                regime="STORM",
             )
 
-        # 2.4 Dynamic Proximity Moat Filter (Volatility-Scaled Distance Filter)
+        # 3.2 ONNX Consensus Team Gate (Partner Discipline)
+        if onnx_sig == "WAIT" and onnx_conf >= 0.70:
+            has_massive_macro_edge = (abs(spot_diff) >= 45.0) and (max(p_up, p_down) >= 0.72)
+            if not has_massive_macro_edge:
+                return Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="onnx_wait_veto",
+                    playbook_stage="none",
+                    p_up=p_up, p_down=p_down, p_wait=1.0,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale=f"ONNX Consensus Veto: Orderflow neural net signals WAIT ({onnx_conf:.0%} conf). Respecting microstructural consensus.",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=float(self.discount_limit_price),
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                    regime="STORM",
+                )
+
+        # 3.3 Dynamic Proximity Moat Filter (Volatility-Scaled Distance Filter)
         dynamic_moat = self.get_dynamic_proximity_threshold(time_to_expiry_s, cycle_duration_s=cycle_duration_s)
         if abs(spot_diff) < dynamic_moat:
             return Bot1V4Decision(
@@ -562,42 +933,40 @@ class Bot1V4DominationEngine:
                 turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
                 ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
                 onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                regime="STORM",
             )
 
-        # 3. Dynamic EV & Win Probability Coupling
+        # 3.4 Dynamic EV & Win Probability Coupling (Storm Mode up to $0.55)
         req_p_win_base = self.compute_required_win_probability(self.discount_limit_price)
         dynamic_limit_yes = self.compute_dynamic_limit_price(p_up, vpin=vpin_eval)
         dynamic_limit_no = self.compute_dynamic_limit_price(p_down, vpin=vpin_eval)
 
         recommended_side = "wait"
-        rationale = "No edge meeting EV hurdle"
+        rationale = f"Warrior 1: No storm edge meeting EV hurdle ({regime_reason})"
         chosen_limit_price = float(self.discount_limit_price)
 
         ev_yes = p_up * 1.0 - float(dynamic_limit_yes)
         ev_no = p_down * 1.0 - float(dynamic_limit_no)
 
-        ai_tag = f" [AI Conf {onnx_conf*100:.0f}%]" if fused_source == "bayesian_fusion" else ""
-        is_chop_yes = (vpin_eval > 0.28) or (p_up < 0.75)
-        is_chop_no = (vpin_eval > 0.28) or (p_down < 0.75)
-        regime_tag_yes = " [Chop Sniper $0.48]" if is_chop_yes else " [Trend Breakout $0.55]"
-        regime_tag_no = " [Chop Sniper $0.48]" if is_chop_no else " [Trend Breakout $0.55]"
-
         if p_up >= (float(dynamic_limit_yes) + float(self.min_ev_hurdle_dollars)) or ev_yes >= float(self.min_ev_hurdle_dollars):
             if p_up >= req_p_win_base:
                 recommended_side = "yes"
                 chosen_limit_price = min(float(dynamic_limit_yes), float(self.max_entry_price))
-                rationale = f"Bot 1 V4 YES Signal{ai_tag}{regime_tag_yes}: P_win {p_up:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_yes:.3f})"
+                rationale = f"Warrior 1 Storm YES Signal{ai_tag}: P_win {p_up:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_yes:.3f}, {regime_reason})"
         elif p_down >= (float(dynamic_limit_no) + float(self.min_ev_hurdle_dollars)) or ev_no >= float(self.min_ev_hurdle_dollars):
             if p_down >= req_p_win_base:
                 recommended_side = "no"
                 chosen_limit_price = min(float(dynamic_limit_no), float(self.max_entry_price))
-                rationale = f"Bot 1 V4 NO Signal{ai_tag}{regime_tag_no}: P_win {p_down:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_no:.3f})"
+                rationale = f"Warrior 1 Storm NO Signal{ai_tag}: P_win {p_down:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_no:.3f}, {regime_reason})"
+
+        active_playbook = "playbook1_breakout" if abs(spot_velocity_3s) >= 15.0 else "playbook2_drift"
+        playbook_stage = "breakout" if active_playbook == "playbook1_breakout" else "drift"
 
         return Bot1V4Decision(
             strategy_id=self.STRATEGY_ID,
             strategy_name=self.STRATEGY_NAME,
-            active_playbook="playbook2_drift",
-            playbook_stage="drift",
+            active_playbook=active_playbook,
+            playbook_stage=playbook_stage,
             p_up=p_up, p_down=p_down, p_wait=1.0 - max(p_up, p_down),
             vpin=vpin_eval, vpin_is_safe=True,
             ev_yes=ev_yes, ev_no=ev_no,
@@ -613,6 +982,10 @@ class Bot1V4DominationEngine:
                     vpin=vpin_eval,
                     time_to_expiry_s=time_to_expiry_s,
                     spot_distance_to_strike=spot_diff,
+                    total_equity=total_equity,
+                    regime="STORM",
+                    has_star_player_seal=self.has_star_player_seal(),
+                    has_seal_of_the_brave=self.has_seal_of_the_brave(),
                 )
                 if recommended_side != "wait" else 0
             ),
@@ -627,4 +1000,5 @@ class Bot1V4DominationEngine:
             onnx_signal=onnx_sig,
             onnx_confidence=onnx_conf,
             fused_source=fused_source,
+            regime="STORM",
         )

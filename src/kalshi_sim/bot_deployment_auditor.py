@@ -604,6 +604,38 @@ class BotDeploymentAuditor:
         auth, _ = self.check_live_authorization_on_disk(bot_id, self.seal_path)
         return auth
 
+    def has_seal_of_star_player(self, bot_id: str) -> bool:
+        """Check whether a strategy holds the Seal of Star Player to bypass contract limits."""
+        seal = self._seals.get(bot_id)
+        if seal and getattr(seal, "seal_of_star_player", False):
+            return True
+        try:
+            if not self.seal_path.exists():
+                return False
+            with open(self.seal_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            seals = data.get("seals", {})
+            seal_info = seals.get(bot_id, {})
+            return seal_info.get("seal_of_star_player", False)
+        except Exception:
+            return False
+
+    def has_seal_of_the_brave(self, bot_id: str) -> bool:
+        """Check whether a strategy holds the Seal of the Brave to bypass all limits."""
+        seal = self._seals.get(bot_id)
+        if seal and getattr(seal, "seal_of_the_brave", False):
+            return True
+        try:
+            if not self.seal_path.exists():
+                return False
+            with open(self.seal_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            seals = data.get("seals", {})
+            seal_info = seals.get(bot_id, {})
+            return seal_info.get("seal_of_the_brave", False)
+        except Exception:
+            return False
+
     def get_seal(self, bot_id: str) -> Optional[SealOfExcellence]:
         return self._seals.get(bot_id)
 

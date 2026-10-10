@@ -83,46 +83,91 @@ class StatisticalEVEngine:
         vpin: float,
         time_to_expiry_s: float = 300.0,
         spot_distance_to_strike: float = 40.0,
-        total_equity: Decimal = Decimal("100.00"),
+        total_equity: Decimal = Decimal("35.00"),
+        regime: str = "STORM",
+        has_star_player_seal: bool = False,
+        has_seal_of_the_brave: bool = False,
     ) -> int:
-        """Calculate dynamic bet sizing (1x, 2x, 3x) according to Council Platinum Confluence rules.
+        """Calculate dynamic bet sizing (1x, 2x, 3x, 4x) according to Quant Council Scale-Up rules.
         
-        Tier 3 (3x Size):
-          - Total Equity >= $75.00
+        Tier 4 (4x Size - Star Player):
+          - Total Equity >= $100.00 (or has_seal_of_the_brave)
+          - Has Star Player Seal (or has_seal_of_the_brave)
           - AI Conviction >= 88%
           - Limit Price <= $0.52
           - VPIN < 0.20
           - Time to Expiry > 300s
           - Spot Distance to Strike >= $50.00
+
+        Tier 3 (3x Size - Growth Conviction):
+          - Total Equity >= $75.00 (or has_seal_of_the_brave)
+          - AI Conviction >= 85%
+          - Limit Price <= $0.52
+          - VPIN < 0.22
+          - Time to Expiry > 240s
+          - Spot Distance to Strike >= $45.00
           
-        Tier 2 (2x Size):
-          - Total Equity >= $50.00
-          - AI Conviction >= 82%
-          - Limit Price <= $0.54
-          - VPIN < 0.30
-          - Time to Expiry > 180s
-          - Spot Distance to Strike >= $30.00
+        Tier 2 (2x Size - Emerging Conviction & Chop Asymmetry):
+          Option A (Storm Conviction):
+            - Total Equity >= $50.00 (or has_seal_of_the_brave)
+            - AI Conviction >= 80%
+            - Limit Price <= $0.54
+            - VPIN < 0.28
+            - Time to Expiry > 180s
+            - Spot Distance to Strike >= $30.00
+          Option B (Tier 1B Chop Deep Discount Sniper):
+            - Regime == 'CHOP'
+            - Total Equity >= $40.00 (or has_seal_of_the_brave)
+            - Limit Price <= $0.42 (Maker deep discount)
+            - AI Conviction >= 65% (Asymmetric Risk:Reward 1:1.63)
+            - VPIN < 0.32
+            - 150s <= Time to Expiry <= 450s
           
         Tier 1 (1x Baseline):
           - Default micro-bankroll sizing (1 contract).
         """
+        # Tier 4 (4x Size): Star Player / Elite Conviction
         if (
-            total_equity >= Decimal("75.00")
+            (total_equity >= Decimal("100.00") or has_seal_of_the_brave)
+            and (has_star_player_seal or has_seal_of_the_brave)
             and ai_prob >= 0.88
-            and price <= Decimal("0.52")
+            and price <= Decimal("0.55")
             and vpin < 0.20
             and time_to_expiry_s > 300.0
             and abs(spot_distance_to_strike) >= 50.0
         ):
+            return 4
+
+        # Tier 3 (3x Size): Growth Conviction
+        if (
+            (total_equity >= Decimal("75.00") or has_seal_of_the_brave)
+            and ai_prob >= 0.85
+            and price <= Decimal("0.55")
+            and vpin < 0.22
+            and time_to_expiry_s > 240.0
+            and abs(spot_distance_to_strike) >= 45.0
+        ):
             return 3
 
+        # Tier 2 (2x Size): Option A (Storm Conviction)
         if (
-            total_equity >= Decimal("50.00")
-            and ai_prob >= 0.82
-            and price <= Decimal("0.54")
-            and vpin < 0.30
+            (total_equity >= Decimal("50.00") or has_seal_of_the_brave)
+            and ai_prob >= 0.80
+            and price <= Decimal("0.55")
+            and vpin < 0.28
             and time_to_expiry_s > 180.0
             and abs(spot_distance_to_strike) >= 30.0
+        ):
+            return 2
+
+        # Tier 2 (2x Size): Option B (Chop Harvester Deep Discount Sniper)
+        if (
+            regime == "CHOP"
+            and (total_equity >= Decimal("40.00") or has_seal_of_the_brave)
+            and price <= Decimal("0.42")
+            and ai_prob >= 0.65
+            and vpin < 0.32
+            and 150.0 <= time_to_expiry_s <= 450.0
         ):
             return 2
 

@@ -86,6 +86,7 @@ class SimulationSettlementCoordinator:
                     pnl=result.pnl,
                     balance_after=p_inst.balance,
                     cycle_id=result.ticker,
+                    execution_mode="simulated",
                 )
                 if macro_trend_bot and hasattr(macro_trend_bot, "record_cycle_outcome"):
                     if b_type in ("macro_trend_dominion", "macro_onnx", "macro_trend", "macro_trend_dominion_bot"):
