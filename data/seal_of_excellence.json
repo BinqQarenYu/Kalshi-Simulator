@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "last_updated": "2026-10-10T10:55:51.114099+00:00",
-  "active_live_strategy": "bot1_v4_domination",
+  "active_live_strategy": "3_step_domination_bot",
   "seals": {
     "3_step_domination_bot": {
       "bot_id": "3_step_domination_bot",
