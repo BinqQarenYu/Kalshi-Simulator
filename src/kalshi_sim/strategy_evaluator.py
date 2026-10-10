@@ -540,6 +540,24 @@ class StrategyEvaluationCoordinator:
                             order_type=order_type_val,
                             limit_price=limit_price_val,
                         )
+                    else:
+                        if not hasattr(self, "_last_eval_heartbeat_time"):
+                            self._last_eval_heartbeat_time = {}
+                        if now_mono - self._last_eval_heartbeat_time.get(f"{ticker}_{bot_type_tag}", 0.0) >= 15.0:
+                            self._last_eval_heartbeat_time[f"{ticker}_{bot_type_tag}"] = now_mono
+                            bot_label = ("LIVE BOT 1 V4" if is_v4 else "LIVE 3-STEP BOT") if is_live else ("BOT 1 V4" if is_v4 else "3-STEP BOT")
+                            diff = spot_price - target_strike
+                            logger.info(
+                                "[%s EVAL] %-18s | Spot: $%.2f | Strike: $%.2f (Diff: %+.2f) | Signal: %s (%s) | Edge: %+.1f%%",
+                                bot_label,
+                                ticker,
+                                spot_price,
+                                target_strike,
+                                diff,
+                                decision.recommended_side.upper(),
+                                getattr(decision, "active_playbook", "observation"),
+                                getattr(decision, "edge_pct", 0.0),
+                            )
             except Exception as exc:
                 logger.debug("Domination bot evaluation error: %s", exc)
 

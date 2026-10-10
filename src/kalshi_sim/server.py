@@ -1323,7 +1323,12 @@ async def get_state() -> dict[str, Any]:
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
-    await websocket.accept()
+    try:
+        await websocket.accept()
+    except Exception as exc:
+        logger.debug("WebSocket accept failed: %s", exc)
+        return
+
     state.connected_websockets.add(websocket)
     logger.info("WebSocket client connected. Active connections: %d", len(state.connected_websockets))
 
@@ -1344,8 +1349,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     await websocket.send_text('{"type":"pong"}')
             except Exception:
                 pass
-    except WebSocketDisconnect:
-        pass
+    except (WebSocketDisconnect, Exception) as exc:
+        logger.debug("WebSocket disconnected: %s", exc)
     finally:
         state.connected_websockets.discard(websocket)
         logger.info("WebSocket client disconnected. Remaining: %d", len(state.connected_websockets))
