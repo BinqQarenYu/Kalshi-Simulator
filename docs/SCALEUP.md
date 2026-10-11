@@ -139,3 +139,32 @@ In Storm, entry prices reach **\$0.52 – \$0.55**:
 - Synchronize across `zero_hallucination_mode` and `run_live_real_money`.
 - Execute full test suite `pytest tests/` under ASVL.
 - Verify live state on port 8000 via `/api/state`.
+
+---
+
+## 7. Live Operational Status & Milestone Achievement (October 11, 2026)
+
+On **October 11, 2026**, `Bot 1 V4` achieved a critical capital milestone:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                   EQUITY MILESTONE REACHED: TIER 1B UNLOCKED           │
+├────────────────────────────────────────────────────────────────────────┤
+│ • Starting Bankroll (Session Low):      $34.92                         │
+│ • Intermediate Level:                   $36.64                         │
+│ • Live Bankroll (Current):              $40.2041                       │
+│ • Milestone Status:                     PASSED $40.00 BARRIER          │
+│ • Active Operational Tier:              TIER 1B (CHOP SNIPER)          │
+│ • Maximum Size Unlocked:                2 Contracts (Warrior 2 Chop)   │
+│ • Risk Ceiling:                         $0.76 - $0.84 (≤ 2.1% equity)  │
+│ • Next Target Milestone:                TIER 2 ($50.00)                │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Operational Rules in Tier 1B ($40.00 – $49.99):
+1. **Warrior 2 Chop Scalp:** Sizing automatically scales to **2 contracts** when entering at maker limit $\le \$0.42$ and model confidence $P_{\text{win}} \ge 65\%$.
+2. **Warrior 1 Storm Defense:** Sizing in Storm momentum trades remains strictly locked at **1 contract** (defending against sharp reversal wipeouts until equity reaches $\$50.00$).
+3. **Drawdown Floor:** If equity dips below $\$39.50$, the system instantly de-escalates to Tier 1 base protection (1 contract across all regimes).
+
+---
+*Document sealed and verified under ASVL on October 11, 2026.*
