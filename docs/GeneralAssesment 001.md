@@ -249,4 +249,19 @@ The Quant Council establishes the following bite-sized, atomic engineering tasks
   - Verify Cooldown hysteresis respects 45s calm.
 
 ---
-*Document sealed and ratified by the Quant Council on October 9, 2026.*
+
+## 11. Cross-Reference: Master Degrees of Freedom (DOF) Portfolio & Arbitration Gate
+
+Following the Quant Council formulation on October 11, 2026, the parameters and regime variables defined in this assessment (`DOF-01` through `DOF-07`) have been formally united with the Microstructure Execution DOFs (`DOF-08` through `DOF-16`) in:
+
+👉 [**`docs/DOF_Counterfactual_Shadow_Ledger.md`**](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/DOF_Counterfactual_Shadow_Ledger.md)
+
+### Immutable Operational Directives:
+1. **Protected Under Rule 9:** These Degrees of Freedom are **NOT** applied directly to active strategy code today. They form our candidate parameter reserve.
+2. **Arbitration by Assessment:** The choice of which DOFs to activate, tune, or prune is determined strictly through empirical market results via:
+   - **The Autonomous 6-Trade Evaluation Cycle** (`docs/AUTONOMOUS_6_TRADE_IMPROVEMENT_CYCLE.md`): Decides micro-adjustments on 6-trade batch triggers.
+   - **The Total 24-Hour Forensic Audit** (`docs/GeneralAssesment 001.md`): Decides macro-regime adaptations across session transitions.
+
+---
+
+*Document sealed and ratified by the Quant Council on October 9, 2026. Updated October 11, 2026.*

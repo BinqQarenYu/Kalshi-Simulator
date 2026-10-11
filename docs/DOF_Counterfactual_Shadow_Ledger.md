@@ -2,8 +2,10 @@
 
 **Document ID:** `DOF_Counterfactual_Shadow_Ledger.md`  
 **Classification:** Quant Council Microstructure Theory & Counterfactual Learning Specification  
-**Status:** Approved for Future Patch & Assessment Roadmap (Protected under Rule 9 — Brain Code Untouched)  
-**Target Integration:** Post-AWS Deployment / v4.x Optimization Patch  
+**Status:** Approved for Future Direction & Roadmap (Protected under Rule 9 — Brain Code Untouched)  
+**Execution Directives:** 
+1. **DO NOT USE FOR LIVE UPGRADE YET**: All variables remain candidate choices in reserve.
+2. **SELECTION ARBITRATION**: The **6-Trade Evaluation Cycle** and **Total Assessment** will empirically choose and promote these DOFs based on ground-truth batch results.
 **Core Thesis:** *Unfilled orders and guardrail vetoes are zero-capital synthetic training samples that expose hidden microstructure variables (Degrees of Freedom) and eliminate survivorship bias.*
 
 ---
@@ -33,7 +35,7 @@ When a trading engine only trains on its fills, it frequently trains on **advers
 
 Conversely, **unfilled bets and vetoed intents** represent decisions that the model *wanted* to make, but did not proceed due to internal risk locks or market queue dynamics. Because every Kalshi binary option deterministically settles at $\$1.00$ or $\$0.00$ at the end of its 15-minute window, we can observe the true outcome of every missed bet **with zero capital at risk**.
 
-By recording these unexecuted intents along with their microstructural environment, we capture new **Degrees of Freedom (DOF)**—the hidden variables that govern fill probability and execution quality.
+By recording these unexecuted intents along with their microstructural environment, we capture new **Degrees of Freedom (DOF)**—the hidden variables that govern fill probability, regime adaptation, and execution quality.
 
 ---
 
@@ -63,28 +65,74 @@ To learn from unexecuted bets, we must categorize precisely *why* an intent did 
 
 ---
 
-## 3. The Degrees of Freedom (DOF) Matrix: Capturing the Hidden Variables
+## 3. The Unified Degrees of Freedom (DOF) Master Portfolio
 
-At the millisecond of every generated trade intent, the system captures a high-dimensional state vector of **Degrees of Freedom (DOF)** that were previously discarded.
+By synthesizing the **Regime & Strategy DOFs created yesterday** ([`docs/GeneralAssesment 001.md`](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/GeneralAssesment%20001.md)) with the **Microstructure & Counterfactual DOFs created today**, we establish the complete candidate parameter space for future iterations:
 
-| Dimension / DOF | Notation | Type | Physical / Mathematical Meaning |
+### Class I: Macro & Regime Degrees of Freedom (Created Yesterday in General Assessment 001)
+These macro DOFs govern *which warrior holds the helm* and the macroeconomic state of the market:
+
+| ID | Degree of Freedom (DOF) | Target / Dynamic Range | Operational Function in Regime Engine |
 | :--- | :--- | :--- | :--- |
-| **Queue Distance** | $\Delta_{\text{touch}}$ | Integer (cents) | Distance of intended limit price below the best prevailing bid. |
-| **Queue Depth Ahead** | $Q_{\text{ahead}}$ | Integer (contracts)| Total resting contracts with time-priority ahead of our bid. |
-| **Bid-Ask Spread** | $S_{\text{CLOB}}$ | Decimal (cents) | Full width of the Level-2 spread at decision time ($P_{\text{ask}} - P_{\text{bid}}$). |
-| **Time to Expiry** | $\tau$ | Seconds | Seconds remaining until 15m/5m contract expiration. |
-| **VPIN Flow Toxicity**| $v_{\text{VPIN}}$ | Float $[0.0, 1.0]$ | Volume-synchronized probability of informed trading. |
-| **OFI Imbalance** | $\text{OFI}_{1s}$ | Float $[-1.0, 1.0]$ | Sub-second order flow pressure (delta in resting bid vs ask size). |
-| **Spot Distance** | $\Delta_{\text{spot}}$ | Decimal ($) | Distance between live BTC spot index and strike price ($P_{\text{spot}} - K$). |
-| **Strike Velocity** | $v_{\text{spot}}$ | Decimal ($/s) | 10-second first derivative of Bitcoin spot price. |
-| **Cancel-to-Fill** | $CTR$ | Ratio | Rate of competing market maker cancellations in the orderbook. |
-| **Regime Identity** | $\mathcal{R}$ | Categorical | Active regime classification (`WARRIOR_1_STORM` vs `WARRIOR_2_CHOP`). |
+| **`DOF-01`** | **Kinetic Volatility Boundary ($\sigma_{1\text{m}}$)** | $\$12.00$ (Chop) vs $\$16.00$ (Trend) | Delineates compressed mean-reversion from explosive directional momentum. |
+| **`DOF-02`** | **Geometric Range Box ($S_{\max} - S_{\min}$)** | $\le \$28.00$ (Chop Cage) vs $> \$50.00$ | Restricts Warrior 2 inside tight consolidation channels. |
+| **`DOF-03`** | **Circadian Volume Window** | `13:00–22:00 UTC` vs `23:00–08:00 UTC` | Adjusts baseline aggression between US/London liquid hours and Asian overnight calm. |
+| **`DOF-04`** | **Chop Discount Entry Limit ($P_{\text{limit}}$)** | $\$0.38 - \$0.42$ | Asymmetric pricing sweet spot providing $1 : 1.63$ risk-to-reward ratio. |
+| **`DOF-05`** | **Dynamic Scalp Exit Hurdle ($\text{ROI}_{\text{exit}}$)**| $+35\% - +50\%$ cash gain | Fires early take-profit exit in chop without waiting for expiration gamma risk. |
+| **`DOF-06`** | **Volcano Breakout Trigger** | $|\Delta \text{OFI}| > 0.45$, $|v_{3\text{s}}| > \$15/\text{s}$ | Fast-path order cancellation and regime shift to Warrior 1 upon trend eruption. |
+| **`DOF-07`** | **Cooldown Hysteresis Duration** | $45$ continuous seconds calm | Anti-whipsaw filter preventing false reversion back into chop during volatility pauses. |
 
-These variables represent the **hidden variables** that determine whether an order gets filled, whether it experiences adverse selection, or whether being passive saved capital.
+### Class II: Microstructure & Counterfactual Degrees of Freedom (Created Today in Shadow Ledger)
+These micro DOFs govern *why an order fails to proceed or fill* in the orderbook queue:
+
+| ID | Degree of Freedom (DOF) | Target / Type | Operational Function in Execution Engine |
+| :--- | :--- | :--- | :--- |
+| **`DOF-08`** | **Queue Distance from Touch ($\Delta_{\text{touch}}$)**| $0¢, 1¢, 2¢$ (Integer) | Measures queue passivity. Distance of our bid below best prevailing bid. |
+| **`DOF-09`** | **Queue Depth Ahead ($Q_{\text{ahead}}$)** | Contracts (Integer) | Total resting contracts with time-priority ahead of our order at the price level. |
+| **`DOF-10`** | **Level-2 Bid-Ask Spread ($S_{\text{CLOB}}$)** | $\$0.02 - \$0.08$ (Decimal) | Spread width at intent. Wide spreads demand maker resting; tight spreads allow snipes. |
+| **`DOF-11`** | **Expiration Horizon Countdown ($\tau$)** | $0 - 900$ Seconds | Time remaining until settlement. Governs theta decay and TWAP gamma pinning. |
+| **`DOF-12`** | **Volume Flow Toxicity ($v_{\text{VPIN}}$)** | $0.00 - 1.00$ (Float) | Microstructure hazard rate. Distinguishes retail flow from toxic institutional dumping. |
+| **`DOF-13`** | **Spot Moneyness Delta ($\Delta_{\text{spot}}$)** | $\$ (P_{\text{spot}} - K)$ | Real-time distance between BTC spot index and strike price. |
+| **`DOF-14`** | **Strike Velocity ($v_{\text{spot}}$)** | $\$/\text{s}$ (10s Derivative) | First derivative of spot price drift. Anticipates queue walk-aways. |
+| **`DOF-15`** | **Cancel-to-Trade Ratio ($CTR$)** | Ratio $[0.0, \infty)$ | Measures competing market-maker spoofing and liquidity pulling. |
+| **`DOF-16`** | **Failure Mode Code** | `MODE_G`, `MODE_Q`, `MODE_E`, `MODE_M` | Categorical failure attribution for post-settlement counterfactual analysis. |
 
 ---
 
-## 4. The Counterfactual Settlement Reconciliation Engine
+## 4. The Selection Protocol: 6-Trade Evaluation & Total Assessment Arbitration
+
+Crucially, **we do NOT implement or hardcode these DOFs into the active bot today**. 
+
+Instead, they represent our **Degrees of Freedom Reserve**. The system delegates the selection, activation, and tuning of these DOFs to our two proven empirical assessment mechanisms:
+
+```
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        EMPIRICAL DOF SELECTION ARBITRATION                             │
+├──────────────────────────────────────────┬─────────────────────────────────────────────┤
+│ 1. AUTONOMOUS 6-TRADE BATCH EVALUATION   │ 2. TOTAL 24-HOUR FORENSIC ASSESSMENT        │
+│    (Micro-Level Optimization)            │    (Macro-Level Strategy Evolution)         │
+├──────────────────────────────────────────┼─────────────────────────────────────────────┤
+│ • Trigger: After every 6 completed       │ • Trigger: Daily 24-hour audit              │
+│   trades (docs/AUTONOMOUS_6_TRADE_*.md). │   (docs/GeneralAssesment 001.md).           │
+│ • Net PnL > $0.00: Auto-extends session; │ • Forensic review across all batches and    │
+│   active parameters remain locked.       │   market sessions.                          │
+│ • Net PnL ≤ $0.00: Auto-disarms and      │ • Evaluates session bifurcation (e.g. Day   │
+│   audits the 6-trade batch.              │   vs Night, Trend vs Chop win rates).       │
+│ • Selects Class II Micro DOFs            │ • Selects Class I Macro DOFs                │
+│   (e.g. adjusts Queue Distance DOF-08    │   (e.g. adjusts Volatility Threshold DOF-01 │
+│   if Alpha Starvation is high; tightens  │   or Chop Entry Limit DOF-04 to plug        │
+│   Spread DOF-10 if adverse selection     │   overnight leaks).                         │
+│   is detected).                          │                                             │
+└──────────────────────────────────────────┴─────────────────────────────────────────────┘
+```
+
+### The Rule of Empirical Promotion:
+1. **Zero Guessing:** A candidate DOF is never promoted to active strategy code based on intuition. It must be justified by hard metrics from completed 6-trade batches or a 24h total assessment.
+2. **Rule 9 Protected Gate:** Even when an assessment indicates a DOF should be tuned or promoted, the proposed change is presented to the operator with a concrete rationale and diff before modifying any active brain code.
+
+---
+
+## 5. Counterfactual Settlement Reconciliation Engine
 
 Because Kalshi binary options have fixed expiration timestamps (e.g. 10:00, 10:15, 10:30, 10:45), every unfulfilled intent can be deterministically reconciled at expiration.
 
@@ -116,7 +164,7 @@ $$\Pi_{\text{counterfactual}} = \begin{cases}
 
 ---
 
-## 5. Roadmap of Granular Tasks for Future Codification (Future Patch)
+## 6. Roadmap of Granular Tasks for Future Codification (Future Patch)
 
 To respect **Rule 9 of AGENTS.md**, these tasks are scheduled for a **future dedicated patch cycle**. They do not modify the current active `bot1_v4_engine.py` or `server.py` in production.
 
@@ -132,26 +180,6 @@ flowchart TD
 * **Objective:** Implement a zero-latency, append-only logger that catches all rejected, vetoed, or timed-out orders.
 * **Mechanism:** Asynchronous queue writing to `data/shadow_intents.jsonl`.
 * **Latency Impact:** $< 0.05\text{ms}$ (non-blocking thread handoff).
-* **Schema Fields:**
-  ```json
-  {
-    "intent_id": "sh_01a127...",
-    "timestamp_utc": "2026-10-11T12:00:05.123Z",
-    "ticker": "KXBTC15M-26OCT111215-15",
-    "intended_side": "yes",
-    "intended_price": 0.42,
-    "intended_size": 1,
-    "failure_mode": "GUARDRAIL_CYCLE_LOCKED",
-    "dof_vector": {
-      "queue_distance": 2,
-      "spread_cents": 4,
-      "vpin": 0.18,
-      "time_to_expiry_s": 895,
-      "spot_delta": 42.50,
-      "regime": "WARRIOR_2_CHOP"
-    }
-  }
-  ```
 
 ### Task 2: Settlement Counterfactual Reconciler (`shadow_reconciler.py`)
 * **Objective:** At each 15-minute settlement event, match all unresolved shadow intents for that ticker against the official settlement price (`$1.00` or `$0.00`).
@@ -162,7 +190,7 @@ flowchart TD
   - Total shadow intents logged.
   - Disaster Aversion Ratio (DAR).
   - Alpha Starvation Ratio (ASR).
-  - Correlation between specific DOFs (e.g. VPIN, Queue Distance) and counterfactual win rates.
+  - Correlation between specific DOFs and counterfactual win rates.
 
 ### Task 4: Dashboard Counterfactual UI Card (`ShadowTelemetryCard.tsx`)
 * **Objective:** Add an optional collapsible analytics widget in the WebCLOB dashboard displaying:
@@ -176,12 +204,11 @@ flowchart TD
 
 ---
 
-## 6. Quant Council Assessment & Conclusion
+## 7. Quant Council Assessment & Conclusion
 
-The operator's insight directly addresses the frontier of quantitative microstructure:
-1. **Unfilled bets are not waste—they are free data.**
-2. By treating them as synthetic samples with known settlement outcomes, we discover the true relationships between hidden variables (Queue position, VPIN, Spread) and execution success.
-3. This architecture is officially codified in this document as the blueprint for our **next quantitative optimization patch**.
+1. **Unfilled bets are valuable data:** They remove survivorship bias with zero capital at risk.
+2. **Yesterday's Regime DOFs (`DOF-01` to `DOF-07`) + Today's Microstructure DOFs (`DOF-08` to `DOF-16`) form our complete strategic compass.**
+3. **The 6-Trade Evaluation batches and Total Assessments will empirically select, tune, and promote these DOFs** as the market unfolds, ensuring we evolve with mathematical proof rather than guesswork.
 
 ---
 
