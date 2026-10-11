@@ -4,8 +4,9 @@
 **Classification:** Quant Council Microstructure Theory & Counterfactual Learning Specification  
 **Status:** Approved for Future Direction & Roadmap (Protected under Rule 9 — Brain Code Untouched)  
 **Execution Directives:** 
-1. **DO NOT USE FOR LIVE UPGRADE YET**: All variables remain candidate choices in reserve.
+1. **DO NOT USE FOR LIVE UPGRADE YET**: All variables and forensic modules remain candidate choices in reserve.
 2. **SELECTION ARBITRATION**: The **6-Trade Evaluation Cycle** and **Total Assessment** will empirically choose and promote these DOFs based on ground-truth batch results.
+3. **TASK TICKING RULE**: All granular codification tasks remain unticked (`[ ]`). Each task is strictly ticked (`[x]`) only after the code has been authored, deployed, and verified under ASVL.
 **Core Thesis:** *Unfilled orders and guardrail vetoes are zero-capital synthetic training samples that expose hidden microstructure variables (Degrees of Freedom) and eliminate survivorship bias.*
 
 ---
@@ -97,9 +98,56 @@ These micro DOFs govern *why an order fails to proceed or fill* in the orderbook
 | **`DOF-15`** | **Cancel-to-Trade Ratio ($CTR$)** | Ratio $[0.0, \infty)$ | Measures competing market-maker spoofing and liquidity pulling. |
 | **`DOF-16`** | **Failure Mode Code** | `MODE_G`, `MODE_Q`, `MODE_E`, `MODE_M` | Categorical failure attribution for post-settlement counterfactual analysis. |
 
+### Class III: Non-Fill Forensic Degrees of Freedom (Microstructure Autopsy DOFs)
+These forensic DOFs explain *the physical orderbook failure mechanics* when a resting order fails to fill:
+
+| ID | Degree of Freedom (DOF) | Target / Type | Forensic Physical Meaning |
+| :--- | :--- | :--- | :--- |
+| **`DOF-17`** | **Queue Depth Deficit ($\Delta Q_{\text{FIFO}}$)** | Contracts (Integer) | Contracts executed at our price level vs contracts ahead of us in line before price walked. |
+| **`DOF-18`** | **Spot Walkaway Velocity ($v_{\text{walkaway}}$)** | $\$/\text{s}$ (Float) | Rate of spot price moving away from strike while order was resting on the book. |
+| **`DOF-19`** | **Competitor Leapfrog Count ($N_{\text{leapfrog}}$)**| Integer Count | Number of competing market maker orders that stepped ahead of our bid at `Touch + 1¢`. |
+| **`DOF-20`** | **Sub-Cent Tick Residual ($\epsilon_{\text{tick}}$)** | Cents ($0.0¢ - 1.0¢$) | Mathematical distance between continuous model fair value and discrete integer tick. |
+| **`DOF-21`** | **Resting Lifespan ($\Delta t_{\text{rest}}$)** | Seconds (Float) | Active lifespan of the maker limit order on Kalshi's book before timeout or cancellation. |
+| **`DOF-22`** | **Fill Hazard Intensity Rate ($\lambda_{\text{hazard}}$)**| Events/sec (Float) | Empirical probability density of fill per second given prevailing volume velocity. |
+| **`DOF-23`** | **Pre-Expiry Liquidity Evaporation ($\mathcal{L}_{\text{freeze}}$)**| Ratio $[0.0, 1.0]$ | Rate of spread blowout and depth evaporation as $\tau \rightarrow 180\text{s}$ (TWAP window). |
+
 ---
 
-## 4. The Selection Protocol: 6-Trade Evaluation & Total Assessment Arbitration
+## 4. Forensic Autopsy of Non-Fills: The "Winner's Curse" & CLOB Physics
+
+In maker order execution, non-fills are governed by an asymmetric statistical trap known as the **Winner's Curse**:
+
+$$\mathbb{P}(\text{Fill} \mid \text{Market Moves In Our Favor}) \ll \mathbb{P}(\text{Fill} \mid \text{Market Moves Against Us})$$
+
+When the bot's prediction is correct, nobody wants to trade against us, and our maker order is starved of fills. When the bot's prediction is wrong, informed aggressors eagerly hit our bid.
+
+Every non-fill is driven by one or more of six physical CLOB failure mechanisms:
+
+```
+               ┌────────────────────────────────────────────────────────┐
+               │           THE 6 PHYSICAL NON-FILL MECHANISMS           │
+               └───────────────────────────┬────────────────────────────┘
+                                           │
+         ┌──────────────────┬──────────────┼──────────────┬──────────────────┐
+         ▼                  ▼              ▼              ▼                  ▼
+┌─────────────────┐ ┌───────────────┐ ┌─────────┐ ┌───────────────┐ ┌─────────────────┐
+│ 1. FIFO Queue   │ │ 2. Spot Drift │ │ 3. HFT  │ │ 4. 1¢ Tick    │ │ 5. TWAP Gamma   │
+│    Priority     │ │    Walkaway   │ │ Leapfrog│ │ Discretization│ │    Evaporation  │
+│ ΔQ_FIFO > 0     │ │ v_walkaway >  │ │ N_leap  │ │ ε_tick trap   │ │ L_freeze > 0.7  │
+│ (Stuck in line) │ │ $12/sec       │ │ > 2 MMs │ │ (2.5% step)   │ │ (τ < 180s)      │
+└─────────────────┘ └───────────────┘ └─────────┘ └───────────────┘ └─────────────────┘
+```
+
+1. **FIFO Queue Priority Deficit (`DOF-17`):** Kalshi enforces strict First-In, First-Out priority. If 40 contracts sit ahead of our bid, a 10-contract sell order fills them; if spot moves up, our order is bypassed and left behind.
+2. **Spot Velocity Walk-Away (`DOF-18`):** Bitcoin spot discoveries on Binance/Coinbase move with high velocity. If spot moves away from the strike at $> \$12/\text{s}$, fair value moves from $42¢ \rightarrow 48¢$. Resting at $42¢$ is dead; nobody crosses to hit us.
+3. **Competing Maker Leapfrogging (`DOF-19`):** Competing HFT algorithms detect tick deltas and immediately bid $1¢$ ahead of us (e.g. from $41¢ \rightarrow 42¢$), absorbing incoming retail sell flow.
+4. **The 1-Cent Tick Discretization Trap (`DOF-20`):** Kalshi prices only in whole cents. On a $40¢$ contract, $1¢$ is a massive $2.5\%$ price increment. When fair value is $41.4¢$, bidding $41¢$ underbids and misses; bidding $42¢$ gives away edge.
+5. **Time-in-Force Lifetime Discrepancy (`DOF-21`):** Premature cancellation cancels an order right before natural retail liquidity crosses the book, or excessive holding exposes the order to adverse selection.
+6. **Pre-Expiry TWAP Gamma Evaporation (`DOF-23`):** In the final 180 seconds, market makers pull quoting algorithms to avoid 60s TWAP settlement risk. Spreads widen to $15¢$, and passive maker fills freeze to zero.
+
+---
+
+## 5. The Selection Protocol: 6-Trade Evaluation & Total Assessment Arbitration
 
 Crucially, **we do NOT implement or hardcode these DOFs into the active bot today**. 
 
@@ -118,21 +166,17 @@ Instead, they represent our **Degrees of Freedom Reserve**. The system delegates
 │   active parameters remain locked.       │   market sessions.                          │
 │ • Net PnL ≤ $0.00: Auto-disarms and      │ • Evaluates session bifurcation (e.g. Day   │
 │   audits the 6-trade batch.              │   vs Night, Trend vs Chop win rates).       │
-│ • Selects Class II Micro DOFs            │ • Selects Class I Macro DOFs                │
+│ • Selects Class II & III Micro DOFs      │ • Selects Class I Macro DOFs                │
 │   (e.g. adjusts Queue Distance DOF-08    │   (e.g. adjusts Volatility Threshold DOF-01 │
-│   if Alpha Starvation is high; tightens  │   or Chop Entry Limit DOF-04 to plug        │
-│   Spread DOF-10 if adverse selection     │   overnight leaks).                         │
-│   is detected).                          │                                             │
+│   if Leapfrog DOF-19 is high; tightens   │   or Chop Entry Limit DOF-04 to plug        │
+│   Expiry Window DOF-11 if L_freeze       │   overnight leaks).                         │
+│   DOF-23 causes execution stalls).       │                                             │
 └──────────────────────────────────────────┴─────────────────────────────────────────────┘
 ```
 
-### The Rule of Empirical Promotion:
-1. **Zero Guessing:** A candidate DOF is never promoted to active strategy code based on intuition. It must be justified by hard metrics from completed 6-trade batches or a 24h total assessment.
-2. **Rule 9 Protected Gate:** Even when an assessment indicates a DOF should be tuned or promoted, the proposed change is presented to the operator with a concrete rationale and diff before modifying any active brain code.
-
 ---
 
-## 5. Counterfactual Settlement Reconciliation Engine
+## 6. Counterfactual Settlement Reconciliation Engine
 
 Because Kalshi binary options have fixed expiration timestamps (e.g. 10:00, 10:15, 10:30, 10:45), every unfulfilled intent can be deterministically reconciled at expiration.
 
@@ -140,8 +184,8 @@ Because Kalshi binary options have fixed expiration timestamps (e.g. 10:00, 10:1
 For any unexecuted intent with intended side $S \in \{\text{yes}, \text{no}\}$ and intended price $P_{\text{intended}}$:
 
 $$\Pi_{\text{counterfactual}} = \begin{cases}
-(\$1.00 - P_{\text{intended}}) \times \text{Size} & \text{if Settlement} = S \quad (\text{Would have WON}) \\
-(-P_{\text{intended}}) \times \text{Size} & \text{if Settlement} \neq S \quad (\text{Would have LOST})
+(\$1.00 - P_{\text{intended}}) \times \text{Size} & \text{if Settlement} = S \quad (\textbf{Would have WON}) \\
+(-P_{\text{intended}}) \times \text{Size} & \text{if Settlement} \neq S \quad (\textbf{Would have LOST})
 \end{cases}$$
 
 ### Two Critical Diagnostic Ratios:
@@ -164,51 +208,42 @@ $$\Pi_{\text{counterfactual}} = \begin{cases}
 
 ---
 
-## 6. Roadmap of Granular Tasks for Future Codification (Future Patch)
+## 7. Granular Implementation Checklist (Future Codification Patch)
 
-To respect **Rule 9 of AGENTS.md**, these tasks are scheduled for a **future dedicated patch cycle**. They do not modify the current active `bot1_v4_engine.py` or `server.py` in production.
+> [!IMPORTANT]
+> **Strict Implementation Invariant:** All tasks below are strictly **unticked (`[ ]`)**. They represent the future engineering roadmap. Each checkbox will be ticked **`[x]` strictly upon code completion and ASVL test verification** during a future authorized patch cycle. Active production code remains 100% untouched today.
 
-```mermaid
-flowchart TD
-    T1[Task 1: Passive Shadow Logger] --> T2[Task 2: Settlement Reconciler]
-    T2 --> T3[Task 3: DOF Feature Store & Analytics API]
-    T3 --> T4[Task 4: Dashboard Counterfactual UI Card]
-    T3 --> T5[Task 5: Continuous Learning Experience Integration]
-```
+### Module 1: Non-Fill Event Interception & Tracking
+- [ ] **Task 1.1:** Create `src/kalshi_sim/ml/unfill_forensic_tracker.py` to intercept maker order timeouts, cancellations, and queue expirations.
+- [ ] **Task 1.2:** Implement FIFO queue depth calculator measuring traded volume vs contracts ahead (`DOF-17`).
+- [ ] **Task 1.3:** Implement spot drift walkaway tracker calculating spot velocity during resting lifetime (`DOF-18`).
+- [ ] **Task 1.4:** Implement competitor leapfrog detector monitoring top-of-book stepping (`DOF-19`).
+- [ ] **Task 1.5:** Append non-fill forensic records asynchronously to `data/non_fill_forensics.jsonl` with $< 0.05\text{ms}$ latency impact.
 
-### Task 1: Passive Shadow Intent Logger (`shadow_intent_logger.py`)
-* **Objective:** Implement a zero-latency, append-only logger that catches all rejected, vetoed, or timed-out orders.
-* **Mechanism:** Asynchronous queue writing to `data/shadow_intents.jsonl`.
-* **Latency Impact:** $< 0.05\text{ms}$ (non-blocking thread handoff).
+### Module 2: Settlement Counterfactual Reconciler
+- [ ] **Task 2.1:** Implement `src/kalshi_sim/ml/shadow_reconciler.py` to reconcile unresolved non-fills at 15m expiration against official settlement.
+- [ ] **Task 2.2:** Calculate automated Counterfactual PnL, Disaster Aversion Ratio (DAR), and Alpha Starvation Ratio (ASR).
+- [ ] **Task 2.3:** Categorize non-fills into `LUCKY_MISS` (disaster averted) vs `PAINFUL_MISS` (alpha starvation).
 
-### Task 2: Settlement Counterfactual Reconciler (`shadow_reconciler.py`)
-* **Objective:** At each 15-minute settlement event, match all unresolved shadow intents for that ticker against the official settlement price (`$1.00` or `$0.00`).
-* **Output:** Appends final `counterfactual_pnl` and classifies the event as `LUCKY_MISS` (disaster averted) or `PAINFUL_MISS` (alpha starvation).
+### Module 3: DOF Feature Store & Analytics API
+- [ ] **Task 3.1:** Implement REST endpoint `GET /api/shadow/non_fill_diagnostics` exposing summary metrics and failure mode distributions.
+- [ ] **Task 3.2:** Expose correlation matrix between `DOF-17` through `DOF-23` and counterfactual settlement win rates.
 
-### Task 3: DOF Feature Store & Analytics API
-* **Objective:** Expose endpoint `GET /api/shadow/counterfactual_analytics` returning:
-  - Total shadow intents logged.
-  - Disaster Aversion Ratio (DAR).
-  - Alpha Starvation Ratio (ASR).
-  - Correlation between specific DOFs and counterfactual win rates.
+### Module 4: Dashboard UI Telemetry
+- [ ] **Task 4.1:** Author `frontend/src/components/parenthub/ShadowTelemetryCard.tsx` displaying capital saved by guardrails vs alpha lost to non-fills.
+- [ ] **Task 4.2:** Add non-fill autopsy breakdown modal in the Live Workbench tab.
 
-### Task 4: Dashboard Counterfactual UI Card (`ShadowTelemetryCard.tsx`)
-* **Objective:** Add an optional collapsible analytics widget in the WebCLOB dashboard displaying:
-  - Number of prevented losses today (Capital saved by guardrails).
-  - Number of missed fills (Opportunity cost of maker passivity).
-  - Net Counterfactual Balance.
-
-### Task 5: Continuous Learning Experience Integration
-* **Objective:** Feed reconciled counterfactuals into the offline Bayesian / neural retraining pipeline (`continuous_trainer.py`).
-* **Benefit:** Trains the model on what happens when it doesn't get filled, allowing it to dynamically adjust maker bidding aggressiveness.
+### Module 5: 6-Trade Evaluation & Continuous Learning Integration
+- [ ] **Task 5.1:** Wire non-fill diagnostics into the 6-trade evaluation gate in `src/kalshi_sim/quant/assessment_evaluator.py` to dynamically recommend DOF adjustments.
+- [ ] **Task 5.2:** Feed counterfactual non-fill samples into the offline Bayesian retraining pipeline (`continuous_trainer.py`).
 
 ---
 
-## 7. Quant Council Assessment & Conclusion
+## 8. Quant Council Assessment & Conclusion
 
-1. **Unfilled bets are valuable data:** They remove survivorship bias with zero capital at risk.
-2. **Yesterday's Regime DOFs (`DOF-01` to `DOF-07`) + Today's Microstructure DOFs (`DOF-08` to `DOF-16`) form our complete strategic compass.**
-3. **The 6-Trade Evaluation batches and Total Assessments will empirically select, tune, and promote these DOFs** as the market unfolds, ensuring we evolve with mathematical proof rather than guesswork.
+1. **Non-fills are not random:** They are governed by the physics of FIFO queue priority, spot drift velocity, competitor leapfrogging, and pre-expiry gamma freezing.
+2. **The 23 Master DOFs** (`DOF-01` through `DOF-23`) form our complete strategic reservoir for all future market conditions.
+3. **The 6-Trade Evaluation batches and Total Assessments will empirically select, tune, and promote these DOFs**, while the granular implementation tasks remain unticked until officially coded and verified under ASVL.
 
 ---
 
