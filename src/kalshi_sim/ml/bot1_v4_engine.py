@@ -30,6 +30,9 @@ from kalshi_sim.ml.domination_exit_evaluator import (
 from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer
 from kalshi_sim.ml.lead_deer_quant_brain import LeadDeerQuantBrain
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
+from kalshi_sim.ml.wave_classifier import MarketWavePhysics, WaveRegimeClassifier, compute_wave_physics
+from kalshi_sim.ml.bleed_defender import BleedDefender
+from kalshi_sim.ml.healing_protocol import HealingProtocol
 from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, get_asset_config
 
 logger = logging.getLogger("kalshi_sim.bot1_v4_engine")
@@ -173,9 +176,26 @@ class Bot1V4DominationEngine:
         self.chop_vol_threshold = chop_vol_threshold
         self.hysteresis_cooldown_seconds = hysteresis_cooldown_seconds
 
-        # Dual Warrior dynamic regime state tracking
+        # 1 Boat, 3 Warriors across 4 Regions Infrastructure
+        self.bleed_discount_limit_price = Decimal("0.30")
+        self.bleed_max_entry_price = Decimal("0.35")
+        self.min_spot_diff_bleed = 85.0
+        self.wave_classifier = WaveRegimeClassifier(
+            chop_range_threshold=chop_range_threshold,
+            chop_vol_threshold=chop_vol_threshold,
+        )
+        self.bleed_defender = BleedDefender(
+            bleed_discount_limit_price=self.bleed_discount_limit_price,
+            bleed_max_entry_price=self.bleed_max_entry_price,
+            min_spot_diff_bleed=self.min_spot_diff_bleed,
+        )
+        self.healing_protocol = HealingProtocol()
+
+        # Multi-Warrior dynamic regime state tracking
+        self._cycle_spot_open: Dict[str, float] = {}
         self._cycle_spot_high: Dict[str, float] = {}
         self._cycle_spot_low: Dict[str, float] = {}
+        self._last_wave_physics: Optional[MarketWavePhysics] = None
         self._recent_spot_history: deque[Tuple[float, float]] = deque(maxlen=120)
         self._current_regime: str = "STORM"
         self._last_storm_ts: float = 0.0
@@ -220,23 +240,19 @@ class Bot1V4DominationEngine:
         now_mono: Optional[float] = None,
         now_utc: Optional[datetime] = None,
     ) -> Tuple[str, str]:
-        """Classify real-time market regime between STORM (Warrior 1) and CHOP (Warrior 2).
-
-        Evaluates:
-        1. Rolling 1m realized spot volatility (< $12.00 is compressed chop).
-        2. Cycle range span (High - Low <= $28.00 defines bounded channel).
-        3. Fast-Path Volcano Trigger (velocity >= $15/s or ONNX directional conf >= 0.70).
-        4. Cooldown Hysteresis (45s sustained calm to switch back to chop).
-
-        Returns:
-            (regime_name, rationale) -> e.g. ("CHOP", "Sustained range-bound box")
+        """Classify real-time market regime across 4 Regions: CHOP, STORM, BLEED, and HEALING.
+        Delegates to WaveRegimeClassifier for multi-warrior fleet governance.
         """
         if now_mono is None:
             now_mono = time.monotonic()
         if now_utc is None:
             now_utc = datetime.now(timezone.utc)
 
-        # 1. Update cycle high/low range
+        # 1. Update cycle open/high/low range
+        if cycle_id not in self._cycle_spot_open:
+            self._cycle_spot_open[cycle_id] = spot_price
+        open_price = self._cycle_spot_open[cycle_id]
+
         high = max(self._cycle_spot_high.get(cycle_id, spot_price), spot_price)
         low = min(self._cycle_spot_low.get(cycle_id, spot_price), spot_price)
         self._cycle_spot_high[cycle_id] = high
@@ -252,17 +268,32 @@ class Bot1V4DominationEngine:
         else:
             rolling_vol = float(self.default_btc_1m_volatility)
 
-        # 3. Fast-Path Volcano Trigger (Chop -> Storm Breakout)
         onnx_sig = str(onnx_res.get("signal", "WAIT")) if onnx_res else "NONE"
         onnx_conf = float(onnx_res.get("confidence", 0.0)) if onnx_res else 0.0
-        vpin_eval = float(onnx_res.get("vpin_score", vpin)) if onnx_res else vpin
+
+        # 3. Classify Region using WaveRegimeClassifier
+        region, physics, reason = self.wave_classifier.classify_region(
+            open_price=open_price,
+            high_price=high,
+            low_price=low,
+            current_price=spot_price,
+            rolling_vol_1m=rolling_vol,
+            spot_velocity_3s=spot_velocity_3s,
+            onnx_signal=onnx_sig,
+            onnx_confidence=onnx_conf,
+        )
+
+        if region in ("BLEED", "HEALING"):
+            self._current_regime = region
+            self._regime_reason = reason
+            self._last_wave_physics = physics
+            return region, reason
 
         effective_chop_range = max(self.chop_range_threshold, spot_price * 0.0020)
         is_volcano = (
             abs(spot_velocity_3s) >= 15.0
             or cycle_range > effective_chop_range
             or (onnx_sig in ("LONG", "SHORT") and onnx_conf >= 0.75)
-            or vpin_eval >= self.vpin_toxic_threshold
             or rolling_vol >= self.chop_vol_threshold * 1.5
         )
 
@@ -274,6 +305,7 @@ class Bot1V4DominationEngine:
                 f"range=${cycle_range:.1f}, vol=${rolling_vol:.1f}, ONNX={onnx_sig}({onnx_conf:.0%})"
             )
             self._regime_reason = reason
+            self._last_wave_physics = physics
             return "STORM", reason
 
         # 4. Cooldown Transition Check (Storm -> Chop with Hysteresis)
@@ -285,28 +317,53 @@ class Bot1V4DominationEngine:
                 and onnx_sig in ("WAIT", "NONE")
             )
             if is_calm:
+                if not hasattr(self, "_last_storm_ts") or self._last_storm_ts is None or self._last_storm_ts == 0.0:
+                    self._last_storm_ts = now_mono
                 calm_duration = now_mono - self._last_storm_ts
                 if calm_duration >= self.hysteresis_cooldown_seconds:
                     self._current_regime = "CHOP"
                     reason = f"Cooldown Hysteresis Passed: Sustained calm for {int(calm_duration)}s"
                     self._regime_reason = reason
+                    self._last_wave_physics = physics
                     return "CHOP", reason
                 else:
                     rem = int(self.hysteresis_cooldown_seconds - calm_duration)
-                    return "STORM", f"Calm detected, cooling down ({rem}s remaining in hysteresis)"
+                    reason = f"Calm detected, cooling down ({rem}s remaining in hysteresis)"
+                    self._regime_reason = reason
+                    self._last_wave_physics = physics
+                    return "STORM", reason
             else:
                 self._last_storm_ts = now_mono
+                self._regime_reason = "Active volatility expansion"
+                self._last_wave_physics = physics
                 return "STORM", "Active volatility expansion"
 
-        # 5. Sustained Chop
-        reason = f"Sustained Chop Box: range=${cycle_range:.1f} <= ${self.chop_range_threshold:.1f}, vol=${rolling_vol:.1f}"
-        self._regime_reason = reason
-        return "CHOP", reason
+        self._current_regime = "CHOP"
+        self._regime_reason = f"Sustained Chop Box: range=${cycle_range:.1f} <= ${self.chop_range_threshold:.1f}, vol=${rolling_vol:.1f}"
+        self._last_wave_physics = physics
+        return "CHOP", self._regime_reason
+
+    def record_cycle_settlement(self, won: bool) -> None:
+        """Records cycle settlement across wave classifier, bleed defender, and healing protocol."""
+        self.wave_classifier.record_settled_cycle(won)
+        if not won:
+            self.bleed_defender.trigger_loss_cooldown()
+        graduated = self.healing_protocol.record_settled_cycle(won)
+        if graduated:
+            self.wave_classifier.current_region = "CHOP"
+
+    def arm_healing_protocol(self, reason: str = "Convalescence initiated") -> None:
+        """Arms Region 4 Healing Protocol and synchronizes wave classifier."""
+        self.wave_classifier.transition_to_healing(reason)
+        self.healing_protocol.arm_healing_quarantine(reason)
+        self._current_regime = "HEALING"
 
     def reset_cycle_turnover(self, cycle_id: str) -> None:
-        """Reset turnover count for a new 15M cycle."""
+        """Reset turnover count and step bleed defender cooldown for a new 15M cycle."""
         self._current_cycle_id = cycle_id
         self._completed_turnovers_map[cycle_id] = 0
+        if hasattr(self, "bleed_defender"):
+            self.bleed_defender.step_cycle()
 
     def get_completed_turnovers(self, cycle_id: str) -> int:
         """Get number of completed round-trip trades for a cycle."""
@@ -516,6 +573,10 @@ class Bot1V4DominationEngine:
             "chop_vol_threshold": float(self.chop_vol_threshold),
             "current_regime": self._current_regime,
             "regime_reason": self._regime_reason,
+            "bleed_discount_limit_price": float(self.bleed_defender.bleed_discount_limit_price),
+            "bleed_max_entry_price": float(self.bleed_defender.bleed_max_entry_price),
+            "min_spot_diff_bleed": float(self.bleed_defender.min_spot_diff_bleed),
+            "healing_status": self.healing_protocol.get_status(),
         }
 
     def update_parameters(
@@ -557,6 +618,18 @@ class Bot1V4DominationEngine:
             self.chop_range_threshold = float(chop_range_threshold)
         if chop_vol_threshold is not None:
             self.chop_vol_threshold = float(chop_vol_threshold)
+        if kwargs.get("bleed_discount_limit_price") is not None:
+            val_disc = Decimal(str(kwargs["bleed_discount_limit_price"]))
+            self.bleed_discount_limit_price = val_disc
+            self.bleed_defender.bleed_discount_limit_price = val_disc
+        if kwargs.get("bleed_max_entry_price") is not None:
+            val_max = Decimal(str(kwargs["bleed_max_entry_price"]))
+            self.bleed_max_entry_price = val_max
+            self.bleed_defender.bleed_max_entry_price = val_max
+        if kwargs.get("min_spot_diff_bleed") is not None:
+            val_moat = float(kwargs["min_spot_diff_bleed"])
+            self.min_spot_diff_bleed = val_moat
+            self.bleed_defender.min_spot_diff_bleed = val_moat
         if kwargs.get("min_ev_hurdle_dollars") is not None:
             self.min_ev_hurdle_dollars = Decimal(str(kwargs["min_ev_hurdle_dollars"]))
         elif kwargs.get("min_ev_dollars") is not None:
@@ -758,6 +831,30 @@ class Bot1V4DominationEngine:
                     regime=self._current_regime,
                 )
 
+        # 2.25 Universal Opening Cycle Noise Quarantine Gate (Anti-False Breakout Shield)
+        cycle_duration_s = 900.0
+        p1_max_s = cycle_duration_s - self.opening_quarantine_seconds
+        if time_to_expiry_s > p1_max_s:
+            quarantine_remaining = int(time_to_expiry_s - p1_max_s)
+            return Bot1V4Decision(
+                strategy_id=self.STRATEGY_ID,
+                strategy_name=self.STRATEGY_NAME,
+                active_playbook="opening_cycle_quarantine",
+                playbook_stage="none",
+                p_up=p_up, p_down=p_down, p_wait=1.0,
+                vpin=vpin_eval, vpin_is_safe=True,
+                ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                kelly_f_yes=0.0, kelly_f_no=0.0,
+                recommended_side="wait", recommended_contracts=0,
+                rationale=f"Opening Cycle Quarantine Active: T={int(time_to_expiry_s)}s left > {int(p1_max_s)}s threshold ({quarantine_remaining}s left). Quarantining early noise.",
+                edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                limit_price=float(self.discount_limit_price),
+                turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                regime=self._current_regime,
+            )
+
         # 2.3 Real-Time Market Regime Classification (One Boat, Two Warriors)
         regime, regime_reason = self.detect_market_regime(
             spot_price=spot_price,
@@ -789,6 +886,100 @@ class Bot1V4DominationEngine:
                 ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
                 onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
                 regime=regime,
+            )
+
+        # =========================================================================
+        # REGION 4: HEALING PROTOCOL (Regime == 'HEALING')
+        # =========================================================================
+        if regime == "HEALING":
+            return Bot1V4Decision(
+                strategy_id=self.STRATEGY_ID,
+                strategy_name=self.STRATEGY_NAME,
+                active_playbook="healing_convalescence_quarantine",
+                playbook_stage="none",
+                p_up=p_up, p_down=p_down, p_wait=1.0,
+                vpin=vpin_eval, vpin_is_safe=True,
+                ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                kelly_f_yes=0.0, kelly_f_no=0.0,
+                recommended_side="wait", recommended_contracts=0,
+                rationale=regime_reason,
+                edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                limit_price=float(self.discount_limit_price),
+                turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                regime="HEALING",
+            )
+
+        # =========================================================================
+        # WARRIOR 3: BLEED DEFENDER (Regime == 'BLEED')
+        # =========================================================================
+        if regime == "BLEED":
+            physics = getattr(self, "_last_wave_physics", None)
+            if physics is None:
+                physics = compute_wave_physics(
+                    open_price=self._cycle_spot_open.get(cycle_id, spot_price),
+                    high_price=self._cycle_spot_high.get(cycle_id, spot_price),
+                    low_price=self._cycle_spot_low.get(cycle_id, spot_price),
+                    current_price=spot_price,
+                )
+
+            best_prob = max(p_up, p_down)
+            side = "yes" if p_up >= p_down else "no"
+
+            allow_entry, bleed_limit_price, bleed_rationale = self.bleed_defender.evaluate_bleed_defense(
+                physics=physics,
+                spot_diff=spot_diff,
+                model_win_prob=best_prob,
+                time_to_expiry_s=time_to_expiry_s,
+            )
+
+            if not allow_entry or bleed_limit_price is None:
+                return Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="bleed_defender_shield",
+                    playbook_stage="none",
+                    p_up=p_up, p_down=p_down, p_wait=1.0,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale=f"Warrior 3 (Bleed Defender) Veto: {bleed_rationale}",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=float(self.bleed_defender.bleed_discount_limit_price),
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                    regime="BLEED",
+                )
+
+            return Bot1V4Decision(
+                strategy_id=self.STRATEGY_ID,
+                strategy_name=self.STRATEGY_NAME,
+                active_playbook="bleed_defender_asymmetric_harvest",
+                playbook_stage="bleed_armor",
+                p_up=p_up, p_down=p_down, p_wait=0.0,
+                ev_yes=float(self.min_ev_hurdle_dollars) if side == "yes" else 0.0,
+                ev_no=float(self.min_ev_hurdle_dollars) if side == "no" else 0.0,
+                edge_yes=p_up - float(bleed_limit_price) if side == "yes" else 0.0,
+                edge_no=p_down - float(bleed_limit_price) if side == "no" else 0.0,
+                kelly_f_yes=0.25 if side == "yes" else 0.0,
+                kelly_f_no=0.25 if side == "no" else 0.0,
+                recommended_side=side,
+                recommended_contracts=1,
+                rationale=bleed_rationale,
+                edge_pct=best_prob - float(bleed_limit_price),
+                time_to_expiry_s=time_to_expiry_s,
+                spot_diff=spot_diff,
+                limit_price=float(bleed_limit_price),
+                turnovers_completed=turnovers,
+                max_turnovers=self.max_turnover_per_event,
+                ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                onnx_signal=onnx_sig,
+                onnx_confidence=onnx_conf,
+                fused_source=fused_source,
+                regime="BLEED",
             )
 
         # =========================================================================

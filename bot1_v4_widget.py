@@ -23,6 +23,9 @@ class Bot1V4Widget:
         self.cycle_locked = False
         self.circuit_tripped = False
         self.losses = 0
+        self.regime_str = "STORM"
+        self.healing_active = False
+        self.healing_wins = 0
         
         # Outer Frame
         self.frame = tk.Frame(root, bg='#0d1117', bd=1, relief=tk.RIDGE, highlightbackground='#30363d', highlightthickness=1)
@@ -181,6 +184,17 @@ class Bot1V4Widget:
                     self.ticker_str = self.ticker_str[:18]
                 diff = mkt.get("diff_str", "--")
                 self.diff_str = diff
+
+                # 4. Poll 4-Region & Multi-Warrior State
+                try:
+                    req_p = urllib.request.Request(f"{BASE_URL}/api/bot/parameters")
+                    res_p = json.loads(urllib.request.urlopen(req_p, timeout=3).read().decode('utf-8'))
+                    self.regime_str = res_p.get("current_regime", "CHOP")
+                    h_stat = res_p.get("healing_status", {})
+                    self.healing_active = h_stat.get("is_active", False)
+                    self.healing_wins = h_stat.get("consecutive_wins", 0)
+                except Exception:
+                    pass
                 
                 self.is_connected = True
             except Exception:
@@ -199,9 +213,21 @@ class Bot1V4Widget:
             return
 
         self.balance_label.config(text=self.balance_str, fg='#e6edf3')
-        self.market_label.config(text=f"{self.ticker_str} | Diff: {self.diff_str}")
+        self.market_label.config(text=f"{self.ticker_str} | [{self.regime_str}] Diff: {self.diff_str}")
 
-        if not self.armed or self.circuit_tripped:
+        if self.healing_active:
+            self.canvas.itemconfig(self.light, fill='#a371f7', outline='#a371f7')
+            self.title_label.config(text="HEALING GATE", fg='#a371f7')
+            self.mode_badge.config(text="QUARANTINE", fg='#a371f7')
+            self.guardrail_label.config(text=f"Healing Probation: {self.healing_wins}/2 Wins | Shield", fg='#a371f7')
+            self.status_label.config(text="Region 4 Active | 2 Shadow Wins Required to Resume", fg='#8b949e')
+        elif self.regime_str == "BLEED":
+            self.canvas.itemconfig(self.light, fill='#f85149', outline='#f85149')
+            self.title_label.config(text="BLEED DEFENDER", fg='#f85149')
+            self.mode_badge.config(text="WARRIOR 3", fg='#f85149')
+            self.guardrail_label.config(text="Region 3: Super-Moat >= $85 | Meatgrinder Veto", fg='#f85149')
+            self.status_label.config(text=f"Streak: {self.losses}/6 | Discount Limit $0.30-$0.35 | Asymmetric", fg='#8b949e')
+        elif not self.armed or self.circuit_tripped:
             self.canvas.itemconfig(self.light, fill='#f85149', outline='#f85149')
             self.title_label.config(text="V4 DISARMED", fg='#f85149')
             self.mode_badge.config(text="STANDBY", fg='#8b949e')
