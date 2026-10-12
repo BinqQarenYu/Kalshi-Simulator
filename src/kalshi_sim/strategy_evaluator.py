@@ -469,6 +469,21 @@ class StrategyEvaluationCoordinator:
                 except Exception:
                     pass
 
+                # Track rolling spot price history to compute spot velocity over 3s
+                if ticker not in self._spot_price_history:
+                    self._spot_price_history[ticker] = []
+                hist = self._spot_price_history[ticker]
+                hist.append((_eval_now, spot_price))
+                hist = [item for item in hist if _eval_now - item[0] <= 10.0]
+                self._spot_price_history[ticker] = hist
+
+                spot_velocity_3s = 0.0
+                if len(hist) >= 2:
+                    oldest_in_window = hist[0]
+                    dt = _eval_now - oldest_in_window[0]
+                    if dt >= 0.5:
+                        spot_velocity_3s = (spot_price - oldest_in_window[1]) / dt * 3.0
+
                 is_dual = active_bot_type in ("both", "dual", "all", "dual_domination", "dual_fleet")
                 engines_to_eval = []
                 if is_dual:
@@ -494,6 +509,7 @@ class StrategyEvaluationCoordinator:
                         max_position_size=4,
                         estimated_vpin=vpin_score,
                         cycle_id=ticker,
+                        spot_velocity_3s=spot_velocity_3s,
                     )
 
                     now_mono = time.monotonic()
@@ -512,7 +528,11 @@ class StrategyEvaluationCoordinator:
                         )
 
                     if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
-                        order_size = max(1, min(4, int(getattr(decision, "recommended_contracts", 1))))
+                        # AGENTS.md Law 2 Micro-Bankroll Sizing: Strictly max 1 contract for portfolios < $100.00
+                        if portfolio.equity < Decimal("100.00"):
+                            order_size = 1
+                        else:
+                            order_size = max(1, min(4, int(getattr(decision, "recommended_contracts", 1))))
                         side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
                         bot_label = ("LIVE BOT 1 V4" if is_v4 else "LIVE 3-STEP BOT") if is_live else ("BOT 1 V4" if is_v4 else "3-STEP BOT")
                         logger.info(

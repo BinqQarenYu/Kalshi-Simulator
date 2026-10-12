@@ -63,6 +63,8 @@ from kalshi_sim.law_order_agent import AgentLawOrder
 from kalshi_sim.token_credit_agent import get_token_credit_agent, AgentTokenCredit
 from kalshi_sim.system_governor import get_system_governor, SystemResourceGovernor
 from kalshi_sim.mock_feed import MockKalshiFeed
+from kalshi_sim.data_hygiene import data_hygiene_loop
+from kalshi_sim.order_sweeper import maker_order_sweeper_loop
 
 
 from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
@@ -935,32 +937,6 @@ async def integrity_audit_loop() -> None:
         await asyncio.sleep(2.0)
 
 
-async def data_hygiene_loop() -> None:
-    """Periodic disk and data hygiene guardian (Runs every 10 minutes to protect free-tier storage)."""
-    while True:
-        try:
-            await asyncio.sleep(600.0)  # every 10 minutes
-            from kalshi_sim.data_hygiene import DataHygieneManager
-            mgr = DataHygieneManager(data_dir=state.data_dir, active_buffer_seconds=300.0)
-            purged_count, bytes_reclaimed = mgr.purge_redundant_files()
-            if purged_count > 0:
-                logger.info(
-                    "🧹 [STORAGE HYGIENE] Purged %d redundant/stub files, reclaimed %.2f MB.",
-                    purged_count, bytes_reclaimed / (1024 * 1024)
-                )
-
-            # Check remaining free disk space
-            import shutil
-            _, _, free_bytes = shutil.disk_usage(state.data_dir)
-            free_gb = free_bytes / (1024 ** 3)
-            if free_gb < 1.5:
-                logger.warning("🚨 [DISK SPACE ALERT] Low free disk space: %.2f GB remaining on %s!", free_gb, state.data_dir)
-        except asyncio.CancelledError:
-            break
-        except Exception as exc:
-            logger.debug("Data hygiene loop exception: %s", exc)
-
-
 async def live_balance_sync_loop() -> None:
     """Periodically synchronize and cache real-time Kalshi exchange balance and live positions."""
     api_key_id = os.getenv("KALSHI_API_KEY_ID")
@@ -1190,7 +1166,8 @@ async def start_background_simulation() -> None:
 
     state.live_balance_task = asyncio.create_task(live_balance_sync_loop(), name="live_balance_sync")
     state.hmm_regime_task = asyncio.create_task(hmm_macro_regime_loop(), name="hmm_macro_regime")
-    state.data_hygiene_task = asyncio.create_task(data_hygiene_loop(), name="data_hygiene")
+    state.data_hygiene_task = asyncio.create_task(data_hygiene_loop(state.data_dir), name="data_hygiene")
+    state.maker_sweeper_task = asyncio.create_task(maker_order_sweeper_loop(state), name="maker_sweeper")
     
     # Perpetuals permanently stopped for good by user directive
     # from kalshi_sim.routers.perpetuals import perpetual_auto_trade_loop
@@ -1251,6 +1228,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state.keep_alive_task.cancel()
     if hasattr(state, "hmm_regime_task") and state.hmm_regime_task:
         state.hmm_regime_task.cancel()
+    if hasattr(state, "maker_sweeper_task") and state.maker_sweeper_task:
+        state.maker_sweeper_task.cancel()
 
     if state.broadcast_task:
         state.broadcast_task.cancel()

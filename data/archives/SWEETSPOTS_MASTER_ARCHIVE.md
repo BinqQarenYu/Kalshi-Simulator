@@ -170,3 +170,21 @@ Replaying these calibrated sweetspots across **843 real Kalshi trades** and **12
 - **Exit Logic Implementation**: [`src/kalshi_sim/ml/domination_bot.py:L844-L980`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/ml/domination_bot.py#L844-L980)
 - **Live Engine Controller**: [`src/kalshi_sim/standalone_bot.py:L620-L750`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/standalone_bot.py#L620-L750)
 - **UI Control Surface**: [`src/kalshi_sim/templates/pocket_cockpit_macro.html`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/templates/pocket_cockpit_macro.html) & [`frontend/src/components/BabyBotConsole.tsx`](file:///f:/012D_TRADE/Kalshi%20Simulator/frontend/src/components/BabyBotConsole.tsx)
+
+---
+
+## 9. Shelf 5: BLEED#01 Forensic Post-Mortem & High-Kinetic Sweetspot (October 12, 2026)
+
+* **Incident Designation**: `BLEED#01` (The Kinetic Whipsaw & Coin-Flip Entry Leak)
+* **Market Regime**: High-Kinetic Bear Dispersion (15M Candle Range: \$185–\$508, Median \$185.10, net -\$979 downward dump).
+* **The Failure**: 19 losses out of 25 trades today (24.0% win rate; streak of 14 losses out of 17 cycles) entering 48¢ contracts that settled at \$0.00.
+* **The Root Causes**:
+  1. Rigid static range threshold (`chop_range_threshold = 48.0` on \$82.5k BTC was pierced 100% of cycles, locking bot permanently into Storm mode).
+  2. Bypassed conviction requirement (engine entered on marginal 54%–56% coin flips).
+  3. Moat inadequacy (\$28 buffer against a \$185 candle dispersion was pierced within seconds).
+* **Calibrated High-Kinetic Sweetspot (Live Production Invariants)**:
+  * **Proximity Moat**: Raised to **`$55.00`** (or $\ge 0.065\%$ of spot) in `bot_parameters_domination.json`.
+  * **Conviction Floor**: Enforced **`72.0%`** minimum model probability in Storm mode (55.0% in Chop). Marginal 54%–56% bets banned.
+  * **Deep Discount Maker Cap**: Limit price clamped to **`$0.42 - $0.45`** max (asymmetric 1:1.38 risk/reward).
+  * **Dynamic Chop Scaling**: `effective_chop_range = max(165.0, spot_price * 0.0020)` prevents standard everyday noise from false-positive storm triggering.
+  * **EV Hurdle & Minimum Edge**: Net $\text{EV} \ge +\$0.04$ and $\text{Edge} \ge 3.0\%$ required. Micro-edges ($+0.1\%$) permanently suppressed.

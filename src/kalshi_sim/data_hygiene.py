@@ -329,5 +329,31 @@ def main() -> None:
         print(f"Protected System Files:      {len(rep.protected_files):,}")
 
 
+async def data_hygiene_loop(data_dir: Path) -> None:
+    """Periodic disk and data hygiene guardian (Runs every 10 minutes to protect free-tier storage)."""
+    import asyncio
+    import shutil
+    while True:
+        try:
+            await asyncio.sleep(600.0)  # every 10 minutes
+            mgr = DataHygieneManager(data_dir=data_dir, active_buffer_seconds=300.0)
+            purged_count, bytes_reclaimed = mgr.purge_redundant_files()
+            if purged_count > 0:
+                logger.info(
+                    "🧹 [STORAGE HYGIENE] Purged %d redundant/stub files, reclaimed %.2f MB.",
+                    purged_count, bytes_reclaimed / (1024 * 1024)
+                )
+
+            # Check remaining free disk space
+            _, _, free_bytes = shutil.disk_usage(data_dir)
+            free_gb = free_bytes / (1024 ** 3)
+            if free_gb < 1.5:
+                logger.warning("🚨 [DISK SPACE ALERT] Low free disk space: %.2f GB remaining on %s!", free_gb, data_dir)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.debug("Data hygiene loop exception: %s", exc)
+
+
 if __name__ == "__main__":
     main()

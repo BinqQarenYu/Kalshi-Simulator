@@ -80,9 +80,9 @@ class Bot1V4DominationEngine:
     def __init__(
         self,
         max_turnover_per_event: int = 1,  # Strictly 1-trade-per-cycle invariant matching Bot 1
-        min_ev_hurdle_dollars: Decimal = Decimal("0.02"),  # $0.02 minimum net EV hurdle
-        discount_limit_price: Decimal = Decimal("0.52"),  # 52c maker discount floor (V3.2 standard)
-        min_edge_pct: float = 0.015,  # 1.5% min edge
+        min_ev_hurdle_dollars: Decimal = Decimal("0.04"),  # $0.04 minimum net EV hurdle
+        discount_limit_price: Decimal = Decimal("0.42"),  # 42c maker discount floor
+        min_edge_pct: float = 0.03,  # 3.0% min edge
         vpin_toxic_threshold: float = 0.35,  # Council Veto: Hard kill orders above 0.35 toxic flow
         vpin_safe_threshold: float = 0.28,
         default_btc_1m_volatility: float = 14.0,
@@ -96,8 +96,8 @@ class Bot1V4DominationEngine:
         late_cycle_roi: float = 0.15,
         fee_per_contract: Decimal = Decimal("0.01"),
         min_spot_diff: Optional[float] = None,
-        max_entry_price: Decimal = Decimal("0.55"),  # 55c hard ceiling: eliminate negative R:R entries (>55c)
-        min_confidence: float = 0.81,
+        max_entry_price: Decimal = Decimal("0.45"),  # 45c hard ceiling: eliminate negative R:R entries (>45c)
+        min_confidence: float = 0.72,  # 72% minimum conviction requirement
         enable_trailing_ratchet: bool = True,
         trailing_ratchet_buffer: Decimal = Decimal("0.08"),
         spot_delta_front_run_threshold: float = 28.0,
@@ -112,13 +112,13 @@ class Bot1V4DominationEngine:
         fusion_weight_micro: float = 0.40,
         opening_quarantine_seconds: float = 90.0,  # 90s opening noise quarantine (V3.2 shield)
         max_clob_spread_cents: float = 0.05,  # Max allowable bid-ask spread corridor cap ($0.05)
-        moneyness_moat_multiplier: float = 1.36,  # 1.36x sigma*sqrt(t) deep ITM protection moat
+        moneyness_moat_multiplier: float = 1.50,  # 1.50x sigma*sqrt(t) deep ITM protection moat
         asset: CryptoAsset | str = CryptoAsset.BTC,
         chop_discount_limit_price: Decimal = Decimal("0.38"),  # Warrior 2 deep discount floor
         chop_max_entry_price: Decimal = Decimal("0.42"),       # Warrior 2 discount ceiling
         chop_min_time_s: float = 150.0,                       # Sweet Spot: 2.5 mins late bound
         chop_max_time_s: float = 450.0,                       # Sweet Spot: 7.5 mins early bound
-        chop_range_threshold: float = 28.0,                   # Cycle range <= $28 box defines chop
+        chop_range_threshold: float = 165.0,                  # Calibrated 0.20% spot range threshold
         chop_vol_threshold: float = 12.0,                     # 1m rolling vol < $12 defines low kinetic energy
         hysteresis_cooldown_seconds: float = 45.0,            # 45s sustained calm to return to chop
         experience_buffer: Optional[ContinuousExperienceBuffer] = None,
@@ -257,11 +257,12 @@ class Bot1V4DominationEngine:
         onnx_conf = float(onnx_res.get("confidence", 0.0)) if onnx_res else 0.0
         vpin_eval = float(onnx_res.get("vpin_score", vpin)) if onnx_res else vpin
 
+        effective_chop_range = max(self.chop_range_threshold, spot_price * 0.0020)
         is_volcano = (
             abs(spot_velocity_3s) >= 15.0
-            or cycle_range > self.chop_range_threshold
-            or (onnx_sig in ("LONG", "SHORT") and onnx_conf >= 0.70)
-            or vpin_eval >= self.vpin_safe_threshold
+            or cycle_range > effective_chop_range
+            or (onnx_sig in ("LONG", "SHORT") and onnx_conf >= 0.75)
+            or vpin_eval >= self.vpin_toxic_threshold
             or rolling_vol >= self.chop_vol_threshold * 1.5
         )
 
@@ -556,6 +557,17 @@ class Bot1V4DominationEngine:
             self.chop_range_threshold = float(chop_range_threshold)
         if chop_vol_threshold is not None:
             self.chop_vol_threshold = float(chop_vol_threshold)
+        if kwargs.get("min_ev_hurdle_dollars") is not None:
+            self.min_ev_hurdle_dollars = Decimal(str(kwargs["min_ev_hurdle_dollars"]))
+        elif kwargs.get("min_ev_dollars") is not None:
+            self.min_ev_hurdle_dollars = Decimal(str(kwargs["min_ev_dollars"]))
+        if kwargs.get("min_edge_pct") is not None:
+            val = float(kwargs["min_edge_pct"])
+            self.min_edge_pct = val if val <= 1.0 else (val / 100.0)
+        if kwargs.get("dynamic_moat_multiplier") is not None:
+            self.moneyness_moat_multiplier = float(kwargs["dynamic_moat_multiplier"])
+        elif kwargs.get("moneyness_moat_multiplier") is not None:
+            self.moneyness_moat_multiplier = float(kwargs["moneyness_moat_multiplier"])
         return self.get_parameters()
 
     def has_star_player_seal(self) -> bool:
@@ -837,14 +849,17 @@ class Bot1V4DominationEngine:
             req_p_win_yes = float(dynamic_limit_yes + self.min_ev_hurdle_dollars)
             req_p_win_no = float(dynamic_limit_no + self.min_ev_hurdle_dollars)
 
-            if p_up >= req_p_win_yes and p_up >= p_down:
+            chop_min_conf = min(0.55, float(self.min_confidence))
+            min_edge = float(self.min_edge_pct)
+
+            if p_up >= req_p_win_yes and p_up >= p_down and p_up >= chop_min_conf and (p_up - float(dynamic_limit_yes)) >= min_edge:
                 recommended_side = "yes"
                 chosen_limit_price = float(dynamic_limit_yes)
                 rationale = (
                     f"Warrior 2 Chop Harvester YES Signal{ai_tag}: P_win {p_up:.1%} "
                     f"(Deep Discount Limit ${chosen_limit_price:.2f}, Net EV +${ev_yes:.3f}, {regime_reason})"
                 )
-            elif p_down >= req_p_win_no and p_down > p_up:
+            elif p_down >= req_p_win_no and p_down > p_up and p_down >= chop_min_conf and (p_down - float(dynamic_limit_no)) >= min_edge:
                 recommended_side = "no"
                 chosen_limit_price = float(dynamic_limit_no)
                 rationale = (
@@ -977,13 +992,18 @@ class Bot1V4DominationEngine:
         ev_yes = p_up * 1.0 - float(dynamic_limit_yes)
         ev_no = p_down * 1.0 - float(dynamic_limit_no)
 
-        if p_up >= (float(dynamic_limit_yes) + float(self.min_ev_hurdle_dollars)) or ev_yes >= float(self.min_ev_hurdle_dollars):
-            if p_up >= req_p_win_base:
+        min_conf = float(self.min_confidence)
+        min_edge = float(self.min_edge_pct)
+
+        if (p_up >= (float(dynamic_limit_yes) + float(self.min_ev_hurdle_dollars)) or ev_yes >= float(self.min_ev_hurdle_dollars)) and p_up >= min_conf:
+            edge_yes = p_up - float(dynamic_limit_yes)
+            if p_up >= req_p_win_base and edge_yes >= min_edge:
                 recommended_side = "yes"
                 chosen_limit_price = min(float(dynamic_limit_yes), float(self.max_entry_price))
                 rationale = f"Warrior 1 Storm YES Signal{ai_tag}: P_win {p_up:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_yes:.3f}, {regime_reason})"
-        elif p_down >= (float(dynamic_limit_no) + float(self.min_ev_hurdle_dollars)) or ev_no >= float(self.min_ev_hurdle_dollars):
-            if p_down >= req_p_win_base:
+        elif (p_down >= (float(dynamic_limit_no) + float(self.min_ev_hurdle_dollars)) or ev_no >= float(self.min_ev_hurdle_dollars)) and p_down >= min_conf:
+            edge_no = p_down - float(dynamic_limit_no)
+            if p_down >= req_p_win_base and edge_no >= min_edge:
                 recommended_side = "no"
                 chosen_limit_price = min(float(dynamic_limit_no), float(self.max_entry_price))
                 rationale = f"Warrior 1 Storm NO Signal{ai_tag}: P_win {p_down:.1%} (Dynamic Limit ${chosen_limit_price:.2f}, Net EV +${ev_no:.3f}, {regime_reason})"

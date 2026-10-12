@@ -231,12 +231,21 @@ This document is the authoritative institutional repository of all quantitative 
 
 ---
 
-### Lesson Q7: Anti-Overfitting Sample Size Rule (30-Trade Macro Threshold vs. 6-Trade Micro Noise)
-* **The Principle**: A sample of $n=6$ trades has a $11.88\%$ probability of producing $\le 2$ wins purely by binomial variance on an edge-positive strategy.
-* **The Invariant Law**:
-  1. **6-Trade Boundary**: Used **strictly as a capital-preservation circuit breaker** (halt execution).
-  2. **$\ge 30$-Trade Boundary**: Used **strictly for model parameter evolution and weight recalibration**.
-  3. **The Anti-Overfitting Lock**: The system **refuses** to curve-fit parameters to short-term 6-trade noise until at least 30 verified trades are logged in the macro sample database.
+### Lesson Q8: Incident BLEED#01 — The Kinetic Whipsaw & Coin-Flip Entry Leak
+* **Incident (2026-10-12)**:
+  * Balance suffered an unmitigated drawdown from **`$44.71`** down to **`$38.29`** (19 losses out of 25 trades today; 24.0% win rate; streak of 14 losses out of 17 cycles between 08:45 and 14:45 UTC).
+  * Every cycle loss was identical: contract bought at 48¢, held through a violent $185–$500 15M candle whipsaw, and settled at $0.00.
+* **The 4 Pathological Root Causes**:
+  1. **Hardcoded Range Barrier (`chop_range_threshold = 48.0`)**: At BTC = $82,500, a $48 move is only 0.058%. 100% of 15m cycles (48 out of 48) exceeded $48 (median range was $185.10). This trapped the engine permanently in `STORM` (Warrior 1) mode and disabled the Warrior 2 deep-discount safe harbor.
+  2. **The 54% Coin-Flip Bypass**: Although `min_confidence = 0.81` was declared in parameters, `evaluate_market_opportunity()` only checked `p_up >= req_p_win_base (0.54)`. The engine entered live trades on marginal 55%–56% noise coin flips.
+  3. **Whipsaw Event Horizon**: The static $25–$28 proximity moat was completely inadequate for $185 candle dispersion. The bot entered whenever BTC drifted $25 from strike, only for spot to violently reverse and cross the strike before expiry.
+  4. **Negative Payoff Asymmetry**: Paying 48¢–52¢ in a high-dispersion regime yields a 1:1 risk/reward that guarantees capital bleed under adverse selection.
+* **The Hardened Invariants (BLEED#01 Sweetspot)**:
+  1. **Strict Conviction Enforcement**: In `bot1_v4_engine.py`, entries MUST satisfy $\max(P_{\text{up}}, P_{\text{down}}) \ge \text{min\_confidence}$ (72% hard floor in Storm mode). Marginal entries $\le 70\%$ are hard-vetoed.
+  2. **Dynamic Range Scaling**: `effective_chop_range = max(chop_range_threshold, spot_price * 0.0020)` ($\ge \$165$ on $82.5k BTC), preventing everyday noise from triggering false-positive storms.
+  3. **High-Dispersion Proximity Moat**: Live baseline moat raised to **`$55.00`** (or $0.065\%$ of spot) in `bot_parameters_domination.json` so entries stay outside the $185 candle noise blast radius.
+  4. **Deep Discount Asymmetry Cap**: Entry limit price clamped strictly to $\le \$0.42 - \$0.45$. Never pay $\ge 48¢$ in high-dispersion environments (risk 42¢ to make 58¢ = +138% ROI).
+  5. **EV Hurdle & Edge Floor**: Net $\text{EV} \ge +\$0.04$ and $\text{Edge} \ge 3.0\%$ required. Micro-edges ($+0.1\%$) are permanently banned.
 
 ---
 
@@ -247,7 +256,7 @@ To avoid breaking working systems through premature or chaotic refactoring, all 
 **Operational Directive for Every Future Assessment / 6-Trade Evaluation**:
 During every 6-trade batch review, Quant Council audit, or post-mortem, the agent **MUST** perform a deficiency look-back:
 1. Review the latest settled batch evidence against the **Active Deficiencies Matrix**.
-2. Ask: *"Did any loss in this batch directly stem from an unpatched deficiency (DEF-01 through DEF-04)?"*
+2. Ask: *"Did any loss in this batch directly stem from an unpatched deficiency (DEF-01 through DEF-05)?"*
 3. If the trigger condition is met, formulate and present the targeted, minimal-viable fix for that specific deficiency before proceeding.
 
 ---
@@ -255,9 +264,10 @@ During every 6-trade batch review, Quant Council audit, or post-mortem, the agen
 ### The Active Deficiencies Matrix
 
 | ID | Domain | Deficiency Description | Empirical Trigger Condition | Proposed Target Fix | Assessment Question for Next Fix |
-| :---: | :---: | :--- | :--- | :--- | :--- |
+| :--- | :--- | :--- | :--- | :--- | :--- |
 | **DEF-01** | **Alpha / Trend** | **Macro Trend Blindness:** Micro Gaussian drift bets `NO` into powerful 1H/4H bullish institutional momentum. | $\ge 2$ losses in a 6-trade batch caused by betting against the 1-hour EMA / 15m trend slope. | Implement strict 1H EMA slope filter in `bot1_v4_engine.py` (veto `NO` when slope $> +0.15$). | *"Did the bot lose trades by taking counter-trend positions against macro momentum? Is it time to activate DEF-01?"* |
 | **DEF-02** | **Alpha / Vol** | **Static Volatility Assumption:** Using fixed $\sigma = \$14/\text{min}$ instead of live Parkinson/ATR realized volatility. | Proximity Moat pierced $\ge 2$ times during high-volatility sessions ($\sigma > \$35/\text{min}$). | Replace static $\sigma$ in Gaussian CDF and Moat calculation with live 15m ATR / Parkinson volatility. | *"Did volatility expand beyond the baseline $\sigma = \$14/\text{min}$, causing proximity traps? Is DEF-02 required?"* |
 | **DEF-03** | **Risk / Exit** | **Missing Early Stop-Loss:** Out-of-the-money positions held all the way to $\$0.00$ when spot breaks $> 3\sigma$ against entry. | Trade lost $100\%$ of capital where early exit was available at $\ge \$0.12$ with $> 8$ minutes remaining. | Implement adversarial $> 3\sigma$ early liquidation in `evaluate_exit()` to salvage $\$0.10 - \$0.15$/contract. | *"Did the bot hold a doomed position to \$0.00 that could have been salvaged early? Should we activate DEF-03?"* |
 | **DEF-04** | **Brain / State** | **Volatile Experience State:** `ContinuousExperienceBuffer` mistake counts and Platt alpha reset on cold server reboot. | Server restarts frequently or loses online Platt dampening history across sessions. | Persist `ContinuousExperienceBuffer` state to `data/experience_state.json` or SQLite table on shutdown/startup. | *"Did a server restart clear the experience buffer learning state? Should we implement DEF-04 cold storage?"* |
+| **DEF-05** | **Execution / Gate** | **Coin-Flip Bypass & Kinetic Moat Piercing (BLEED#01):** Engine fires 54%–56% marginal bets inside $185 range whipsaws due to unenforced `min_confidence` and static $48 range threshold. | Win rate drops $\le 30\%$ over $\ge 10$ cycles with repeated 48¢ entries settling at $0.00$. | Codify BLEED#01 Sweetspot: enforce $\ge 72\%$ conviction in Storm, dynamic range scaling $0.20\%$ of spot, $55 moat, and $0.42-$0.45 discount limit cap. | *"Did the bot enter marginal 54%-56% coin flips inside an active whipsaw? Has the BLEED#01 sweetspot been enforced?"* |
 

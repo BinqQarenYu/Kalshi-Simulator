@@ -56,6 +56,7 @@ class AgentGuardrails:
         self._circuit_breaker_tripped: bool = False
         self.is_bot_armed: bool = True
         self.harakiri_loss_limit: int = 3
+        self._resting_order_details: dict[str, dict[str, Any]] = {}
 
         # Certified Live Strategies
         self.authorized_live_bots: set[str] = {
@@ -559,6 +560,16 @@ class AgentGuardrails:
         self._cycle_active_side[cycle_key] = side.lower()
         self._last_order_ts = now_mono
         self._last_order_ts_by_ticker[ticker] = now_mono
+        self._resting_order_details[order_id] = {
+            "order_id": order_id,
+            "ticker": ticker,
+            "side": side.lower(),
+            "size": size,
+            "price": price,
+            "cycle_key": cycle_key,
+            "bot_type": bot_type,
+            "ts": now_mono,
+        }
         
         report = {
             "event_type": "RESTING_ORDER_SUBMISSION",
@@ -585,6 +596,28 @@ class AgentGuardrails:
             "🛡️ [GUARDRAIL RESTING LOCK] Locked cycle '%s' for resting order %s (%s %d cts @ $%.2f). Total in cycle: %d/2",
             cycle_key, order_id, side.upper(), size, float(price), self._cycle_contracts_count[cycle_key]
         )
+
+    def get_stale_resting_orders(self, max_age_seconds: float = 90.0) -> list[dict[str, Any]]:
+        """Identify resting orders older than max_age_seconds for adverse selection sweeps."""
+        now_mono = time.monotonic()
+        stale = []
+        for oid, details in list(self._resting_order_details.items()):
+            if (now_mono - details.get("ts", 0.0)) >= max_age_seconds:
+                stale.append(details)
+        return stale
+
+    def release_resting_order(self, order_id: str) -> None:
+        """Release a resting order tracking entry after cancellation by the sweeper.
+        
+        CRITICAL GUARDRAIL (AGENTS.md Law 2):
+        The 1-Trade-Per-Cycle lock (_cycle_locks and _bot_cycle_locks) MUST REMAIN ACTIVE!
+        Cancelling an unfilled or partially filled resting order does NOT grant a license to re-enter
+        the same 15-minute cycle. Allowing re-entry causes duplicate fills, adverse selection sweeps,
+        and multiple entries on the same cycle.
+        """
+        details = self._resting_order_details.pop(order_id, None)
+        cycle_key = details.get("cycle_key", "unknown") if details else "unknown"
+        logger.info("🛡️ [GUARDRAIL RESTING RELEASE] Resting order %s swept from memory. Cycle %s remains locked (1-trade-per-cycle invariant).", order_id, cycle_key)
 
     def release_in_flight_intent(self, cycle_key: str) -> None:
         """Release in-flight reservation if order placement failed, was rejected, or was cancelled."""

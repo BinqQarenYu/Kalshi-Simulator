@@ -23,6 +23,7 @@ from kalshi_sim.ml.domination_exit_evaluator import (
 )
 from kalshi_sim.ml.lead_deer_quant_brain import ExitDecision, LeadDeerQuantBrain
 from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, StatisticalEVEngine
+from kalshi_sim.ml.chop_protection import evaluate_chop_toxicity_veto
 from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, get_asset_config
 
 logger = logging.getLogger("kalshi_sim.domination_bot")
@@ -59,8 +60,6 @@ class DominationDecision:
     spot_diff: float
     order_type: str = "limit"
     limit_price: float = 0.52
-
-
 
 
 class ThreeStepDominationBot:
@@ -1073,30 +1072,21 @@ class ThreeStepDominationBot:
                 )
 
             # Dual-Regime Chop Protection & Toxicity Veto (exempts late-cycle Silas TWAP sniper which has its own immutability ceiling)
-            if stage != "twap_sniper":
-                if vpin > 0.35:
-                    return self._build_wait_decision(
-                        time_to_expiry_s=time_to_expiry_s,
-                        spot_diff=spot_diff,
-                        vpin=vpin,
-                        rationale=f"VPIN Toxicity Veto (Hard Kill): Orderbook VPIN {vpin:.2f} > 0.35 toxic flow threshold. Suppressing entry.",
-                    )
-
-                is_chop_regime = (vpin > 0.28) or (target_prob < 0.75)
-                chop_max_cap = 0.48 if is_chop_regime else float(self.max_entry_price)
-                # When resting as maker limit order, evaluate discount_price_val against chop cap; for taker/fill evaluate target_ask
-                effective_order_price = discount_price_val if (target_ask > discount_price_val and stage != "initial_10s_maker_park") else target_ask
-                if effective_order_price > chop_max_cap:
-                    regime_name = "Chop Regime ($0.48)" if is_chop_regime else f"Max Cap (${float(self.max_entry_price):.2f})"
-                    return self._build_wait_decision(
-                        time_to_expiry_s=time_to_expiry_s,
-                        spot_diff=spot_diff,
-                        vpin=vpin,
-                        rationale=(
-                            f"Price Cap Veto ({regime_name}): Proposed entry ${effective_order_price:.2f} "
-                            f"> ${chop_max_cap:.2f} allowable limit. Refusing adverse fill in {'choppy/low-conviction' if is_chop_regime else 'standard'} market."
-                        ),
-                    )
+            veto_triggered, veto_rationale = evaluate_chop_toxicity_veto(
+                stage=stage,
+                vpin=vpin,
+                target_prob=target_prob,
+                discount_price_val=discount_price_val,
+                target_ask=target_ask,
+                max_entry_price=float(self.max_entry_price),
+            )
+            if veto_triggered:
+                return self._build_wait_decision(
+                    time_to_expiry_s=time_to_expiry_s,
+                    spot_diff=spot_diff,
+                    vpin=vpin,
+                    rationale=veto_rationale or "Chop/toxicity veto triggered.",
+                )
 
             if stage == "twap_sniper":
                 if target_ask > self.twap_immutability_sniper_cents:
@@ -1327,13 +1317,9 @@ class ThreeStepDominationBot:
     ) -> tuple[bool, str]:
         """Evaluate Spot Velocity Front-Run using 4-Regime Fading Mathematics."""
         return self._exit_evaluator.compute_dynamic_spot_velocity_decision(
-            side_is_yes=side_is_yes,
-            spot_velocity_3s=spot_velocity_3s,
-            time_to_expiry_s=time_to_expiry_s,
-            spot_price=spot_price,
-            target_strike=target_strike,
-            twap_60s=twap_60s,
-            rolling_vol_1m=rolling_vol_1m,
+            side_is_yes=side_is_yes, spot_velocity_3s=spot_velocity_3s,
+            time_to_expiry_s=time_to_expiry_s, spot_price=spot_price,
+            target_strike=target_strike, twap_60s=twap_60s, rolling_vol_1m=rolling_vol_1m,
         )
 
     def evaluate_exit(
@@ -1353,16 +1339,8 @@ class ThreeStepDominationBot:
     ) -> DominationExitDecision:
         """Evaluate open position against quantitative Take-Profit and Early Liquidation rules."""
         return self._exit_evaluator.evaluate_exit(
-            side=side,
-            entry_price=entry_price,
-            size=size,
-            book=book,
-            time_to_expiry_s=time_to_expiry_s,
-            spot_price=spot_price,
-            target_strike=target_strike,
-            peak_bid=peak_bid,
-            spot_velocity_3s=spot_velocity_3s,
-            twap_60s=twap_60s,
-            rolling_vol_1m=rolling_vol_1m,
-            **kwargs,
+            side=side, entry_price=entry_price, size=size, book=book,
+            time_to_expiry_s=time_to_expiry_s, spot_price=spot_price, target_strike=target_strike,
+            peak_bid=peak_bid, spot_velocity_3s=spot_velocity_3s, twap_60s=twap_60s,
+            rolling_vol_1m=rolling_vol_1m, **kwargs,
         )
