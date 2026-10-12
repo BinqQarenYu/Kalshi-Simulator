@@ -4,7 +4,7 @@ export const NEURAL_ENGINES: NeuralEngineSpec[] = [
   {
     id: 'brain_1_spot_macro',
     name: 'Brain 1: Spot Macro Anchor',
-    filename: 'nano_microscope_overhauled.onnx',
+    filename: 'quolas.onnx',
     version: 'v2.4.1',
     dimension: 28,
     features_description: '28-D Spot Microstructure (Binance 5Hz L2 Depth + aggTrade, CVD, VPIN)',

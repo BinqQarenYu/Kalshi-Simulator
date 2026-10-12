@@ -31,8 +31,8 @@ if !errorlevel! neq 0 (
 set PYTHONPATH=src
 
 rem Check if ONNX model exists
-if not exist "models\nano_microscope_overhauled.onnx" (
-    echo [WARNING] ONNX model 'models\nano_microscope_overhauled.onnx' not found.
+if not exist "models\quolas.onnx" (
+    echo [WARNING] ONNX model 'models\quolas.onnx' not found.
     echo Attempting to pull model from Google Drive via rclone...
     !PYTHON_CMD! -m kalshi_sim.gdrive_sync --pull-models
 )

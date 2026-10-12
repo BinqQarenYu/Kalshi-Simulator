@@ -1,7 +1,7 @@
 """Nano Microscope Matrix Tensor Builder (Transplanted from QuoLas Core).
 
 Transforms raw Binance @depth20 and @trade ticks into a normalized
-Machine Learning Tensor for the Orderflow AI (models/nano_microscope_overhauled.onnx).
+Machine Learning Tensor for the Orderflow AI (models/quolas.onnx).
 Produces the exact 28-feature tensor:
 - 13 Toxic Vector Parameters
 - 15 Spatial Order Book Decayed Imbalance Parameters (alpha = 0.425)

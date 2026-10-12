@@ -236,7 +236,7 @@ from kalshi_sim.ml.onnx_engine import KalshiONNXEngine
 class ONNXMicrostructurePredictor:
     """Loads and runs inference with QuoLas Nano Microscope ONNX Model."""
 
-    def __init__(self, model_path: str = "models/nano_microscope_overhauled.onnx"):
+    def __init__(self, model_path: str = "models/quolas.onnx"):
         self.engine = KalshiONNXEngine(model_path=model_path)
 
     def predict_for_cycle(self, cycle: CycleData) -> Tuple[str, float, float, float, float]:

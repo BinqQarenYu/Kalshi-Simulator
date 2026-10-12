@@ -44,10 +44,8 @@ class KalshiONNXEngine:
     ) -> None:
         if model_path:
             self.model_path = Path(model_path)
-        elif Path("models/quolas.onnx").exists():
-            self.model_path = Path("models/quolas.onnx")
         else:
-            self.model_path = Path("models/nano_microscope_overhauled.onnx")
+            self.model_path = Path("models/quolas.onnx")
         self.stats_path = Path(stats_path) if stats_path else (self.model_path.parent / "feature_stats.json")
         self.confidence_threshold = confidence_threshold
 
@@ -116,8 +114,6 @@ class KalshiONNXEngine:
             data_file = str(self.model_path) + ".data"
             if os.path.exists(data_file):
                 shutil.copy(data_file, active_onnx + ".data")
-                # Fallback for tmp naming in protobuf if present
-                shutil.copy(data_file, os.path.join(tmp_dir, "nano_microscope_overhauled.tmp.onnx.data"))
 
             self.session = ort.InferenceSession(
                 active_onnx,

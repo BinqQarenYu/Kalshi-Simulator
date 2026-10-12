@@ -2,7 +2,7 @@
 
 Transplanted institutional components from QuoLas:
 - OrderFlowIntegrity: CVD divergence, absorption, spoofing, VPIN PBC, OFI.
-- NanoMatrixBuilder: 28-feature input tensor for nano_microscope_overhauled.onnx.
+- NanoMatrixBuilder: 28-feature input tensor for quolas.onnx.
 - StreamManager: Binance multi-stream WebSocket manager (@aggTrade, @depth@100ms, @bookTicker).
 - HMMBrain: 3-state Gaussian HMM for macro market regime detection.
 """

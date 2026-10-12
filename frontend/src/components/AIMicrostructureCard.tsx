@@ -516,7 +516,7 @@ export const AIMicrostructureCard: React.FC<AIMicrostructureCardProps> = React.m
             </button>
           )}
           <span className="text-[10px] font-mono text-gray-500 hidden sm:inline">
-            {isMacroOnnx ? 'nano_microscope_overhauled.onnx' : isMacroTrend ? 'macro_trend_dominion.py' : is3StepBot ? '3_step_domination.py' : 'nano_microscope.onnx'}
+            {isMacroOnnx ? 'quolas.onnx' : isMacroTrend ? 'macro_trend_dominion.py' : is3StepBot ? '3_step_domination.py' : 'quolas.onnx'}
           </span>
         </div>
       </div>

@@ -36,7 +36,7 @@ try {
 $env:PYTHONPATH = "src"
 
 # 3. Verify Models
-$modelPath = Join-Path $ScriptDir "models\nano_microscope_overhauled.onnx"
+$modelPath = Join-Path $ScriptDir "models\quolas.onnx"
 if (-not (Test-Path $modelPath)) {
     Write-Host "[WARNING] ONNX model missing at $modelPath" -ForegroundColor Yellow
     Write-Host "[INFO] Attempting sync from Google Drive..." -ForegroundColor Gray

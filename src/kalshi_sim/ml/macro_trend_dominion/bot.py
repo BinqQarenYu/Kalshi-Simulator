@@ -1,7 +1,7 @@
 """Bot 3: Macro Trend Dominion Strategy Engine.
 
 Fuses 3 Machine Learning & Statistical Brains:
-1. Brain 1: QuoLas Spot Lead (28-D Microstructure Tensor via nano_microscope_overhauled.onnx)
+1. Brain 1: QuoLas Spot Lead (28-D Microstructure Tensor via quolas.onnx)
 2. HMM Brain: 3-State AI Markov Regime (STABLE_RANGE, VOL_EXPANSION, RISK_OFF)
 3. Brain 2: Kalshi CLOB Microstructure Lag (15-Level Binary Orderbook)
 

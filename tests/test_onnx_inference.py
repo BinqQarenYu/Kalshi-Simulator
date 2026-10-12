@@ -38,7 +38,7 @@ class TestONNXTradingPipeline(unittest.TestCase):
         self.assertGreater(vec[0], 0.0)
 
     def test_onnx_engine_inference(self):
-        engine = KalshiONNXEngine(model_path="models/nano_microscope_overhauled.onnx")
+        engine = KalshiONNXEngine(model_path="models/quolas.onnx")
         if engine.session is None:
             self.skipTest("ONNX model file not present")
 

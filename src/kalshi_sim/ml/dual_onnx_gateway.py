@@ -1,7 +1,7 @@
 """Dual-ONNX Inference Gateway for High-Frequency Cross-Market Orderflow.
 
 Coordinates concurrent low-latency inference across two independent ONNX neural brains:
-1. QuoLas Brain (models/nano_microscope_overhauled.onnx): Spot BTC microstructure & price discovery.
+1. QuoLas Brain (models/quolas.onnx): Spot BTC microstructure & price discovery.
 2. Kalshi Brain (models/kalshi_onnx.onnx): Kalshi binary CLOB microstructure & retail flow.
 """
 
@@ -55,7 +55,7 @@ class DualONNXGateway:
         if quolas_model_path:
             self.quolas_model_path = Path(quolas_model_path)
         else:
-            self.quolas_model_path = p_quolas_default if p_quolas_default.exists() else Path("models/nano_microscope_overhauled.onnx")
+            self.quolas_model_path = p_quolas_default
 
         if kalshi_model_path:
             self.kalshi_model_path = Path(kalshi_model_path)

@@ -68,7 +68,7 @@ def test_feature_extraction_latency_sub_millisecond():
 
 def test_onnx_inference_latency_benchmark():
     """QuoLas ONNX neural network inference must execute in < 2.0ms per tick."""
-    engine = KalshiONNXEngine(model_path="models/nano_microscope_overhauled.onnx")
+    engine = KalshiONNXEngine(model_path="models/quolas.onnx")
     book = _create_dense_book()
 
     # Warmup

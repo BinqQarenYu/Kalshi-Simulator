@@ -84,7 +84,7 @@ def main() -> None:
     parser.add_argument("--weight-decay", type=float, default=1e-4, help="AdamW weight decay")
     parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
     parser.add_argument("--output-dir", type=str, default="models", help="Directory to save model checkpoints")
-    parser.add_argument("--onnx-name", type=str, default="nano_microscope_overhauled.onnx", help="Filename of exported ONNX model")
+    parser.add_argument("--onnx-name", type=str, default="quolas.onnx", help="Filename of exported ONNX model")
     args = parser.parse_args()
 
     data_path = Path(args.dataset)

@@ -34,8 +34,8 @@ rem 2. Set PYTHONPATH to src
 set PYTHONPATH=src
 
 rem 3. Check for ONNX AI Model
-if not exist "models\nano_microscope_overhauled.onnx" (
-    echo [WARNING] ONNX model 'models\nano_microscope_overhauled.onnx' missing.
+if not exist "models\quolas.onnx" (
+    echo [WARNING] ONNX model 'models\quolas.onnx' missing.
     echo Attempting model synchronization...
     !PYTHON_CMD! -m kalshi_sim.gdrive_sync --pull-models
 )

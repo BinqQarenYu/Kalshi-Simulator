@@ -404,7 +404,7 @@ def test_get_and_update_parameters() -> None:
 
 def test_gateway_fallback_and_inference(tmp_path: Path) -> None:
     """Verify DualONNXGateway initialization, QuoLas fallback, and infer_both interface."""
-    dummy_quolas = tmp_path / "nano_microscope_overhauled.onnx"
+    dummy_quolas = tmp_path / "quolas.onnx"
     dummy_kalshi = tmp_path / "kalshi_onnx.onnx"
 
     # Both non-existent -> gateway runs in stub mode without throwing exception
