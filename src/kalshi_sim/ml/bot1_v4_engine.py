@@ -410,6 +410,7 @@ class Bot1V4DominationEngine:
         self,
         time_to_expiry_s: float,
         cycle_duration_s: float = 900.0,
+        regime: Optional[str] = None,
     ) -> float:
         """Compute self-calibrating time-and-volatility-scaled minimum spot distance threshold (V3.2 Moat)."""
         tau_mins = max(0.2, time_to_expiry_s / 60.0)
@@ -423,12 +424,28 @@ class Bot1V4DominationEngine:
             base_min_diff = 25.0
         live_vol = self.default_btc_1m_volatility if self.default_btc_1m_volatility > 0 else baseline_vol
 
+        if regime is None:
+            regime = getattr(self, "_current_regime", "STORM")
+
         # Dynamic Strike Distance Scaling: Scale minimum separation proportionally with spot price
-        # Baseline is self.min_spot_diff (or asset config default), scaling dynamically to prevent tight noise trades
         base_diff = float(self.min_spot_diff) if getattr(self, "min_spot_diff", None) is not None else base_min_diff
         effective_min_diff = max(base_diff, getattr(self, "_last_spot_price", 0.0) * 0.00025)
-        floor_moat = effective_min_diff * 1.15
-        ceiling_moat = effective_min_diff * 2.15
+
+        # Regional Moat Adaptation:
+        if regime == "STORM":
+            # Storm Vanguard: Wide Moat (1.5x - 2.6x) to absorb violent Brownian expansion
+            moat_mult = max(1.50, float(getattr(self, "moneyness_moat_multiplier", 1.50)))
+            floor_moat = effective_min_diff * moat_mult
+            ceiling_moat = effective_min_diff * (moat_mult + 1.10)
+        elif regime == "BLEED":
+            # Bleed Defender: Super-Moat >= $85
+            bleed_moat = float(getattr(self, "min_spot_diff_bleed", 85.0))
+            floor_moat = max(bleed_moat, effective_min_diff * 1.55)
+            ceiling_moat = max(bleed_moat * 1.65, effective_min_diff * 2.60)
+        else:
+            # Chop Harvester: Standard Moat
+            floor_moat = effective_min_diff * 1.05
+            ceiling_moat = effective_min_diff * 2.05
 
         expected_full_cycle_noise = baseline_vol * math.sqrt(cycle_mins)
         if expected_full_cycle_noise > 1e-9:
@@ -552,6 +569,7 @@ class Bot1V4DominationEngine:
 
     def get_parameters(self) -> dict[str, Any]:
         """Return current strategy parameters."""
+        physics = getattr(self, "_last_wave_physics", None)
         return {
             "asset": self.asset.value if hasattr(self.asset, "value") else str(self.asset),
             "discount_limit_price": float(self.discount_limit_price),
@@ -573,6 +591,10 @@ class Bot1V4DominationEngine:
             "chop_vol_threshold": float(self.chop_vol_threshold),
             "current_regime": self._current_regime,
             "regime_reason": self._regime_reason,
+            "wave_summary": physics.wave_summary if physics else "NORMAL WAVE",
+            "is_tsunami": bool(physics.is_tsunami) if physics else False,
+            "is_double_wick_meatgrinder": bool(physics.is_double_wick_meatgrinder) if physics else False,
+            "is_false_breakout": bool(physics.is_false_breakout) if physics else False,
             "bleed_discount_limit_price": float(self.bleed_defender.bleed_discount_limit_price),
             "bleed_max_entry_price": float(self.bleed_defender.bleed_max_entry_price),
             "min_spot_diff_bleed": float(self.bleed_defender.min_spot_diff_bleed),
@@ -1150,7 +1172,7 @@ class Bot1V4DominationEngine:
                 )
 
         # 3.3 Dynamic Proximity Moat Filter (Volatility-Scaled Distance Filter)
-        dynamic_moat = self.get_dynamic_proximity_threshold(time_to_expiry_s, cycle_duration_s=cycle_duration_s)
+        dynamic_moat = self.get_dynamic_proximity_threshold(time_to_expiry_s, cycle_duration_s=cycle_duration_s, regime="STORM")
         if abs(spot_diff) < dynamic_moat:
             return Bot1V4Decision(
                 strategy_id=self.STRATEGY_ID,

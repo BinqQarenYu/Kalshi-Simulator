@@ -263,6 +263,22 @@ def record_win_loss_event_report(
             execution_mode=exec_mode_resolved,
         )
 
+    # 4-Region & Multi-Warrior Live Dynamic Feedback Loop
+    try:
+        active_bot = _resolve_bot(bot_type_resolved)
+        if active_bot is None and hasattr(state, "bot1_v4_engine"):
+            active_bot = state.bot1_v4_engine
+        if active_bot and hasattr(active_bot, "record_cycle_settlement"):
+            is_win = (str(outcome).strip().lower() == "win")
+            active_bot.record_cycle_settlement(is_win)
+            logger.info(
+                "🌊 [WAVE REGIME SETTLEMENT FEEDBACK] Recorded cycle settlement for %s (Won: %s).",
+                bot_type_resolved,
+                is_win,
+            )
+    except Exception as bot_settle_exc:
+        logger.debug("[WAVE REGIME SETTLEMENT FEEDBACK] Error recording settlement on bot instance: %s", bot_settle_exc)
+
     try:
         get_db_writer().enqueue_settlement(
             settlement_id=report["report_id"],

@@ -351,3 +351,33 @@ def test_bot1_v4_engine_healing_transition_on_bleed_losses():
     assert decision.recommended_contracts == 0
     assert decision.active_playbook == "healing_convalescence_quarantine"
     assert decision.regime == "HEALING"
+
+
+def test_get_dynamic_proximity_threshold_regional_scaling():
+    """Verify get_dynamic_proximity_threshold scales moat based on active region."""
+    engine = Bot1V4DominationEngine(asset=CryptoAsset.BTC, min_spot_diff=55.0)
+
+    # 1. Chop region moat: baseline
+    moat_chop = engine.get_dynamic_proximity_threshold(time_to_expiry_s=300.0, regime="CHOP")
+    
+    # 2. Storm region moat: wide expansion (1.5x - 2.6x)
+    moat_storm = engine.get_dynamic_proximity_threshold(time_to_expiry_s=300.0, regime="STORM")
+
+    # 3. Bleed region moat: super-moat >= $85
+    moat_bleed = engine.get_dynamic_proximity_threshold(time_to_expiry_s=300.0, regime="BLEED")
+
+    assert moat_storm > moat_chop, f"Storm moat ({moat_storm}) must exceed Chop moat ({moat_chop})"
+    assert moat_bleed >= 85.0, f"Bleed moat ({moat_bleed}) must enforce >= $85 floor"
+
+
+def test_get_parameters_exposes_wave_physics():
+    """Verify get_parameters returns wave physics geometry and flags."""
+    engine = Bot1V4DominationEngine(asset=CryptoAsset.BTC)
+    params = engine.get_parameters()
+    assert "wave_summary" in params
+    assert "is_tsunami" in params
+    assert "is_double_wick_meatgrinder" in params
+    assert "is_false_breakout" in params
+    assert isinstance(params["is_tsunami"], bool)
+    assert isinstance(params["is_double_wick_meatgrinder"], bool)
+    assert isinstance(params["is_false_breakout"], bool)
