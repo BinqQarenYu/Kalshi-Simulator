@@ -274,6 +274,7 @@ class DominationExitEvaluator:
                         f"reached{rev_text} | Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | "
                         f"Liquidating immediately to lock in banked gains before gamma cliff."
                     ),
+                    order_type="market",
                 )
             else:
                 logger.debug(
@@ -304,6 +305,7 @@ class DominationExitEvaluator:
                         f"⚡ [SPOT VELOCITY FRONT-RUN] {fr_rationale} | Front-running orderbook vacuum to lock in bid "
                         f"${best_bid:.2f} (Net +${total_net_pnl:.2f}, +{roi*100:.1f}% ROI) before liquidity evaporates."
                     ),
+                    order_type="market",
                 )
 
         # Rule 3: High-Water Mark Trailing Profit Ratchet & Deep Breakeven Armor
@@ -328,6 +330,7 @@ class DominationExitEvaluator:
                             f"(Peak was ${effective_peak:.2f}) | Locking in +${total_net_pnl:.2f} profit "
                             f"(+{roi*100:.1f}% ROI) to protect banked gains."
                         ),
+                        order_type="market",
                     )
 
             # Tier 1: Deep Breakeven Armor (Active ONLY once peak reached >= $0.85 and gained >= +20c from entry)
@@ -345,6 +348,7 @@ class DominationExitEvaluator:
                             f"🛡️ [BREAKEVEN ARMOR] Bid ${best_bid:.2f} dropped back to entry/fee floor ${be_floor:.2f} "
                             f"(Peak was ${effective_peak:.2f}) | Exiting near breakeven to protect capital from negative reversal."
                         ),
+                        order_type="market",
                     )
 
         # Rule 4: Late-Cycle Expiration Defense (15s < T <= 120s, Bid >= $0.85, ROI >= 15%)
@@ -368,6 +372,7 @@ class DominationExitEvaluator:
                     f"Bid ${best_bid:.2f} with +{roi*100:.1f}% ROI | "
                     f"Net profit +${total_net_pnl:.2f} | Locking in win before binary settlement volatility."
                 ),
+                order_type="market",
             )
 
         # Rule 5: Dynamic Reversal Take-Profit Harvest (ROI >= min_take_profit_roi ONLY IF reverse_prob >= dyn_reversal_threshold)
@@ -389,6 +394,7 @@ class DominationExitEvaluator:
                     f"Net ROI +{roi*100:.1f}% >= +{bot.min_take_profit_roi*100:.0f}% target at ${best_bid:.2f} | "
                     f"Net profit +${total_net_pnl:.2f} | Securing banked returns before reversal destroys gains."
                 ),
+                order_type="market",
             )
 
         # Rule 5.1: The Council Doubt-Harvest Engine (Horizon-Proportional 50% Profit & Inversion Doubt)
@@ -580,7 +586,26 @@ class DominationExitEvaluator:
                     profit_pct=round(roi * 100.0, 2),
                     unrealized_pnl=round(total_net_pnl, 4),
                     rationale=f"🏔️ [{bag_eval.action}] {bag_eval.reason} | Liquidating on maker ask to bank locked-in profits.",
+                    order_type="market",
                 )
+
+        # Rule 5.9: Kinetic Crash Salvage (Adverse Momentum Knife Defense)
+        # When adverse velocity spikes (>= 12.0 $/3s) and bid decays <= $0.40 with strong adverse conviction
+        is_kinetic_crash = best_bid <= Decimal("0.40") and adverse_vel >= 12.0 and reverse_prob >= 0.65
+        if is_kinetic_crash and not twap_safe_itm and (peak_bid is None or peak_bid < Decimal("0.80")):
+            return DominationExitDecision(
+                should_exit=True,
+                exit_reason="KINETIC_CRASH_SALVAGE",
+                exit_price=best_bid,
+                profit_pct=round(roi * 100.0, 2),
+                unrealized_pnl=round(total_net_pnl, 4),
+                rationale=(
+                    f"🚨 [KINETIC CRASH SALVAGE] Severe adverse velocity {adverse_vel:+.1f} $/3s with bid at ${best_bid:.2f} "
+                    f"and {reverse_prob*100:.1f}% adverse conviction | Salvaging capital immediately via market sell "
+                    f"(-${abs(total_net_pnl):.2f}) before liquidity evaporates to $0.00."
+                ),
+                order_type="market",
+            )
 
         # Rule 6: Valley Ejector (Early Loss Capping / Dynamic Capital Salvage)
         # 3-Minute Death Window patched. Now operates until expiration, but tightens criteria inside 180s.
@@ -610,6 +635,7 @@ class DominationExitEvaluator:
                     f"(T={int(time_to_expiry_s)}s) | Liquidating early to salvage capital (PnL: -${abs(total_net_pnl):.2f}) "
                     f"instead of absorbing a -100% expiration loss."
                 ),
+                order_type="market",
             )
 
         pnl_prefix = "+" if total_net_pnl >= Decimal("0.00") else "-"

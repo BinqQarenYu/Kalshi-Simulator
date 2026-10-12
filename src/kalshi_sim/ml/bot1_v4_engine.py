@@ -117,6 +117,10 @@ class Bot1V4DominationEngine:
         min_fast_lock_roi: float = 0.35,  # +35% net ROI in chop/bleed
         fast_lock_late_cycle_roi: float = 0.20,  # +20% net ROI in late cycle T <= 180s
         require_reversal_for_asymmetric_peak: bool = False,  # Unconditional peak harvest at asymmetric floor
+        enable_taker_breakout_entry: bool = True,  # Part 3: Taker Dynamic Breakout Entry
+        taker_breakout_min_velocity: float = 15.0,  # Min spot velocity ($/3s) for taker entry
+        taker_breakout_min_confidence: float = 0.78,  # Min conviction threshold for taker entry
+        max_taker_entry_price: Decimal = Decimal("0.52"),  # Max price cap for taker entry
         onnx_engine: Optional[Any] = None,
         fusion_weight_micro: float = 0.40,
         opening_quarantine_seconds: float = 90.0,  # 90s opening noise quarantine (V3.2 shield)
@@ -170,6 +174,10 @@ class Bot1V4DominationEngine:
         self.min_fast_lock_roi = min_fast_lock_roi
         self.fast_lock_late_cycle_roi = fast_lock_late_cycle_roi
         self.require_reversal_for_asymmetric_peak = require_reversal_for_asymmetric_peak
+        self.enable_taker_breakout_entry = enable_taker_breakout_entry
+        self.taker_breakout_min_velocity = taker_breakout_min_velocity
+        self.taker_breakout_min_confidence = taker_breakout_min_confidence
+        self.max_taker_entry_price = max_taker_entry_price
         self.twap_fading_quarantine_seconds: float = 15.0
         self.twap_fading_window_seconds: float = 60.0
         self.enable_dynamic_reversal_curve: bool = True
@@ -1249,6 +1257,34 @@ class Bot1V4DominationEngine:
 
         active_playbook = "playbook1_breakout" if abs(spot_velocity_3s) >= 15.0 else "playbook2_drift"
         playbook_stage = "breakout" if active_playbook == "playbook1_breakout" else "drift"
+        order_type_val = "limit"
+
+        # Part 3: Taker Dynamic Breakout Entry (High-Velocity Wave Penetration)
+        # When high kinetic energy and high conviction confirm a runaway breakout,
+        # paying the $0.01 taker fee guarantees immediate fill before the market escapes.
+        if (
+            self.enable_taker_breakout_entry
+            and recommended_side in ("yes", "no")
+            and abs(spot_velocity_3s) >= self.taker_breakout_min_velocity
+        ):
+            chosen_conf = p_up if recommended_side == "yes" else p_down
+            aligned_vel = spot_velocity_3s if recommended_side == "yes" else -spot_velocity_3s
+            if chosen_conf >= self.taker_breakout_min_confidence and aligned_vel >= self.taker_breakout_min_velocity:
+                best_ask = None
+                if l2_book is not None:
+                    if recommended_side == "yes":
+                        best_ask = l2_book.best_yes_ask
+                    else:
+                        best_ask = (Decimal("1.00") - l2_book.best_yes_bid) if l2_book.best_yes_bid is not None else None
+
+                if best_ask is None or best_ask <= self.max_taker_entry_price:
+                    order_type_val = "market"
+                    if best_ask is not None:
+                        chosen_limit_price = float(best_ask)
+                    rationale += (
+                        f" | ⚡ [TAKER BREAKOUT ENTRY] High-velocity wave (v={spot_velocity_3s:+.1f}$/3s, Conf {chosen_conf:.1%}) "
+                        f"taking ask ${chosen_limit_price:.2f} with fee to penetrate momentum wave."
+                    )
 
         return Bot1V4Decision(
             strategy_id=self.STRATEGY_ID,
@@ -1281,6 +1317,7 @@ class Bot1V4DominationEngine:
             edge_pct=max(p_up, p_down) - chosen_limit_price,
             time_to_expiry_s=time_to_expiry_s,
             spot_diff=spot_diff,
+            order_type=order_type_val,
             limit_price=chosen_limit_price,
             turnovers_completed=turnovers,
             max_turnovers=self.max_turnover_per_event,

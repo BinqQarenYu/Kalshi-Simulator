@@ -231,6 +231,12 @@ async def sync_kalshi_portfolio(is_demo: bool = True) -> dict[str, Any]:
 @router.get("/api/kalshi/balance")
 async def get_kalshi_live_balance() -> dict[str, Any]:
     """Retrieve real-time actual Kalshi exchange cash balance, margin, and exposure."""
+    try:
+        from dotenv import find_dotenv, load_dotenv
+        load_dotenv(find_dotenv(usecwd=True), override=False)
+    except Exception:
+        pass
+
     if state.live_portfolio is not None:
         return state.live_portfolio
 
