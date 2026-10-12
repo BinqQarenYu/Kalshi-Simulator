@@ -48,7 +48,7 @@
       "velocity_z_score_threshold": 2.5,
       "moneyness_moat_multiplier": 1.5,
       "chop_range_threshold": 165.0,
-      "bleed_discount_limit_price": 0.30,
+      "bleed_discount_limit_price": 0.3,
       "bleed_max_entry_price": 0.35,
       "min_spot_diff_bleed": 85.0,
       "tsunami_threshold": 250.0,
