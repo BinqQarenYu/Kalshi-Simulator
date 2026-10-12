@@ -1,4 +1,4 @@
-﻿"""Unit Tests for Per-Bot and Per-Mode Win/Loss Performance Reports."""
+"""Unit Tests for Per-Bot and Per-Mode Win/Loss Performance Reports."""
 
 from decimal import Decimal
 import pytest

@@ -1,4 +1,4 @@
-﻿import json
+import json
 from pathlib import Path
 
 def test_agent_deer_model_documentation_sync():

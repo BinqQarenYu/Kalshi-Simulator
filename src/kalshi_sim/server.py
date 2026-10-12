@@ -69,8 +69,12 @@ from kalshi_sim.cfbenchmarks_sync import CFBenchmarksBRTISync, CFBenchmarksSync
 from kalshi_sim.clock_sync import clock_sync
 from kalshi_sim.ml.ai_worker import AIWorker
 from kalshi_sim.ml.continuous_trainer import ContinuousModelTrainer
-from kalshi_sim.ml.gold_continuous_trainer import GoldContinuousTrainer
-from kalshi_sim.shadow_gold_runner import Lane2GoldShadowRunner
+try:
+    from kalshi_sim.ml.gold_continuous_trainer import GoldContinuousTrainer
+    from kalshi_sim.shadow_gold_runner import Lane2GoldShadowRunner
+except ImportError:
+    GoldContinuousTrainer = None  # type: ignore
+    Lane2GoldShadowRunner = None  # type: ignore
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
@@ -201,10 +205,9 @@ def resolve_bot_instance(bot_id: str) -> Any:
             return state.bot1_v4_engine
         from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
         onnx_eng = getattr(state, "onnx_engine", None)
-        if onnx_eng is None and hasattr(state, "dual_onnx_bot") and state.dual_onnx_bot:
-            onnx_eng = getattr(state.dual_onnx_bot, "gateway", None)
         exp_buf = getattr(state, "experience_buffer", None)
         state.bot1_v4_engine = Bot1V4DominationEngine(onnx_engine=onnx_eng, experience_buffer=exp_buf)
+        return state.bot1_v4_engine
     elif bot_id in ("both", "dual", "dual_domination", "dual_fleet"):
         class DualFleetProxy:
             STRATEGY_ID = "both"
@@ -392,12 +395,15 @@ class ServerState:
         self.gdrive_sync = GDriveSyncDaemon(data_dir=self.data_dir, sync_interval_seconds=300)
 
         # High-Throughput Quantitative Data & Memory Manager
+        # On AWS Cloud appliances (KALSHI_CLOUD_LEAN=true or AWS environment), keep ticks strictly in zero-copy RAM
+        is_cloud_lean = os.getenv("KALSHI_CLOUD_LEAN", "false").lower() == "true" or os.path.exists("/home/ec2-user")
         self.memory_manager = MarketDataMemoryManager(
             data_dir=self.data_dir,
             max_hot_ticks_per_ticker=1000,
             max_active_tickers=50,
             batch_flush_size=100,
             flush_interval_seconds=1.0,
+            enable_disk_offload=not is_cloud_lean,
         )
 
         # Autonomous Continuous Background ONNX Model Trainer (Live Trading Protected)
@@ -413,16 +419,24 @@ class ServerState:
             enabled=True,
         )
 
-        # Gold 32-D ONNX Continuous Background Trainer (Lane 2 Incubator)
-        self.gold_continuous_trainer = GoldContinuousTrainer(
-            training_interval_s=120.0,
-            batch_size=32,
-            target_val_acc=0.85,
-            min_f1_score=0.80,
+        # Gold 32-D ONNX Continuous Background Trainer (Lane 2 Incubator - optional)
+        self.gold_continuous_trainer = (
+            GoldContinuousTrainer(
+                training_interval_s=120.0,
+                batch_size=32,
+                target_val_acc=0.85,
+                min_f1_score=0.80,
+            )
+            if GoldContinuousTrainer is not None
+            else None
         )
 
-        # Lane 2 Gold ONNX Shadow Runner (Paper Trading on Live Ticks)
-        self.gold_shadow_runner = Lane2GoldShadowRunner(strategy_mode="ONNX")
+        # Lane 2 Gold ONNX Shadow Runner (Paper Trading on Live Ticks - optional)
+        self.gold_shadow_runner = (
+            Lane2GoldShadowRunner(strategy_mode="ONNX")
+            if Lane2GoldShadowRunner is not None
+            else None
+        )
 
         # Project Odin Shadow Volatility Harvester (Lane 2 Shadow Fleet)
         from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer
@@ -921,6 +935,32 @@ async def integrity_audit_loop() -> None:
         await asyncio.sleep(2.0)
 
 
+async def data_hygiene_loop() -> None:
+    """Periodic disk and data hygiene guardian (Runs every 10 minutes to protect free-tier storage)."""
+    while True:
+        try:
+            await asyncio.sleep(600.0)  # every 10 minutes
+            from kalshi_sim.data_hygiene import DataHygieneManager
+            mgr = DataHygieneManager(data_dir=state.data_dir, active_buffer_seconds=300.0)
+            purged_count, bytes_reclaimed = mgr.purge_redundant_files()
+            if purged_count > 0:
+                logger.info(
+                    "🧹 [STORAGE HYGIENE] Purged %d redundant/stub files, reclaimed %.2f MB.",
+                    purged_count, bytes_reclaimed / (1024 * 1024)
+                )
+
+            # Check remaining free disk space
+            import shutil
+            _, _, free_bytes = shutil.disk_usage(state.data_dir)
+            free_gb = free_bytes / (1024 ** 3)
+            if free_gb < 1.5:
+                logger.warning("🚨 [DISK SPACE ALERT] Low free disk space: %.2f GB remaining on %s!", free_gb, state.data_dir)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.debug("Data hygiene loop exception: %s", exc)
+
+
 async def live_balance_sync_loop() -> None:
     """Periodically synchronize and cache real-time Kalshi exchange balance and live positions."""
     api_key_id = os.getenv("KALSHI_API_KEY_ID")
@@ -1042,6 +1082,7 @@ async def start_background_simulation() -> None:
         guardrails=state.guardrails_agent,
         bot_auditor=state.bot_auditor,
         hmm_brain=state.hmm_brain,
+        experience_buffer=state.experience_buffer,
     )
     if getattr(state, "guardrails_agent", None):
         state.guardrails_agent.reset_circuit_breaker(state.starting_capital)
@@ -1052,9 +1093,11 @@ async def start_background_simulation() -> None:
     else:
         state.sim_agent.execution_mode = state.mode
         
-    # Re-enabled per user request: Required by Agent Deer / DeerFlow for data organization
-    state.tick_writer = TickWriter(data_dir=state.data_dir, timeframe="paper_live")
-    await state.tick_writer.open()
+    # In cloud lean environments (AWS EC2), suppress writing multi-gigabyte raw tick files
+    is_cloud_lean = os.getenv("KALSHI_CLOUD_LEAN", "false").lower() == "true" or os.path.exists("/home/ec2-user")
+    if not is_cloud_lean:
+        state.tick_writer = TickWriter(data_dir=state.data_dir, timeframe="paper_live")
+        await state.tick_writer.open()
 
     # Hook feed updates to server state
     original_apply_delta = state.orderbook.apply_delta
@@ -1147,6 +1190,7 @@ async def start_background_simulation() -> None:
 
     state.live_balance_task = asyncio.create_task(live_balance_sync_loop(), name="live_balance_sync")
     state.hmm_regime_task = asyncio.create_task(hmm_macro_regime_loop(), name="hmm_macro_regime")
+    state.data_hygiene_task = asyncio.create_task(data_hygiene_loop(), name="data_hygiene")
     
     # Perpetuals permanently stopped for good by user directive
     # from kalshi_sim.routers.perpetuals import perpetual_auto_trade_loop

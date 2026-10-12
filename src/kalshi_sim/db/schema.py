@@ -18,7 +18,69 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
+
+SCHEMA_V4_SQL = """
+-- 10. Batch Assessments Ledger Table
+CREATE TABLE IF NOT EXISTS batch_assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_number INTEGER UNIQUE NOT NULL,
+    document_id TEXT,
+    evaluation_date TEXT NOT NULL,
+    time_window TEXT,
+    market_session TEXT,
+    target_asset TEXT DEFAULT 'KXBTC15M',
+    vessel TEXT,
+    active_playbook TEXT,
+    verdict TEXT NOT NULL,
+    wins INTEGER NOT NULL,
+    losses INTEGER NOT NULL,
+    total_trades INTEGER NOT NULL,
+    win_rate REAL NOT NULL,
+    net_pnl REAL NOT NULL,
+    pre_batch_balance REAL,
+    post_batch_balance REAL,
+    market_regime TEXT,
+    microstructure_context TEXT,
+    winning_autopsy TEXT,
+    losing_autopsy TEXT,
+    root_cause_why TEXT,
+    changes_triggered TEXT,
+    council_directives TEXT,
+    lessons_learned TEXT,
+    trades_json TEXT,
+    raw_markdown TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_batch_assessments_batch ON batch_assessments (batch_number);
+CREATE INDEX IF NOT EXISTS idx_batch_assessments_date ON batch_assessments (evaluation_date);
+CREATE INDEX IF NOT EXISTS idx_batch_assessments_verdict ON batch_assessments (verdict);
+
+-- 11. General Macro Assessments Table
+CREATE TABLE IF NOT EXISTS general_assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    assessment_id TEXT UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    evaluation_date TEXT NOT NULL,
+    time_window TEXT,
+    total_trades INTEGER,
+    wins INTEGER,
+    losses INTEGER,
+    win_rate REAL,
+    net_pnl REAL,
+    pre_balance REAL,
+    post_balance REAL,
+    leaks_identified TEXT,
+    architecture_innovations TEXT,
+    dof_portfolio_json TEXT,
+    lessons_learned TEXT,
+    raw_markdown TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_general_assessments_id ON general_assessments (assessment_id);
+"""
 
 SCHEMA_V3_SQL = """
 -- 8. Perpetual Trading Positions Table
@@ -256,5 +318,15 @@ class MigrationEngine:
             await db.commit()
             current_version = 3
             logger.info("Successfully applied migration V3.")
+
+        if current_version < 4:
+            logger.info("Applying migration V4 (Batch Assessments and Quantitative Lessons Ledger)...")
+            await db.executescript(SCHEMA_V4_SQL)
+            await db.execute(
+                "INSERT OR REPLACE INTO schema_migrations (version, description) VALUES (4, 'Batch assessments and quantitative lessons ledger')"
+            )
+            await db.commit()
+            current_version = 4
+            logger.info("Successfully applied migration V4.")
 
         return current_version

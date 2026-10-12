@@ -14,6 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import os
 import orjson
 from pydantic import BaseModel
 
@@ -50,24 +51,33 @@ class TickWriter:
         timeframe: str = "15m",
         flush_interval: int = 50,
         max_queue_size: int = 10000,
+        disabled: bool | None = None,
     ) -> None:
         self._data_dir = data_dir
         self._timeframe = timeframe
         self._flush_interval = flush_interval
+
+        is_cloud_lean = os.getenv("KALSHI_CLOUD_LEAN", "false").lower() == "true" or os.path.exists("/home/ec2-user")
+        self._disabled = disabled if disabled is not None else is_cloud_lean
 
         self._file_path: Path | None = None
         self._file = None
         self._write_count: int = 0
         self._queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue(maxsize=max_queue_size)
         self._drain_task: asyncio.Task | None = None
-        self._closed = False
+        self._closed = self._disabled
 
     @property
     def file_path(self) -> Path | None:
         return self._file_path
 
-    async def open(self) -> Path:
+    async def open(self) -> Path | None:
         """Create and open a new tick file and start the background drain task."""
+        if self._disabled:
+            logger.info("TickWriter is in CLOUD LEAN mode: disk tick writing is DISABLED to preserve storage.")
+            self._closed = True
+            return None
+
         def _open_file() -> tuple[Path, Any]:
             self._data_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")

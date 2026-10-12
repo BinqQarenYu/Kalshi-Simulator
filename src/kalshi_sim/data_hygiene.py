@@ -123,7 +123,7 @@ class DataHygieneManager:
                 continue
 
             # 5. Monolithic tick dumps
-            if name.startswith("ticks_paper_live_"):
+            if name.startswith("ticks_"):
                 if sz < 100 * 1024:
                     rep.restart_stubs.append(name)
                 else:

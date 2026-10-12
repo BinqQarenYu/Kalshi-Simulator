@@ -14,16 +14,18 @@ ASVL is the execution and verification engine of Antigravity. It takes the **Gra
 
 ## 2. Self-Verification & Testing Setup
 Before declaring any code complete, configure and run automated verification tools autonomously. Do not rely on human review.
-- **Project-Specific Test Harness**: Adhere strictly to the project rules defined in [`4-autonomous-execution.md`](file:///.agents/rules/4-autonomous-execution.md) and [`1-trading-invariants.md`](file:///.agents/rules/1-trading-invariants.md):
-  - Backend targeted test: `python -m pytest tests/<target_test>.py -v`
-  - Backend full suite: `python -m pytest tests/ -q` (all 296+ tests must pass)
-  - Frontend typecheck: `npm --prefix frontend run typecheck` (`tsc --noEmit`)
-  - Frontend production build: `npm --prefix frontend run build` (`vite build`)
+- **Project-Specific Test Harness**: Adhere strictly to the project rules defined in [`4-autonomous-execution.md`](file:///.agents/library/4-autonomous-execution.md) and [`1-trading-invariants.md`](file:///.agents/library/1-trading-invariants.md):
+  - **Backend Targeted Verification**: `python -m pytest tests/<target_test>.py -v` (run on every atomic micro-step).
+  - **Backend Full Suite**: `python -m pytest tests/ -q` (executed at final completion gate).
+  - **Frontend Typecheck**: `npm --prefix frontend run typecheck` (`tsc --noEmit`).
+  - **Frontend Production Build**: `npm --prefix frontend run build` (`vite build`).
+  - **Zero Float Math Invariant**: Verify all balances, limits, and PnL use `decimal.Decimal` (Python) and `decimal.js` (TypeScript).
+  - **Database & Assessment Parity**: Ensure SQLite database (`data/kalshi_history.db`) schema migrations, trade tables, and `batch_assessments` records match current state.
 - **Dual-Tier Continuous Evaluation Loop**:
   1. *Micro-Step Loop (Per Task)*: `BUILD ──> TARGET VERIFY ──> FIX` on each Codeflow atomic step. Always use quiet mode (`pytest tests/<target>.py -q`) to keep terminal logs under 15 lines.
-  2. *Final Regression Loop*: `FULL TEST BATTERY ──> BUILD CHECK ──> COMPLETE GATE` executed only once at task completion.
+  2. *Final Regression Loop*: `FULL TEST BATTERY ──> BUILD CHECK ──> COMPLETE GATE` executed once at task completion.
 - **Token & Log Conservation Invariants**:
-  - Never run the full 296+ test suite on intermediate micro-steps.
+  - Never run the full test suite on intermediate micro-steps; use targeted test files.
   - Never poll background tasks in a loop; yield execution and await reactive system notifications.
   - Never re-read a file immediately after editing it; rely on the replacement diff.
   - Never parrot artifact contents in text replies; point the user to the artifact.
@@ -34,7 +36,7 @@ During execution, operate as a fully autonomous agent thread within the Antigrav
 - **End-to-End Task Execution**: Do not yield control, request mid-task approval, or return partial progress. Continuously chain internal agent steps, terminal commands, and tool calls until all success criteria are satisfied.
 - **Antigravity Tooling & Sensible Defaults**: Independently select and invoke available platform capabilities (shell execution, workspace search, targeted file edits). If minor implementation details are unspecified, apply institutional standards without halting execution.
 - **Autonomous Error Recovery**: If build steps fail, terminal commands error out, or verification loops detect regressions, inspect execution logs, resolve issues, and immediately re-trigger the verification loop.
-- **System Blocker Escalation**: Yield execution control to the user ONLY if you hit an unrecoverable system boundary—such as missing external API credentials, OS-level permission locks, or platform service outages.
+- **Rule 9 Exception Escalation**: Yield execution control and ask the user for explicit approval ONLY when proposing modifications to protected brain code (`bot1_v4_engine.py`, `ai_worker.py`, `strategy_evaluator.py`, `statistical_ev.py`) or active quantitative trading parameters.
 
 ## 4. Definitive Completion Gates
 Exit the autonomous loop and return control to the user ONLY when ALL completion conditions are met:
@@ -62,14 +64,7 @@ Process all implementation tasks using this internal step-by-step cycle:
 6. **REGRESSION CHECK**: Run the full project test harness (`pytest tests/ -q` and `npm run build`).
 7. **COMPLETE**: Document changes in a walkthrough artifact and present verified results.
 
----
-
-## 6. Continuous 24/7 Dual-Lead Autonomous Architecture
-The self-healing and self-verification lifecycle operates 24/7 across two dedicated Gemini Free-Tier leads:
-
-| Autonomous Role | Engine & Model | Operational Domain & Mandate |
-|---|---|---|
-| **Lead Deer** (Backend Lead) | Google Gemini Free API | **24/7 Autonomous Backend Self-Healer**: Continually monitors `server.py`, error logs, WebSocket sequence gaps, L2 book resyncs, and regressions. Diagnoses runtime exceptions, executes backend self-repairs, and dispatches incident digests to `likhahomebuild`. |
-| **Lead Architect** (Frontend Lead) | Google Gemini Free API | **24/7 Autonomous Frontend Quant Designer**: Continually polishes WebCLOB ergonomics, visual hierarchy, dark institutional theming, glanceable telemetry, and layout responsiveness. Operates under strict **harmless execution invariants**: zero tampering with React state hooks, WebSocket feeds, or execution handlers. |
-
-Both 24/7 autonomous leads operate within Google's Free Tier quotas (15 RPM / 1M TPM / $0.00 cost) with zero latency impact on live trading.
+## 6. Quant Council Continuous Improvement Alignment
+- All completed trades resolve against the **6-Trade Iterative Improvement Cycle** (`docs/AUTONOMOUS_6_TRADE_IMPROVEMENT_CYCLE.md`).
+- Assessment autopsies and root-cause findings are preserved in SQLite `batch_assessments` and `general_assessments` tables (`kalshi_history.db`).
+- Candidate improvements are arbitrated against the 23 Master Degrees of Freedom in `docs/DOF_Counterfactual_Shadow_Ledger.md`.

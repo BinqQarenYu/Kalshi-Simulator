@@ -27,6 +27,7 @@ from kalshi_sim.db import DatabaseWriter, get_db_writer
 from kalshi_sim.execution_logger import ExecutionLogger
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
+from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
 from kalshi_sim.ml.macro_trend_dominion import MacroTrendDominionBot
@@ -83,6 +84,7 @@ class SimulationAgent:
         hmm_brain: Optional[Any] = None,
         simulator: Optional[OrderSimulator] = None,
         realistic_simulation: bool = False,
+        experience_buffer: Optional[ContinuousExperienceBuffer] = None,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
@@ -93,6 +95,7 @@ class SimulationAgent:
         self._btc_orderflow_feed = btc_orderflow_feed or BtcOrderflowFeed()
         self.bot_auditor = bot_auditor or BotDeploymentAuditor(guardrails=self._guardrails)
         self.hmm_brain = hmm_brain
+        self.experience_buffer = experience_buffer
 
         # Strategy Portfolios ($15 each starting capital)
         self._portfolio_macro_trend = Portfolio(starting_balance=starting_capital)
@@ -117,7 +120,10 @@ class SimulationAgent:
         )
         self._dominion2_bot = Dominion2Bot()
         self._domination_bot = ThreeStepDominationBot()
-        self._bot1_v4_engine = Bot1V4DominationEngine(onnx_engine=self._onnx_engine)
+        self._bot1_v4_engine = Bot1V4DominationEngine(
+            onnx_engine=self._onnx_engine,
+            experience_buffer=self.experience_buffer,
+        )
         self._dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
         self.active_strategy_bot: str = "3_step_domination_bot"
         self.execution_mode: str = "simulated"

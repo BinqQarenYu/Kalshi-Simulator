@@ -344,6 +344,70 @@ class DatabaseWriter:
         except asyncio.QueueFull:
             logger.warning("DatabaseWriter queue full; dropped circuit breaker event")
 
+    def enqueue_batch_assessment(
+        self,
+        batch_number: int,
+        evaluation_date: str,
+        verdict: str,
+        wins: int,
+        losses: int,
+        total_trades: int,
+        win_rate: float,
+        net_pnl: float,
+        document_id: Optional[str] = None,
+        time_window: Optional[str] = None,
+        market_session: Optional[str] = None,
+        target_asset: str = "KXBTC15M",
+        vessel: Optional[str] = None,
+        active_playbook: Optional[str] = None,
+        pre_batch_balance: Optional[float] = None,
+        post_batch_balance: Optional[float] = None,
+        market_regime: Optional[str] = None,
+        microstructure_context: Optional[str] = None,
+        winning_autopsy: Optional[str] = None,
+        losing_autopsy: Optional[str] = None,
+        root_cause_why: Optional[str] = None,
+        changes_triggered: Optional[str] = None,
+        council_directives: Optional[str] = None,
+        lessons_learned: Optional[str] = None,
+        trades_json: Optional[str] = None,
+        raw_markdown: Optional[str] = None,
+    ) -> None:
+        """Enqueue an audited 6-trade batch evaluation assessment."""
+        record = {
+            "batch_number": batch_number,
+            "document_id": document_id,
+            "evaluation_date": evaluation_date,
+            "time_window": time_window,
+            "market_session": market_session,
+            "target_asset": target_asset,
+            "vessel": vessel,
+            "active_playbook": active_playbook,
+            "verdict": verdict,
+            "wins": wins,
+            "losses": losses,
+            "total_trades": total_trades,
+            "win_rate": float(win_rate),
+            "net_pnl": float(net_pnl),
+            "pre_batch_balance": float(pre_batch_balance) if pre_batch_balance is not None else None,
+            "post_batch_balance": float(post_batch_balance) if post_batch_balance is not None else None,
+            "market_regime": market_regime,
+            "microstructure_context": microstructure_context,
+            "winning_autopsy": winning_autopsy,
+            "losing_autopsy": losing_autopsy,
+            "root_cause_why": root_cause_why,
+            "changes_triggered": changes_triggered,
+            "council_directives": council_directives,
+            "lessons_learned": lessons_learned,
+            "trades_json": trades_json,
+            "raw_markdown": raw_markdown,
+        }
+        try:
+            self.queue.put_nowait(QueuedRecord(table="batch_assessments", data=record))
+        except asyncio.QueueFull:
+            logger.warning("DatabaseWriter queue full; dropped batch assessment #%d", batch_number)
+
+
 
 # Global default writer singleton
 _global_db_writer: Optional[DatabaseWriter] = None

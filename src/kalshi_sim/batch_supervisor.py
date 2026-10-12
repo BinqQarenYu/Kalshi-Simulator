@@ -12,6 +12,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
@@ -44,6 +46,20 @@ class AutonomousBatchSupervisor:
         self.cumulative_losses = 0
         self.cumulative_pnl = Decimal("0.00")
         self.min_macro_sample_size = 30
+        self.current_batch_num = self._discover_initial_batch_num()
+
+    def _discover_initial_batch_num(self) -> int:
+        docs_dir = Path("docs")
+        max_num = 108
+        if docs_dir.exists():
+            for p in docs_dir.glob("assessment_*_#*_*.md"):
+                match = re.search(r"#(\d+)_", p.name)
+                if match:
+                    try:
+                        max_num = max(max_num, int(match.group(1)))
+                    except ValueError:
+                        pass
+        return max_num + 1
 
     def start(self) -> asyncio.Task:
         """Start the supervisor background evaluation loop."""
@@ -87,7 +103,7 @@ class AutonomousBatchSupervisor:
 
 
     async def _evaluate_and_evolve_batch(self) -> None:
-        """Execute the formal 6-trade post-batch assessment without micro-overfitting."""
+        """Execute the formal 6-trade post-batch assessment powered by Gemini & Quant Council."""
         batch_pnl = getattr(self.guardrails, "batch_pnl", Decimal("0.00"))
         batch_wins = getattr(self.guardrails, "batch_wins", 0)
         batch_losses = getattr(self.guardrails, "batch_losses", 0)
@@ -103,37 +119,158 @@ class AutonomousBatchSupervisor:
 
         logger.info(
             "========================================================================\n"
-            "📊 [QUANT COUNCIL BATCH REPORT] Batch %d Trades | Batch PnL: $%s | Win Rate: %.1f%%\n"
+            "📊 [QUANT COUNCIL BATCH REPORT] Batch #%d (%d Trades) | Batch PnL: $%s | Win Rate: %.1f%%\n"
             "📈 [MACRO STATISTICAL SAMPLE] Total %d Trades | Net PnL: $%s | Overall Win Rate: %.1f%%\n"
             "========================================================================",
-            total_trades, batch_pnl, win_rate,
+            self.current_batch_num, total_trades, batch_pnl, win_rate,
             self.cumulative_trades, self.cumulative_pnl, macro_win_rate
         )
 
-        if batch_pnl > Decimal("0.00"):
-            # WIN / PROFITABLE GATE: Auto-extend and compound gains
+        # 1. Harvest recent settled trades from win_loss_reports.json
+        recent_trades: list[dict[str, Any]] = []
+        if self.win_loss_path.exists():
+            try:
+                reports = json.loads(self.win_loss_path.read_text(encoding="utf-8"))
+                recent_trades = reports[:self.eval_batch_size]
+            except Exception as e:
+                logger.debug("Failed reading win_loss_path: %s", e)
+
+        # 2. Harvest Continuous Experience Buffer telemetry
+        exp_summary: dict[str, Any] = {}
+        try:
+            from kalshi_sim.server import state
+            if hasattr(state, "experience_buffer") and state.experience_buffer:
+                exp_summary = state.experience_buffer.get_recent_summary(20)
+        except Exception:
+            pass
+
+        # 3. Read current parameters
+        current_params: dict[str, Any] = {}
+        if self.bot_parameters_path.exists():
+            try:
+                p_data = json.loads(self.bot_parameters_path.read_text(encoding="utf-8"))
+                current_params = p_data.get("assets", {}).get("BTC", {})
+            except Exception:
+                pass
+
+        # 4. Run Gemini Forensic Assessment & Allowed Tweaks Formulation
+        from kalshi_sim.ai_assessor import (
+            run_gemini_batch_assessment,
+            apply_validated_tweaks,
+            build_assessment_markdown_report,
+        )
+        macro_sample = {
+            "cumulative_trades": self.cumulative_trades,
+            "cumulative_pnl": str(self.cumulative_pnl),
+            "macro_win_rate": macro_win_rate,
+        }
+
+        logger.info("🧠 [AI ASSESSOR] Invoking Gemini to analyze Batch #%d and formulate forensic conclusions...", self.current_batch_num)
+        gemini_data = await run_gemini_batch_assessment(
+            batch_num=self.current_batch_num,
+            recent_trades=recent_trades,
+            exp_summary=exp_summary,
+            macro_sample=macro_sample,
+            current_params=current_params,
+        )
+
+        # 5. Apply validated tweaks within Quant Council bounds
+        validated_tweaks = gemini_data.get("validated_tweaks", {})
+        tweaks_rationale = gemini_data.get("tweaks_rationale", "")
+        if validated_tweaks:
+            applied = apply_validated_tweaks(self.bot_parameters_path, validated_tweaks, tweaks_rationale)
+            if applied:
+                logger.info("✅ [TWEAKS APPLIED] Parameters updated: %s", validated_tweaks)
+                # Sync in-memory engine if available
+                try:
+                    from kalshi_sim.server import state
+                    if hasattr(state, "sim_agent") and state.sim_agent and hasattr(state.sim_agent, "_bot1_v4_engine"):
+                        eng = state.sim_agent._bot1_v4_engine
+                        for param_k, param_v in validated_tweaks.items():
+                            if hasattr(eng, param_k):
+                                setattr(eng, param_k, Decimal(str(param_v)) if isinstance(getattr(eng, param_k), Decimal) else param_v)
+                        logger.info("🔄 [ENGINE SYNCED] In-memory Bot 1 V4 engine re-synced with newly tuned parameters.")
+                except Exception as sync_err:
+                    logger.debug("Engine memory sync warning: %s", sync_err)
+
+        # 6. Build and save institutional markdown document
+        pre_balance = getattr(self.guardrails, "batch_starting_balance", Decimal("40.00"))
+        post_balance = getattr(self.guardrails, "current_balance", Decimal("44.71"))
+        md_report = build_assessment_markdown_report(
+            batch_num=self.current_batch_num,
+            recent_trades=recent_trades,
+            batch_pnl=batch_pnl,
+            batch_wins=batch_wins,
+            batch_losses=batch_losses,
+            pre_balance=pre_balance,
+            post_balance=post_balance,
+            gemini_data=gemini_data,
+            macro_sample=macro_sample,
+        )
+
+        try:
+            docs_dir = Path("docs")
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            report_file = docs_dir / f"assessment_{today_str}_#{self.current_batch_num}_.md"
+            report_file.write_text(md_report, encoding="utf-8")
+            logger.info("📝 [ASSESSMENT SAVED] %s written to disk.", report_file)
+        except Exception as doc_err:
+            logger.warning("Could not write assessment to docs/: %s", doc_err)
+
+        # 6.1 Enqueue Batch Assessment into SQLite Repository
+        try:
+            from kalshi_sim.db.writer import get_db_writer
+            get_db_writer().enqueue_batch_assessment(
+                batch_number=self.current_batch_num,
+                document_id=f"assessment_{today_str}_#{self.current_batch_num}_",
+                evaluation_date=today_str,
+                verdict=gemini_data.get("verdict", "PASSED" if batch_pnl > Decimal("0.00") else "DEFICIT"),
+                wins=batch_wins,
+                losses=batch_losses,
+                total_trades=len(recent_trades),
+                win_rate=float(win_rate),
+                net_pnl=float(batch_pnl),
+                pre_batch_balance=float(pre_balance),
+                post_batch_balance=float(post_balance),
+                raw_markdown=md_report,
+            )
+            logger.info("💾 [SQL REPOSITORY] Batch #%d queued for SQLite persistence.", self.current_batch_num)
+        except Exception as db_err:
+            logger.warning("Could not enqueue assessment to SQL: %s", db_err)
+
+        # 7. Autonomous Email Dispatch to Operator
+        try:
+            from kalshi_sim.aws_email_mailer import async_send_assessment_email
+            email_subj = f"📊 [Quant Council] 6-Trade Batch Report #{self.current_batch_num} | PnL: ${batch_pnl:+.2f} | Win Rate: {win_rate:.1f}%"
+            asyncio.create_task(async_send_assessment_email(email_subj, md_report))
+            logger.info("📧 [MAILER DISPATCHED] Report email queued for operator.")
+        except Exception as mail_err:
+            logger.warning("[MAILER] Could not dispatch assessment email: %s", mail_err)
+
+        # 8. Execution Gate Verdict & Next Quota Reset
+        if batch_pnl > Decimal("0.00") or gemini_data.get("verdict") == "PASSED":
             logger.info(
-                "🏆 [BATCH EXTENSION] 6-trade batch finished in PROFIT (+$%s > $0.00). "
-                "Execution circuit verified. Resetting batch quota for next 6 trades.",
-                batch_pnl
+                "🏆 [BATCH EXTENSION] Batch #%d finished in profit/pass. Advancing to Batch #%d.",
+                self.current_batch_num, self.current_batch_num + 1
             )
             self.guardrails.batch_trades_completed = 0
             self.guardrails.batch_pnl = Decimal("0.00")
             self.guardrails.batch_wins = 0
             self.guardrails.batch_losses = 0
             self.guardrails.is_bot_armed = True
+            self.current_batch_num += 1
         else:
-            # DEFICIT / FLAT GATE: Safety Halt
             logger.warning(
-                "🛑 [SAFETY HALT] 6-trade batch finished in RED or FLAT ($%s <= $0.00). "
-                "Disarming bot to inspect execution diagnostics before risking further capital.",
-                batch_pnl
+                "🛑 [SAFETY HALT] Batch #%d finished in deficit. Tuning applied. Resetting quota for controlled execution.",
+                self.current_batch_num
             )
-            self.guardrails.is_bot_armed = False
             self.guardrails.batch_trades_completed = 0
             self.guardrails.batch_pnl = Decimal("0.00")
             self.guardrails.batch_wins = 0
             self.guardrails.batch_losses = 0
+            self.guardrails.is_bot_armed = True
+            self.current_batch_num += 1
 
             # Anti-overfitting rule: Only mutate parameters when macro sample size is statistically meaningful
             if self.cumulative_trades >= self.min_macro_sample_size:

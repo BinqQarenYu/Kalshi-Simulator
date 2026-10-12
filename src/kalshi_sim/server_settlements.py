@@ -239,6 +239,19 @@ def record_win_loss_event_report(
     state.win_loss_reports.insert(0, report)
     state.save_persisted_reports()
 
+    # Feed Continuous Experience Buffer for online sharpening & Platt calibration
+    if hasattr(state, "experience_buffer") and state.experience_buffer:
+        try:
+            exp = state.experience_buffer._dict_to_experience(report)
+            if exp:
+                state.experience_buffer.record_settled_cycle(exp)
+                logger.info(
+                    "[EXPERIENCE_BUFFER] Recalibrated after cycle %s -> %s (PnL: $%s). Brier: %.4f, Platt Alpha: %.2f",
+                    ticker, outcome.upper(), pnl, state.experience_buffer.brier_score, state.experience_buffer.platt_alpha
+                )
+        except Exception as eb_exc:
+            logger.debug("[EXPERIENCE_BUFFER] Error recording cycle settlement: %s", eb_exc)
+
     if not skip_guardrails and hasattr(state, "guardrails_agent") and state.guardrails_agent:
         # Record settlement in Agent_Guardrails to unlock cycle and track streaks
         state.guardrails_agent.record_cycle_settlement(

@@ -422,6 +422,7 @@ class DominationExitEvaluator:
 
         enable_doubt_harvest = getattr(bot, "enable_doubt_harvest", True)
         doubt_thresh = getattr(bot, "doubt_threshold", 0.80)
+        upside_thresh = getattr(bot, "upside_capture_ratio_threshold", 0.50)
         asymmetric_peak = getattr(bot, "asymmetric_peak_bid", Decimal("0.75"))
 
         twap_safe_itm = False

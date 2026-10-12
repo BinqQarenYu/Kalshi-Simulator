@@ -181,6 +181,7 @@ class Bot1V4DominationEngine:
         self._last_storm_ts: float = 0.0
         self._regime_reason: str = "Session boot initial state"
 
+        self.experience_buffer = experience_buffer
         self.lead_deer_brain = LeadDeerQuantBrain(
             experience_buffer=experience_buffer,
             min_confidence=float(self.min_confidence),
@@ -378,6 +379,8 @@ class Bot1V4DominationEngine:
             z_asset = 1.40
 
         dynamic_moat = z_asset * live_vol * math.sqrt(tau_mins)
+        if self.experience_buffer is not None:
+            dynamic_moat *= getattr(self.experience_buffer, "adaptive_proximity_moat_multiplier", 1.0)
         return max(floor_moat, min(ceiling_moat, dynamic_moat))
 
     def compute_fused_probabilities(
@@ -431,6 +434,11 @@ class Bot1V4DominationEngine:
             if total > 0.0:
                 p_up /= total
                 p_down /= total
+
+            # Apply Online Platt Scaling Calibration if ContinuousExperienceBuffer is wired
+            if self.experience_buffer is not None:
+                p_up = self.experience_buffer.calibrate_probability(p_up)
+                p_down = max(0.01, min(0.99, round(1.0 - p_up, 3)))
 
             return p_up, p_down, p_wait_micro, onnx_res
         except Exception as exc:
@@ -749,6 +757,27 @@ class Bot1V4DominationEngine:
         )
 
         ai_tag = f" [AI Conf {onnx_conf*100:.0f}%]" if fused_source == "bayesian_fusion" else ""
+
+        # 2.4 Empirical Mistake Quadrant Pruning Gate (Continuous Experience Learning)
+        if self.experience_buffer is not None and self.experience_buffer.is_quadrant_pruned(time_to_expiry_s, spot_diff):
+            return Bot1V4Decision(
+                strategy_id=self.STRATEGY_ID,
+                strategy_name=self.STRATEGY_NAME,
+                active_playbook="empirical_quadrant_pruning_veto",
+                playbook_stage="none",
+                p_up=p_up, p_down=p_down, p_wait=1.0,
+                vpin=vpin_eval, vpin_is_safe=True,
+                ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                kelly_f_yes=0.0, kelly_f_no=0.0,
+                recommended_side="wait", recommended_contracts=0,
+                rationale="Empirical Mistake Pruning Veto: State quadrant historically unprofitable under current horizon/separation.",
+                edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                limit_price=float(self.discount_limit_price),
+                turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                regime=regime,
+            )
 
         # =========================================================================
         # WARRIOR 2: CHOP HARVESTER (Regime == 'CHOP')

@@ -182,6 +182,7 @@ class MarketDataMemoryManager:
         batch_flush_size: int = 100,
         flush_interval_seconds: float = 1.0,
         compress_offload: bool = False,
+        enable_disk_offload: bool = True,
     ) -> None:
         self.data_dir = data_dir
         self.max_hot_ticks_per_ticker = max_hot_ticks_per_ticker
@@ -189,6 +190,7 @@ class MarketDataMemoryManager:
         self.batch_flush_size = batch_flush_size
         self.flush_interval_seconds = flush_interval_seconds
         self.compress_offload = compress_offload
+        self.enable_disk_offload = enable_disk_offload
 
         # LRU mapping: ticker -> ZeroCopyRingBuffer[dict]
         self._buffers: OrderedDict[str, ZeroCopyRingBuffer[dict]] = OrderedDict()
@@ -254,7 +256,7 @@ class MarketDataMemoryManager:
         self._buffers.move_to_end(ticker)
         evicted = self._buffers[ticker].append(payload)
 
-        if evicted is not None:
+        if evicted is not None and self.enable_disk_offload:
             try:
                 self._offload_queue.put_nowait((ticker, evicted))
             except asyncio.QueueFull:
