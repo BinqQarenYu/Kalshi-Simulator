@@ -42,7 +42,12 @@ class KalshiONNXEngine:
         stats_path: Optional[str | Path] = None,
         confidence_threshold: float = CONFIDENCE_THRESHOLD,
     ) -> None:
-        self.model_path = Path(model_path) if model_path else Path("models/nano_microscope_overhauled.onnx")
+        if model_path:
+            self.model_path = Path(model_path)
+        elif Path("models/quolas.onnx").exists():
+            self.model_path = Path("models/quolas.onnx")
+        else:
+            self.model_path = Path("models/nano_microscope_overhauled.onnx")
         self.stats_path = Path(stats_path) if stats_path else (self.model_path.parent / "feature_stats.json")
         self.confidence_threshold = confidence_threshold
 
@@ -60,6 +65,7 @@ class KalshiONNXEngine:
         # Hot-reload filesystem stat check rate-limiting state
         self._last_mtime_check: float = 0.0
         self._check_interval: float = 1.0  # Throttle stat() to max once per second
+        self._last_frozen_warning_ts: float = 0.0
 
         # Performance optimization: Pre-allocate persistent contiguous input buffers to avoid
         # per-tick array instantiations and garbage collection pauses during high-frequency ticks.
@@ -166,7 +172,10 @@ class KalshiONNXEngine:
         # 5.5 Guardrails: Frozen Sensor Check (Zero Variance)
         # If the L2 order book delta is completely static, the tensor variance hits 0.0.
         if np.var(raw_vector) == 0.0:
-            logger.warning("[KalshiONNX] Guardrails triggered: Input tensor variance is 0.0. Frozen sensor detected.")
+            now_mono = time.monotonic()
+            if now_mono - self._last_frozen_warning_ts >= 30.0:
+                self._last_frozen_warning_ts = now_mono
+                logger.warning("[KalshiONNX] Guardrails triggered: Input tensor variance is 0.0. Frozen sensor detected.")
             # Halt trading by returning a confident WAIT signal.
             return {
                 "signal": "WAIT",

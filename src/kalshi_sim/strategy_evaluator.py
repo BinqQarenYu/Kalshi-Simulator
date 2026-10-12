@@ -697,7 +697,7 @@ class StrategyEvaluationCoordinator:
                             reasoning=f"Scalp Take-Profit Exit: {exit_decision.exit_reason} ({exit_decision.rationale})",
                             portfolio=portfolio,
                             bot_type="bot1_v4_domination",
-                            order_type="limit",
+                            order_type=getattr(exit_decision, "order_type", "limit"),
                             limit_price=exit_price,
                             action="sell",
                         )

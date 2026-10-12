@@ -33,11 +33,12 @@ def standard_normal_cdf(x: float) -> float:
 class DominationExitDecision:
     """Structured exit decision output from the 3-Step Domination Bot."""
     should_exit: bool
-    exit_reason: str  # 'TAKE_PROFIT_CEILING' | 'TAKE_PROFIT_ROI' | 'LATE_CYCLE_HARVEST' | 'HOLD' | 'NO_BID' | 'NONE'
+    exit_reason: str  # 'TAKE_PROFIT_CEILING' | 'TAKE_PROFIT_ROI' | 'LATE_CYCLE_HARVEST' | 'FAST_WIN_LOCK_FEE_ADVANTAGE' | 'ASYMMETRIC_PEAK_HARVEST' | 'HOLD' | 'NO_BID' | 'NONE'
     exit_price: Decimal
     profit_pct: float
     unrealized_pnl: Decimal
     rationale: str
+    order_type: str = "limit"
 
 
 class DominationExitEvaluator:
@@ -432,7 +433,13 @@ class DominationExitEvaluator:
                 twap_safe_itm = True
 
         # Asymmetric Peak Harvest Floor: In choppy regimes or after +50% ROI, risking 75c for 25c upside is negative EV.
-        if bot.enable_take_profit_ceiling and best_bid >= asymmetric_peak and net_pnl_per_ct > Decimal("0.02") and not twap_safe_itm and reverse_prob >= dyn_reversal_threshold:
+        if (
+            bot.enable_take_profit_ceiling
+            and best_bid >= asymmetric_peak
+            and net_pnl_per_ct > Decimal("0.02")
+            and not twap_safe_itm
+            and ((not getattr(bot, "require_reversal_for_asymmetric_peak", False)) or reverse_prob >= dyn_reversal_threshold)
+        ):
             return DominationExitDecision(
                 should_exit=True,
                 exit_reason="ASYMMETRIC_PEAK_HARVEST",
@@ -444,6 +451,7 @@ class DominationExitEvaluator:
                     f"Remaining upside only +${(Decimal('1.00')-best_bid):.2f} vs -${best_bid:.2f} downside | "
                     f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | Harvesting optimal EV peak."
                 ),
+                order_type="market",
             )
 
         if enable_doubt_harvest and net_pnl_per_ct > Decimal("0.04") and not twap_safe_itm:
@@ -460,7 +468,95 @@ class DominationExitEvaluator:
                         f"Doubt Score {doubt_score:.2f} >= {doubt_thresh:.2f} (Brain prob {our_prob*100:.1f}%, AdvVel {adverse_vel:+.1f}) | "
                         f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | Locking in realized gains before reversal."
                     ),
+                    order_type="market",
                 )
+
+        # Rule 5.2: Fast Taker Win Lock ("A Win is Truly a Win Even With Fees")
+        # In specific asymmetric scenarios, taking liquidity fast and paying the exchange fee ($0.01)
+        # locks in guaranteed cash and prevents late-cycle variance from destroying banked gains.
+        enable_fast_win_lock = getattr(bot, "enable_fast_win_lock", True)
+        if enable_fast_win_lock and net_pnl_per_ct > Decimal("0.02") and not twap_safe_itm:
+            fast_asym_bid = getattr(bot, "fast_lock_asymmetric_bid", Decimal("0.78"))
+            min_fast_bid = getattr(bot, "min_fast_lock_bid", Decimal("0.68"))
+            min_fast_roi = getattr(bot, "min_fast_lock_roi", 0.35)
+            late_cycle_roi = getattr(bot, "fast_lock_late_cycle_roi", 0.20)
+            net_roi = float(net_pnl_per_ct / safe_entry)
+
+            # Scenario A: Asymmetric R:R Inversion (Risking 78c to make 22c is negative EV)
+            if best_bid >= fast_asym_bid:
+                return DominationExitDecision(
+                    should_exit=True,
+                    exit_reason="FAST_WIN_LOCK_FEE_ADVANTAGE",
+                    exit_price=best_bid,
+                    profit_pct=round(roi * 100.0, 2),
+                    unrealized_pnl=round(total_net_pnl, 4),
+                    rationale=(
+                        f"⚡ [FAST TAKER WIN LOCK - ASYMMETRIC R:R] Best bid ${best_bid:.2f} >= ${fast_asym_bid:.2f} | "
+                        f"Remaining upside only +${(Decimal('1.00')-best_bid):.2f} vs downside -${best_bid:.2f} (3.5:1 risk trap) | "
+                        f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI after -${bot.fee_per_contract:.2f} fee) | "
+                        f"Selling fast at market: A win is truly a win in the bank!"
+                    ),
+                    order_type="market",
+                )
+
+            # Scenario B: CHOP & BLEED Regime Rapid Scalp Lock
+            is_chop_regime = (
+                getattr(bot, "current_regime", "") in ("CHOP", "BLEED")
+                or getattr(self, "current_regime", "") in ("CHOP", "BLEED")
+                or (time_to_expiry_s >= 150.0 and time_to_expiry_s <= 450.0 and rolling_vol_1m is not None and rolling_vol_1m < 15.0)
+            )
+            if is_chop_regime and best_bid >= min_fast_bid and net_roi >= min_fast_roi:
+                return DominationExitDecision(
+                    should_exit=True,
+                    exit_reason="FAST_WIN_LOCK_FEE_ADVANTAGE",
+                    exit_price=best_bid,
+                    profit_pct=round(roi * 100.0, 2),
+                    unrealized_pnl=round(total_net_pnl, 4),
+                    rationale=(
+                        f"⚡ [FAST TAKER WIN LOCK - CHOP SHIELD] Oscillating market: Bid ${best_bid:.2f} reached "
+                        f"+{net_roi*100:.1f}% net ROI (+${total_net_pnl:.2f}) | "
+                        f"Crossing spread with fee to bank realized gain before chop mean-reversion."
+                    ),
+                    order_type="market",
+                )
+
+            # Scenario C: Late-Cycle Gamma Defense (3-Minute Window: 15s < T <= 180s)
+            quarantine_s = getattr(bot, "twap_fading_quarantine_seconds", 15.0)
+            if time_to_expiry_s > quarantine_s and time_to_expiry_s <= 180.0 and best_bid >= min_fast_bid and net_roi >= late_cycle_roi:
+                return DominationExitDecision(
+                    should_exit=True,
+                    exit_reason="FAST_WIN_LOCK_FEE_ADVANTAGE",
+                    exit_price=best_bid,
+                    profit_pct=round(roi * 100.0, 2),
+                    unrealized_pnl=round(total_net_pnl, 4),
+                    rationale=(
+                        f"⚡ [FAST TAKER WIN LOCK - GAMMA DEFENSE] T={int(time_to_expiry_s)}s <= 180s inside gamma cliff | "
+                        f"Bid ${best_bid:.2f} holds +{net_roi*100:.1f}% net ROI (+${total_net_pnl:.2f}) | "
+                        f"Dumping into bid immediately with fee to immunize against late-cycle jump diffusion."
+                    ),
+                    order_type="market",
+                )
+
+            # Scenario D: Kinetic Exhaustion / Adverse Microstructural Shift
+            # Triggered when adverse velocity exceeds threat threshold (v_threat) outside deep ITM moat,
+            # or in transition/late cycle (T <= 240s) where an orderbook vacuum threatens banked profits.
+            is_velocity_threat = (adverse_vel >= v_threat) if time_to_expiry_s > 240.0 else (adverse_vel >= 5.0)
+            is_deep_itm_safe = moneyness >= 25.0 and (moneyness - adverse_vel) >= 15.0
+            if is_velocity_threat and not is_deep_itm_safe and best_bid >= Decimal("0.65") and net_roi >= 0.25:
+                return DominationExitDecision(
+                    should_exit=True,
+                    exit_reason="FAST_WIN_LOCK_FEE_ADVANTAGE",
+                    exit_price=best_bid,
+                    profit_pct=round(roi * 100.0, 2),
+                    unrealized_pnl=round(total_net_pnl, 4),
+                    rationale=(
+                        f"⚡ [FAST TAKER WIN LOCK - KINETIC DUMP] Adverse velocity {adverse_vel:+.1f} $/3s "
+                        f"threatens banked profit (${best_bid:.2f}, +{net_roi*100:.1f}% ROI) | "
+                        f"Taking liquidity immediately with fee before orderbook vacuum pulls the bid."
+                    ),
+                    order_type="market",
+                )
+
 
         # Rule 5.5: Lead Deer Quant Horizon Bag Evaluator (Peak Harvester)
         if getattr(bot, "enable_lead_deer_peak_harvester", False) and hasattr(bot, "lead_deer_brain") and bot.lead_deer_brain is not None:

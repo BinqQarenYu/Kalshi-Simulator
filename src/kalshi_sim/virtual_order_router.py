@@ -97,9 +97,16 @@ class VirtualOrderRouter:
 
         snapshot = active_p.get_pnl_snapshot()
 
-        if order_type == "limit" and limit_price is not None:
+        if limit_price is not None:
             est_price = limit_price
-        elif side == OrderSide.YES:
+        elif action == "sell":
+            if side == OrderSide.YES or (hasattr(side, "value") and side.value == "yes") or str(side).lower() == "yes":
+                est_price = book.best_yes_bid if book.best_yes_bid is not None else Decimal("0.50")
+            else:
+                est_price = book.best_no_bid if (hasattr(book, "best_no_bid") and book.best_no_bid is not None) else (
+                    Decimal("1.00") - book.best_yes_ask if book.best_yes_ask is not None else Decimal("0.50")
+                )
+        elif side == OrderSide.YES or (hasattr(side, "value") and side.value == "yes") or str(side).lower() == "yes":
             ask = book.best_yes_ask
             est_price = ask if ask is not None else Decimal("0.50")
         else:
@@ -227,7 +234,7 @@ class VirtualOrderRouter:
                     count=live_count,
                     action=action,
                     order_type=order_type,
-                    price_dollars=limit_price if order_type == "limit" else est_price,
+                    price_dollars=limit_price if limit_price is not None else est_price,
                     exchange_index=live_exchange_index,
                 )
                 if live_order:

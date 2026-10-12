@@ -111,6 +111,12 @@ class Bot1V4DominationEngine:
         doubt_threshold: float = 0.80,
         upside_capture_ratio_threshold: float = 0.50,
         asymmetric_peak_bid: Decimal = Decimal("0.75"),  # Council recommendation: $0.75 asymmetric chop harvest (+50% ROI)
+        enable_fast_win_lock: bool = True,  # Council fast taker win lock with fee advantage
+        fast_lock_asymmetric_bid: Decimal = Decimal("0.78"),  # Asymmetric 3.5:1 risk trap threshold ($0.78)
+        min_fast_lock_bid: Decimal = Decimal("0.68"),  # Min bid to trigger chop/late-cycle lock ($0.68)
+        min_fast_lock_roi: float = 0.35,  # +35% net ROI in chop/bleed
+        fast_lock_late_cycle_roi: float = 0.20,  # +20% net ROI in late cycle T <= 180s
+        require_reversal_for_asymmetric_peak: bool = False,  # Unconditional peak harvest at asymmetric floor
         onnx_engine: Optional[Any] = None,
         fusion_weight_micro: float = 0.40,
         opening_quarantine_seconds: float = 90.0,  # 90s opening noise quarantine (V3.2 shield)
@@ -158,6 +164,12 @@ class Bot1V4DominationEngine:
         self.doubt_threshold = doubt_threshold
         self.upside_capture_ratio_threshold = upside_capture_ratio_threshold
         self.asymmetric_peak_bid = asymmetric_peak_bid
+        self.enable_fast_win_lock = enable_fast_win_lock
+        self.fast_lock_asymmetric_bid = fast_lock_asymmetric_bid
+        self.min_fast_lock_bid = min_fast_lock_bid
+        self.min_fast_lock_roi = min_fast_lock_roi
+        self.fast_lock_late_cycle_roi = fast_lock_late_cycle_roi
+        self.require_reversal_for_asymmetric_peak = require_reversal_for_asymmetric_peak
         self.twap_fading_quarantine_seconds: float = 15.0
         self.twap_fading_window_seconds: float = 60.0
         self.enable_dynamic_reversal_curve: bool = True
@@ -477,6 +489,20 @@ class Bot1V4DominationEngine:
         p_down_macro = 1.0 - p_up_macro
 
         if self.onnx_engine is None or l2_book is None:
+            return p_up_macro, p_down_macro, 0.0, None
+
+        # Guard: Check if order book has active depth levels before executing neural feature extraction
+        has_depth = False
+        if hasattr(l2_book, "get_depth_raw"):
+            y_raw, n_raw = l2_book.get_depth_raw(1)
+            has_depth = bool(y_raw and n_raw)
+        elif hasattr(l2_book, "get_depth"):
+            bids, asks = l2_book.get_depth(1)
+            has_depth = bool(bids and asks)
+        elif hasattr(l2_book, "yes_book") and hasattr(l2_book, "no_book"):
+            has_depth = bool(l2_book.yes_book and l2_book.no_book)
+
+        if not has_depth:
             return p_up_macro, p_down_macro, 0.0, None
 
         try:

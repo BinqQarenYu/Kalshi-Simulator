@@ -207,6 +207,9 @@ def resolve_bot_instance(bot_id: str) -> Any:
             return state.bot1_v4_engine
         from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
         onnx_eng = getattr(state, "onnx_engine", None)
+        if onnx_eng is None and hasattr(state, "sim_agent") and state.sim_agent and hasattr(state.sim_agent, "_onnx_engine"):
+            onnx_eng = state.sim_agent._onnx_engine
+            state.onnx_engine = onnx_eng
         exp_buf = getattr(state, "experience_buffer", None)
         state.bot1_v4_engine = Bot1V4DominationEngine(onnx_engine=onnx_eng, experience_buffer=exp_buf)
         return state.bot1_v4_engine
@@ -548,8 +551,8 @@ class ServerState:
             self.data_dir.mkdir(parents=True, exist_ok=True)
             reports_file = self.data_dir / "win_loss_reports.json"
             tmp_file = self.data_dir / "win_loss_reports.tmp"
-            # Keep active hot ledger capped at 100 most recent records
-            capped_reports = self.win_loss_reports[-100:] if len(self.win_loss_reports) > 100 else self.win_loss_reports
+            # Keep active hot ledger capped at 100 most recent records (newest first)
+            capped_reports = self.win_loss_reports[:100] if len(self.win_loss_reports) > 100 else self.win_loss_reports
             with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(capped_reports, f, indent=2)
             tmp_file.replace(reports_file)
@@ -1060,6 +1063,9 @@ async def start_background_simulation() -> None:
         hmm_brain=state.hmm_brain,
         experience_buffer=state.experience_buffer,
     )
+    state.onnx_engine = state.sim_agent._onnx_engine
+    if hasattr(state, "bot1_v4_engine") and state.bot1_v4_engine and state.bot1_v4_engine.onnx_engine is None:
+        state.bot1_v4_engine.onnx_engine = state.onnx_engine
     if getattr(state, "guardrails_agent", None):
         state.guardrails_agent.reset_circuit_breaker(state.starting_capital)
     state.sim_agent.active_strategy_bot = state.active_strategy_bot

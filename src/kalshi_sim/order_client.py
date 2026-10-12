@@ -410,13 +410,16 @@ class KalshiLiveOrderClient:
         if action_val == "sell":
             if side_val == "yes":
                 v2_side = "ask"
-                v2_price = price_dollars if price_dollars is not None else Decimal("0.95")
+                if price_dollars is not None:
+                    v2_price = price_dollars
+                else:
+                    v2_price = Decimal("0.01") if order_type.lower() == "market" else Decimal("0.95")
             else:
                 v2_side = "bid"
                 if price_dollars is not None:
                     v2_price = Decimal("1.00") - price_dollars
                 else:
-                    v2_price = Decimal("0.05")
+                    v2_price = Decimal("0.99") if order_type.lower() == "market" else Decimal("0.05")
         else:
             if side_val == "yes":
                 v2_side = "bid"
