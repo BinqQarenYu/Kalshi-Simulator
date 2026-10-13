@@ -215,10 +215,12 @@ async def update_settings(req: SettingsRequest) -> dict[str, Any]:
             cand_bot = "dominion_2_bot"
         elif cand_bot in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
             cand_bot = "bot1_v4_domination"
+        elif cand_bot in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
+            cand_bot = "eth_bot1_v4"
         elif cand_bot in ("both", "dual", "dual_domination", "dual_fleet"):
             cand_bot = "both"
 
-        if cand_bot in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot", "both"):
+        if cand_bot in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "eth_bot1_v4", "onnx_microstructure_bot", "both"):
             # Enforce Pre-Deployment Audit Certification Gate
             if not state.bot_auditor.is_certified(cand_bot):
                 bot_inst = resolve_bot_instance(cand_bot)
@@ -1074,6 +1076,22 @@ async def get_bot_strategies() -> dict[str, Any]:
                 ],
             },
             {
+                "id": "eth_bot1_v4",
+                "name": "ETH Bot 1 V4 (Ethereum Domination)",
+                "description": "Multi-Turnover Quantitative Domination Engine calibrated for Kalshi 15M Ethereum (KXETH15M)",
+                "active": state.active_strategy_bot == "eth_bot1_v4",
+                "badge": "ETH 15M",
+                "icon": "Zap",
+                "features": [
+                    "KXETH15M 15-Minute Event Ingestion",
+                    "Calibrated ETH Volatility ($0.60/1m)",
+                    "$2.50 Strike Step Proximity Moat",
+                    "Binance + Coinbase L2 Orderflow Feed",
+                    "Isolated ETH Experience Buffer",
+                    "Micro-Bankroll Sizing Armor (Strictly 1 Contract)",
+                ],
+            },
+            {
                 "id": "onnx_microstructure_bot",
                 "name": "ONNX Microstructure Bot",
                 "description": "28-D Deep Feature Tensor + Neural Network Inference + Quarter-Kelly Sizing",
@@ -1107,8 +1125,10 @@ async def select_bot_strategy(req: StrategySelectRequest) -> dict[str, Any]:
         strat_id = "dominion_2_bot"
     elif strat_id in ("bot1_v4", "bot1_v4_domination", "domination_v4", "v4_domination"):
         strat_id = "bot1_v4_domination"
+    elif strat_id in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
+        strat_id = "eth_bot1_v4"
 
-    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "onnx_microstructure_bot"):
+    if strat_id not in ("dual_onnx", "macro_onnx", "macro_trend_dominion", "dominion_2_bot", "3_step_domination_bot", "bot1_v4_domination", "eth_bot1_v4", "onnx_microstructure_bot"):
         raise HTTPException(status_code=400, detail=f"Invalid strategy_id: {req.strategy_id}")
 
     # Enforce Pre-Deployment Audit Certification Gate

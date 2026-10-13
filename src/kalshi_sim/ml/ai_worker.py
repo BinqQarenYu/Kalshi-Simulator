@@ -63,7 +63,9 @@ class AIWorker:
         self._dominion2_bot = Dominion2Bot()
         self._dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
         from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
+        from kalshi_sim.ml.eth_bot1v4.eth_bot1v4_engine import EthBot1V4Engine
         self._bot1_v4_engine = Bot1V4DominationEngine()
+        self._eth_bot1_v4_engine = EthBot1V4Engine()
         self._odin_harvester: Any = None
 
         # Thread-safe in-memory cached AI signals
@@ -116,6 +118,9 @@ class AIWorker:
             logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
         elif strategy_id in ("both", "dual", "dual_domination", "dual_fleet"):
             self.active_strategy_bot = "both"
+            logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
+        elif strategy_id in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
+            self.active_strategy_bot = "eth_bot1_v4"
             logger.info("AIWorker active strategy bot switched to: %s", self.active_strategy_bot)
         elif strategy_id in ("dominion_2_bot", "3_step_domination_bot", "onnx_microstructure_bot", "dominion2", "dominion_v2"):
             # Normalize alias
@@ -461,6 +466,53 @@ class AIWorker:
                                     )
                                 except Exception as e_odin:
                                     logger.debug("Odin observation error: %s", e_odin)
+
+                        # 3b. Strategy: ETH Bot 1 V4 (Ethereum Domination)
+                        elif self.active_strategy_bot in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
+                            vpin_val = 0.15
+                            try:
+                                vpin_val = float(self._sim_agent._onnx_engine.extractor.compute_vpin())
+                            except Exception:
+                                pass
+
+                            dec_eth = self._eth_bot1_v4_engine.evaluate_market_opportunity(
+                                spot_price=spot_price,
+                                target_strike=target_strike,
+                                time_to_expiry_s=time_to_expiry_s,
+                                l2_book=book,
+                                vpin=vpin_val,
+                                cycle_id=ticker,
+                            )
+
+                            compute_duration = (asyncio.get_event_loop().time() - start_t) * 1000.0
+                            self._last_compute_duration_ms = compute_duration
+
+                            self._cached_signals = {
+                                "strategy_id": dec_eth.strategy_id,
+                                "strategy_name": dec_eth.strategy_name,
+                                "active_playbook": dec_eth.active_playbook,
+                                "playbook_stage": dec_eth.playbook_stage,
+                                "p_up": dec_eth.p_up,
+                                "p_down": dec_eth.p_down,
+                                "p_wait": dec_eth.p_wait,
+                                "vpin": dec_eth.vpin,
+                                "vpin_is_safe": dec_eth.vpin_is_safe,
+                                "ev_yes": dec_eth.ev_yes,
+                                "ev_no": dec_eth.ev_no,
+                                "edge_yes": dec_eth.edge_yes,
+                                "edge_no": dec_eth.edge_no,
+                                "kelly_f_yes": dec_eth.kelly_f_yes,
+                                "kelly_f_no": dec_eth.kelly_f_no,
+                                "recommended_side": dec_eth.recommended_side,
+                                "recommended_contracts": dec_eth.recommended_contracts,
+                                "rationale": dec_eth.rationale,
+                                "order_type": getattr(dec_eth, "order_type", "limit"),
+                                "limit_price": getattr(dec_eth, "limit_price", 0.42),
+                                "discount_limit_price": float(self._eth_bot1_v4_engine.discount_limit_price),
+                                "turnovers_completed": dec_eth.turnovers_completed,
+                                "max_turnovers": dec_eth.max_turnovers,
+                                "compute_latency_ms": round(compute_duration, 2),
+                            }
 
                         # 4. Strategy: ONNX Microstructure Bot
                         else:

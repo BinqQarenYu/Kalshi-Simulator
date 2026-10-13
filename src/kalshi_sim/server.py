@@ -89,6 +89,7 @@ from kalshi_sim.ohlcv_aggregator import OHLCVAggregator
 from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
+from kalshi_sim.orderflow.eth_orderflow_feed import EthOrderflowFeed
 from kalshi_sim.portfolio import Portfolio
 from kalshi_sim.rate_limiter import kalshi_rate_limiter
 from kalshi_sim.schemas import (
@@ -214,6 +215,20 @@ def resolve_bot_instance(bot_id: str) -> Any:
         exp_buf = getattr(state, "experience_buffer", None)
         state.bot1_v4_engine = Bot1V4DominationEngine(onnx_engine=onnx_eng, experience_buffer=exp_buf)
         return state.bot1_v4_engine
+    elif bot_id in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
+        if hasattr(state, "eth_bot1_v4_engine") and state.eth_bot1_v4_engine:
+            return state.eth_bot1_v4_engine
+        from kalshi_sim.ml.eth_bot1v4.eth_bot1v4_engine import EthBot1V4Engine
+        onnx_eng = getattr(state, "onnx_engine", None)
+        if onnx_eng is None and hasattr(state, "sim_agent") and state.sim_agent and hasattr(state.sim_agent, "_onnx_engine"):
+            onnx_eng = state.sim_agent._onnx_engine
+            state.onnx_engine = onnx_eng
+        state.eth_bot1_v4_engine = EthBot1V4Engine(
+            onnx_engine=onnx_eng,
+            orderflow_feed=getattr(state, "eth_orderflow_feed", None),
+            order_client=getattr(state, "order_client", None),
+        )
+        return state.eth_bot1_v4_engine
     elif bot_id in ("both", "dual", "dual_domination", "dual_fleet"):
         class DualFleetProxy:
             STRATEGY_ID = "both"
@@ -354,8 +369,10 @@ class ServerState:
         self.keep_alive_task: Optional[asyncio.Task] = None
 
 
-        # Real-time Institutional Bitcoin Orderflow Feed (Binance / Coinbase L2)
+        # Real-time Institutional Orderflow Feeds (Binance / Coinbase L2)
         self.btc_orderflow_feed = BtcOrderflowFeed()
+        self.eth_orderflow_feed = EthOrderflowFeed()
+        self.active_assets: list[CryptoAsset] = [CryptoAsset.BTC, CryptoAsset.ETH]
 
         # QuoLas HMM Markov Macro Regime Detector
         self.hmm_brain = HMMBrain()
@@ -425,24 +442,9 @@ class ServerState:
             enabled=True,
         )
 
-        # Gold 32-D ONNX Continuous Background Trainer (Lane 2 Incubator - optional)
-        self.gold_continuous_trainer = (
-            GoldContinuousTrainer(
-                training_interval_s=120.0,
-                batch_size=32,
-                target_val_acc=0.85,
-                min_f1_score=0.80,
-            )
-            if GoldContinuousTrainer is not None
-            else None
-        )
-
-        # Lane 2 Gold ONNX Shadow Runner (Paper Trading on Live Ticks - optional)
-        self.gold_shadow_runner = (
-            Lane2GoldShadowRunner(strategy_mode="ONNX")
-            if Lane2GoldShadowRunner is not None
-            else None
-        )
+        # Gold 32-D ONNX Continuous Background Trainer & Shadow Runner (Excluded by Operator Directive)
+        self.gold_continuous_trainer = None
+        self.gold_shadow_runner = None
 
         # Project Odin Shadow Volatility Harvester (Lane 2 Shadow Fleet)
         from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer
@@ -1166,15 +1168,22 @@ async def start_background_simulation() -> None:
     else:
         await start_mock_feed()
 
-    # Start real-time institutional Bitcoin orderflow feed
+    # Start real-time institutional Bitcoin and Ethereum orderflow feeds
     await state.btc_orderflow_feed.start()
     def _on_btc_feed_tick(price: Decimal) -> None:
-        # Only use Binance orderflow tick as spot price fallback if official CF Benchmarks is not connected
-        if not (state.cf_sync and state.cf_sync.is_connected):
+        if state.active_asset == CryptoAsset.BTC and not (state.cf_sync and state.cf_sync.is_connected):
             if price != state.current_btc_price:
                 state.current_btc_price = price
                 state.is_dirty = True
     state.btc_orderflow_feed.register_on_tick(_on_btc_feed_tick)
+
+    await state.eth_orderflow_feed.start()
+    def _on_eth_feed_tick(price: Decimal) -> None:
+        if state.active_asset == CryptoAsset.ETH and not (state.cf_sync and state.cf_sync.is_connected):
+            if price != state.current_btc_price:
+                state.current_btc_price = price
+                state.is_dirty = True
+    state.eth_orderflow_feed.register_on_tick(_on_eth_feed_tick)
 
     state.ticker_timer_task = asyncio.create_task(live_ticker_and_timer_loop(), name="ticker_timer")
     state.broadcast_task = asyncio.create_task(broadcast_loop(), name="broadcast_loop")
@@ -1263,6 +1272,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         state.live_balance_task.cancel()
     if hasattr(state, "btc_orderflow_feed") and state.btc_orderflow_feed:
         await state.btc_orderflow_feed.stop()
+    if hasattr(state, "eth_orderflow_feed") and state.eth_orderflow_feed:
+        await state.eth_orderflow_feed.stop()
     await stop_current_feed()
     if state.sim_agent:
         await state.sim_agent.stop()

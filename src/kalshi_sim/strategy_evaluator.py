@@ -60,6 +60,7 @@ class StrategyEvaluationCoordinator:
         spot_price_getter: Optional[Callable[[], Decimal]] = None,
         bot1_v4_engine: Optional[Any] = None,
         market_maker_engine: Optional[MarketMakerEngine] = None,
+        eth_bot1_v4_engine: Optional[Any] = None,
     ) -> None:
         self._guardrails = guardrails
         self._simulator = simulator
@@ -74,6 +75,7 @@ class StrategyEvaluationCoordinator:
         self._spot_price_getter = spot_price_getter
         self._bot1_v4_engine = bot1_v4_engine
         self._market_maker_engine = market_maker_engine or (MarketMakerEngine() if MarketMakerEngine is not None else None)
+        self._eth_bot1_v4_engine = eth_bot1_v4_engine
 
         # Cooldown and rate-limiting caches
         self._last_macro_eval_time: dict[str, float] = {}
@@ -126,6 +128,9 @@ class StrategyEvaluationCoordinator:
         if is_live:
             if is_mm:
                 if not (ticker.startswith("KXBTC15M") or ticker.startswith("KXDOGE15M")):
+                    return
+            elif active_strategy_bot in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
+                if not ticker.startswith("KXETH15M"):
                     return
             elif not ticker.startswith("KXBTC15M"):
                 return
@@ -188,7 +193,7 @@ class StrategyEvaluationCoordinator:
                 place_order_fn=place_order_fn,
             )
 
-        if active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination", "bot1_v4_domination", "bot1_v4", "both", "dual", "all", "dual_domination", "dual_fleet"):
+        if active_strategy_bot in ("3_step_domination_bot", "domination_bot", "domination", "bot1_v4_domination", "bot1_v4", "both", "dual", "all", "dual_domination", "dual_fleet", "eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
             await self._eval_domination(
                 ticker=ticker,
                 book=book,
@@ -493,6 +498,9 @@ class StrategyEvaluationCoordinator:
                     ]
                 elif active_bot_type in ("bot1_v4_domination", "bot1_v4") and self._bot1_v4_engine is not None:
                     engines_to_eval = [(self._bot1_v4_engine, "bot1_v4_domination", True)]
+                elif active_bot_type in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot") or ticker.startswith("KXETH"):
+                    eth_engine = getattr(self, "_eth_bot1_v4_engine", None) or self._bot1_v4_engine
+                    engines_to_eval = [(eth_engine, "eth_bot1_v4", True)]
                 else:
                     engines_to_eval = [(self._domination_bot, "3_step_domination_bot", False)]
 

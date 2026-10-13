@@ -445,7 +445,7 @@ class KalshiLiveOrderClient:
         }
         if exchange_index is not None and exchange_index >= 0:
             payload["exchange_index"] = exchange_index
-        elif ticker.startswith("KXBTC15M") or ticker.startswith("KXBTCH") or ticker.startswith("KXBTCD"):
+        elif ticker.startswith("KXBTC15M") or ticker.startswith("KXBTCH") or ticker.startswith("KXBTCD") or ticker.startswith("KXETH15M") or ticker.startswith("KXETHD") or ticker.startswith("KXETH"):
             payload["exchange_index"] = 2
 
         session = await self._get_session()

@@ -16,6 +16,17 @@ import os
 from pathlib import Path
 import sys
 
+# Conditional imports for Windows-specific functionality
+if sys.platform == "win32":
+    try:
+        import psutil
+    except Exception:
+        psutil = None
+    import ctypes
+else:
+    psutil = None
+    ctypes = None
+
 _ROOT = Path(__file__).resolve().parent
 _SRC = _ROOT / "src"
 if str(_SRC) not in sys.path:

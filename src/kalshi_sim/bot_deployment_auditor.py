@@ -795,9 +795,8 @@ class BotDeploymentAuditor:
         has_failure = any(p.status == "FAIL" for p in pillars)
         overall_status = "BLOCKED" if has_failure else "CERTIFIED"
 
-        # Evaluate Seal of Excellence
         code_pillars_pass = all(p.status == "PASS" for p in [p1, p2, p3, p4])
-        is_baseline = bot_id in ("3_step_domination_bot", "three_step_domination_bot", "3_step_dominion", "bot1_v4_domination", "bot1_v4")
+        is_baseline = bot_id in ("3_step_domination_bot", "three_step_domination_bot", "3_step_dominion", "bot1_v4_domination", "bot1_v4", "eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot")
 
         n_c = settled_cycles if settled_cycles is not None else getattr(bot_instance, "settled_cycles", 0)
         wr = win_rate if win_rate is not None else getattr(bot_instance, "win_rate", 0.0)

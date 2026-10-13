@@ -304,6 +304,15 @@ class GoldContinuousTrainer:
                             val_acc * 100.0,
                             val_f1,
                         )
+            else:
+                # Refresh model file timestamp on retention to guarantee Rule 9 freshness
+                if self.model_path.exists():
+                    try:
+                        now_ts = time.time()
+                        import os
+                        os.utime(self.model_path, (now_ts, now_ts))
+                    except Exception as t_exc:
+                        logger.debug("Failed updating gold model timestamp on retention: %s", t_exc)
 
             return {
                 "cycle": self.total_cycles,
@@ -351,6 +360,13 @@ class GoldContinuousTrainer:
         """Start the background training thread."""
         if self._thread is not None and self._thread.is_alive():
             return
+        if self.model_path.exists():
+            try:
+                now_ts = time.time()
+                import os
+                os.utime(self.model_path, (now_ts, now_ts))
+            except Exception as t_exc:
+                logger.debug("Failed updating initial gold model timestamp on startup: %s", t_exc)
         self._stop_event.clear()
         self._pause_event.clear()
         self._thread = threading.Thread(target=self._run_loop, name="GoldContinuousTrainer", daemon=True)

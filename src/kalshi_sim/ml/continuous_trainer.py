@@ -263,6 +263,14 @@ class ContinuousModelTrainer:
         with self._lock:
             if self._running:
                 return
+            if self.onnx_model_path.exists():
+                try:
+                    now_ts = time.time()
+                    os.utime(self.onnx_model_path, (now_ts, now_ts))
+                    if self.feature_stats_path.exists():
+                        os.utime(self.feature_stats_path, (now_ts, now_ts))
+                except Exception as t_exc:
+                    logger.debug("Failed updating initial model timestamp on startup: %s", t_exc)
             self._running = True
             self._stop_event.clear()
             self._thread = threading.Thread(

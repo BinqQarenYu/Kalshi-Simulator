@@ -36,7 +36,7 @@ logger = logging.getLogger("EthBotPaperTrade")
 logger.setLevel(logging.INFO)
 
 async def main(
-    ticker: str,
+    ticker: Optional[str] = None,
     cycle_interval: int = 5,
     api_key_id: Optional[str] = None,
     private_key_path: Optional[str] = None,
@@ -45,8 +45,8 @@ async def main(
 
     Parameters
     ----------
-    ticker: str
-        The ETH contract ticker (e.g. ``KXETH15M-26AUG300215-15``).
+    ticker: str | None
+        The ETH contract ticker (e.g. ``KXETH15M-26AUG300215-15``). If None, auto-discovers active market.
     cycle_interval: int, default 5
         Seconds between engine cycles.
     api_key_id: str | None
@@ -75,15 +75,15 @@ async def main(
             await eth_engine.run_cycle()
             await asyncio.sleep(cycle_interval)
     except asyncio.CancelledError:
-        logger.info("Paper‑trade loop cancelled – shutting down.")
+        logger.info("Paper-trade loop cancelled - shutting down.")
     finally:
         await order_client.close()
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Paper‑trade ETH Bot 1 V4 on Kalshi demo.")
-    parser.add_argument("--ticker", required=True, help="ETH market ticker (e.g. KXETH15M-…)")
+    parser = argparse.ArgumentParser(description="Paper-trade ETH Bot 1 V4 on Kalshi demo.")
+    parser.add_argument("--ticker", default=None, help="ETH market ticker (e.g. KXETH15M-..., optional; auto-discovers if omitted)")
     parser.add_argument("--cycle-interval", type=int, default=5, help="Seconds between cycles.")
     parser.add_argument("--api-key-id", help="Override KALSHI_API_KEY_ID env variable.")
     parser.add_argument("--private-key-path", help="Override KALSHI_PRIVATE_KEY_PATH env variable.")

@@ -246,5 +246,11 @@ class HMMBrain:
                     self.current_regime = data.get("current_regime", self.current_regime)
                     self.regime_probabilities = data.get("regime_probabilities", self.regime_probabilities)
                 logger.info("Loaded HMM model from %s", self.model_path)
+                try:
+                    now_ts = time.time()
+                    import os
+                    os.utime(self.model_path, (now_ts, now_ts))
+                except Exception as t_exc:
+                    logger.debug("Failed updating hmm model timestamp on load: %s", t_exc)
             except Exception as e:
                 logger.warning("Could not load HMM model from %s: %s", self.model_path, e)

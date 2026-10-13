@@ -27,6 +27,7 @@ from kalshi_sim.db import DatabaseWriter, get_db_writer
 from kalshi_sim.execution_logger import ExecutionLogger
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
 from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
+from kalshi_sim.ml.eth_bot1v4.eth_bot1v4_engine import EthBot1V4Engine
 from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer
 from kalshi_sim.ml.dominion_2_bot import Dominion2Bot
 from kalshi_sim.ml.dual_onnx_strategy import DualONNXArbitrageBot
@@ -124,6 +125,10 @@ class SimulationAgent:
             onnx_engine=self._onnx_engine,
             experience_buffer=self.experience_buffer,
         )
+        self._eth_bot1_v4_engine = EthBot1V4Engine(
+            onnx_engine=self._onnx_engine,
+            order_client=self._order_client,
+        )
         self._dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
         self.active_strategy_bot: str = "3_step_domination_bot"
         self.execution_mode: str = "simulated"
@@ -151,6 +156,7 @@ class SimulationAgent:
             btc_orderflow_feed=self._btc_orderflow_feed,
             spot_price_getter=self._spot_price_getter,
             bot1_v4_engine=self._bot1_v4_engine,
+            eth_bot1_v4_engine=self._eth_bot1_v4_engine,
         )
         self._settlement_coordinator = SimulationSettlementCoordinator(
             exec_logger=self._exec_logger,
@@ -163,6 +169,7 @@ class SimulationAgent:
         for b_id, b_inst in [
             ("3_step_domination_bot", self._domination_bot),
             ("bot1_v4_domination", self._bot1_v4_engine),
+            ("eth_bot1_v4", self._eth_bot1_v4_engine),
             ("dominion_2_bot", self._dominion2_bot),
             ("macro_trend_dominion", self._macro_trend_bot),
             ("macro_onnx", self._macro_trend_bot),
@@ -326,6 +333,8 @@ class SimulationAgent:
             return self._dominion2_bot
         elif bot_id in ("bot1_v4_domination", "bot1_v4", "domination_v4", "v4_domination"):
             return self._bot1_v4_engine
+        elif bot_id in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
+            return self._eth_bot1_v4_engine
         elif bot_id in ("3_step_domination_bot", "domination_bot", "domination"):
             return self._domination_bot
         elif bot_id in ("market_maker", "bot6_market_maker"):
@@ -358,6 +367,8 @@ class SimulationAgent:
             target = "dominion_2_bot"
         elif target in ("bot1_v4_domination", "bot1_v4"):
             target = "bot1_v4_domination"
+        elif target in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
+            target = "eth_bot1_v4"
         elif target in ("3_step_domination_bot", "domination_bot", "domination"):
             target = "3_step_domination_bot"
 
