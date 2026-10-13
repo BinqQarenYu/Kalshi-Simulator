@@ -30,7 +30,7 @@ class AgentGuardrails:
         consecutive_loss_taper_threshold: int = 2,
         drawdown_taper_threshold: Decimal = Decimal("0.15"),  # 15% drawdown activates taper
         emergency_drawdown_limit: Decimal = Decimal("0.25"),  # 25% drawdown halts all trading
-        vpin_toxic_threshold: float = 0.9,
+        vpin_toxic_threshold: float = 0.65,
     ) -> None:
         self.min_order_interval_seconds = min_order_interval_seconds
         self.max_risk_pct_per_trade = max_risk_pct_per_trade

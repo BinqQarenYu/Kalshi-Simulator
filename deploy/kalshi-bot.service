@@ -1,0 +1,18 @@
+[Unit]
+Description=Kalshi Bot 1 V4 (Quolas) Autonomous Headless Quantitative Engine
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/kalshi-bot
+ExecStart=/home/ec2-user/kalshi-bot/venv/bin/python aws_headless_daemon.py
+Restart=always
+RestartSec=5
+Environment=PYTHONPATH=/home/ec2-user/kalshi-bot/src
+Environment=KALSHI_CLOUD_LEAN=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

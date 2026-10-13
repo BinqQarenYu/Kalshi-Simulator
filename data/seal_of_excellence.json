@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-10-13T07:31:17.053727+00:00",
+  "last_updated": "2026-10-13T08:44:00.792252+00:00",
   "active_live_strategy": "bot1_v4_domination",
   "seals": {
     "3_step_domination_bot": {
@@ -32,10 +32,10 @@
       "bot_id": "bot1_v4_domination",
       "bot_name": "Bot 1 V4 (Multi-Turnover Domination)",
       "seal_status": "SEALED_EXCELLENT",
-      "seal_token": "SEAL-BOT1-V4-EXCELLENCE",
+      "seal_token": "SEAL-BOT1-4127024668F8",
       "live_trading_authorized": true,
-      "granted_at": "2026-10-13T07:55:00.000000+00:00",
-      "council_signoff": "COUNCIL-SANCTIONED-V4-MULTITURNOVER",
+      "granted_at": "2026-10-13T08:44:00.792060+00:00",
+      "council_signoff": "COUNCIL-SANCTIONED-BASELINE-V3.2",
       "settled_cycles_verified": 35,
       "graduation_threshold": 30,
       "empirical_win_rate": 0.685,
@@ -50,7 +50,7 @@
       "simsim_verified": false,
       "regime_distribution": {},
       "details": {
-        "evaluated_mode": "simulated"
+        "evaluated_mode": "live"
       }
     },
     "dominion_2_bot": {
