@@ -1,0 +1,2 @@
+min_freshness_seconds: 120  # 2 minutes
+max_freshness_seconds: 300  # 5 minutes

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import yaml
 import os
 import shutil
 import tempfile
@@ -25,8 +26,19 @@ except ImportError:
 
 from kalshi_sim.ml.feature_extractor import KalshiOrderflowFeatureExtractor
 from kalshi_sim.schemas import L2BookState, TradeEvent
-
 logger = logging.getLogger(__name__)
+
+# Ensure ONNX reload log file handler exists
+log_path = Path("aws/logs/onnx_reload.log")
+try:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(log_path.resolve()) for h in logger.handlers):
+        file_handler = logging.FileHandler(str(log_path), mode="a", encoding="utf-8")
+        formatter = logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+except Exception:
+    pass
 
 # Decision thresholds
 CONFIDENCE_THRESHOLD = 0.70  # AI must be 70%+ confident to fire directional signal
@@ -48,6 +60,21 @@ class KalshiONNXEngine:
             self.model_path = Path("models/quolas.onnx")
         self.stats_path = Path(stats_path) if stats_path else (self.model_path.parent / "feature_stats.json")
         self.confidence_threshold = confidence_threshold
+        # Load freshness thresholds from config (default 2‑5 min)
+        try:
+            import yaml
+            cfg_path = Path('config/brain_freshness.yaml')
+            if cfg_path.exists():
+                cfg = yaml.safe_load(cfg_path.read_text())
+                self.min_freshness_seconds = cfg.get('min_freshness_seconds', 120)
+                self.max_freshness_seconds = cfg.get('max_freshness_seconds', 300)
+            else:
+                self.min_freshness_seconds = 120
+                self.max_freshness_seconds = 300
+        except Exception as e:
+            logger.warning(f"[KalshiONNX] Failed to load freshness config: {e}")
+            self.min_freshness_seconds = 120
+            self.max_freshness_seconds = 300
 
         self.extractor = KalshiOrderflowFeatureExtractor(target_depth=15, spatial_alpha=0.425)
         self.session: Optional[Any] = None
@@ -138,13 +165,53 @@ class KalshiONNXEngine:
         """Execute sub-millisecond ONNX inference directly on a 28-dimensional raw feature vector."""
         # 1. Hot-reload check (throttled to max once per second to avoid blocking filesystem stat calls on tick hot path)
         now = time.monotonic()
+        # 1. Freshness and hot‑reload check (throttled to once per second)
+        now = time.monotonic()
         if now - self._last_mtime_check > self._check_interval:
             self._last_mtime_check = now
             if self.model_path.exists():
                 try:
                     curr_mtime = self.model_path.stat().st_mtime
+                    age_seconds = time.time() - curr_mtime
+                    # Enforce freshness: must be between 2 min (120 s) and 5 min (300 s)
+                    if age_seconds > self.max_freshness_seconds:
+                        logger.error(
+                            "[KalshiONNX] Model %s is stale (age %.1f s > %.1f s). Sending alert and halting trading.",
+                            self.model_path,
+                            age_seconds,
+                            self.max_freshness_seconds,
+                        )
+                        # Send alert email (fail‑safe)
+                        try:
+                            from kalshi_sim.utils.email_alert import send_alert
+                            send_alert(
+                                subject="[ALERT] ONNX model stale",
+                                body=f"ONNX model {self.model_path} is {age_seconds:.1f}s old, exceeding the allowed {self.max_freshness_seconds}s freshness window. Trading is paused.",
+                            )
+                        except Exception as exc:
+                            logger.error("[KalshiONNX] Failed to send alert email: %s", exc)
+                        # Force a WAIT signal with zero confidence to stop trading
+                        return {
+                            "signal": "WAIT",
+                            "confidence": 0.0,
+                            "prob_long": 0.0,
+                            "prob_short": 0.0,
+                            "prob_wait": 1.0,
+                            "rel_long": 0.0,
+                            "rel_short": 0.0,
+                            "vpin_score": 0.0,
+                            "vpin_veto": True,
+                            "veto_reason": "MODEL_STALE",
+                            "spread_bps": 0.0,
+                            "ofi_l1": 0.0,
+                            "ofi_l5": 0.0,
+                            "cvd": 0.0,
+                            "entropy": 0.0,
+                            "whale_tx": 0.0,
+                        }
+                    # Normal hot‑reload if a newer file appears
                     if curr_mtime > self.last_mtime:
-                        logger.info("[KalshiONNX] Hot-reload triggered: reloading %s", self.model_path)
+                        logger.info("[KalshiONNX] Hot‑reload triggered: reloading %s", self.model_path)
                         self._load_model()
                 except Exception:
                     pass

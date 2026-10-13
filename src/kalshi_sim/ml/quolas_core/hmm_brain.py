@@ -45,6 +45,21 @@ class HMMBrain:
             self.model_path = Path(model_dir) / self.config.model_filename
         else:
             self.model_path = self.config.models_dir / self.config.model_filename
+        # Load freshness thresholds (same defaults as ONNX)
+        try:
+            import yaml
+            cfg_path = Path('config/brain_freshness.yaml')
+            if cfg_path.exists():
+                cfg = yaml.safe_load(cfg_path.read_text())
+                self.min_freshness_seconds = cfg.get('min_freshness_seconds', 120)
+                self.max_freshness_seconds = cfg.get('max_freshness_seconds', 300)
+            else:
+                self.min_freshness_seconds = 120
+                self.max_freshness_seconds = 300
+        except Exception as e:
+            logger.warning(f"[HMMBrain] Failed to load freshness config: {e}")
+            self.min_freshness_seconds = 120
+            self.max_freshness_seconds = 300
 
         self._load_model()
 

@@ -31,5 +31,5 @@ print(f"Session loaded: {eng_quolas.session is not None}")
 
 print("\n=== TESTING HMM Brain ===")
 hmm = HMMBrain()
-print(f"HMM model exists: {hmm._model_path.exists()}")
-print(f"HMM is trained/loaded: {hmm._is_trained}")
+print(f"HMM model exists: {hmm.model_path.exists()}")
+print(f"HMM is trained/loaded: {hmm.is_trained}")
