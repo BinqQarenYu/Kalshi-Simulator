@@ -13,6 +13,7 @@ import os
 import random
 import time
 import uuid
+from pathlib import Path
 from decimal import Decimal
 from typing import Any, Callable, Optional
 
@@ -146,8 +147,38 @@ class VirtualOrderRouter:
         if execution_mode == "live":
             if self._order_client is None:
                 sim_ag = getattr(self, "_sim_agent", None)
-                if sim_ag and hasattr(sim_ag, "_order_client"):
+                if sim_ag and getattr(sim_ag, "_order_client", None) is not None:
                     self._order_client = getattr(sim_ag, "_order_client", None)
+
+            if self._order_client is None:
+                try:
+                    from kalshi_sim.server import state as server_state
+                    if getattr(server_state, "order_client", None) is not None:
+                        self._order_client = server_state.order_client
+                except Exception:
+                    pass
+
+            if self._order_client is None:
+                try:
+                    from dotenv import find_dotenv, load_dotenv
+                    load_dotenv(find_dotenv(usecwd=True) or (Path(__file__).resolve().parent.parent.parent / ".env"), override=True)
+                    key_id = os.getenv("KALSHI_API_KEY_ID")
+                    key_path = os.getenv("KALSHI_PRIVATE_KEY_PATH") or os.getenv("KALSHI_PRIVATE_KEY")
+                    if not key_path and Path("kalshi_demo.pem").exists():
+                        key_path = "kalshi_demo.pem"
+                    if key_id and key_path and Path(key_path).exists():
+                        from kalshi_sim.order_client import KalshiLiveOrderClient
+                        from kalshi_sim.schemas import DEMO_REST_BASE, PROD_REST_BASE
+                        env = os.getenv("KALSHI_ENV", "live").lower()
+                        base_url = DEMO_REST_BASE if env == "demo" else PROD_REST_BASE
+                        self._order_client = KalshiLiveOrderClient(
+                            api_key_id=key_id,
+                            private_key_path=key_path,
+                            base_url=base_url,
+                        )
+                        logger.info("🛡️ [LIVE ORDER ROUTER] Successfully lazy-initialized KalshiLiveOrderClient.")
+                except Exception as exc:
+                    logger.error("🛑 [LIVE ORDER ROUTER] Failed to lazy-initialize KalshiLiveOrderClient: %s", exc)
 
             bot_match = (
                 active_strategy_bot is None

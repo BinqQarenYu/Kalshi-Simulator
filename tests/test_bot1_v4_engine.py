@@ -100,8 +100,8 @@ def test_bot1_v4_bayesian_onnx_fusion() -> None:
 
     # Evaluate opportunity
     decision = engine.evaluate_market_opportunity(
-        spot_price=85000.0,
-        target_strike=84950.0,  # +$50 moat
+        spot_price=85200.0,
+        target_strike=84950.0,  # +$250 moat (clears dynamic proximity moat at T=600s)
         time_to_expiry_s=600.0,
         l2_book=l2,
         cycle_id="FUSION_CYCLE_1",

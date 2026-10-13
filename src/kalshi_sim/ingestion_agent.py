@@ -532,7 +532,11 @@ def load_config() -> dict:
     Raises:
         SystemExit: If required config is missing or env is not 'demo'.
     """
-    load_dotenv()
+    from dotenv import find_dotenv, load_dotenv
+    _env_f = find_dotenv(usecwd=True)
+    if not _env_f:
+        _env_f = str(Path(__file__).resolve().parent.parent.parent / ".env")
+    load_dotenv(_env_f, override=True)
 
     # Safety check: allow demo, prod, and live
     env = os.getenv("KALSHI_ENV", "demo").lower()

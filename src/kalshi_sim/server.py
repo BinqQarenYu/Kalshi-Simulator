@@ -30,8 +30,9 @@ import time
 import uuid
 
 try:
-    from dotenv import load_dotenv
-    load_dotenv()
+    from dotenv import find_dotenv, load_dotenv
+    _env_f = find_dotenv(usecwd=True) or str(_SRC_DIR.parent / ".env")
+    load_dotenv(_env_f, override=True)
 except Exception:
     pass
 from datetime import datetime, timezone, timedelta
@@ -1029,6 +1030,10 @@ async def start_background_simulation() -> None:
     state.data_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize live exchange execution client if credentials exist
+    from dotenv import find_dotenv, load_dotenv
+    _env_f = find_dotenv(usecwd=True) or str(_SRC_DIR.parent / ".env")
+    load_dotenv(_env_f, override=True)
+
     key_id = os.getenv("KALSHI_API_KEY_ID")
     private_key_source = os.getenv("KALSHI_PRIVATE_KEY_PATH") or os.getenv("KALSHI_PRIVATE_KEY")
     if not private_key_source and Path("kalshi_demo.pem").exists():

@@ -389,6 +389,10 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
                 base_url=os.getenv("KALSHI_API_HOST", "https://api.elections.kalshi.com/trade-api/v2"),
             )
             state.order_client = client
+            if hasattr(state, "sim_agent") and state.sim_agent:
+                state.sim_agent._order_client = client
+                if hasattr(state.sim_agent, "_order_router") and state.sim_agent._order_router:
+                    state.sim_agent._order_router._order_client = client
 
     if client is None:
         return []

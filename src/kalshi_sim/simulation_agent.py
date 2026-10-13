@@ -137,6 +137,7 @@ class SimulationAgent:
             order_client=self._order_client,
             telemetry_alerts=self._telemetry_alerts,
         )
+        self._order_router._sim_agent = self
         self._strategy_evaluator = StrategyEvaluationCoordinator(
             guardrails=self._guardrails,
             simulator=self._simulator,

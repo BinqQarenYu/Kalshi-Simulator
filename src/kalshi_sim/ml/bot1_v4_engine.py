@@ -86,8 +86,8 @@ class Bot1V4DominationEngine:
         min_ev_hurdle_dollars: Decimal = Decimal("0.04"),  # $0.04 minimum net EV hurdle
         discount_limit_price: Decimal = Decimal("0.42"),  # 42c maker discount floor
         min_edge_pct: float = 0.03,  # 3.0% min edge
-        vpin_toxic_threshold: float = 0.35,  # Council Veto: Hard kill orders above 0.35 toxic flow
-        vpin_safe_threshold: float = 0.28,
+        vpin_toxic_threshold: float = 0.70,  # Council Veto: Hard kill orders above 0.70 toxic flow
+        vpin_safe_threshold: float = 0.55,
         default_btc_1m_volatility: float = 14.0,
         take_profit_price_threshold: Decimal = Decimal("0.92"),
         enable_take_profit_ceiling: bool = True,
@@ -499,19 +499,6 @@ class Bot1V4DominationEngine:
         if self.onnx_engine is None or l2_book is None:
             return p_up_macro, p_down_macro, 0.0, None
 
-        # Guard: Check if order book has active depth levels before executing neural feature extraction
-        has_depth = False
-        if hasattr(l2_book, "get_depth_raw"):
-            y_raw, n_raw = l2_book.get_depth_raw(1)
-            has_depth = bool(y_raw and n_raw)
-        elif hasattr(l2_book, "get_depth"):
-            bids, asks = l2_book.get_depth(1)
-            has_depth = bool(bids and asks)
-        elif hasattr(l2_book, "yes_book") and hasattr(l2_book, "no_book"):
-            has_depth = bool(l2_book.yes_book and l2_book.no_book)
-
-        if not has_depth:
-            return p_up_macro, p_down_macro, 0.0, None
 
         try:
             onnx_res = self.onnx_engine.process_orderbook_tick(l2_book)

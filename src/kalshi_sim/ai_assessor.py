@@ -30,7 +30,7 @@ ALLOWED_PARAMETER_BOUNDS: Dict[str, Tuple[float, float]] = {
     "min_confidence": (75.0, 88.0),              # Required ONNX / Bayesian probability %
     "min_ev_dollars": (0.015, 0.040),            # Net EV hurdle in dollars
     "min_spot_diff": (18.0, 35.0),               # Minimum spot distance in dollars
-    "vpin_toxic_threshold": (0.28, 0.40),        # Maximum acceptable VPIN orderflow toxicity
+    "vpin_toxic_threshold": (0.50, 0.75),        # Maximum acceptable VPIN orderflow toxicity
     "take_profit_price_threshold": (0.80, 0.95), # Peak take profit target ceiling
     "min_take_profit_roi": (30.0, 55.0),         # Minimum scalp ROI percentage
     "moneyness_moat_multiplier": (1.00, 1.50),   # Proximity moat volatility multiplier
@@ -137,7 +137,7 @@ Please perform a cold, factual, empirical audit. Return your response as a valid
     "min_confidence": 79.0,        // optional, within [75.0, 88.0]
     "min_ev_dollars": 0.02,        // optional, within [0.015, 0.040]
     "min_spot_diff": 21.0,         // optional, within [18.0, 35.0]
-    "vpin_toxic_threshold": 0.35,  // optional, within [0.28, 0.40]
+    "vpin_toxic_threshold": 0.70,  // optional, within [0.50, 0.75]
     "take_profit_price_threshold": 0.92, // optional, within [0.80, 0.95]
     "min_take_profit_roi": 45.0,   // optional, within [30.0, 55.0]
     "moneyness_moat_multiplier": 1.25 // optional, within [1.00, 1.50]
