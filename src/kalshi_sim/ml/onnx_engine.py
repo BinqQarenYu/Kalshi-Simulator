@@ -91,6 +91,7 @@ class KalshiONNXEngine:
         self._last_mtime_check: float = 0.0
         self._check_interval: float = 1.0  # Throttle stat() to max once per second
         self._last_frozen_warning_ts: float = 0.0
+        self._last_stale_alert_ts: float = 0.0
 
         # Performance optimization: Pre-allocate persistent contiguous input buffers to avoid
         # per-tick array instantiations and garbage collection pauses during high-frequency ticks.
@@ -175,21 +176,23 @@ class KalshiONNXEngine:
                     age_seconds = time.time() - curr_mtime
                     # Enforce freshness: must be between 2 min (120 s) and 5 min (300 s)
                     if age_seconds > self.max_freshness_seconds:
-                        logger.error(
-                            "[KalshiONNX] Model %s is stale (age %.1f s > %.1f s). Sending alert and halting trading.",
-                            self.model_path,
-                            age_seconds,
-                            self.max_freshness_seconds,
-                        )
-                        # Send alert email (fail‑safe)
-                        try:
-                            from kalshi_sim.utils.email_alert import send_alert
-                            send_alert(
-                                subject="[ALERT] ONNX model stale",
-                                body=f"ONNX model {self.model_path} is {age_seconds:.1f}s old, exceeding the allowed {self.max_freshness_seconds}s freshness window. Trading is paused.",
+                        if self._last_stale_alert_ts == 0.0 or (now - self._last_stale_alert_ts >= 300.0):
+                            self._last_stale_alert_ts = now
+                            logger.error(
+                                "[KalshiONNX] Model %s is stale (age %.1f s > %.1f s). Sending alert and halting trading.",
+                                self.model_path,
+                                age_seconds,
+                                self.max_freshness_seconds,
                             )
-                        except Exception as exc:
-                            logger.error("[KalshiONNX] Failed to send alert email: %s", exc)
+                            # Send alert email (fail‑safe)
+                            try:
+                                from kalshi_sim.utils.email_alert import send_alert
+                                send_alert(
+                                    subject="[ALERT] ONNX model stale",
+                                    body=f"ONNX model {self.model_path} is {age_seconds:.1f}s old, exceeding the allowed {self.max_freshness_seconds}s freshness window. Trading is paused.",
+                                )
+                            except Exception as exc:
+                                logger.error("[KalshiONNX] Failed to send alert email: %s", exc)
                         # Force a WAIT signal with zero confidence to stop trading
                         return {
                             "signal": "WAIT",

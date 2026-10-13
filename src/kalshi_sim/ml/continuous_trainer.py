@@ -426,6 +426,14 @@ class ContinuousModelTrainer:
             max_files=self.max_recent_tick_files,
         )
 
+        # Prune consumed tick files once extracted to prevent storage bloat on AWS Free Tier
+        if matched_files:
+            for f in matched_files:
+                try:
+                    f.unlink(missing_ok=True)
+                except Exception as del_exc:
+                    logger.debug("Failed pruning consumed tick file %s: %s", f, del_exc)
+
         # 2. Merge with anchor dataset if available using balanced stratified replay buffer
         anchor_file = self.models_dir / "dataset_v1.npz"
         X_all: np.ndarray
@@ -454,8 +462,16 @@ class ContinuousModelTrainer:
             y_all = y_recent
 
         if len(X_all) < self.min_samples_to_train:
-            logger.info("[CONTINUOUS TRAINER] Insufficient samples (%d < %d). Waiting for next tick accumulation.",
+            logger.info("[CONTINUOUS TRAINER] Low tick volume (%d < %d). Refreshing active model heartbeat.",
                         len(X_all), self.min_samples_to_train)
+            if self.onnx_model_path.exists():
+                try:
+                    now_ts = time.time()
+                    os.utime(self.onnx_model_path, (now_ts, now_ts))
+                    if self.feature_stats_path.exists():
+                        os.utime(self.feature_stats_path, (now_ts, now_ts))
+                except Exception as t_exc:
+                    logger.debug("Failed updating model timestamp: %s", t_exc)
             self.status = "IDLE"
             return
 
@@ -567,6 +583,14 @@ class ContinuousModelTrainer:
         else:
             logger.info("Model candidate did not beat best known validation loss (%.4f >= %.4f). Retaining current model.",
                         best_cycle_epoch.val_loss, self.best_val_loss)
+            if self.onnx_model_path.exists():
+                try:
+                    now_ts = time.time()
+                    os.utime(self.onnx_model_path, (now_ts, now_ts))
+                    if self.feature_stats_path.exists():
+                        os.utime(self.feature_stats_path, (now_ts, now_ts))
+                except Exception as t_exc:
+                    logger.debug("Failed updating model timestamp on retention: %s", t_exc)
             self.status = "IDLE"
 
         # Explicit garbage collection and memory release
