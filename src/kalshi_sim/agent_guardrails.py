@@ -30,7 +30,7 @@ class AgentGuardrails:
         consecutive_loss_taper_threshold: int = 2,
         drawdown_taper_threshold: Decimal = Decimal("0.15"),  # 15% drawdown activates taper
         emergency_drawdown_limit: Decimal = Decimal("0.25"),  # 25% drawdown halts all trading
-        vpin_toxic_threshold: float = 0.65,
+        vpin_toxic_threshold: float = 0.9,
     ) -> None:
         self.min_order_interval_seconds = min_order_interval_seconds
         self.max_risk_pct_per_trade = max_risk_pct_per_trade
@@ -42,6 +42,45 @@ class AgentGuardrails:
         self.emergency_drawdown_limit = emergency_drawdown_limit
         self.vpin_toxic_threshold = vpin_toxic_threshold
 
+
+        _MARKET_PRESETS: dict[str, dict[str, Any]] = {
+            "choppy": {
+                "min_order_interval_seconds": 5.0,
+                "max_risk_pct_per_trade": Decimal("0.10"),
+                "vpin_toxic_threshold": 0.80,
+            },
+            "stormy": {
+                "min_order_interval_seconds": 5.0,
+                "max_risk_pct_per_trade": Decimal("0.15"),
+                "vpin_toxic_threshold": 0.85,
+            },
+            "bleed": {
+                "min_order_interval_seconds": 10.0,
+                "max_risk_pct_per_trade": Decimal("0.20"),
+                "vpin_toxic_threshold": 0.90,
+            },
+            "heal": {
+                "min_order_interval_seconds": 30.0,
+                "max_risk_pct_per_trade": Decimal("0.05"),
+                "vpin_toxic_threshold": 0.70,
+            },
+        }
+
+        def apply_market_condition(self, condition: str) -> None:
+            """Adjust guardrail parameters according to a high‑level market condition.
+
+            Args:
+                condition: One of "choppy", "stormy", "bleed" or "heal".
+            """
+            preset = self._MARKET_PRESETS.get(condition)
+            if not preset:
+                logger.warning("Unknown market condition %s – no guardrail changes applied", condition)
+                return
+            for key, value in preset.items():
+                setattr(self, key, value)
+                logger.info("Guardrail %s set to %s due to %s market condition", key, value, condition)
+
+
         # State tracking
         self._last_order_ts: float = 0.0
         self._last_order_ts_by_ticker: dict[str, float] = {}
@@ -51,6 +90,7 @@ class AgentGuardrails:
         self._in_flight_locks: set[str] = set()  # In-flight order dispatch locks (anti-burst)
         self._in_flight_lock_ts: dict[str, float] = {}  # cycle_key -> monotonic lock reservation timestamp
         self._cycle_contracts_count: dict[str, int] = {}  # cycle_key -> total contracts placed (hard cap: 2)
+        self._cycle_trade_counter: dict[str, int] = {}  # cycle_key -> number of trades executed
         self._consecutive_losses: int = 0
         self._peak_equity: Optional[Decimal] = None
         self._circuit_breaker_tripped: bool = False
