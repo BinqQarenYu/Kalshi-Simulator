@@ -40,6 +40,7 @@ interface HeaderProps {
   onOpenIntegrity?: () => void;
   onOpenCompliance?: () => void;
   onOpenSystemResources?: () => void;
+  onOpenCouncil?: () => void;
   onTestBot?: () => Promise<any>;
 }
 import { CRYPTO_ASSET_LIST } from '../utils/assets';
@@ -77,6 +78,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenIntegrity,
   onOpenCompliance,
   onOpenSystemResources,
+  onOpenCouncil,
   onTestBot,
 }) => {
   const [isMuted, setIsMuted] = useState<boolean>(soundFX.muted);
@@ -561,6 +563,23 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Integrity</span>
               <span className="px-1.5 py-0.2 text-[10px] font-mono bg-cyan-500/20 border border-cyan-500/40 rounded-full">
                 {(integrityStatus?.score ?? 100.0).toFixed(0)}%
+              </span>
+            </button>
+          )}
+
+          {/* LangGraph Council of 7 Crucible Button */}
+          {onOpenCouncil && (
+            <button
+              type="button"
+              aria-label="Open LangGraph Council of 7 Crucible"
+              onClick={onOpenCouncil}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 text-xs font-bold rounded-xl transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 shadow-sm shadow-amber-500/10"
+              title="LangGraph Council of 7: Adversarial Crucible & Task Granulizer"
+            >
+              <Scale className="h-3.5 w-3.5 text-amber-400" />
+              <span>Council</span>
+              <span className="px-1.5 py-0.2 text-[9px] font-mono bg-amber-500/30 text-amber-200 border border-amber-500/50 rounded-full font-extrabold">
+                7
               </span>
             </button>
           )}

@@ -61,6 +61,7 @@ import {
   Timer,
 } from 'lucide-react';
 import { PresetVaultModal } from './PresetVaultModal';
+import { CouncilModal } from './CouncilModal';
 import { PriceHero } from './PriceHero';
 import { TargetChart } from './TargetChart';
 import { ChanceBanner } from './ChanceBanner';
@@ -197,6 +198,7 @@ export const ParentHub: React.FC<ParentHubProps> = ({
   const [isPromoteModalOpen, setIsPromoteModalOpen] = useState(false);
   const [isWinLossModalOpen, setIsWinLossModalOpen] = useState(false);
   const [isPresetVaultOpen, setIsPresetVaultOpen] = useState(false);
+  const [isCouncilOpen, setIsCouncilOpen] = useState(false);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [journalAssetFilter, setJournalAssetFilter] = useState<'ALL' | 'BTC' | 'ETH' | 'SOL' | 'DOGE'>('ALL');
   const [journalTimeframeFilter, setJournalTimeframeFilter] = useState<'ALL' | '5M' | '15M'>('ALL');
@@ -908,6 +910,19 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               <span>Preset Vault</span>
             </button>
 
+            {/* LangGraph Council of 7 Modal Trigger */}
+            <button
+              onClick={() => {
+                soundFX.playClickSound();
+                setIsCouncilOpen(true);
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 hover:border-amber-400 transition-all flex items-center gap-1.5 shadow-sm"
+              title="Open LangGraph Council of 7: Adversarial Crucible & Task Granulizer"
+            >
+              <Scale className="w-3.5 h-3.5 text-amber-400" />
+              <span>Council (7)</span>
+            </button>
+
             {/* Pop-Out Baby Bot Console Button */}
             <button
               onClick={() => onTogglePopOutBabyBot(selectedBotId)}
@@ -1293,6 +1308,12 @@ export const ParentHub: React.FC<ParentHubProps> = ({
       <PresetVaultModal
         isOpen={isPresetVaultOpen}
         onClose={() => setIsPresetVaultOpen(false)}
+      />
+
+      {/* LangGraph Council of 7 Modal */}
+      <CouncilModal
+        isOpen={isCouncilOpen}
+        onClose={() => setIsCouncilOpen(false)}
       />
     </div>
   );

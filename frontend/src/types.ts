@@ -722,4 +722,58 @@ export interface NeuralEngineSpec {
   adapters?: string[];
 }
 
+export interface CouncilorInfo {
+  id: string;
+  name: string;
+  domain: string;
+  gate: string;
+}
+
+export interface CouncilorVoteData {
+  councilor: string;
+  verdict: 'PASS' | 'VETO' | 'ADJUST';
+  critique: string;
+  hard_bounds: Record<string, string>;
+}
+
+export interface IdentifiedFlawData {
+  flaw_id: string;
+  category: 'fee_drag' | 'dead_zone' | 'race_condition' | 'blast_radius' | 'float_math' | 'twap_mismatch';
+  description: string;
+  severity: 'FATAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  counter_measure: string;
+}
+
+export interface GranularTaskStepData {
+  step_id: number;
+  phase: '1_schemas' | '2_core_logic' | '3_ui_state' | '4_verification';
+  target_file: string;
+  allowed_access: 'write' | 'append' | 'read_only';
+  action_description: string;
+  definition_of_done: string;
+}
+
+export interface CouncilDeliberationState {
+  raw_prompt: string;
+  core_objective: string;
+  target_asset: string;
+  debate_round: number;
+  max_rounds: number;
+  council_votes: Record<string, CouncilorVoteData>;
+  flaw_registry: IdentifiedFlawData[];
+  consensus_verdict: 'APPROVED' | 'REJECTED' | 'CONDITIONALLY_APPROVED' | null;
+  synthesized_solution: string | null;
+  non_negotiable_invariants: string[];
+  specification_document_path: string | null;
+  file_boundary_matrix: Record<string, 'write' | 'append' | 'read_only' | 'forbidden'>;
+  task_contract: GranularTaskStepData[];
+  verification_status: 'PENDING' | 'IN_PROGRESS' | 'PASSED' | 'FAILED';
+  test_results: Record<string, boolean>;
+}
+
+export interface CouncilRosterResponse {
+  councilors: CouncilorInfo[];
+  invariants: string[];
+}
+
 
