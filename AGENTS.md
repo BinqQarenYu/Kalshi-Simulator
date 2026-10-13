@@ -40,9 +40,5 @@ Tokens and API credits are physical assets. Prevent "blackhole burning" (infinit
 - Apply the `agent-token-credit` philosophy: Batch your tool calls.
 - Stop immediately and report if a test or script loops or fails repeatedly. Do not blind-fire solutions and drain credits.
 
-## 9. Immutable ONNX & HMM Core Engine Protection (Explicit Permission Gate)
-The core Machine Learning engines and neural architectures — specifically **ONNX Runtime model definitions** (`quolas.onnx`, `onnx_engine.py`), **Gaussian HMM Brain** (`hmm_brain.py`), tensor input feature pipelines, and loss/training math — are **PROTECTED FINANCIAL INFRASTRUCTURE**.
-- **Core Engine Immutability:** You (and any subagent) MUST NEVER modify, rewrite, refactor, or alter core ONNX neural models, HMM hidden Markov logic, or underlying feature tensor architectures WITHOUT explicitly stopping and asking the user for permission first.
-- **Tunable Parameters (Dials) Are Dynamic:** Quantitative trading parameters and dials (e.g. discount limit prices, VPIN safety thresholds, dynamic proximity moat offsets, take profit / stop loss levels, EV hurdle thresholds, and timing window bounds) are **EXCLUDED** from the code immutability ban. These parameters/dials are designed to be adaptively tuned, evolved, and calibrated based on real-time market regimes, continuous experience learning, and 6-trade evaluation feedback.
-- **NO SILENT REFACTORS ON CORE ENGINES:** Any architectural changes to the ONNX or HMM brain engines require presenting the exact rationale, proposed diff, and awaiting explicit user approval.
+
 
