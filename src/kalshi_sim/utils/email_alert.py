@@ -26,8 +26,7 @@ def send_alert(subject: str, body: str, recipient: Optional[str] = None) -> bool
         ``True`` if the email was sent successfully, ``False`` otherwise.
     """
     try:
-        # Re‑use the existing assessment mailer – it handles SMTP/SES config.
-        from .aws_email_mailer import send_assessment_email
+        from kalshi_sim.aws_email_mailer import send_assessment_email
         return send_assessment_email(subject, body, recipient)
     except Exception as exc:  # pragma: no cover – defensive fallback
         logger.error("[email_alert] Failed to send alert email: %s", exc)
