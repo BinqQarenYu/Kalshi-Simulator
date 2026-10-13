@@ -1489,6 +1489,9 @@ from kalshi_sim.routers.presets import (
 init_presets_router(state_getter=lambda: state)
 app.include_router(presets_router)
 
+from kalshi_sim.routers.council import router as council_router
+app.include_router(council_router)
+
 
 # ---------------------------------------------------------------------------
 # Frontend Static Mount (if built)
