@@ -30,6 +30,7 @@ class AutonomousBatchSupervisor:
         win_loss_path: str | Path = "data/win_loss_reports.json",
         eval_batch_size: int = 6,
         poll_interval_s: float = 5.0,
+        asset: Optional[str] = None,
     ) -> None:
         self.guardrails = guardrails
         self.bot_parameters_path = Path(bot_parameters_path)
@@ -40,6 +41,14 @@ class AutonomousBatchSupervisor:
         self._task: Optional[asyncio.Task] = None
         self._last_processed_trade_count = 0
 
+        # Dedicated Asset Isolation (Strictly exclude unrelated assets)
+        if asset:
+            self.asset = str(asset).upper()
+        elif "eth" in str(self.win_loss_path).lower() or "eth" in str(self.bot_parameters_path).lower():
+            self.asset = "ETH"
+        else:
+            self.asset = "BTC"
+
         # Cumulative Statistical History (Combats 6-trade noise / overfitting)
         self.cumulative_trades = 0
         self.cumulative_wins = 0
@@ -49,11 +58,29 @@ class AutonomousBatchSupervisor:
         self.current_batch_num = self._discover_initial_batch_num()
         self._emailed_batches: set[int] = set()
 
+    def _is_asset_match(self, report: dict[str, Any]) -> bool:
+        """Verify whether a historical report belongs to this bot's target asset."""
+        a = str(report.get("asset", "")).upper()
+        t = str(report.get("ticker", "")).upper()
+        if self.asset == "BTC":
+            if a == "ETH" or t.startswith("KXETH"):
+                return False
+            return a == "BTC" or t.startswith("KXBTC") or ("BTC" in t and "ETH" not in t)
+        elif self.asset == "ETH":
+            if a == "BTC" or t.startswith("KXBTC"):
+                return False
+            return a == "ETH" or t.startswith("KXETH") or "ETH" in t
+        elif a:
+            return a == self.asset
+        return self.asset in t
+
     def _discover_initial_batch_num(self) -> int:
         docs_dir = Path("docs")
         max_num = 108
         if docs_dir.exists():
-            for p in docs_dir.glob("assessment_*_#*_*.md"):
+            asset_s = getattr(self, "asset", "BTC").lower()
+            pattern = f"assessment_*_#*_{asset_s}_.md" if asset_s != "btc" else "assessment_*_#*_*.md"
+            for p in docs_dir.glob(pattern):
                 match = re.search(r"#(\d+)_", p.name)
                 if match:
                     try:
@@ -91,8 +118,17 @@ class AutonomousBatchSupervisor:
         # 1. Inspect live Bot 1 V4 engine wave classifier & wave physics
         try:
             from kalshi_sim.server import state
-            if hasattr(state, "sim_agent") and state.sim_agent and hasattr(state.sim_agent, "_bot1_v4_engine"):
-                eng = state.sim_agent._bot1_v4_engine
+            eng = None
+            if self.asset == "ETH":
+                eng = getattr(state, "eth_bot1v4_engine", None)
+                if not eng and hasattr(state, "sim_agent") and state.sim_agent:
+                    eng = getattr(state.sim_agent, "_eth_bot1v4_engine", None)
+            else:
+                eng = getattr(state, "bot1_v4_engine", None)
+                if not eng and hasattr(state, "sim_agent") and state.sim_agent:
+                    eng = getattr(state.sim_agent, "_bot1_v4_engine", None)
+
+            if eng:
                 if hasattr(eng, "wave_classifier"):
                     region = getattr(eng.wave_classifier, "current_region", "CHOP")
                     transition_reason = getattr(eng.wave_classifier, "last_transition_reason", "")
@@ -178,7 +214,8 @@ class AutonomousBatchSupervisor:
                 if self.win_loss_path.exists():
                     try:
                         reports = json.loads(self.win_loss_path.read_text(encoding="utf-8"))
-                        current_total = len(reports)
+                        matching = [r for r in reports if self._is_asset_match(r)]
+                        current_total = len(matching)
                         if self._last_processed_trade_count == 0:
                             self._last_processed_trade_count = (current_total // self.eval_batch_size) * self.eval_batch_size
                         elif current_total - self._last_processed_trade_count >= self.eval_batch_size:
@@ -210,13 +247,14 @@ class AutonomousBatchSupervisor:
         self.cumulative_pnl += batch_pnl
         macro_win_rate = (self.cumulative_wins / max(1, self.cumulative_trades)) * 100.0
 
-        # 1. Harvest recent settled trades from win_loss_reports.json
+        # 1. Harvest recent settled trades strictly matching this asset (exclude unrelated assets)
         recent_trades: list[dict[str, Any]] = []
         if self.win_loss_path.exists():
             try:
                 reports = json.loads(self.win_loss_path.read_text(encoding="utf-8"))
-                recent_trades = reports[:self.eval_batch_size]
-                self._last_processed_trade_count = len(reports)
+                matching = [r for r in reports if self._is_asset_match(r)]
+                recent_trades = matching[:self.eval_batch_size]
+                self._last_processed_trade_count = len(matching)
             except Exception as e:
                 logger.debug("Failed reading win_loss_path: %s", e)
 
@@ -279,13 +317,14 @@ class AutonomousBatchSupervisor:
             macro_sample=macro_sample,
             current_params=current_params,
             market_condition_info=market_info,
+            asset=self.asset,
         )
 
         # 5. Apply validated tweaks within Quant Council bounds
         validated_tweaks = gemini_data.get("validated_tweaks", {})
         tweaks_rationale = gemini_data.get("tweaks_rationale", "")
         if validated_tweaks:
-            applied = apply_validated_tweaks(self.bot_parameters_path, validated_tweaks, tweaks_rationale)
+            applied = apply_validated_tweaks(self.bot_parameters_path, validated_tweaks, tweaks_rationale, asset=self.asset)
             if applied:
                 logger.info("✅ [TWEAKS APPLIED] Parameters updated: %s", validated_tweaks)
                 # Sync in-memory engine if available
@@ -314,24 +353,32 @@ class AutonomousBatchSupervisor:
             gemini_data=gemini_data,
             macro_sample=macro_sample,
             market_condition_info=market_info,
+            asset=self.asset,
         )
 
         try:
             docs_dir = Path("docs")
             docs_dir.mkdir(parents=True, exist_ok=True)
             today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            report_file = docs_dir / f"assessment_{today_str}_#{self.current_batch_num}_.md"
+            asset_suffix = f"_{self.asset.lower()}_" if self.asset != "BTC" else "_"
+            report_file = docs_dir / f"assessment_{today_str}_#{self.current_batch_num}{asset_suffix}.md"
             report_file.write_text(md_report, encoding="utf-8")
             logger.info("📝 [ASSESSMENT SAVED] %s written to disk.", report_file)
         except Exception as doc_err:
             logger.warning("Could not write assessment to docs/: %s", doc_err)
 
-        # 6.1 Enqueue Batch Assessment into SQLite Repository
+        # 6.1 Enqueue Batch Assessment into SQLite Repository (Asset-Isolated DB)
         try:
-            from kalshi_sim.db.writer import get_db_writer
-            get_db_writer().enqueue_batch_assessment(
+            if self.asset == "ETH":
+                from kalshi_sim.db import get_eth_db_writer
+                writer = get_eth_db_writer()
+            else:
+                from kalshi_sim.db.writer import get_db_writer
+                writer = get_db_writer()
+
+            writer.enqueue_batch_assessment(
                 batch_number=self.current_batch_num,
-                document_id=f"assessment_{today_str}_#{self.current_batch_num}_",
+                document_id=f"assessment_{today_str}_#{self.current_batch_num}_{self.asset.lower()}",
                 evaluation_date=today_str,
                 verdict=gemini_data.get("verdict", "PASSED" if batch_pnl > Decimal("0.00") else "DEFICIT"),
                 wins=batch_wins,
@@ -343,7 +390,7 @@ class AutonomousBatchSupervisor:
                 post_batch_balance=float(post_balance),
                 raw_markdown=md_report,
             )
-            logger.info("💾 [SQL REPOSITORY] Batch #%d queued for SQLite persistence.", self.current_batch_num)
+            logger.info("💾 [SQL REPOSITORY] %s Batch #%d queued for SQLite persistence.", self.asset, self.current_batch_num)
         except Exception as db_err:
             logger.warning("Could not enqueue assessment to SQL: %s", db_err)
 

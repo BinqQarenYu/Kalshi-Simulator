@@ -79,7 +79,27 @@ class HistoricalQueryService:
     """Provides analytical and time-series query operations over SQLite historical data."""
 
     def __init__(self, db_manager: Optional[DatabaseManager] = None) -> None:
+        self._custom_db = db_manager is not None
         self.db_manager = db_manager or get_db()
+
+    def _resolve_db_manager(
+        self,
+        asset: Optional[str] = None,
+        ticker: Optional[str] = None,
+        bot_type: Optional[str] = None,
+    ) -> DatabaseManager:
+        """Resolve the appropriate DatabaseManager for BTC vs ETH asset isolation."""
+        if self._custom_db:
+            return self.db_manager
+        is_eth = (
+            (asset is not None and "ETH" in asset.upper())
+            or (ticker is not None and "ETH" in ticker.upper())
+            or (bot_type is not None and "ETH" in bot_type.upper())
+        )
+        if is_eth:
+            from kalshi_sim.db.connection import get_eth_db
+            return get_eth_db()
+        return self.db_manager
 
     async def get_trades(
         self,
@@ -116,7 +136,8 @@ class HistoricalQueryService:
         query += " ORDER BY timestamp_epoch_ms DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
-        async with self.db_manager.get_connection() as db:
+        mgr = self._resolve_db_manager(asset=asset, ticker=ticker, bot_type=bot_type)
+        async with mgr.get_connection() as db:
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
@@ -156,7 +177,8 @@ class HistoricalQueryService:
         query += " ORDER BY timestamp_epoch_ms DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
-        async with self.db_manager.get_connection() as db:
+        mgr = self._resolve_db_manager(asset=asset, ticker=ticker, bot_type=bot_type)
+        async with mgr.get_connection() as db:
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
@@ -193,7 +215,8 @@ class HistoricalQueryService:
         query += " ORDER BY timestamp_epoch_ms ASC LIMIT ?"
         params.append(limit)
 
-        async with self.db_manager.get_connection() as db:
+        mgr = self._resolve_db_manager(bot_type=bot_type)
+        async with mgr.get_connection() as db:
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
@@ -221,7 +244,8 @@ class HistoricalQueryService:
         query += " ORDER BY timestamp_epoch_ms DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
-        async with self.db_manager.get_connection() as db:
+        mgr = self._resolve_db_manager(ticker=ticker, bot_type=bot_type)
+        async with mgr.get_connection() as db:
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(r) for r in rows]
@@ -273,7 +297,8 @@ class HistoricalQueryService:
             tr_where += " AND (timeframe = ? OR ticker LIKE ?)"
             tr_params.extend([timeframe.lower(), tf_pat])
 
-        async with self.db_manager.get_connection() as db:
+        mgr = self._resolve_db_manager(asset=asset, bot_type=bot_type)
+        async with mgr.get_connection() as db:
             # 1. Fetch settlements
             async with db.execute(
                 f"SELECT pnl, entry_price, size, outcome FROM settlements{st_where} ORDER BY timestamp_epoch_ms ASC",
@@ -451,6 +476,8 @@ class HistoricalQueryService:
         execution_mode: Optional[str] = None,
     ) -> Dict[str, int]:
         """Selectively delete history records from SQLite database."""
+        where_clause = " WHERE 1=1"
+        params: List[Any] = []
         bot_aliases = _expand_bot_aliases(bot_type)
         if bot_aliases:
             placeholders = ",".join("?" for _ in bot_aliases)
@@ -463,49 +490,72 @@ class HistoricalQueryService:
 
         counts = {"settlements": 0, "trades": 0, "ai_predictions": 0, "equity_snapshots": 0}
 
-        async with self.db_manager.get_connection() as db:
-            for table in ["settlements", "trades", "ai_predictions", "equity_snapshots"]:
-                try:
-                    # Check if table has bot_type column
-                    cur = await db.execute(f"DELETE FROM {table}{where_clause}", params)
-                    counts[table] = cur.rowcount
-                except Exception as exc:
-                    # Fallback for tables without bot_type
-                    logger.debug("Selective reset error for table %s: %s", table, exc)
-                    if bot_type is None or bot_type.lower() in ("all", "combined"):
-                        cur = await db.execute(f"DELETE FROM {table}")
-                        counts[table] = cur.rowcount
-            await db.commit()
+        mgrs = []
+        if self._custom_db:
+            mgrs = [self.db_manager]
+        elif bot_type and "ETH" in bot_type.upper():
+            from kalshi_sim.db.connection import get_eth_db
+            mgrs = [get_eth_db()]
+        elif bot_type and "ETH" not in bot_type.upper() and bot_type.lower() not in ("all", "combined"):
+            mgrs = [self.db_manager]
+        else:
+            from kalshi_sim.db.connection import get_eth_db
+            mgrs = [self.db_manager, get_eth_db()]
+
+        for mgr in mgrs:
+            async with mgr.get_connection() as db:
+                for table in ["settlements", "trades", "ai_predictions", "equity_snapshots"]:
+                    try:
+                        cur = await db.execute(f"DELETE FROM {table}{where_clause}", params)
+                        counts[table] += cur.rowcount
+                    except Exception as exc:
+                        logger.debug("Selective reset error for table %s: %s", table, exc)
+                        if bot_type is None or bot_type.lower() in ("all", "combined"):
+                            cur = await db.execute(f"DELETE FROM {table}")
+                            counts[table] += cur.rowcount
+                await db.commit()
 
         logger.info("Reset historical database for bot=%s, mode=%s: %s", bot_type, execution_mode, counts)
         return counts
 
     async def delete_trade(self, trade_id_or_id: str | int) -> bool:
         """Delete a single trade by primary key ID or trade_id."""
-        async with self.db_manager.get_connection() as db:
-            if isinstance(trade_id_or_id, int) or (isinstance(trade_id_or_id, str) and trade_id_or_id.isdigit()):
-                cur = await db.execute("DELETE FROM trades WHERE id = ? OR trade_id = ?", [int(trade_id_or_id), str(trade_id_or_id)])
-            else:
-                cur = await db.execute("DELETE FROM trades WHERE trade_id = ?", [str(trade_id_or_id)])
-            await db.commit()
-            return cur.rowcount > 0
+        mgrs = [self.db_manager] if self._custom_db else [self.db_manager, self._resolve_db_manager(asset="ETH")]
+        for mgr in mgrs:
+            async with mgr.get_connection() as db:
+                if isinstance(trade_id_or_id, int) or (isinstance(trade_id_or_id, str) and trade_id_or_id.isdigit()):
+                    cur = await db.execute("DELETE FROM trades WHERE id = ? OR trade_id = ?", [int(trade_id_or_id), str(trade_id_or_id)])
+                else:
+                    cur = await db.execute("DELETE FROM trades WHERE trade_id = ?", [str(trade_id_or_id)])
+                await db.commit()
+                if cur.rowcount > 0:
+                    return True
+        return False
 
     async def delete_settlement(self, settlement_id_or_id: str | int) -> bool:
         """Delete a single settlement by primary key ID or settlement_id."""
-        async with self.db_manager.get_connection() as db:
-            if isinstance(settlement_id_or_id, int) or (isinstance(settlement_id_or_id, str) and settlement_id_or_id.isdigit()):
-                cur = await db.execute("DELETE FROM settlements WHERE id = ? OR settlement_id = ?", [int(settlement_id_or_id), str(settlement_id_or_id)])
-            else:
-                cur = await db.execute("DELETE FROM settlements WHERE settlement_id = ?", [str(settlement_id_or_id)])
-            await db.commit()
-            return cur.rowcount > 0
+        mgrs = [self.db_manager] if self._custom_db else [self.db_manager, self._resolve_db_manager(asset="ETH")]
+        for mgr in mgrs:
+            async with mgr.get_connection() as db:
+                if isinstance(settlement_id_or_id, int) or (isinstance(settlement_id_or_id, str) and settlement_id_or_id.isdigit()):
+                    cur = await db.execute("DELETE FROM settlements WHERE id = ? OR settlement_id = ?", [int(settlement_id_or_id), str(settlement_id_or_id)])
+                else:
+                    cur = await db.execute("DELETE FROM settlements WHERE settlement_id = ?", [str(settlement_id_or_id)])
+                await db.commit()
+                if cur.rowcount > 0:
+                    return True
+        return False
 
     async def delete_ai_prediction(self, prediction_id: int | str) -> bool:
         """Delete an AI prediction record by primary key ID."""
-        async with self.db_manager.get_connection() as db:
-            cur = await db.execute("DELETE FROM ai_predictions WHERE id = ?", [int(prediction_id)])
-            await db.commit()
-            return cur.rowcount > 0
+        mgrs = [self.db_manager] if self._custom_db else [self.db_manager, self._resolve_db_manager(asset="ETH")]
+        for mgr in mgrs:
+            async with mgr.get_connection() as db:
+                cur = await db.execute("DELETE FROM ai_predictions WHERE id = ?", [int(prediction_id)])
+                await db.commit()
+                if cur.rowcount > 0:
+                    return True
+        return False
 
     async def delete_batch(self, table: str, ids: List[Any]) -> int:
         """Batch delete records from a specified historical table given a list of IDs."""

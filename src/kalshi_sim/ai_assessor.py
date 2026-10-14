@@ -98,8 +98,10 @@ async def run_gemini_batch_assessment(
     macro_sample: Dict[str, Any],
     current_params: Dict[str, Any],
     market_condition_info: Optional[Dict[str, Any]] = None,
+    asset: str = "BTC",
 ) -> Dict[str, Any]:
     """Execute prompt formulation, Gemini inference, and parameter validation."""
+    asset_upper = asset.upper()
     cond = market_condition_info or {
         "tag": "CHOPPY",
         "name": "Choppy / Range-Bound Compression",
@@ -111,9 +113,10 @@ async def run_gemini_batch_assessment(
         "transition_reason": "Baseline market regime",
     }
 
-    prompt = f"""You are the Lead Quantitative Auditor and Post-Occupancy Evaluator (POE) for an institutional Kalshi Bitcoin binary options trading algorithm (Bot 1 V4 Quolas).
+    prompt = f"""You are the Lead Quantitative Auditor and Post-Occupancy Evaluator (POE) for an institutional Kalshi {asset_upper} binary options trading algorithm (Bot 1 V4 {asset_upper}).
 
-You are evaluating Batch #{batch_num} consisting of the last {len(recent_trades)} settled trades.
+You are evaluating Batch #{batch_num} consisting of the last {len(recent_trades)} settled {asset_upper} trades.
+All unrelated assets have been strictly excluded to ensure pure mathematical and microstructural attribution for {asset_upper}.
 
 === OBSERVED MARKET CONDITION & WAVE REGIME ===
 Active Condition: {cond.get('name')} ({cond.get('tag')})
@@ -124,7 +127,7 @@ Batch Average Orderflow VPIN: {cond.get('avg_vpin', 0.0):.3f}
 Dynamics: {cond.get('description', '')}
 Transition Reason: {cond.get('transition_reason', '')}
 
-=== BATCH TRADES LEDGER ===
+=== BATCH TRADES LEDGER ({asset_upper} ONLY) ===
 {json.dumps(recent_trades, indent=2)}
 
 === CONTINUOUS EXPERIENCE BUFFER TELEMETRY ===
@@ -135,12 +138,12 @@ Loss Causes Breakdown: {json.dumps(exp_summary.get('loss_causes', {}))}
 Recommended Take-Profit Ceiling: ${exp_summary.get('recommended_tp', 0.85):.2f}
 Adaptive Proximity Moat Multiplier: {exp_summary.get('moat_multiplier', 1.0):.2f}x
 
-=== MACRO SAMPLE METRICS ===
+=== MACRO SAMPLE METRICS ({asset_upper}) ===
 Cumulative Trades: {macro_sample.get('cumulative_trades', 0)}
 Cumulative Net PnL: ${macro_sample.get('cumulative_pnl', '0.00')}
 Overall Win Rate: {macro_sample.get('macro_win_rate', 0.0):.1f}%
 
-=== CURRENT BTC BOT PARAMETERS ===
+=== CURRENT {asset_upper} BOT PARAMETERS ===
 {json.dumps(current_params, indent=2)}
 
 === ALLOWED PARAMETER TUNING BOUNDS (STRICT LIMITS) ===
@@ -204,27 +207,40 @@ def apply_validated_tweaks(
     bot_parameters_path: Path,
     tweaks: Dict[str, float],
     rationale: str,
+    asset: str = "BTC",
 ) -> bool:
-    """Safely apply bounded parameter updates to bot_parameters_domination.json on disk."""
+    """Safely apply bounded parameter updates to bot parameters file on disk."""
     if not tweaks or not bot_parameters_path.exists():
         return False
 
     try:
         data = json.loads(bot_parameters_path.read_text(encoding="utf-8"))
-        btc_cfg = data.get("assets", {}).get("BTC", {})
+        asset_clean = asset.upper().strip()
+        if asset_clean == "ETH" or "eth" in str(bot_parameters_path).lower():
+            target_cfg = (
+                data.get("assets", {}).get("ETH")
+                or data.get("eth_bot1_v4")
+                or data
+            )
+        else:
+            target_cfg = (
+                data.get("assets", {}).get("BTC")
+                or data.get("bot1_v4_domination")
+                or data
+            )
 
         modified_keys = []
         for k, v in tweaks.items():
-            old_val = btc_cfg.get(k)
+            old_val = target_cfg.get(k)
             if old_val != v:
-                btc_cfg[k] = v
+                target_cfg[k] = v
                 modified_keys.append(f"{k}: {old_val} -> {v}")
 
         if modified_keys:
             data["updated_at"] = datetime.now(timezone.utc).isoformat()
             data["last_tuning_rationale"] = rationale
             bot_parameters_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            logger.info("🔧 [ALLOWED TWEAKS APPLIED] Updated %s on disk.", ", ".join(modified_keys))
+            logger.info("🔧 [ALLOWED TWEAKS APPLIED] Updated %s on disk for %s.", ", ".join(modified_keys), asset_clean)
             return True
         return False
     except Exception as exc:
@@ -243,6 +259,7 @@ def build_assessment_markdown_report(
     gemini_data: Dict[str, Any],
     macro_sample: Dict[str, Any],
     market_condition_info: Optional[Dict[str, Any]] = None,
+    asset: str = "BTC",
 ) -> str:
     """Format full institutional Markdown document conforming to assessment series standard."""
     total_trades = max(1, batch_wins + batch_losses)
@@ -312,18 +329,19 @@ def build_assessment_markdown_report(
 
     # Query recent failure autopsies for Section 2.1
     autopsies = []
-    db_file = Path("data/kalshi_history.db")
+    db_file = Path("data/kalshi_history_eth.db") if asset.upper() == "ETH" else Path("data/kalshi_history.db")
     if db_file.exists():
         try:
             import sqlite3
             with sqlite3.connect(db_file) as conn:
                 conn.row_factory = sqlite3.Row
                 cur = conn.cursor()
+                ticker_prefix = f"KX{asset.upper()}%"
                 cur.execute(
                     "SELECT trade_id, ticker, outcome, realized_pnl, failure_code, "
                     "is_counter_trend, was_salvageable, salvageable_cents_lost, is_twap_pin_victim "
-                    "FROM trade_failure_autopsies ORDER BY id DESC LIMIT ?",
-                    (max(6, total_trades),)
+                    "FROM trade_failure_autopsies WHERE ticker LIKE ? ORDER BY id DESC LIMIT ?",
+                    (ticker_prefix, max(6, total_trades))
                 )
                 for r in cur.fetchall():
                     autopsies.append(dict(r))
@@ -373,13 +391,24 @@ def build_assessment_markdown_report(
 ✅ **Zero Preventable Capital Leaks Detected** — 100% of cycle executions conformed to council invariants.
 """
 
-    report = f"""# 6-Trade Evaluation Assessment Series: Batch #{batch_num}
+    target_asset_desc = (
+        f"Ethereum Binary Options (`KXETH15M` 15-Minute Expirations)"
+        if asset.upper() == "ETH"
+        else f"Bitcoin Binary Options (`KXBTC15M` 15-Minute Expirations)"
+    )
+    vessel_desc = (
+        f"`Bot 1 V4 (ETH Domination Engine) / Dual Warrior Architecture`"
+        if asset.upper() == "ETH"
+        else f"`Bot 1 V4 (BTC Quolas Engine) / Dual Warrior Architecture`"
+    )
 
-**Document ID:** `assessment_{now_date}_#{batch_num}_`  
+    report = f"""# 6-Trade Evaluation Assessment Series: Batch #{batch_num} ({asset.upper()})
+
+**Document ID:** `assessment_{now_date}_#{batch_num}_{asset.upper()}_`  
 **Series Classification:** Continuous 6-Trade Quantitative Audit & Forensic Ledger  
 **Evaluation Date:** {now_date} ({now_time})  
-**Target Asset:** Bitcoin Binary Options (`KXBTC15M` 15-Minute Expirations)  
-**Execution Vessel:** `Bot 1 V4 (Domination Engine) / Dual Warrior Architecture`  
+**Target Asset:** {target_asset_desc}  
+**Execution Vessel:** {vessel_desc}  
 **Market Condition:** **{cond_badge}** — {cond_name}  
 **AI Macro Regime:** `{cond_hmm}` | **Wave Region:** `{cond_wave}`  
 **Gate Evaluation Verdict:** {verdict_str}  

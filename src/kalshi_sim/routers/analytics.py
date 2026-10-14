@@ -357,7 +357,29 @@ def _matches_bot_id(r: dict[str, Any], target_bot: str) -> bool:
             r_bot in ("ofi_sprint_scalper", "ofi_scalper")
             or "ofi sprint" in r_strat
         )
+    elif target in ("eth_bot1v4", "eth_bot", "eth_domination", "eth_domination_bot", "bot1v4_eth"):
+        return (
+            r_bot in ("eth_bot1v4", "eth_bot", "eth_domination", "eth_domination_bot", "bot1v4_eth")
+            or "eth" in r_bot
+            or "eth" in r_strat
+        )
     return r_bot == target
+
+
+def _is_asset_match(report: dict[str, Any], target_asset: str) -> bool:
+    """Check if report belongs to target asset (BTC or ETH), strictly excluding unrelated assets."""
+    target = target_asset.upper().strip()
+    r_asset = str(report.get("asset", "")).upper().strip()
+    r_ticker = str(report.get("ticker", "")).upper().strip()
+    r_bot = str(report.get("bot_type", "")).upper().strip()
+
+    if target == "ETH":
+        return r_asset == "ETH" or "KXETH" in r_ticker or "ETH" in r_bot
+    elif target == "BTC":
+        if r_asset == "ETH" or "KXETH" in r_ticker or "ETH" in r_bot:
+            return False
+        return r_asset in ("BTC", "") or "KXBTC" in r_ticker or not r_ticker.startswith("KXETH")
+    return True
 
 
 @router.get("/api/reports/win-loss")
@@ -375,30 +397,57 @@ async def get_win_loss_reports_endpoint(
     if state.mode == "live":
         await sync_live_settlements()
 
-    # Synchronize with reports persisted to disk by Standalone Bot or prior sessions
-    reports_file = state.data_dir / "win_loss_reports.json"
-    if reports_file.exists():
-        try:
-            disk_reports = json.loads(reports_file.read_text(encoding="utf-8"))
-            if isinstance(disk_reports, list):
-                known_ids = {r.get("report_id") for r in state.win_loss_reports}
-                new_added = False
-                for dr in disk_reports:
-                    if dr.get("report_id") and dr.get("report_id") not in known_ids:
-                        state.win_loss_reports.append(dr)
-                        known_ids.add(dr.get("report_id"))
-                        new_added = True
-                if new_added:
-                    state.win_loss_reports.sort(key=lambda r: str(r.get("timestamp_utc", "")), reverse=True)
-        except Exception:
-            pass
+    effective_bot = bot_id or bot_type
+    effective_asset = None
+    if asset and asset.lower() not in ("all", "combined"):
+        effective_asset = asset.upper().strip()
+    elif effective_bot:
+        if "eth" in effective_bot.lower():
+            effective_asset = "ETH"
+        elif effective_bot.lower() in (
+            "3_step_domination_bot",
+            "macro_trend_dominion",
+            "dominion_2_bot",
+            "dual_onnx",
+            "the_onnx_strategy",
+            "onnx_macro_v2",
+            "ofi_sprint_scalper",
+        ):
+            effective_asset = "BTC"
 
-    all_reports = state.win_loss_reports
+    # Synchronize with reports persisted to disk by Standalone Bot or prior sessions
+    files_to_sync = [state.data_dir / "win_loss_reports.json"]
+    if effective_asset == "ETH" or (state.data_dir / "eth_win_loss_reports.json").exists():
+        files_to_sync.append(state.data_dir / "eth_win_loss_reports.json")
+
+    for reports_file in files_to_sync:
+        if reports_file.exists():
+            try:
+                disk_reports = json.loads(reports_file.read_text(encoding="utf-8"))
+                if isinstance(disk_reports, list):
+                    known_ids = {r.get("report_id") for r in state.win_loss_reports}
+                    new_added = False
+                    for dr in disk_reports:
+                        if dr.get("report_id") and dr.get("report_id") not in known_ids:
+                            state.win_loss_reports.append(dr)
+                            known_ids.add(dr.get("report_id"))
+                            new_added = True
+                    if new_added:
+                        state.win_loss_reports.sort(key=lambda r: str(r.get("timestamp_utc", "")), reverse=True)
+            except Exception:
+                pass
+
+    if effective_asset in ("BTC", "ETH"):
+        all_reports = [r for r in state.win_loss_reports if _is_asset_match(r, effective_asset)]
+    else:
+        all_reports = state.win_loss_reports
+
     macro_reports = [r for r in all_reports if _matches_bot_id(r, "macro_trend_dominion")]
     dom_reports = [r for r in all_reports if _matches_bot_id(r, "3_step_domination_bot")]
     dom2_reports = [r for r in all_reports if _matches_bot_id(r, "dominion_2_bot")]
     onnx_reports = [r for r in all_reports if r.get("bot_type") in ("onnx_ml_bot", "onnx_microstructure_bot", "onnx")]
     dual_onnx_reports = [r for r in all_reports if _matches_bot_id(r, "onnx_macro_v2")]
+    eth_reports = [r for r in all_reports if _matches_bot_id(r, "eth_bot1v4")]
     live_reports = [
         r for r in all_reports
         if (r.get("execution_mode") == "live" or r.get("bot_type") == "live" or str(r.get("report_id", "")).startswith("WLR-LIVE-"))
@@ -429,7 +478,6 @@ async def get_win_loss_reports_endpoint(
         elif exec_m.lower() in ("simulated", "mock", "paper"):
             filtered_reports = [r for r in filtered_reports if r in sim_reports]
 
-    effective_bot = bot_id or bot_type
     if effective_bot and effective_bot.lower() not in ("all", "combined"):
         filtered_reports = [r for r in filtered_reports if _matches_bot_id(r, effective_bot)]
 
@@ -441,7 +489,7 @@ async def get_win_loss_reports_endpoint(
         asset_clean = asset.upper().strip()
         filtered_reports = [
             r for r in filtered_reports
-            if r.get("asset", "").upper() == asset_clean or (f"KX{asset_clean}" in r.get("ticker", "").upper())
+            if _is_asset_match(r, asset_clean)
         ]
 
     BOT_NAMES = {
@@ -452,6 +500,9 @@ async def get_win_loss_reports_endpoint(
         "dominion_2_bot": "Dominion 2 (Anti-Pin Scalper)",
         "macro_trend_dominion": "Macro Trend Dominion",
         "ofi_sprint_scalper": "OFI Sprint Scalper",
+        "eth_bot1v4": "Bot 1 V4 (ETH Domination)",
+        "eth_bot": "Bot 1 V4 (ETH Domination)",
+        "eth_domination": "Bot 1 V4 (ETH Domination)",
     }
     bot_summary = None
     if effective_bot and effective_bot.lower() not in ("all", "combined"):
@@ -474,6 +525,7 @@ async def get_win_loss_reports_endpoint(
         "dominion2_summary": _calculate_15m_metrics(dom2_reports),
         "onnx_summary": _calculate_15m_metrics(dual_onnx_reports if dual_onnx_reports else onnx_reports),
         "dual_onnx_summary": _calculate_15m_metrics(dual_onnx_reports),
+        "eth_domination_summary": _calculate_15m_metrics(eth_reports),
         "live_summary": _calculate_15m_metrics(live_reports),
         "sim_summary": _calculate_15m_metrics(sim_reports),
         "today_summary": _calculate_15m_metrics(today_reports),
@@ -482,7 +534,7 @@ async def get_win_loss_reports_endpoint(
         "filter_bot_type": effective_bot or "all",
         "filter_mode": exec_m or "all",
         "filter_timeframe": timeframe or "all",
-        "filter_asset": asset or "all",
+        "filter_asset": effective_asset or "all",
         "filter_date": date or "all",
         "reports": filtered_reports[:limit],
         "live_reports": live_reports[:limit],
@@ -526,7 +578,16 @@ async def export_win_loss_reports_csv(
         "timestamp_utc",
         "ai_rationale",
     ])
+    effective_asset = None
+    if asset and asset.lower() not in ("all", "combined"):
+        effective_asset = asset.upper().strip()
+    elif bot_type and "eth" in bot_type.lower():
+        effective_asset = "ETH"
+
     reports = state.win_loss_reports
+    if effective_asset in ("BTC", "ETH"):
+        reports = [r for r in reports if _is_asset_match(r, effective_asset)]
+
     if date and date.lower() in ("today", "current"):
         et_now = datetime.now(ZoneInfo("America/New_York"))
         today_et_prefix = et_now.strftime("%Y-%m-%d")
@@ -549,10 +610,6 @@ async def export_win_loss_reports_csv(
 
     if timeframe and timeframe.lower() not in ("all", "combined"):
         reports = [r for r in reports if str(r.get("timeframe", "15m")).lower() == timeframe.lower()]
-
-    if asset and asset.lower() not in ("all", "combined"):
-        asset_clean = asset.upper().strip()
-        reports = [r for r in reports if r.get("asset", "").upper() == asset_clean or f"KX{asset_clean}" in r.get("ticker", "").upper()]
 
     for r in reports:
         writer.writerow([
@@ -580,7 +637,7 @@ async def export_win_loss_reports_csv(
             r.get("timestamp_utc"),
             r.get("ai_rationale"),
         ])
-    prefix = f"kalshi_{asset.lower()}_" if asset and asset.lower() != "all" else "kalshi_"
+    prefix = f"kalshi_{effective_asset.lower()}_" if effective_asset else "kalshi_"
     tf_str = f"{timeframe}_" if timeframe and timeframe.lower() != "all" else ""
     date_str = "today_" if date and date.lower() in ("today", "current") else ""
     filename = f"{prefix}{tf_str}{date_str}live_reports.csv" if mode == "live" else f"{prefix}{tf_str}{date_str}win_loss_reports.csv"
@@ -600,7 +657,16 @@ async def export_win_loss_reports_json(
     date: str | None = None,
 ) -> Response:
     """Export event Win/Loss reports as formatted JSON."""
+    effective_asset = None
+    if asset and asset.lower() not in ("all", "combined"):
+        effective_asset = asset.upper().strip()
+    elif bot_type and "eth" in bot_type.lower():
+        effective_asset = "ETH"
+
     reports = state.win_loss_reports
+    if effective_asset in ("BTC", "ETH"):
+        reports = [r for r in reports if _is_asset_match(r, effective_asset)]
+
     if date and date.lower() in ("today", "current"):
         et_now = datetime.now(ZoneInfo("America/New_York"))
         today_et_prefix = et_now.strftime("%Y-%m-%d")
@@ -624,11 +690,7 @@ async def export_win_loss_reports_json(
     if timeframe and timeframe.lower() not in ("all", "combined"):
         reports = [r for r in reports if str(r.get("timeframe", "15m")).lower() == timeframe.lower()]
 
-    if asset and asset.lower() not in ("all", "combined"):
-        asset_clean = asset.upper().strip()
-        reports = [r for r in reports if r.get("asset", "").upper() == asset_clean or f"KX{asset_clean}" in r.get("ticker", "").upper()]
-
-    prefix = f"kalshi_{asset.lower()}_" if asset and asset.lower() != "all" else "kalshi_"
+    prefix = f"kalshi_{effective_asset.lower()}_" if effective_asset else "kalshi_"
     tf_str = f"{timeframe}_" if timeframe and timeframe.lower() != "all" else ""
     date_str = "today_" if date and date.lower() in ("today", "current") else ""
     filename = f"{prefix}{tf_str}{date_str}live_reports.json" if mode == "live" else f"{prefix}{tf_str}{date_str}win_loss_reports.json"
@@ -644,13 +706,22 @@ async def get_full_24h_reports(
     bot_type: str | None = None,
     mode: str | None = None,
     execution_mode: str | None = None,
+    asset: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve complete persistent 24-hour 15-minute event win/loss reports with statistics."""
     if state.mode == "live":
         await sync_live_settlements()
 
     exec_m = mode or execution_mode
+    effective_asset = None
+    if asset and asset.lower() not in ("all", "combined"):
+        effective_asset = asset.upper().strip()
+    elif bot_type and "eth" in bot_type.lower():
+        effective_asset = "ETH"
+
     reports = state.win_loss_reports
+    if effective_asset in ("BTC", "ETH"):
+        reports = [r for r in reports if _is_asset_match(r, effective_asset)]
     if bot_type and bot_type.lower() not in ("all", "combined"):
         reports = [r for r in reports if r.get("bot_type") == bot_type or r.get("strategy_id") == bot_type]
     if exec_m and exec_m.lower() != "all":

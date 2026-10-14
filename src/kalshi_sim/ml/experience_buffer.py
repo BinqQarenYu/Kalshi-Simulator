@@ -116,6 +116,18 @@ class ContinuousExperienceBuffer:
                 raw_data = json.load(f)
 
             for item in raw_data[-self.max_buffer_size:]:
+                # Exclude unrelated assets: each bot only fetches its own asset history
+                item_asset = str(item.get("asset", "")).upper()
+                item_ticker = str(item.get("ticker", "")).upper()
+                if self.asset == "BTC":
+                    if item_asset == "ETH" or item_ticker.startswith("KXETH"):
+                        continue
+                elif self.asset == "ETH":
+                    if item_asset == "BTC" or item_ticker.startswith("KXBTC"):
+                        continue
+                elif item_asset and item_asset != self.asset:
+                    continue
+
                 exp = self._dict_to_experience(item)
                 if exp:
                     self.experiences.append(exp)
@@ -216,6 +228,15 @@ class ContinuousExperienceBuffer:
 
     def record_settled_cycle(self, exp: CycleExperience) -> None:
         """Add a newly settled cycle to the buffer and trigger online recalibration."""
+        # Exclude unrelated assets from live experience updates
+        exp_ticker = str(exp.ticker).upper()
+        if self.asset == "BTC" and exp_ticker.startswith("KXETH"):
+            logger.debug("Excluded unrelated ETH experience %s from BTC buffer.", exp.ticker)
+            return
+        if self.asset == "ETH" and exp_ticker.startswith("KXBTC"):
+            logger.debug("Excluded unrelated BTC experience %s from ETH buffer.", exp.ticker)
+            return
+
         if exp.outcome == "loss" and exp.loss_cause == "none":
             exp.loss_cause = self._classify_loss_cause(
                 outcome=exp.outcome,
