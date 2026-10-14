@@ -619,6 +619,10 @@ class Bot1V4DominationEngine:
             "bleed_discount_limit_price": float(self.bleed_defender.bleed_discount_limit_price),
             "bleed_max_entry_price": float(self.bleed_defender.bleed_max_entry_price),
             "min_spot_diff_bleed": float(self.bleed_defender.min_spot_diff_bleed),
+            "enable_taker_breakout_entry": bool(self.enable_taker_breakout_entry),
+            "max_taker_entry_price": float(self.max_taker_entry_price),
+            "taker_breakout_min_velocity": float(self.taker_breakout_min_velocity),
+            "taker_breakout_min_confidence": float(self.taker_breakout_min_confidence),
             "healing_status": self.healing_protocol.get_status(),
         }
 
@@ -661,6 +665,15 @@ class Bot1V4DominationEngine:
             self.chop_range_threshold = float(chop_range_threshold)
         if chop_vol_threshold is not None:
             self.chop_vol_threshold = float(chop_vol_threshold)
+        if kwargs.get("enable_taker_breakout_entry") is not None:
+            self.enable_taker_breakout_entry = bool(kwargs["enable_taker_breakout_entry"])
+        if kwargs.get("max_taker_entry_price") is not None:
+            self.max_taker_entry_price = Decimal(str(kwargs["max_taker_entry_price"]))
+        if kwargs.get("taker_breakout_min_velocity") is not None:
+            self.taker_breakout_min_velocity = float(kwargs["taker_breakout_min_velocity"])
+        if kwargs.get("taker_breakout_min_confidence") is not None:
+            val_c = float(kwargs["taker_breakout_min_confidence"])
+            self.taker_breakout_min_confidence = val_c if val_c <= 1.0 else (val_c / 100.0)
         if kwargs.get("bleed_discount_limit_price") is not None:
             val_disc = Decimal(str(kwargs["bleed_discount_limit_price"]))
             self.bleed_discount_limit_price = val_disc
@@ -1003,6 +1016,7 @@ class Bot1V4DominationEngine:
                 active_playbook="bleed_defender_asymmetric_harvest",
                 playbook_stage="bleed_armor",
                 p_up=p_up, p_down=p_down, p_wait=0.0,
+                vpin=vpin_eval, vpin_is_safe=True,
                 ev_yes=float(self.min_ev_hurdle_dollars) if side == "yes" else 0.0,
                 ev_no=float(self.min_ev_hurdle_dollars) if side == "no" else 0.0,
                 edge_yes=p_up - float(bleed_limit_price) if side == "yes" else 0.0,
