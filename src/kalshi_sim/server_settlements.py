@@ -19,7 +19,7 @@ from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
 from kalshi_sim.agent_guardrails import AgentGuardrails
-from kalshi_sim.db import get_db, get_db_writer
+from kalshi_sim.db import get_db, get_db_writer, get_eth_db, get_eth_db_writer
 from kalshi_sim.order_client import KalshiLiveOrderClient
 from kalshi_sim.portfolio import Portfolio
 from kalshi_sim.schemas import (
@@ -265,31 +265,34 @@ def record_win_loss_event_report(
     state.win_loss_reports.insert(0, report)
     state.save_persisted_reports()
 
-    # Feed Continuous Experience Buffer for online sharpening & Platt calibration
-    if hasattr(state, "experience_buffer") and state.experience_buffer:
-        try:
-            exp = state.experience_buffer._dict_to_experience(report)
-            if exp:
-                state.experience_buffer.record_settled_cycle(exp)
-                logger.info(
-                    "[EXPERIENCE_BUFFER] Recalibrated after cycle %s -> %s (PnL: $%s). Brier: %.4f, Platt Alpha: %.2f",
-                    ticker, outcome.upper(), pnl, state.experience_buffer.brier_score, state.experience_buffer.platt_alpha
-                )
-        except Exception as eb_exc:
-            logger.debug("[EXPERIENCE_BUFFER] Error recording cycle settlement: %s", eb_exc)
+    # Determine if ETH asset
+    is_eth_asset = (
+        str(asset).upper() == "ETH"
+        or ticker.upper().startswith("KXETH")
+        or "eth" in str(bot_type_resolved).lower()
+    )
+    db_writer = get_eth_db_writer() if is_eth_asset else get_db_writer()
 
-    if not skip_guardrails and hasattr(state, "guardrails_agent") and state.guardrails_agent:
-        # Record settlement in Agent_Guardrails to unlock cycle and track streaks
-        state.guardrails_agent.record_cycle_settlement(
-            ticker=ticker,
-            outcome=outcome,
-            pnl=pnl,
-            balance_after=balance_after,
-            cycle_id=ticker,
-            execution_mode=exec_mode_resolved,
-        )
+    # Route persistence to dedicated ETH report store if ETH asset
+    if is_eth_asset:
+        try:
+            eth_file = Path("data/eth_win_loss_reports.json")
+            eth_file.parent.mkdir(parents=True, exist_ok=True)
+            eth_reports = []
+            if eth_file.exists():
+                try:
+                    eth_reports = json.loads(eth_file.read_text(encoding="utf-8"))
+                    if not isinstance(eth_reports, list):
+                        eth_reports = []
+                except Exception:
+                    eth_reports = []
+            eth_reports.insert(0, report)
+            eth_file.write_text(json.dumps(eth_reports, indent=2), encoding="utf-8")
+        except Exception as eth_w_exc:
+            logger.warning("Could not persist to eth_win_loss_reports.json: %s", eth_w_exc)
 
     # 4-Region & Multi-Warrior Live Dynamic Feedback Loop
+    active_bot = None
     try:
         active_bot = _resolve_bot(bot_type_resolved)
         if active_bot is None and hasattr(state, "bot1_v4_engine"):
@@ -305,8 +308,36 @@ def record_win_loss_event_report(
     except Exception as bot_settle_exc:
         logger.debug("[WAVE REGIME SETTLEMENT FEEDBACK] Error recording settlement on bot instance: %s", bot_settle_exc)
 
+    # Feed Continuous Experience Buffer for online sharpening & Platt calibration
+    target_exp_buf = getattr(active_bot, "experience_buffer", None) if active_bot else None
+    if target_exp_buf is None and hasattr(state, "experience_buffer"):
+        target_exp_buf = state.experience_buffer
+
+    if target_exp_buf:
+        try:
+            exp = target_exp_buf._dict_to_experience(report)
+            if exp:
+                target_exp_buf.record_settled_cycle(exp)
+                logger.info(
+                    "[EXPERIENCE_BUFFER] Recalibrated after cycle %s -> %s (PnL: $%s). Brier: %.4f, Platt Alpha: %.2f",
+                    ticker, outcome.upper(), pnl, target_exp_buf.brier_score, target_exp_buf.platt_alpha
+                )
+        except Exception as eb_exc:
+            logger.debug("[EXPERIENCE_BUFFER] Error recording cycle settlement: %s", eb_exc)
+
+    if not skip_guardrails and hasattr(state, "guardrails_agent") and state.guardrails_agent:
+        # Record settlement in Agent_Guardrails to unlock cycle and track streaks
+        state.guardrails_agent.record_cycle_settlement(
+            ticker=ticker,
+            outcome=outcome,
+            pnl=pnl,
+            balance_after=balance_after,
+            cycle_id=ticker,
+            execution_mode=exec_mode_resolved,
+        )
+
     try:
-        get_db_writer().enqueue_settlement(
+        db_writer.enqueue_settlement(
             settlement_id=report["report_id"],
             ticker=ticker,
             side=side_clean,
@@ -330,13 +361,10 @@ def record_win_loss_event_report(
                 twap_div = float(settlement_spot_price) - twap_val
 
         macro_slope = 0.0
-        active_bot = _resolve_bot(bot_type_resolved)
-        if active_bot is None and hasattr(state, "bot1_v4_engine"):
-            active_bot = state.bot1_v4_engine
         if active_bot and hasattr(active_bot, "_last_1h_slope"):
             macro_slope = float(getattr(active_bot, "_last_1h_slope", 0.0) or 0.0)
 
-        get_db_writer().enqueue_lifecycle_forensics(
+        db_writer.enqueue_lifecycle_forensics(
             trade_id=report["report_id"],
             ticker=ticker,
             side=side_clean,
@@ -367,7 +395,9 @@ def record_win_loss_event_report(
 
         # Failure & Mistake Attribution Autopsy (If Loss)
         if outcome.lower() == "loss":
-            is_twap_pin = 1 if abs(twap_div) >= 15.0 and ((side_clean == "yes" and float(settlement_spot_price) >= float(strike_price) and twap_val < float(strike_price)) or (side_clean == "no" and float(settlement_spot_price) < float(strike_price) and twap_val >= float(strike_price))) else 0
+            twap_div_threshold = 1.50 if is_eth_asset else 15.0
+            salv_diff_threshold = 8.50 if is_eth_asset else 85.0
+            is_twap_pin = 1 if abs(twap_div) >= twap_div_threshold and ((side_clean == "yes" and float(settlement_spot_price) >= float(strike_price) and twap_val < float(strike_price)) or (side_clean == "no" and float(settlement_spot_price) < float(strike_price) and twap_val >= float(strike_price))) else 0
             is_ct = 1 if ((side_clean == "no" and macro_slope > 0.20) or (side_clean == "yes" and macro_slope < -0.20)) else 0
             
             wave_phys = getattr(active_bot, "_last_wave_physics", None) if active_bot else None
@@ -375,7 +405,7 @@ def record_win_loss_event_report(
             w_ratio = getattr(wave_phys, "upper_wick_dollars", 0.0) / max(1.0, getattr(wave_phys, "body_dollars", 1.0)) if wave_phys else 0.0
             
             # Salvage stop check (DEF-03)
-            was_salv = 1 if float(entry_price) >= 0.40 and abs(float(settlement_spot_price - strike_price)) >= 85.0 else 0
+            was_salv = 1 if float(entry_price) >= 0.40 and abs(float(settlement_spot_price - strike_price)) >= salv_diff_threshold else 0
             salv_lost = 0.12 * contracts if was_salv else 0.0
 
             if is_twap_pin:
@@ -389,7 +419,7 @@ def record_win_loss_event_report(
             else:
                 f_code = "ERR_DISPERSION_EXCURSION"
 
-            get_db_writer().enqueue_failure_autopsy(
+            db_writer.enqueue_failure_autopsy(
                 trade_id=report["report_id"],
                 ticker=ticker,
                 outcome="LOSS",
@@ -408,7 +438,7 @@ def record_win_loss_event_report(
 
         if exec_mode_resolved != "live" and state.sim_agent and state.sim_agent._portfolio:
             snap = state.sim_agent._portfolio.get_pnl_snapshot()
-            get_db_writer().enqueue_equity_snapshot(
+            db_writer.enqueue_equity_snapshot(
                 balance=float(snap.current_balance),
                 equity=float(snap.total_equity),
                 realized_pnl=float(snap.total_realized_pnl),
@@ -542,27 +572,35 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
             existing_report_ids = {r.get("report_id") for r in state.win_loss_reports}
             existing_tickers = {r.get("ticker") for r in state.win_loss_reports if r.get("execution_mode") == "live"}
 
-        # Query local live trades from SQLite to reconcile attribution
+        # Query local live trades from SQLite to reconcile attribution (both BTC and ETH stores)
         live_db_trades: dict[str, dict[str, Any]] = {}
-        try:
-            async with get_db(state.data_dir / "kalshi_history.db").get_connection() as conn:
-                async with conn.execute(
-                    "SELECT trade_id, ticker, side, size, price, gross_value, timestamp_utc, bot_type FROM trades WHERE execution_mode = 'live'"
-                ) as cursor:
-                    rows = await cursor.fetchall()
-                    for row in rows:
-                        live_db_trades[row[1]] = {
-                            "trade_id": row[0],
-                            "ticker": row[1],
-                            "side": row[2],
-                            "size": row[3],
-                            "price": Decimal(str(row[4])),
-                            "gross_value": Decimal(str(row[5])),
-                            "timestamp_utc": row[6],
-                            "bot_type": row[7] or "3_step_domination_bot",
-                        }
-        except Exception as db_exc:
-            logger.debug("Failed reading trades table in sync_live_settlements: %s", db_exc)
+        db_managers = [get_db(state.data_dir / "kalshi_history.db")]
+        eth_path = state.data_dir / "kalshi_history_eth.db"
+        if eth_path.exists():
+            db_managers.append(get_eth_db(eth_path))
+
+        for mgr in db_managers:
+            try:
+                if mgr.db_path.exists():
+                    async with mgr.get_connection() as conn:
+                        async with conn.execute(
+                            "SELECT trade_id, ticker, side, size, price, gross_value, timestamp_utc, bot_type FROM trades WHERE execution_mode = 'live'"
+                        ) as cursor:
+                            rows = await cursor.fetchall()
+                            for row in rows:
+                                t_ticker = row[1]
+                                live_db_trades[t_ticker] = {
+                                    "trade_id": row[0],
+                                    "ticker": t_ticker,
+                                    "side": row[2],
+                                    "size": row[3],
+                                    "price": Decimal(str(row[4])),
+                                    "gross_value": Decimal(str(row[5])),
+                                    "timestamp_utc": row[6],
+                                    "bot_type": row[7] or ("eth_bot1_v4" if "ETH" in str(t_ticker) else "3_step_domination_bot"),
+                                }
+            except Exception as db_exc:
+                logger.debug("Failed reading trades table from %s in sync_live_settlements: %s", mgr.db_path, db_exc)
 
         new_reports: list[dict[str, Any]] = []
 
@@ -607,7 +645,9 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
             if strike_price == Decimal("0.0"):
                 strike_price = state.target_strike
 
-            settlement_btc_price = strike_price + (Decimal("45.00") if market_result == "yes" else Decimal("-45.00"))
+            is_eth = ticker.startswith("KXETH")
+            diff_step = Decimal("2.50") if is_eth else Decimal("45.00")
+            settlement_btc_price = strike_price + (diff_step if market_result == "yes" else -diff_step)
             live_bal = real_bal_dollars
 
             rep = record_win_loss_event_report(
@@ -616,6 +656,7 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
                 contracts=size,
                 entry_price=entry_price,
                 settlement_btc_price=settlement_btc_price,
+                settlement_spot_price=settlement_btc_price,
                 strike_price=strike_price,
                 timeframe="15m",
                 ai_confidence=0.82,
@@ -630,6 +671,7 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
                 timestamp_utc=settled_ts,
                 cycle_time=cycle_time,
                 balance_after=live_bal,
+                asset="ETH" if is_eth else "BTC",
                 skip_guardrails=True,
             )
             new_reports.append(rep)
@@ -683,7 +725,9 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
             if strike_price == Decimal("0.0"):
                 strike_price = state.target_strike
 
-            settlement_btc_price = strike_price + (Decimal("50.00") if market_result == "yes" else Decimal("-50.00"))
+            is_eth = ticker.startswith("KXETH")
+            diff_step = Decimal("2.50") if is_eth else Decimal("50.00")
+            settlement_btc_price = strike_price + (diff_step if market_result == "yes" else -diff_step)
             live_bal = real_bal_dollars
 
             rep = record_win_loss_event_report(
@@ -692,13 +736,14 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
                 contracts=contracts,
                 entry_price=entry_price,
                 settlement_btc_price=settlement_btc_price,
+                settlement_spot_price=settlement_btc_price,
                 strike_price=strike_price,
                 timeframe="15m",
                 ai_confidence=0.80,
                 ai_rationale=f"Real Kalshi Production Settlement | Result: {market_result.upper()} | Revenue: ${float(revenue):.2f} | Fee: ${float(fee):.4f}",
                 vpin_score=0.15,
                 ev_edge=0.10,
-                bot_type="3_step_domination_bot",
+                bot_type="eth_bot1_v4" if is_eth else "3_step_domination_bot",
                 execution_mode="live",
                 report_id=report_id,
                 custom_pnl=pnl,
@@ -706,6 +751,7 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
                 timestamp_utc=settled_ts,
                 cycle_time=cycle_time,
                 balance_after=live_bal,
+                asset="ETH" if is_eth else "BTC",
                 skip_guardrails=True,
             )
             rep["gross_pnl"] = float(revenue - cost)
@@ -720,10 +766,12 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
             state.win_loss_reports.sort(key=lambda r: str(r.get("timestamp_utc", "")), reverse=True)
             state.save_persisted_reports()
 
-            # Ensure SQLite store has all live records for historical query service
+            # Ensure SQLite store has all live records for historical query service (both BTC and ETH)
             try:
-                async with get_db(state.data_dir / "kalshi_history.db").get_connection() as conn:
-                    for r in new_reports:
+                for r in new_reports:
+                    is_eth = r["ticker"].startswith("KXETH") or str(r.get("asset", "")).upper() == "ETH"
+                    target_db = get_eth_db(state.data_dir / "kalshi_history_eth.db") if is_eth else get_db(state.data_dir / "kalshi_history.db")
+                    async with target_db.get_connection() as conn:
                         ts_str = str(r.get("timestamp_utc", ""))
                         try:
                             dt_val = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
@@ -750,7 +798,7 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
                                 r["outcome"],
                                 float(r.get("gross_pnl", r["pnl"])),
                                 float(r.get("balance_after", 21.97)),
-                                r.get("bot_type", "3_step_domination_bot"),
+                                r.get("bot_type", "eth_bot1_v4" if is_eth else "3_step_domination_bot"),
                                 "live",
                             )
                         )
@@ -772,12 +820,12 @@ async def sync_live_settlements(full_sync: bool = False) -> list[dict[str, Any]]
                                 float(r["entry_price"]),
                                 float(r["entry_price"]) * r["contracts"],
                                 float(r.get("fee", 0.0)),
-                                r.get("bot_type", "3_step_domination_bot"),
+                                r.get("bot_type", "eth_bot1_v4" if is_eth else "3_step_domination_bot"),
                                 "live",
                                 "filled",
                             )
                         )
-                    await conn.commit()
+                        await conn.commit()
             except Exception as db_sync_exc:
                 logger.debug("Direct DB sync exception: %s", db_sync_exc)
 

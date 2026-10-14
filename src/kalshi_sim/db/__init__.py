@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from kalshi_sim.db.connection import DatabaseManager, get_db
+from kalshi_sim.db.connection import DatabaseManager, get_db, get_eth_db
 from kalshi_sim.db.queries import HistoricalQueryService
 from kalshi_sim.db.schema import CURRENT_SCHEMA_VERSION, MigrationEngine
-from kalshi_sim.db.writer import DatabaseWriter, get_db_writer
+from kalshi_sim.db.writer import DatabaseWriter, get_db_writer, get_eth_db_writer
 
 __all__ = [
     "CURRENT_SCHEMA_VERSION",
@@ -15,4 +15,6 @@ __all__ = [
     "MigrationEngine",
     "get_db",
     "get_db_writer",
+    "get_eth_db",
+    "get_eth_db_writer",
 ]

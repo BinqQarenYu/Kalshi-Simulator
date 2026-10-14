@@ -236,7 +236,11 @@ class AutonomousBatchSupervisor:
         exp_summary: dict[str, Any] = {}
         try:
             from kalshi_sim.server import state
-            if hasattr(state, "experience_buffer") and state.experience_buffer:
+            if "eth" in str(self.win_loss_path).lower():
+                eth_bot = getattr(state, "eth_bot1_v4_engine", None)
+                if eth_bot and getattr(eth_bot, "experience_buffer", None):
+                    exp_summary = eth_bot.experience_buffer.get_recent_summary(20)
+            if not exp_summary and hasattr(state, "experience_buffer") and state.experience_buffer:
                 exp_summary = state.experience_buffer.get_recent_summary(20)
         except Exception:
             pass
@@ -246,7 +250,12 @@ class AutonomousBatchSupervisor:
         if self.bot_parameters_path.exists():
             try:
                 p_data = json.loads(self.bot_parameters_path.read_text(encoding="utf-8"))
-                current_params = p_data.get("assets", {}).get("BTC", {})
+                current_params = (
+                    p_data.get("eth_bot1_v4")
+                    or p_data.get("assets", {}).get("ETH")
+                    or p_data.get("assets", {}).get("BTC", {})
+                    or p_data
+                )
             except Exception:
                 pass
 

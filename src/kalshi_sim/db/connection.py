@@ -22,6 +22,7 @@ from kalshi_sim.db.schema import MigrationEngine
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("data/kalshi_history.db")
+DEFAULT_ETH_DB_PATH = Path("data/kalshi_history_eth.db")
 
 
 class DatabaseManager:
@@ -66,3 +67,15 @@ def get_db(db_path: Optional[Union[str, Path]] = None) -> DatabaseManager:
     if _global_db_manager is None or db_path is not None:
         _global_db_manager = DatabaseManager(db_path)
     return _global_db_manager
+
+
+# Global ETH database manager singleton
+_global_eth_db_manager: Optional[DatabaseManager] = None
+
+
+def get_eth_db(db_path: Optional[Union[str, Path]] = None) -> DatabaseManager:
+    """Retrieve or create the global ETH DatabaseManager instance."""
+    global _global_eth_db_manager
+    if _global_eth_db_manager is None or db_path is not None:
+        _global_eth_db_manager = DatabaseManager(db_path or DEFAULT_ETH_DB_PATH)
+    return _global_eth_db_manager

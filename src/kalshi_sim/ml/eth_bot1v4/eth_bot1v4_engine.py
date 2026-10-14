@@ -17,14 +17,17 @@ import inspect
 import logging
 import os
 from pathlib import Path
+import json
+import random
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import aiohttp
 
 from kalshi_sim.auth import DEMO_REST_BASE, PROD_REST_BASE, get_auth_headers
+from kalshi_sim.db import get_eth_db_writer
 from kalshi_sim.ml.bot1_v4_engine import Bot1V4Decision, Bot1V4DominationEngine
-from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer
+from kalshi_sim.ml.experience_buffer import ContinuousExperienceBuffer, CycleExperience
 from kalshi_sim.orderflow.eth_orderflow_feed import EthOrderflowFeed
 from kalshi_sim.schemas import (
     CryptoAsset,
@@ -70,12 +73,17 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         kwargs.setdefault("fee_per_contract", Decimal("0.01"))
 
         # Dedicated ETH experience buffer
+        buffer_path = Path(hist_file) if hist_file else Path("data/eth_win_loss_reports.json")
+        buffer_path.parent.mkdir(parents=True, exist_ok=True)
         if "experience_buffer" not in kwargs or kwargs["experience_buffer"] is None:
-            buffer_path = Path(hist_file) if hist_file else Path("data/eth_win_loss_reports.json")
-            buffer_path.parent.mkdir(parents=True, exist_ok=True)
-            kwargs["experience_buffer"] = ContinuousExperienceBuffer(history_file=buffer_path)
+            kwargs["experience_buffer"] = ContinuousExperienceBuffer(history_file=buffer_path, asset="ETH")
 
         super().__init__(*args, **kwargs)
+
+        self.history_file = buffer_path
+        self.parameters_file = Path("data/bot_parameters_eth.json")
+        self._load_persisted_parameters()
+        self._active_trade_forensics: dict[str, dict[str, Any]] = {}
 
         self.min_spot_diff_bleed = float(min_bleed_diff)
         if hasattr(self, "bleed_defender") and self.bleed_defender:
@@ -86,6 +94,34 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         self.target_ticker: Optional[str] = target_ticker
         self._cached_market: Optional[MarketInfo] = None
         self._last_market_fetch_ts: float = 0.0
+
+    def _load_persisted_parameters(self) -> None:
+        """Load persisted ETH bot parameters from disk if available."""
+        if not self.parameters_file.exists():
+            return
+        try:
+            raw = json.loads(self.parameters_file.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                eth_params = raw.get("eth_bot1_v4", raw)
+                self.update_parameters(**eth_params)
+                logger.info("[ETH BOT] Loaded persisted parameters from %s", self.parameters_file)
+        except Exception as exc:
+            logger.debug("[ETH BOT] Error loading persisted parameters: %s", exc)
+
+    def save_persisted_parameters(self) -> None:
+        """Persist active parameters to data/bot_parameters_eth.json."""
+        try:
+            self.parameters_file.parent.mkdir(parents=True, exist_ok=True)
+            existing: dict[str, Any] = {}
+            if self.parameters_file.exists():
+                try:
+                    existing = json.loads(self.parameters_file.read_text(encoding="utf-8"))
+                except Exception:
+                    existing = {}
+            existing["eth_bot1_v4"] = self.get_parameters()
+            self.parameters_file.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.warning("[ETH BOT] Could not persist parameters to %s: %s", self.parameters_file, exc)
 
     def evaluate(
         self,
@@ -353,7 +389,252 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                     res = await self.order_client.place_order(**order_kwargs)
                     self.record_completed_turnover(target_ticker)
                     logger.info("🚀 [ETH BOT ORDER EXECUTED] %s %s 1 ct @ $%s | Result: %s", target_ticker, order_side.value, limit_p, res)
+
+                    # Capture T1 & T2 Forensics for trade lifecycle ledger
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    order_id = res.get("order_id", f"ord_eth_{int(time.time()*1000)}") if isinstance(res, dict) else f"ord_eth_{int(time.time()*1000)}"
+                    self._active_trade_forensics[target_ticker] = {
+                        "order_id": order_id,
+                        "ticker": target_ticker,
+                        "side": order_side.value,
+                        "entry_price": float(limit_p),
+                        "contracts": 1,
+                        "t1_timestamp": now_iso,
+                        "t1_spot": float(spot_price),
+                        "t1_strike_diff": float(spot_price - target_strike),
+                        "t1_regime": getattr(self, "_current_regime", "CHOP").upper(),
+                        "t1_vpin": float(vpin_score),
+                        "t1_1h_slope": float(getattr(self, "_last_1h_slope", 0.0) or 0.0),
+                        "t2_timestamp": now_iso,
+                        "t2_spot": float(spot_price),
+                        "t2_regime": getattr(self, "_current_regime", "CHOP").upper(),
+                        "t2_vpin": float(vpin_score),
+                    }
+
+                    # Enqueue trade into separate ETH database
+                    get_eth_db_writer().enqueue_trade(
+                        trade_id=order_id,
+                        ticker=target_ticker,
+                        side=order_side.value,
+                        price=float(limit_p),
+                        size=1,
+                        bot_type=self.STRATEGY_ID,
+                        execution_mode="live" if hasattr(self.order_client, "shard_balances") else "simulated",
+                    )
                 except Exception as ex:
                     logger.error("[ETH BOT ORDER FAILED] %s: %s", target_ticker, ex)
 
         return decision
+
+    def record_cycle_settlement(
+        self,
+        won_or_pnl: Union[bool, Decimal, float],
+        ticker: Optional[str] = None,
+        side: Optional[str] = None,
+        entry_price: Optional[Decimal] = None,
+        settlement_spot_price: Optional[Decimal] = None,
+        strike_price: Optional[Decimal] = None,
+        contracts: int = 1,
+        execution_mode: str = "live",
+        twap_60s: Optional[Decimal] = None,
+        market_condition: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Record cycle settlement across ETH database, lifecycle forensics, autopsies, and experience buffer."""
+        # Simple boolean feedback invocation from server or loop
+        if isinstance(won_or_pnl, bool) and ticker is None:
+            super().record_cycle_settlement(won_or_pnl)
+            return None
+
+        is_win = bool(won_or_pnl) if isinstance(won_or_pnl, bool) else (Decimal(str(won_or_pnl)) > 0)
+        target_ticker = ticker or self.target_ticker or "KXETH15M-CYCLE"
+        entry_p = entry_price or self.discount_limit_price
+        if not isinstance(entry_p, Decimal):
+            entry_p = Decimal(str(round(entry_p, 2)))
+
+        if isinstance(won_or_pnl, (Decimal, float)) and not isinstance(won_or_pnl, bool):
+            pnl = Decimal(str(won_or_pnl))
+        else:
+            pnl = Decimal(str(contracts)) * (Decimal("1.00") - entry_p) if is_win else -Decimal(str(contracts)) * entry_p
+
+        outcome = "win" if is_win else "loss"
+        now_utc = datetime.now(timezone.utc)
+        now_iso = now_utc.isoformat()
+        report_id = f"WLR-ETH-{now_utc.strftime('%y%m%d%H%M%S')}-{random.randint(100, 999)}"
+
+        strike = strike_price or Decimal("2600.00")
+        spot = settlement_spot_price or (strike + Decimal("2.50") if is_win else strike - Decimal("2.50"))
+        side_clean = (side or "yes").lower()
+
+        twap_val = float(twap_60s if twap_60s is not None else spot)
+        twap_div = float(spot) - twap_val
+        macro_slope = float(getattr(self, "_last_1h_slope", 0.0) or 0.0)
+        cond_tag = market_condition or getattr(self, "_current_regime", "CHOP").upper()
+
+        # Retrieve saved T1/T2 forensics or construct baseline
+        t_forensics = self._active_trade_forensics.pop(target_ticker, None) or {}
+        t1_spot = t_forensics.get("t1_spot", float(strike))
+        t1_diff = t_forensics.get("t1_strike_diff", float(spot - strike))
+        t1_regime = t_forensics.get("t1_regime", cond_tag)
+        t1_vpin = t_forensics.get("t1_vpin", 0.15)
+        t1_ts = t_forensics.get("t1_timestamp", now_iso)
+
+        t2_ts = t_forensics.get("t2_timestamp", now_iso)
+        t2_spot = t_forensics.get("t2_spot", float(spot))
+        t2_regime = t_forensics.get("t2_regime", cond_tag)
+        t2_vpin = t_forensics.get("t2_vpin", t1_vpin)
+
+        # 1. Failure Autopsy Attribution on Losses
+        failure_code = "NONE"
+        if not is_win:
+            twap_div_threshold = 1.50
+            salv_diff_threshold = 8.50
+            is_twap_pin = 1 if abs(twap_div) >= twap_div_threshold and ((side_clean == "yes" and float(spot) >= float(strike) and twap_val < float(strike)) or (side_clean == "no" and float(spot) < float(strike) and twap_val >= float(strike))) else 0
+            is_ct = 1 if ((side_clean == "no" and macro_slope > 0.20) or (side_clean == "yes" and macro_slope < -0.20)) else 0
+            wave_phys = getattr(self, "_last_wave_physics", None)
+            is_dw = 1 if (wave_phys and getattr(wave_phys, "is_double_wick_meatgrinder", False)) else 0
+            w_ratio = getattr(wave_phys, "upper_wick_dollars", 0.0) / max(1.0, getattr(wave_phys, "body_dollars", 1.0)) if wave_phys else 0.0
+            was_salv = 1 if float(entry_p) >= 0.40 and abs(float(spot - strike)) >= salv_diff_threshold else 0
+            salv_lost = 0.12 * contracts if was_salv else 0.0
+
+            if is_twap_pin:
+                failure_code = "ERR_TWAP_PIN_VICTIM"
+            elif is_ct:
+                failure_code = "ERR_COUNTER_TREND"
+            elif is_dw:
+                failure_code = "ERR_DOUBLE_WICK_TRAP"
+            elif was_salv:
+                failure_code = "ERR_DOOMED_HOLD_TO_ZERO"
+            elif abs(float(spot - strike)) < 2.00:
+                failure_code = "STRIKE_PROXIMITY_TRAP"
+            elif t1_vpin >= 0.50:
+                failure_code = "ADVERSE_SELECTION_SWEEP"
+            else:
+                failure_code = "ERR_DISPERSION_EXCURSION"
+
+            get_eth_db_writer().enqueue_failure_autopsy(
+                trade_id=report_id,
+                ticker=target_ticker,
+                outcome="LOSS",
+                realized_pnl=float(pnl),
+                failure_code=failure_code,
+                is_counter_trend=is_ct,
+                macro_1h_slope=macro_slope,
+                is_double_wick_trap=is_dw,
+                wick_to_body_ratio=w_ratio,
+                was_salvageable=was_salv,
+                salvageable_cents_lost=salv_lost,
+                is_twap_pin_victim=is_twap_pin,
+                twap_vs_spot_divergence=twap_div,
+                bot_type=self.STRATEGY_ID,
+            )
+
+        # 2. Lifecycle Forensics (T1, T2, T3) Enqueue
+        get_eth_db_writer().enqueue_lifecycle_forensics(
+            trade_id=report_id,
+            ticker=target_ticker,
+            side=side_clean,
+            entry_price=float(entry_p),
+            outcome=outcome.upper(),
+            realized_pnl=float(pnl),
+            role="MAKER" if float(entry_p) <= 0.48 else "TAKER",
+            fee_paid=0.0 if float(entry_p) <= 0.48 else 0.01,
+            t1_timestamp=t1_ts,
+            t1_spot=t1_spot,
+            t1_strike_diff=t1_diff,
+            t1_1h_slope=macro_slope,
+            t1_regime=t1_regime,
+            t1_vpin=t1_vpin,
+            t2_timestamp=t2_ts,
+            t2_spot=t2_spot,
+            t2_1h_slope=macro_slope,
+            t2_regime=t2_regime,
+            t2_vpin=t2_vpin,
+            t3_timestamp=now_iso,
+            t3_spot=float(spot),
+            t3_60s_twap=twap_val,
+            twap_vs_spot_divergence=twap_div,
+            t3_1h_slope=macro_slope,
+            t3_regime=cond_tag,
+            bot_type=self.STRATEGY_ID,
+        )
+
+        # 3. Contract Settlement Enqueue
+        get_eth_db_writer().enqueue_settlement(
+            settlement_id=report_id,
+            ticker=target_ticker,
+            side=side_clean,
+            size=contracts,
+            entry_price=float(entry_p),
+            settlement_price=1.0 if is_win else 0.0,
+            outcome=outcome,
+            pnl=float(pnl),
+            balance_after=26.34,
+            bot_type=self.STRATEGY_ID,
+            execution_mode=execution_mode,
+        )
+
+        # 4. Standardized Win/Loss Report for disk persistence
+        report = {
+            "report_id": report_id,
+            "cycle_time": now_utc.strftime("%B %d, 15M Event Cycle ET"),
+            "ticker": target_ticker,
+            "timeframe": "15m",
+            "asset": "ETH",
+            "strike_price": float(strike),
+            "settlement_spot_price": float(spot),
+            "bot_side": side_clean,
+            "contracts": contracts,
+            "entry_price": float(entry_p),
+            "settlement_price": 1.0 if is_win else 0.0,
+            "outcome": outcome,
+            "pnl": float(pnl),
+            "roi_pct": round(float(pnl / (entry_p * contracts)) * 100.0, 2) if entry_p > 0 else 0.0,
+            "ai_confidence": 0.80,
+            "ai_rationale": f"ETH 15M Cycle Execution | Loss Cause: {failure_code}" if not is_win else "ETH 15M Cycle Execution | Profitable Settlement",
+            "vpin_score": t1_vpin,
+            "ev_edge": 0.08,
+            "balance_after": 26.34,
+            "market_condition": cond_tag,
+            "bot_type": self.STRATEGY_ID,
+            "execution_mode": execution_mode,
+            "timestamp_utc": now_iso,
+            "failure_code": failure_code,
+            "bot_parameters": self.get_parameters(),
+        }
+
+        # Save to data/eth_win_loss_reports.json
+        try:
+            self.history_file.parent.mkdir(parents=True, exist_ok=True)
+            reports = []
+            if self.history_file.exists():
+                try:
+                    reports = json.loads(self.history_file.read_text(encoding="utf-8"))
+                    if not isinstance(reports, list):
+                        reports = []
+                except Exception:
+                    reports = []
+            reports.insert(0, report)
+            self.history_file.write_text(json.dumps(reports, indent=2), encoding="utf-8")
+        except Exception as file_exc:
+            logger.warning("[ETH BOT] Error persisting report to %s: %s", self.history_file, file_exc)
+
+        # 5. Feed Continuous Experience Buffer for online sharpening & Platt calibration
+        if self.experience_buffer:
+            try:
+                exp = self.experience_buffer._dict_to_experience(report)
+                if exp:
+                    self.experience_buffer.record_settled_cycle(exp)
+                    logger.info(
+                        "🧠 [ETH EXPERIENCE_BUFFER] Recalibrated after cycle %s -> %s (PnL: $%s). Brier: %.4f, Platt Alpha: %.2f",
+                        target_ticker, outcome.upper(), pnl, self.experience_buffer.brier_score, self.experience_buffer.platt_alpha
+                    )
+            except Exception as eb_exc:
+                logger.debug("[ETH BOT] Error feeding experience buffer: %s", eb_exc)
+
+        # 6. Update wave classifier, bleed defender, healing protocol
+        super().record_cycle_settlement(is_win)
+
+        # 7. Persist dynamic parameters
+        self.save_persisted_parameters()
+
+        return report

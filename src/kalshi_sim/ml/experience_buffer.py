@@ -58,9 +58,29 @@ class ContinuousExperienceBuffer:
         self,
         max_buffer_size: int = 500,
         history_file: Optional[Path] = None,
+        asset: Optional[str] = None,
     ):
         self.max_buffer_size = max_buffer_size
         self.history_file = history_file or Path("data/win_loss_reports.json")
+        if asset:
+            self.asset = str(asset).upper()
+        elif "eth" in str(self.history_file).lower():
+            self.asset = "ETH"
+        else:
+            self.asset = "BTC"
+
+        # Asset-specific thresholds for Causal Attribution and Quadrant Pruning:
+        if self.asset == "ETH":
+            self.tight_spot_diff_threshold = 2.00
+            self.mid_spot_diff_threshold = 5.00
+            self.momentum_inversion_threshold = 6.00
+            self.gamma_pin_threshold = 1.50
+        else:
+            self.tight_spot_diff_threshold = 25.00
+            self.mid_spot_diff_threshold = 60.00
+            self.momentum_inversion_threshold = 50.00
+            self.gamma_pin_threshold = 20.00
+
         self.experiences: List[CycleExperience] = []
         
         # Online Calibration Metrics
@@ -129,17 +149,17 @@ class ContinuousExperienceBuffer:
             return "ADVERSE_SELECTION_SWEEP"
 
         # Cause 2: Strike Proximity Trap (Entered within tight noise envelope)
-        if abs(spot_diff) < 25.0:
+        if abs(spot_diff) < self.tight_spot_diff_threshold:
             return "STRIKE_PROXIMITY_TRAP"
 
         # Cause 3: Late-Cycle Gamma Cliff Reversal (Failed inside final 120s)
-        if time_to_expiry_s <= 90.0 and abs(spot_diff) < 20.0:
+        if time_to_expiry_s <= 90.0 and abs(spot_diff) < self.gamma_pin_threshold:
             return "GAMMA_PIN_CRUSH"
         if time_to_expiry_s <= 120.0:
             return "LATE_CYCLE_GAMMA_REVERSAL"
 
         # Cause 4: Directional Momentum Inversion
-        if abs(spot_diff) >= 50.0:
+        if abs(spot_diff) >= self.momentum_inversion_threshold:
             return "MOMENTUM_INVERSION"
 
         return "STANDARD_LOSS"
@@ -252,7 +272,7 @@ class ContinuousExperienceBuffer:
 
             # Track 3D Quadrants: (Horizon x Distance)
             h_tag = "EARLY" if e.time_to_expiry_s > 600 else ("MID" if e.time_to_expiry_s > 180 else "LATE")
-            d_tag = "TIGHT" if abs(e.spot_diff) < 25.0 else ("MID" if abs(e.spot_diff) < 60.0 else "WIDE")
+            d_tag = "TIGHT" if abs(e.spot_diff) < self.tight_spot_diff_threshold else ("MID" if abs(e.spot_diff) < self.mid_spot_diff_threshold else "WIDE")
             quad_key = f"{h_tag}_{d_tag}"
             if quad_key not in quadrant_pnl:
                 quadrant_pnl[quad_key] = []
@@ -318,7 +338,7 @@ class ContinuousExperienceBuffer:
     def is_quadrant_pruned(self, time_to_expiry_s: float, spot_diff: float) -> bool:
         """Check if current execution condition falls into a banned losing quadrant."""
         h_tag = "EARLY" if time_to_expiry_s > 600 else ("MID" if time_to_expiry_s > 180 else "LATE")
-        d_tag = "TIGHT" if abs(spot_diff) < 25.0 else ("MID" if abs(spot_diff) < 60.0 else "WIDE")
+        d_tag = "TIGHT" if abs(spot_diff) < self.tight_spot_diff_threshold else ("MID" if abs(spot_diff) < self.mid_spot_diff_threshold else "WIDE")
         quad_key = f"{h_tag}_{d_tag}"
         return quad_key in self.pruned_regime_quadrants
 

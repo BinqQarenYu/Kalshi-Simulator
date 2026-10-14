@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import aiosqlite
 
-from kalshi_sim.db.connection import DatabaseManager, get_db
+from kalshi_sim.db.connection import DatabaseManager, get_db, get_eth_db
 
 logger = logging.getLogger(__name__)
 
@@ -618,3 +618,15 @@ def get_db_writer() -> DatabaseWriter:
     if _global_db_writer is None:
         _global_db_writer = DatabaseWriter()
     return _global_db_writer
+
+
+# Global ETH writer singleton
+_global_eth_db_writer: Optional[DatabaseWriter] = None
+
+
+def get_eth_db_writer() -> DatabaseWriter:
+    """Retrieve or create the global ETH DatabaseWriter singleton."""
+    global _global_eth_db_writer
+    if _global_eth_db_writer is None:
+        _global_eth_db_writer = DatabaseWriter(db_manager=get_eth_db())
+    return _global_eth_db_writer

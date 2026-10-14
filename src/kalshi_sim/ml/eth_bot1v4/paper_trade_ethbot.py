@@ -33,6 +33,7 @@ _ROOT = Path(__file__).resolve().parents[4]
 load_dotenv(_ROOT / ".env")
 
 from kalshi_sim.auth import DEMO_REST_BASE, PROD_REST_BASE
+from kalshi_sim.db import get_eth_db_writer
 from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
 from kalshi_sim.orderflow.eth_orderflow_feed import EthOrderflowFeed
 from kalshi_sim.ml.eth_bot1v4.eth_bot1v4_engine import EthBot1V4Engine
@@ -105,6 +106,11 @@ async def run_eth_bot(
         logger.info("==================================================================")
         order_client = KalshiDemoOrderClient(api_key_id, private_key_path, base_url=DEMO_REST_BASE)
 
+    # Initialize and start dedicated ETH DatabaseWriter
+    db_writer = get_eth_db_writer()
+    await db_writer.start()
+    logger.info("🗄️ [ETH DATABASE WRITER] Initialized data/kalshi_history_eth.db background persistence worker.")
+
     # Initialize institutional L2 WebSocket feed
     feed = EthOrderflowFeed()
     await feed.start()
@@ -117,9 +123,27 @@ async def run_eth_bot(
         ticker=ticker,
     )
 
+    # Track already processed settlements to avoid duplicates
+    processed_settlements: set[str] = set()
+    eth_reports_file = _ROOT / "data" / "eth_win_loss_reports.json"
+    if eth_reports_file.exists():
+        try:
+            prior = json.loads(eth_reports_file.read_text(encoding="utf-8"))
+            if isinstance(prior, list):
+                for p in prior:
+                    if p.get("ticker"):
+                        processed_settlements.add(p["ticker"])
+        except Exception:
+            pass
+
+    last_settlement_check = 0.0
+
     try:
         while True:
             try:
+                now_mono = asyncio.get_running_loop().time()
+
+                # 1. Evaluate and execute 15-minute cycle
                 decision = await eth_engine.run_cycle()
                 if decision:
                     logger.info(
@@ -131,6 +155,84 @@ async def run_eth_bot(
                         float(feed.ofi_l1),
                         decision.recommended_side.upper(),
                     )
+
+                # 2. Periodic Live/Demo Settlement & Causal Autopsy Reconciliation (every 30s)
+                if now_mono - last_settlement_check >= 30.0:
+                    last_settlement_check = now_mono
+                    if order_client and hasattr(order_client, "get_settlements"):
+                        try:
+                            settlements = await order_client.get_settlements(limit=20)
+                            for s in settlements:
+                                s_ticker = s.get("ticker", "")
+                                if not s_ticker or not s_ticker.startswith("KXETH"):
+                                    continue
+                                if s_ticker in processed_settlements:
+                                    continue
+
+                                market_result = s.get("market_result", "").lower()
+                                if not market_result:
+                                    continue
+
+                                yes_cnt = int(float(str(s.get("yes_count_fp", "0") or "0")))
+                                no_cnt = int(float(str(s.get("no_count_fp", "0") or "0")))
+                                yes_cost = Decimal(str(s.get("yes_total_cost_dollars", "0") or "0"))
+                                no_cost = Decimal(str(s.get("no_total_cost_dollars", "0") or "0"))
+                                revenue = Decimal(str(s.get("revenue", 0) or 0)) / Decimal("100")
+                                fee = Decimal(str(s.get("fee_cost", "0") or "0"))
+
+                                total_cnt = max(1, yes_cnt + no_cnt)
+                                cost = yes_cost + no_cost
+                                side_det = "yes" if yes_cnt > no_cnt else "no"
+                                won_det = (revenue > cost) or (side_det == market_result and revenue > Decimal("0"))
+                                pnl_val = revenue - cost - fee
+                                entry_p_val = (cost / Decimal(str(total_cnt))) if total_cnt > 0 else Decimal("0.42")
+
+                                # Extract strike price from ticker
+                                strike_dec = Decimal("2600.00")
+                                parts = s_ticker.split("-")
+                                if len(parts) >= 3:
+                                    try:
+                                        strike_dec = Decimal(parts[-1])
+                                    except Exception:
+                                        pass
+
+                                spot_dec = strike_dec + (Decimal("2.50") if market_result == "yes" else Decimal("-2.50"))
+
+                                rep = eth_engine.record_cycle_settlement(
+                                    won_or_pnl=pnl_val,
+                                    ticker=s_ticker,
+                                    side=side_det,
+                                    entry_price=entry_p_val,
+                                    settlement_spot_price=spot_dec,
+                                    strike_price=strike_dec,
+                                    contracts=total_cnt,
+                                    execution_mode="live" if is_live else "demo",
+                                )
+                                processed_settlements.add(s_ticker)
+                                if rep:
+                                    logger.info(
+                                        "🎯 [ETH SETTLEMENT RECONCILED] %s | %s | PnL: $%+.4f | Why: %s",
+                                        s_ticker,
+                                        rep["outcome"].upper(),
+                                        rep["pnl"],
+                                        rep.get("failure_code", "PROFITABLE"),
+                                    )
+
+                            # Log continuous experience buffer status
+                            if eth_engine.experience_buffer:
+                                summ = eth_engine.experience_buffer.get_recent_summary(10)
+                                if summ["total_recent"] > 0:
+                                    logger.info(
+                                        "🧠 [ETH LEARNING CURVE] Recent WR: %.1f%% | Net: $%+.2f | Brier: %.4f | Platt Alpha: %.2f | Pruned Quads: %s",
+                                        summ["win_rate"],
+                                        summ["net_pnl"],
+                                        summ["brier_score"],
+                                        summ["platt_alpha"],
+                                        summ["pruned_quadrants"],
+                                    )
+                        except Exception as settle_exc:
+                            logger.debug("[ETH SETTLEMENT CHECK ERROR] %s", settle_exc)
+
             except Exception as loop_exc:
                 logger.error("[CYCLE ERROR] Unexpected error during cycle: %s", loop_exc)
 
@@ -138,9 +240,10 @@ async def run_eth_bot(
     except asyncio.CancelledError:
         logger.info("ETH Bot loop cancelled - shutting down cleanly.")
     finally:
-        logger.info("Stopping feeds and closing exchange sessions...")
+        logger.info("Stopping feeds, flushing database, and closing exchange sessions...")
         await feed.stop()
         await order_client.close()
+        await db_writer.stop()
         logger.info("Shutdown complete.")
 
 
