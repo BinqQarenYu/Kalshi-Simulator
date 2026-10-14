@@ -96,6 +96,7 @@ flowchart TB
 - **`kev_oracle.py`**: Ultra-fast latency shadow oracle providing directional bias, strike sanity, and vetoes.
 - **`wave_classifier.py`**: Microstructural wave physics classifier (Choppy, Stormy, Bleed, Healing).
 - **`statistical_ev_engine.py`**: Closed-form Gaussian error function (erf) calculating pricing edges ($P_{\text{win}} - P_{\text{market}}$).
+- **`dynamic_regime_strategy.py`**: Dynamic Regime-State Architecture (DRSA) multi-regime adaptive execution vessel.
 - **`onnx_engine.py`**: ONNX Runtime inferencing engine delivering non-linear probability estimates.
 
 ### 2.3 Council of Advisors (`src/kalshi_sim/council/`)

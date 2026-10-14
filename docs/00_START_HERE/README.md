@@ -23,7 +23,8 @@ docs/
 │   ├── ETH_DOMINATION_SPECIFICATION.md
 │   ├── DUAL_WARRIOR_4_REGIONS.md
 │   ├── BIMODAL_MAKER_TAKER_RESEARCH.md
-│   └── TEMPORARY_TAKER_MOMENTUM_TRIAL_SPECIFICATION.md
+│   ├── TEMPORARY_TAKER_MOMENTUM_TRIAL_SPECIFICATION.md
+│   └── DYNAMIC_TRADING_STRATEGY.md
 ├── 03_AGENTS/               <-- Comprehensive agent registry, council, and truth oracles
 │   └── AGENT_REGISTRY.md
 ├── 04_WORKFLOWS/            <-- Production workflows, failure modes, and recovery

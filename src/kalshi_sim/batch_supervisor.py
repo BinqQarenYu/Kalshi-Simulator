@@ -339,6 +339,28 @@ class AutonomousBatchSupervisor:
                 except Exception as sync_err:
                     logger.debug("Engine memory sync warning: %s", sync_err)
 
+        # 5.1 Dynamic Failover Check: If strategy failed performance gate, hot-swap to Dynamic Trading Strategy
+        if batch_pnl < Decimal("0.00") or (win_rate < 50.0 and total_trades >= self.eval_batch_size):
+            logger.warning(
+                "🚨 [STRATEGY PERFORMANCE FAILURE DETECTED] Batch #%d PnL=$%s | Win Rate=%.1f%%. Triggering failover to Dynamic Trading Strategy...",
+                self.current_batch_num, batch_pnl, win_rate
+            )
+            try:
+                from kalshi_sim.preset_manager import PresetManager
+                pm = PresetManager()
+                success, msg, _ = pm.load_preset("dynamic_trading_strategy_v1")
+                if success:
+                    logger.info("⚡ [FAILOVER HOT-SWAP SUCCESS] Dynamic Trading Strategy preset activated: %s", msg)
+                    try:
+                        from kalshi_sim.server import state
+                        state.active_strategy_bot = "dynamic_trading_strategy"
+                        if hasattr(state, "sim_agent") and state.sim_agent:
+                            state.sim_agent.active_strategy_bot = "dynamic_trading_strategy"
+                    except Exception as s_err:
+                        logger.debug("State strategy bot switch note: %s", s_err)
+            except Exception as fo_err:
+                logger.error("Failover hot-swap error: %s", fo_err)
+
         # 6. Build and save institutional markdown document
         pre_balance = getattr(self.guardrails, "batch_starting_balance", None) or Decimal("40.00")
         post_balance = getattr(self.guardrails, "current_balance", None) or Decimal("44.71")

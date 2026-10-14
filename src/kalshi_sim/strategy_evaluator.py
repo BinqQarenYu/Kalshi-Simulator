@@ -35,6 +35,7 @@ from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
 from kalshi_sim.order_simulator import OrderSimulator
 from kalshi_sim.portfolio import Portfolio
 from kalshi_sim.process_lock import get_active_lock_holder
+from kalshi_sim.ml.dynamic_regime_strategy import DynamicRegimeStrategy
 from kalshi_sim.schemas import L2BookState, MarketInfo, OrderSide, Timeframe, TradeEvent
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class StrategyEvaluationCoordinator:
         bot1_v4_engine: Optional[Any] = None,
         market_maker_engine: Optional[MarketMakerEngine] = None,
         eth_bot1_v4_engine: Optional[Any] = None,
+        dynamic_regime_engine: Optional[DynamicRegimeStrategy] = None,
     ) -> None:
         self._guardrails = guardrails
         self._simulator = simulator
@@ -76,10 +78,12 @@ class StrategyEvaluationCoordinator:
         self._bot1_v4_engine = bot1_v4_engine
         self._market_maker_engine = market_maker_engine or (MarketMakerEngine() if MarketMakerEngine is not None else None)
         self._eth_bot1_v4_engine = eth_bot1_v4_engine
+        self._dynamic_regime_engine = dynamic_regime_engine or DynamicRegimeStrategy(asset="BTC")
 
         # Cooldown and rate-limiting caches
         self._last_macro_eval_time: dict[str, float] = {}
         self._last_dom_eval_time: dict[str, float] = {}
+        self._last_dynamic_eval_time: dict[str, float] = {}
         self._last_dom_exit_eval_time: dict[str, float] = {}
         self._last_dual_onnx_eval_time: dict[str, float] = {}
         self._last_onnx_ts: dict[str, float] = {}
@@ -131,6 +135,10 @@ class StrategyEvaluationCoordinator:
                     return
             elif active_strategy_bot in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
                 if not ticker.startswith("KXETH15M"):
+                    return
+            elif active_strategy_bot in ("dynamic_trading_strategy", "dynamic_regime_adaptive", "dynamic_strategy"):
+                target_prefix = "KXETH15M" if getattr(self._dynamic_regime_engine, "asset", "BTC") == "ETH" else "KXBTC15M"
+                if not ticker.startswith(target_prefix):
                     return
             elif not ticker.startswith("KXBTC15M"):
                 return
@@ -235,6 +243,100 @@ class StrategyEvaluationCoordinator:
                 portfolio=portfolio_onnx,
                 place_order_fn=place_order_fn,
             )
+
+        # DYNAMIC TRADING STRATEGY (DRSA — Dynamic Regime-State Architecture)
+        if active_strategy_bot in ("dynamic_trading_strategy", "dynamic_regime_adaptive", "dynamic_strategy"):
+            await self._eval_dynamic_regime(
+                ticker=ticker,
+                book=book,
+                market_info=market_info,
+                timeframe=timeframe,
+                portfolio=portfolio_domination,
+                is_live=is_live,
+                place_order_fn=place_order_fn,
+            )
+
+    async def _eval_dynamic_regime(
+        self,
+        ticker: str,
+        book: L2BookState,
+        market_info: Optional[MarketInfo],
+        timeframe: Timeframe,
+        portfolio: Portfolio,
+        is_live: bool,
+        place_order_fn: Callable[..., Any],
+    ) -> None:
+        pos = portfolio.get_position(ticker)
+        if pos is not None:
+            return
+
+        if not portfolio.circuit_breaker_tripped and len(portfolio.open_positions) < MAX_CONCURRENT_POSITIONS:
+            _now = time.monotonic()
+            if _now - self._last_dynamic_eval_time.get(ticker, 0.0) < 2.0:
+                return
+            self._last_dynamic_eval_time[ticker] = _now
+
+            try:
+                target_strike = Decimal(str(market_info.target_strike if market_info and market_info.target_strike else "78650.0"))
+                if self._spot_price_getter:
+                    try:
+                        spot_price = Decimal(str(self._spot_price_getter()))
+                    except Exception:
+                        spot_price = target_strike
+                else:
+                    spot_price = target_strike
+
+                volatility_1m = Decimal("16.0")
+                if hasattr(self, "_spot_price_history") and ticker in self._spot_price_history:
+                    hist = self._spot_price_history[ticker]
+                    if len(hist) >= 5:
+                        prices = [p[1] for p in hist[-30:]]
+                        diffs = [abs(prices[i] - prices[i-1]) for i in range(1, len(prices))]
+                        if diffs:
+                            volatility_1m = Decimal(str(round(sum(diffs) / len(diffs) * 60, 2)))
+
+                vpin_val = Decimal("0.50")
+                if self._btc_orderflow_feed and hasattr(self._btc_orderflow_feed, "current_vpin"):
+                    try:
+                        vpin_val = Decimal(str(round(self._btc_orderflow_feed.current_vpin, 3)))
+                    except Exception:
+                        pass
+
+                exp_time = market_info.expiration_time if market_info else None
+
+                decision = self._dynamic_regime_engine.evaluate(
+                    ticker=ticker,
+                    book=book,
+                    spot_price=spot_price,
+                    strike_price=target_strike,
+                    expiration_time=exp_time,
+                    volatility_1m=volatility_1m,
+                    vpin=vpin_val,
+                )
+
+                if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
+                    side_enum = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
+                    logger.info(
+                        "⚡ [DYNAMIC REGIME SIGNAL] %s | Side: %s | Regime: %s | Limit: $%s | EV: $%s | Reason: %s",
+                        ticker,
+                        decision.recommended_side.upper(),
+                        decision.regime,
+                        decision.limit_price,
+                        decision.expected_value,
+                        decision.rationale,
+                    )
+                    await place_order_fn(
+                        book=book,
+                        ticker=ticker,
+                        side=side_enum,
+                        max_size=decision.recommended_contracts,
+                        timeframe=timeframe,
+                        reasoning=decision.rationale,
+                        portfolio=portfolio,
+                        bot_type="dynamic_trading_strategy",
+                    )
+            except Exception as exc:
+                logger.debug("Dynamic regime evaluation error: %s", exc)
 
     async def _eval_macro_trend(
         self,
