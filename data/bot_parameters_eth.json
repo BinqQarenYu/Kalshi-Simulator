@@ -16,6 +16,8 @@
     "take_profit_price_threshold": 0.78,
     "opening_quarantine_seconds": 60.0,
     "max_clob_spread_cents": 0.03,
+    "dynamic_moat_multiplier": 1.0,
+    "moneyness_moat_multiplier": 1.0,
     "max_turnover_per_event": 1,
     "enable_doubt_harvest": true,
     "chop_discount_limit_price": 0.38,
