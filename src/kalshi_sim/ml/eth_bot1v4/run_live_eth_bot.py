@@ -12,11 +12,15 @@ import os
 import sys
 from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parents[4]
+_SRC = _ROOT / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
 # Load environment variables from .env if present
 try:
     from dotenv import load_dotenv
-    # The .env file resides at the repository root (four levels up)
-    env_path = Path(__file__).parents[4] / ".env"
+    env_path = _ROOT / ".env"
     if env_path.is_file():
         load_dotenv(dotenv_path=env_path)
 except Exception:

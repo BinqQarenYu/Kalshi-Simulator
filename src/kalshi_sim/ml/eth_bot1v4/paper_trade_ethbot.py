@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
@@ -30,6 +31,9 @@ from dotenv import load_dotenv
 
 # Load workspace environment
 _ROOT = Path(__file__).resolve().parents[4]
+_SRC = _ROOT / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 load_dotenv(_ROOT / ".env")
 
 from kalshi_sim.auth import DEMO_REST_BASE, PROD_REST_BASE
