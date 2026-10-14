@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
+import inspect
 import logging
 import os
 from pathlib import Path
@@ -334,13 +335,22 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                     limit_p = Decimal(str(round(limit_p, 2)))
 
                 try:
-                    res = await self.order_client.place_order(
-                        ticker=target_ticker,
-                        side=order_side.value,
-                        count=1,
-                        price=limit_p,
-                        order_type=getattr(decision, "order_type", "limit"),
-                    )
+                    order_kwargs: dict[str, Any] = {
+                        "ticker": target_ticker,
+                        "side": order_side.value,
+                        "count": 1,
+                        "order_type": getattr(decision, "order_type", "limit"),
+                    }
+                    try:
+                        sig = inspect.signature(self.order_client.place_order)
+                        if "price_dollars" in sig.parameters:
+                            order_kwargs["price_dollars"] = limit_p
+                        else:
+                            order_kwargs["price"] = limit_p
+                    except Exception:
+                        order_kwargs["price_dollars"] = limit_p
+
+                    res = await self.order_client.place_order(**order_kwargs)
                     self.record_completed_turnover(target_ticker)
                     logger.info("🚀 [ETH BOT ORDER EXECUTED] %s %s 1 ct @ $%s | Result: %s", target_ticker, order_side.value, limit_p, res)
                 except Exception as ex:
