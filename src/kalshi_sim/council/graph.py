@@ -22,6 +22,8 @@ from src.kalshi_sim.council.councilors import (
     SilasCouncilor,
     KokoArbiter,
 )
+from src.kalshi_sim.ml.kev_oracle import KevDecisionOracle, KevQuestion, KevQuestionType
+import asyncio
 
 
 def node_diagnose(state: CouncilState) -> Dict[str, Any]:
@@ -68,6 +70,47 @@ def node_roundtable(state: CouncilState) -> Dict[str, Any]:
 def node_rebuttal(state: CouncilState) -> Dict[str, Any]:
     """Node 3: Rebuttal & Flaw Catcher. Evaluates if flaws are fatal or addressable."""
     return {}
+
+
+def node_kev_evaluation(state: CouncilState) -> Dict[str, Any]:
+    """Node 3c: Kev Decision Oracle. Evaluates council debate state into calibrated probabilities."""
+    oracle = KevDecisionOracle()
+    prompt = state.get("raw_prompt", "")
+    target = state.get("target_asset", "BTC")
+    votes = state.get("council_votes", {})
+    flaws = state.get("flaw_registry", [])
+
+    debate_summary = f"Proposal: {prompt} | Asset: {target} | Votes: " + ", ".join(
+        f"{c}:{v.get('verdict')}" for c, v in votes.items()
+    ) + f" | Flaws: {len(flaws)} registered"
+
+    questions = [
+        KevQuestion("is_proposal_viable", "Is the proposal quantitatively sound?", KevQuestionType.BOOLEAN),
+        KevQuestion(
+            "consensus_verdict", 
+            "What is the consensus verdict?", 
+            KevQuestionType.CHOICE, 
+            ["APPROVED", "REJECTED", "CONDITIONALLY_APPROVED"]
+        ),
+    ]
+
+    try:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        if loop.is_running():
+            res = oracle._fallback_heuristic_evaluation(debate_summary, questions)
+        else:
+            res = loop.run_until_complete(oracle.evaluate(debate_summary, questions))
+    except Exception:
+        res = oracle._fallback_heuristic_evaluation(debate_summary, questions)
+
+    return {
+        "kev_evaluation": {k: v.to_dict() for k, v in res.items()}
+    }
 
 
 def node_refine(state: CouncilState) -> Dict[str, Any]:
@@ -159,7 +202,7 @@ def route_after_diagnose(state: CouncilState) -> str:
     return "roundtable"
 
 
-def route_after_rebuttal(state: CouncilState) -> str:
+def route_after_kev_eval(state: CouncilState) -> str:
     """Route: Fatal flaws -> synthesis (reject); Addressable & rounds < max -> refine; Else -> synthesis."""
     flaws = state.get("flaw_registry", [])
     has_fatal = any(f.get("severity") == "FATAL" for f in flaws)
@@ -191,6 +234,7 @@ def build_council_graph():
     graph.add_node("diagnose", node_diagnose)
     graph.add_node("roundtable", node_roundtable)
     graph.add_node("rebuttal", node_rebuttal)
+    graph.add_node("kev_eval", node_kev_evaluation)
     graph.add_node("refine", node_refine)
     graph.add_node("synthesis", node_synthesis)
     graph.add_node("granulizer", node_task_granulizer)
@@ -198,7 +242,8 @@ def build_council_graph():
     graph.add_edge(START, "diagnose")
     graph.add_conditional_edges("diagnose", route_after_diagnose)
     graph.add_edge("roundtable", "rebuttal")
-    graph.add_conditional_edges("rebuttal", route_after_rebuttal)
+    graph.add_edge("rebuttal", "kev_eval")
+    graph.add_conditional_edges("kev_eval", route_after_kev_eval)
     graph.add_edge("refine", "roundtable")
     graph.add_conditional_edges("synthesis", route_after_synthesis)
     graph.add_edge("granulizer", END)

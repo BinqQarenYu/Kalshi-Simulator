@@ -38,6 +38,7 @@ from kalshi_sim.schemas import (
     Timeframe,
     get_asset_config,
 )
+from kalshi_sim.ml.kev_oracle import KevDecisionOracle, KevQuestion, KevQuestionType
 from kalshi_sim.ws_connection import create_aiohttp_connector
 
 logger = logging.getLogger("kalshi_sim.eth_bot1v4_engine")
@@ -97,6 +98,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         self.target_ticker: Optional[str] = target_ticker
         self._cached_market: Optional[MarketInfo] = None
         self._last_market_fetch_ts: float = 0.0
+        self.kev_oracle = KevDecisionOracle()
 
     def _load_persisted_parameters(self) -> None:
         """Load persisted ETH bot parameters from disk if available."""
@@ -358,6 +360,37 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             getattr(decision, "action", decision.recommended_side.upper()),
             decision.rationale[:60],
         )
+
+        # Kev Decision Model Shadow Evaluation (Zero-interference telemetry)
+        try:
+            kev_ctx = self.kev_oracle.build_market_context(
+                asset="ETH",
+                spot_price=spot_price,
+                target_strike=target_strike,
+                time_to_expiry_s=time_to_expiry_s,
+                ofi=float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0),
+                vpin=vpin_score,
+                spread_cents=0.02,
+                current_regime=getattr(self, "_current_regime", "CHOP"),
+            )
+            kev_questions = [
+                KevQuestion("is_toxic_sweep", "Is toxic sweep?", KevQuestionType.BOOLEAN),
+                KevQuestion("trade_direction", "Direction?", KevQuestionType.CHOICE, ["YES", "NO", "WAIT"]),
+            ]
+            kev_res = await self.kev_oracle.evaluate(kev_ctx, kev_questions)
+            kev_rec = kev_res.get("trade_direction")
+            if kev_rec:
+                matches_onnx = (kev_rec.selected_option.lower() == decision.recommended_side.lower())
+                logger.info(
+                    "🔮 [KEV SHADOW ORACLE] Rec: %s (Conf: %.1f%%) | Match Engine: %s | Latency: %.1fms | Source: %s",
+                    kev_rec.selected_option,
+                    float(kev_rec.confidence) * 100.0,
+                    matches_onnx,
+                    kev_rec.latency_ms,
+                    kev_rec.source,
+                )
+        except Exception as kev_err:
+            logger.debug("[KEV SHADOW EVAL ERROR] %s", kev_err)
 
         # Execution guardrails: 1 trade per cycle & micro-bankroll sizing (1 contract)
         if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:

@@ -3,7 +3,7 @@
 Enforces zero-float math invariants and structured state reducers.
 """
 
-from typing import TypedDict, List, Dict, Optional, Literal, Annotated
+from typing import TypedDict, List, Dict, Optional, Literal, Annotated, Any
 import operator
 
 
@@ -58,6 +58,7 @@ class CouncilState(TypedDict, total=False):
     consensus_verdict: Optional[Literal["APPROVED", "REJECTED", "CONDITIONALLY_APPROVED"]]
     synthesized_solution: Optional[str]
     non_negotiable_invariants: List[str]
+    kev_evaluation: Optional[Dict[str, Any]]
     
     # Documentation & Task Contract
     specification_document_path: Optional[str]
