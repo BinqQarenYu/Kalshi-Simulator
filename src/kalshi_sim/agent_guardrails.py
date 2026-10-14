@@ -42,44 +42,17 @@ class AgentGuardrails:
         self.emergency_drawdown_limit = emergency_drawdown_limit
         self.vpin_toxic_threshold = vpin_toxic_threshold
 
+        # Market Condition State
+        self.current_market_condition: str = "choppy"
 
-        _MARKET_PRESETS: dict[str, dict[str, Any]] = {
-            "choppy": {
-                "min_order_interval_seconds": 5.0,
-                "max_risk_pct_per_trade": Decimal("0.10"),
-                "vpin_toxic_threshold": 0.80,
-            },
-            "stormy": {
-                "min_order_interval_seconds": 5.0,
-                "max_risk_pct_per_trade": Decimal("0.15"),
-                "vpin_toxic_threshold": 0.85,
-            },
-            "bleed": {
-                "min_order_interval_seconds": 10.0,
-                "max_risk_pct_per_trade": Decimal("0.20"),
-                "vpin_toxic_threshold": 0.90,
-            },
-            "heal": {
-                "min_order_interval_seconds": 30.0,
-                "max_risk_pct_per_trade": Decimal("0.05"),
-                "vpin_toxic_threshold": 0.70,
-            },
-        }
-
-        def apply_market_condition(self, condition: str) -> None:
-            """Adjust guardrail parameters according to a high‑level market condition.
-
-            Args:
-                condition: One of "choppy", "stormy", "bleed" or "heal".
-            """
-            preset = self._MARKET_PRESETS.get(condition)
-            if not preset:
-                logger.warning("Unknown market condition %s – no guardrail changes applied", condition)
-                return
-            for key, value in preset.items():
-                setattr(self, key, value)
-                logger.info("Guardrail %s set to %s due to %s market condition", key, value, condition)
-
+        # 6-Trade Evaluation Batch State Tracking
+        self.batch_trades_completed: int = 0
+        self.batch_trades_quota: int = 6
+        self.batch_pnl: Decimal = Decimal("0.00")
+        self.batch_wins: int = 0
+        self.batch_losses: int = 0
+        self.batch_starting_balance: Optional[Decimal] = None
+        self.current_balance: Optional[Decimal] = None
 
         # State tracking
         self._last_order_ts: float = 0.0
@@ -135,6 +108,45 @@ class AgentGuardrails:
                 "macro_trend_dominion_bot",
                 "macro_trend",
             })
+
+    _MARKET_PRESETS: dict[str, dict[str, Any]] = {
+        "choppy": {
+            "min_order_interval_seconds": 5.0,
+            "max_risk_pct_per_trade": Decimal("0.10"),
+            "vpin_toxic_threshold": 0.80,
+        },
+        "stormy": {
+            "min_order_interval_seconds": 5.0,
+            "max_risk_pct_per_trade": Decimal("0.15"),
+            "vpin_toxic_threshold": 0.85,
+        },
+        "bleed": {
+            "min_order_interval_seconds": 10.0,
+            "max_risk_pct_per_trade": Decimal("0.20"),
+            "vpin_toxic_threshold": 0.90,
+        },
+        "heal": {
+            "min_order_interval_seconds": 30.0,
+            "max_risk_pct_per_trade": Decimal("0.05"),
+            "vpin_toxic_threshold": 0.70,
+        },
+    }
+
+    def apply_market_condition(self, condition: str) -> None:
+        """Adjust guardrail parameters according to a high‑level market condition.
+
+        Args:
+            condition: One of "choppy", "stormy", "bleed" or "heal".
+        """
+        c_clean = condition.lower()
+        preset = self._MARKET_PRESETS.get(c_clean)
+        self.current_market_condition = c_clean
+        if not preset:
+            logger.warning("Unknown market condition %s – retained default guardrail parameters", condition)
+            return
+        for key, value in preset.items():
+            setattr(self, key, value)
+            logger.info("Guardrail %s set to %s due to %s market condition", key, value, condition)
 
     # -------------------------------------------------------------------------
     # 1. Pre-Trade Intent Validation
@@ -722,6 +734,21 @@ class AgentGuardrails:
                     "🚨 [GUARDRAIL EMERGENCY] Circuit breaker tripped on settlement! Drawdown %.1f%% >= %.0f%%",
                     float(drawdown_pct * 100), float(self.emergency_drawdown_limit * 100)
                 )
+
+        # Accumulate 6-trade evaluation batch progress
+        self.batch_trades_completed += 1
+        self.batch_pnl += pnl
+        if outcome.lower() == "win":
+            self.batch_wins += 1
+        else:
+            self.batch_losses += 1
+        self.current_balance = balance_after
+        if self.batch_starting_balance is None:
+            self.batch_starting_balance = balance_after - pnl
+        logger.info(
+            "📊 [BATCH ACCUMULATION] Trade recorded in batch (%d/%d completed | Batch PnL: $%s | Balance: $%s)",
+            self.batch_trades_completed, self.batch_trades_quota, self.batch_pnl, balance_after
+        )
 
     def record_trade_settlement(
         self,

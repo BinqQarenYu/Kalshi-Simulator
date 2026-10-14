@@ -47,6 +47,7 @@ class AutonomousBatchSupervisor:
         self.cumulative_pnl = Decimal("0.00")
         self.min_macro_sample_size = 30
         self.current_batch_num = self._discover_initial_batch_num()
+        self._emailed_batches: set[int] = set()
 
     def _discover_initial_batch_num(self) -> int:
         docs_dir = Path("docs")
@@ -80,6 +81,88 @@ class AutonomousBatchSupervisor:
             self._task.cancel()
             logger.info("🛡️ [BATCH SUPERVISOR] Autonomous Batch Supervisor stopped.")
 
+    def determine_market_condition(self, recent_trades: list[dict[str, Any]]) -> dict[str, Any]:
+        """Classify active market condition (Choppy, Stormy, Bleed, Healing) for this 6-trade evaluation."""
+        region = "CHOP"
+        transition_reason = "Baseline microstructural flow"
+        hmm_regime = "STABLE_RANGE"
+        wave_summary = "BOUNDED CHOP"
+
+        # 1. Inspect live Bot 1 V4 engine wave classifier & wave physics
+        try:
+            from kalshi_sim.server import state
+            if hasattr(state, "sim_agent") and state.sim_agent and hasattr(state.sim_agent, "_bot1_v4_engine"):
+                eng = state.sim_agent._bot1_v4_engine
+                if hasattr(eng, "wave_classifier"):
+                    region = getattr(eng.wave_classifier, "current_region", "CHOP")
+                    transition_reason = getattr(eng.wave_classifier, "last_transition_reason", "")
+                if hasattr(eng, "_last_wave_physics") and eng._last_wave_physics:
+                    wave_summary = eng._last_wave_physics.wave_summary
+            elif hasattr(state, "guardrails_agent") and hasattr(state.guardrails_agent, "current_market_condition"):
+                region = state.guardrails_agent.current_market_condition.upper()
+        except Exception:
+            pass
+
+        # 2. Inspect HMM macro regime
+        try:
+            from kalshi_sim.server import state
+            if hasattr(state, "hmm_brain") and state.hmm_brain:
+                hmm_regime = state.hmm_brain.get_status().get("current_regime", "STABLE_RANGE")
+        except Exception:
+            pass
+
+        # 3. Compute empirical batch metrics from the 6 settled trades
+        spot_prices = [
+            float(t.get("settlement_spot_price") or t.get("settlement_btc_price") or 0.0)
+            for t in recent_trades
+            if (t.get("settlement_spot_price") or t.get("settlement_btc_price"))
+        ]
+        spot_prices = [p for p in spot_prices if p > 0.0]
+        spot_range = (max(spot_prices) - min(spot_prices)) if len(spot_prices) >= 2 else 0.0
+
+        vpin_scores = [float(t.get("vpin_score", 0.0)) for t in recent_trades if t.get("vpin_score") is not None]
+        avg_vpin = sum(vpin_scores) / len(vpin_scores) if vpin_scores else 0.0
+
+        # 4. Synthesize final condition tag & descriptors
+        reg_upper = region.upper()
+        if "STORM" in reg_upper or spot_range >= 200.0 or avg_vpin >= 0.70 or hmm_regime == "VOL_EXPANSION":
+            cond_tag = "STORMY"
+            cond_name = "Stormy (Directional Volatility & Volcano Expansion)"
+            cond_desc = f"High velocity wave expansion (Range: ${spot_range:.1f}, Avg VPIN: {avg_vpin:.2f}, Macro: {hmm_regime})"
+        elif "BLEED" in reg_upper or hmm_regime == "RISK_OFF":
+            cond_tag = "BLEED"
+            cond_name = "Bleed / Adverse Wicks (Hostile Meatgrinder)"
+            cond_desc = f"Adverse selection and double-wick whipsaws detected. Bleed defense protocols engaged."
+        elif "HEAL" in reg_upper:
+            cond_tag = "HEALING"
+            cond_name = "Healing (Post-Drawdown Convalescence)"
+            cond_desc = f"Probationary quarantine mode recovering bankroll with defensive filters."
+        else:
+            cond_tag = "CHOPPY"
+            cond_name = "Choppy (Range-Bound Compression & Mean-Reversion)"
+            cond_desc = f"Compressed range with mean-reverting liquidity (Range: ${spot_range:.1f}, Avg VPIN: {avg_vpin:.2f}, Macro: {hmm_regime})"
+
+        return {
+            "tag": cond_tag,
+            "name": cond_name,
+            "description": cond_desc,
+            "hmm_regime": hmm_regime,
+            "wave_region": region,
+            "wave_summary": wave_summary,
+            "spot_range": round(spot_range, 2),
+            "avg_vpin": round(avg_vpin, 3),
+            "transition_reason": transition_reason or "Normal wave dynamics",
+        }
+
+    async def force_trigger_batch_evaluation(self) -> dict[str, Any]:
+        """Manually trigger a 6-trade evaluation batch right now, generate report with market condition, and email operator."""
+        logger.info("⚡ [BATCH SUPERVISOR] Manual/On-demand evaluation batch triggered.")
+        await self._evaluate_and_evolve_batch()
+        return {
+            "batch_num": self.current_batch_num - 1,
+            "status": "evaluated_and_dispatched",
+        }
+
     async def _supervision_loop(self) -> None:
         """Continuous background loop monitoring the 6-trade execution gate."""
         while self.is_running:
@@ -91,6 +174,18 @@ class AutonomousBatchSupervisor:
                 completed = getattr(self.guardrails, "batch_trades_completed", 0)
                 quota = getattr(self.guardrails, "batch_trades_quota", self.eval_batch_size)
 
+                # Also detect from persisted win_loss_reports to avoid missing any settled cycle
+                if self.win_loss_path.exists():
+                    try:
+                        reports = json.loads(self.win_loss_path.read_text(encoding="utf-8"))
+                        current_total = len(reports)
+                        if self._last_processed_trade_count == 0:
+                            self._last_processed_trade_count = (current_total // self.eval_batch_size) * self.eval_batch_size
+                        elif current_total - self._last_processed_trade_count >= self.eval_batch_size:
+                            completed = quota
+                    except Exception as e:
+                        logger.debug("Win loss read error in supervision loop: %s", e)
+
                 # Detect when a 6-trade batch completes its cycle
                 if completed >= quota and quota > 0 and getattr(self.guardrails, "is_bot_armed", True):
                     await self._evaluate_and_evolve_batch()
@@ -99,8 +194,6 @@ class AutonomousBatchSupervisor:
                 break
             except Exception as exc:
                 logger.error("[BATCH SUPERVISOR ERROR] Supervision loop error: %s", exc, exc_info=True)
-
-
 
     async def _evaluate_and_evolve_batch(self) -> None:
         """Execute the formal 6-trade post-batch assessment powered by Gemini & Quant Council."""
@@ -117,23 +210,27 @@ class AutonomousBatchSupervisor:
         self.cumulative_pnl += batch_pnl
         macro_win_rate = (self.cumulative_wins / max(1, self.cumulative_trades)) * 100.0
 
-        logger.info(
-            "========================================================================\n"
-            "📊 [QUANT COUNCIL BATCH REPORT] Batch #%d (%d Trades) | Batch PnL: $%s | Win Rate: %.1f%%\n"
-            "📈 [MACRO STATISTICAL SAMPLE] Total %d Trades | Net PnL: $%s | Overall Win Rate: %.1f%%\n"
-            "========================================================================",
-            self.current_batch_num, total_trades, batch_pnl, win_rate,
-            self.cumulative_trades, self.cumulative_pnl, macro_win_rate
-        )
-
         # 1. Harvest recent settled trades from win_loss_reports.json
         recent_trades: list[dict[str, Any]] = []
         if self.win_loss_path.exists():
             try:
                 reports = json.loads(self.win_loss_path.read_text(encoding="utf-8"))
                 recent_trades = reports[:self.eval_batch_size]
+                self._last_processed_trade_count = len(reports)
             except Exception as e:
                 logger.debug("Failed reading win_loss_path: %s", e)
+
+        # 1.1 Classify Market Condition (Choppy, Stormy, Bleed, Healing)
+        market_info = self.determine_market_condition(recent_trades)
+
+        logger.info(
+            "========================================================================\n"
+            "📊 [QUANT COUNCIL BATCH REPORT] Batch #%d (%d Trades) | Condition: %s | Batch PnL: $%s | Win Rate: %.1f%%\n"
+            "📈 [MACRO STATISTICAL SAMPLE] Total %d Trades | Net PnL: $%s | Overall Win Rate: %.1f%%\n"
+            "========================================================================",
+            self.current_batch_num, total_trades, market_info["tag"], batch_pnl, win_rate,
+            self.cumulative_trades, self.cumulative_pnl, macro_win_rate
+        )
 
         # 2. Harvest Continuous Experience Buffer telemetry
         exp_summary: dict[str, Any] = {}
@@ -165,13 +262,14 @@ class AutonomousBatchSupervisor:
             "macro_win_rate": macro_win_rate,
         }
 
-        logger.info("🧠 [AI ASSESSOR] Invoking Gemini to analyze Batch #%d and formulate forensic conclusions...", self.current_batch_num)
+        logger.info("🧠 [AI ASSESSOR] Invoking Gemini to analyze Batch #%d (Condition: %s) and formulate forensic conclusions...", self.current_batch_num, market_info["tag"])
         gemini_data = await run_gemini_batch_assessment(
             batch_num=self.current_batch_num,
             recent_trades=recent_trades,
             exp_summary=exp_summary,
             macro_sample=macro_sample,
             current_params=current_params,
+            market_condition_info=market_info,
         )
 
         # 5. Apply validated tweaks within Quant Council bounds
@@ -194,8 +292,8 @@ class AutonomousBatchSupervisor:
                     logger.debug("Engine memory sync warning: %s", sync_err)
 
         # 6. Build and save institutional markdown document
-        pre_balance = getattr(self.guardrails, "batch_starting_balance", Decimal("40.00"))
-        post_balance = getattr(self.guardrails, "current_balance", Decimal("44.71"))
+        pre_balance = getattr(self.guardrails, "batch_starting_balance", None) or Decimal("40.00")
+        post_balance = getattr(self.guardrails, "current_balance", None) or Decimal("44.71")
         md_report = build_assessment_markdown_report(
             batch_num=self.current_batch_num,
             recent_trades=recent_trades,
@@ -206,6 +304,7 @@ class AutonomousBatchSupervisor:
             post_balance=post_balance,
             gemini_data=gemini_data,
             macro_sample=macro_sample,
+            market_condition_info=market_info,
         )
 
         try:
@@ -239,12 +338,28 @@ class AutonomousBatchSupervisor:
         except Exception as db_err:
             logger.warning("Could not enqueue assessment to SQL: %s", db_err)
 
-        # 7. Autonomous Email Dispatch to Operator
+        # 7. Autonomous Email Dispatch to Operator (For Each 6-Trade Evaluation)
         try:
-            from kalshi_sim.aws_email_mailer import async_send_assessment_email
-            email_subj = f"📊 [Quant Council] 6-Trade Batch Report #{self.current_batch_num} | PnL: ${batch_pnl:+.2f} | Win Rate: {win_rate:.1f}%"
-            asyncio.create_task(async_send_assessment_email(email_subj, md_report))
-            logger.info("📧 [MAILER DISPATCHED] Report email queued for operator.")
+            if self.current_batch_num in self._emailed_batches:
+                logger.info(
+                    "ℹ️ [BATCH SUPERVISOR] Batch #%d already emailed in this session. Skipping dispatch.",
+                    self.current_batch_num,
+                )
+            else:
+                from kalshi_sim.aws_email_mailer import async_send_assessment_email
+                email_subj = f"📊 [Quant Council] 6-Trade Batch Report #{self.current_batch_num} | Condition: {market_info['tag']} | PnL: ${batch_pnl:+.2f} | Win Rate: {win_rate:.1f}%"
+                sent = await async_send_assessment_email(
+                    subject=email_subj,
+                    body_markdown=md_report,
+                    market_condition=market_info["tag"],
+                    batch_num=self.current_batch_num,
+                    topic=f"batch_assessment_{self.current_batch_num}",
+                )
+                if sent:
+                    self._emailed_batches.add(self.current_batch_num)
+                    logger.info("📧 [MAILER DISPATCHED] Report email delivered for Batch #%d to operator.", self.current_batch_num)
+                else:
+                    logger.warning("⚠️ [MAILER] Report email not dispatched for Batch #%d (throttled, deduplicated, or SMTP failure).", self.current_batch_num)
         except Exception as mail_err:
             logger.warning("[MAILER] Could not dispatch assessment email: %s", mail_err)
 

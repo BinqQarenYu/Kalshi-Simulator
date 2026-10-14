@@ -132,6 +132,8 @@ class OrderSimulator:
 
         effective_queue = int(round(initial_queue * (1.0 - self.quote_cancel_rate))) if (initial_queue > 0 and self.quote_cancel_rate > 0.0) else initial_queue
 
+        best_ask = book.best_yes_ask if side == OrderSide.YES else ((Decimal("1.00") - book.best_yes_bid) if book.best_yes_bid else None)
+
         order = SimulatedOrder(
             order_id=order_id,
             ticker=book.market_ticker,
@@ -144,7 +146,10 @@ class OrderSimulator:
             created_at=now,
             status=OrderStatus.RESTING,
             queue_ahead=effective_queue,
+            initial_queue_ahead=effective_queue,
             filled_size=0,
+            best_ask_at_placement=best_ask,
+            closest_ask_approach=best_ask,
         )
 
         if book.market_ticker not in self._resting_orders:
@@ -157,21 +162,71 @@ class OrderSimulator:
         )
         return order
 
-    def cancel_resting_order(self, order_id: str) -> bool:
-        """Cancel a resting limit order by ID."""
+    def _log_unfilled_order_to_db(
+        self,
+        order: SimulatedOrder,
+        reason: str,
+        time_remaining_s: Optional[int] = None,
+    ) -> None:
+        """Deterministically record an unfilled resting limit order to SQLite with zero AI tokens."""
+        try:
+            from kalshi_sim.db import get_db_writer
+            now = datetime.now(timezone.utc)
+            lifetime = (now - order.created_at).total_seconds() if order.created_at else 0.0
+            init_q = order.initial_queue_ahead if order.initial_queue_ahead > 0 else order.queue_ahead
+            vol_cleared = max(0, init_q - order.queue_ahead)
+            q_pct = round((vol_cleared / max(1, init_q)) * 100.0, 2)
+            limit_f = float(order.limit_price) if order.limit_price is not None else 0.50
+            ask_f = float(order.best_ask_at_placement) if order.best_ask_at_placement is not None else None
+            closest_f = float(order.closest_ask_approach) if order.closest_ask_approach is not None else ask_f
+            price_gap = round((ask_f - limit_f) * 100.0, 2) if ask_f is not None else None
+
+            get_db_writer().enqueue_unfilled_order(
+                order_id=order.order_id,
+                ticker=order.ticker,
+                side=order.side.value if hasattr(order.side, "value") else str(order.side),
+                limit_price=limit_f,
+                size=order.size,
+                created_at_utc=order.created_at.isoformat() if order.created_at else now.isoformat(),
+                terminated_at_utc=now.isoformat(),
+                lifetime_seconds=lifetime,
+                cancellation_reason=reason,
+                time_remaining_at_cancel_s=float(time_remaining_s) if time_remaining_s is not None else None,
+                best_ask_at_placement=ask_f,
+                closest_ask_approach=closest_f,
+                price_gap_cents=price_gap,
+                initial_queue_ahead=init_q,
+                volume_traded_at_price=vol_cleared,
+                queue_deficit=order.queue_ahead,
+                queue_exhaustion_pct=q_pct,
+                t1_spot_price=float(order.t1_spot) if order.t1_spot is not None else None,
+                t1_strike_diff=float(order.t1_strike_diff) if order.t1_strike_diff is not None else None,
+                t1_macro_1h_slope=float(order.t1_slope) if order.t1_slope is not None else None,
+                t1_regime=order.t1_regime,
+                t1_vpin=float(order.t1_vpin) if order.t1_vpin is not None else None,
+                diagnostic_category="UNFILLED_ORDER_EXPIRED" if "EXPIRED" in reason else "UNFILLED_ORDER_CANCELLED",
+            )
+        except Exception as exc:
+            logger.debug("Failed to record unfilled order in db: %s", exc)
+
+    def cancel_resting_order(self, order_id: str, reason: str = "MANUAL_OR_SWEEPER_CANCEL") -> bool:
+        """Cancel a resting limit order by ID and record telemetry."""
         for ticker, orders in self._resting_orders.items():
             for i, ord in enumerate(orders):
                 if ord.order_id == order_id:
+                    self._log_unfilled_order_to_db(ord, reason=reason)
                     orders.pop(i)
-                    logger.info("CANCELLED RESTING ORDER: %s on %s", order_id, ticker)
+                    logger.info("CANCELLED RESTING ORDER: %s on %s (Reason: %s)", order_id, ticker, reason)
                     return True
         return False
 
-    def cancel_resting_orders_for_ticker(self, ticker: str) -> int:
-        """Cancel all resting limit orders for a given ticker."""
+    def cancel_resting_orders_for_ticker(self, ticker: str, reason: str = "TICKER_SWEEP_CANCEL") -> int:
+        """Cancel all resting limit orders for a given ticker and record telemetry."""
         orders = self._resting_orders.pop(ticker, [])
+        for ord in orders:
+            self._log_unfilled_order_to_db(ord, reason=reason)
         if orders:
-            logger.info("CANCELLED ALL %d RESTING ORDERS for %s", len(orders), ticker)
+            logger.info("CANCELLED ALL %d RESTING ORDERS for %s (Reason: %s)", len(orders), ticker, reason)
         return len(orders)
 
     def cancel_expired_orders(
@@ -193,6 +248,7 @@ class OrderSimulator:
             for ord in orders:
                 ord.status = OrderStatus.EXPIRED
                 expired.append(ord)
+                self._log_unfilled_order_to_db(ord, reason="EXPIRED_WINDOW_CUTOFF", time_remaining_s=time_remaining_s)
                 logger.info(
                     "⏰ [RESTING ORDER EXPIRED UNFILLED] %s %s %d @ $%s on %s (T_rem: %ds <= %ds)",
                     ord.side.value.upper(),
@@ -241,6 +297,9 @@ class OrderSimulator:
 
             if ord.side == OrderSide.YES:
                 best_ask = book.best_yes_ask
+                if best_ask is not None:
+                    if ord.closest_ask_approach is None or best_ask < ord.closest_ask_approach:
+                        ord.closest_ask_approach = best_ask
                 # 1. Price touch / cross (market crossed limit)
                 if best_ask is not None and ord.limit_price is not None and ord.limit_price >= best_ask:
                     if ord.limit_price > best_ask:
@@ -283,6 +342,9 @@ class OrderSimulator:
                                         break
             else:
                 best_no_ask = Decimal("1") - book.best_yes_bid if book.best_yes_bid else None
+                if best_no_ask is not None:
+                    if ord.closest_ask_approach is None or best_no_ask < ord.closest_ask_approach:
+                        ord.closest_ask_approach = best_no_ask
                 if best_no_ask is not None and ord.limit_price is not None and ord.limit_price >= best_no_ask:
                     if ord.limit_price > best_no_ask:
                         is_filled = True

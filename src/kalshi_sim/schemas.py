@@ -804,7 +804,15 @@ class SimulatedOrder(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     status: OrderStatus = OrderStatus.PENDING
     queue_ahead: int = 0
+    initial_queue_ahead: int = 0
     filled_size: int = 0
+    best_ask_at_placement: Decimal | None = None
+    closest_ask_approach: Decimal | None = None
+    t1_spot: Decimal | None = None
+    t1_strike_diff: Decimal | None = None
+    t1_slope: Decimal | None = None
+    t1_regime: str | None = None
+    t1_vpin: Decimal | None = None
 
 
 class SimulatedFill(BaseModel):

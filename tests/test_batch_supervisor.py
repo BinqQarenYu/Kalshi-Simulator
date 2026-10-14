@@ -71,9 +71,18 @@ async def test_batch_supervisor_workflow(tmp_path):
         "tweaks_rationale": "Tightened entry discount floor to capture more fills.",
     }
 
+    mock_mailer = AsyncMock(return_value=True)
     with patch("kalshi_sim.ai_assessor.run_gemini_batch_assessment", AsyncMock(return_value=mock_gemini_res)):
-        with patch("kalshi_sim.aws_email_mailer.async_send_assessment_email", AsyncMock(return_value=True)):
+        with patch("kalshi_sim.aws_email_mailer.async_send_assessment_email", mock_mailer):
             await supervisor._evaluate_and_evolve_batch()
+
+    # Verify mailer called with market condition in subject and kwargs
+    assert mock_mailer.called
+    call_kwargs = mock_mailer.call_args.kwargs
+    assert "market_condition" in call_kwargs
+    assert call_kwargs["market_condition"] in ("CHOPPY", "STORMY", "BLEED", "HEALING")
+    subject = mock_mailer.call_args.kwargs.get("subject", "")
+    assert "Condition:" in subject
 
     # Verify quota reset & re-arm
     assert guard.batch_trades_completed == 0

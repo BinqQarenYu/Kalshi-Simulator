@@ -194,6 +194,31 @@ def record_win_loss_event_report(
         else:
             balance_after = state.starting_capital
 
+    # Resolve active market condition (choppy, stormy, bleed, heal)
+    current_cond = "choppy"
+    try:
+        active_bot = _resolve_bot(bot_type_resolved)
+        if active_bot is None and hasattr(state, "bot1_v4_engine"):
+            active_bot = state.bot1_v4_engine
+        if active_bot and hasattr(active_bot, "wave_classifier"):
+            region = getattr(active_bot.wave_classifier, "current_region", "").lower()
+            if region in ("chop", "choppy"):
+                current_cond = "choppy"
+            elif region in ("storm", "stormy"):
+                current_cond = "stormy"
+            elif region:
+                current_cond = region
+        elif hasattr(state, "guardrails_agent") and hasattr(state.guardrails_agent, "current_market_condition"):
+            current_cond = state.guardrails_agent.current_market_condition
+        elif hasattr(state, "hmm_brain") and state.hmm_brain:
+            hmm_regime = state.hmm_brain.get_status().get("current_regime", "")
+            if hmm_regime == "VOL_EXPANSION":
+                current_cond = "stormy"
+            elif hmm_regime == "RISK_OFF":
+                current_cond = "bleed"
+    except Exception:
+        pass
+
     report = {
         "report_id": report_id or f"WLR-{now_utc.strftime('%y%m%d%H%M%S')}-{random.randint(100, 999)}",
         "cycle_time": cycle_time,
@@ -215,6 +240,7 @@ def record_win_loss_event_report(
         "vpin_score": round(vpin_score, 3),
         "ev_edge": round(ev_edge, 3),
         "balance_after": float(balance_after),
+        "market_condition": current_cond,
         "bot_type": bot_type_resolved,
         "bot_id": bot_type_resolved,
         "strategy_id": bot_type_resolved,
@@ -293,6 +319,93 @@ def record_win_loss_event_report(
             bot_type=bot_type_resolved,
             execution_mode=exec_mode_resolved,
         )
+
+        # Checkpoint & Lifecycle Forensics
+        twap_val = float(settlement_spot_price)
+        twap_div = 0.0
+        if hasattr(state, "cfbenchmarks_sync") and state.cfbenchmarks_sync:
+            latest_twap = getattr(state.cfbenchmarks_sync, "latest_60s_twap", None)
+            if latest_twap is not None:
+                twap_val = float(latest_twap)
+                twap_div = float(settlement_spot_price) - twap_val
+
+        macro_slope = 0.0
+        active_bot = _resolve_bot(bot_type_resolved)
+        if active_bot is None and hasattr(state, "bot1_v4_engine"):
+            active_bot = state.bot1_v4_engine
+        if active_bot and hasattr(active_bot, "_last_1h_slope"):
+            macro_slope = float(getattr(active_bot, "_last_1h_slope", 0.0) or 0.0)
+
+        get_db_writer().enqueue_lifecycle_forensics(
+            trade_id=report["report_id"],
+            ticker=ticker,
+            side=side_clean,
+            entry_price=float(entry_price),
+            outcome=outcome.upper(),
+            realized_pnl=float(pnl),
+            role="MAKER" if float(entry_price) <= 0.48 else "TAKER",
+            fee_paid=0.0 if float(entry_price) <= 0.48 else 0.01,
+            t1_timestamp=report.get("cycle_time"),
+            t1_spot=float(strike_price),
+            t1_strike_diff=float(settlement_spot_price - strike_price),
+            t1_1h_slope=macro_slope,
+            t1_regime=current_cond.upper(),
+            t1_vpin=float(vpin_score),
+            t2_timestamp=report.get("timestamp_utc"),
+            t2_spot=float(settlement_spot_price),
+            t2_1h_slope=macro_slope,
+            t2_regime=current_cond.upper(),
+            t2_vpin=float(vpin_score),
+            t3_timestamp=report.get("timestamp_utc"),
+            t3_spot=float(settlement_spot_price),
+            t3_60s_twap=twap_val,
+            twap_vs_spot_divergence=twap_div,
+            t3_1h_slope=macro_slope,
+            t3_regime=current_cond.upper(),
+            bot_type=bot_type_resolved,
+        )
+
+        # Failure & Mistake Attribution Autopsy (If Loss)
+        if outcome.lower() == "loss":
+            is_twap_pin = 1 if abs(twap_div) >= 15.0 and ((side_clean == "yes" and float(settlement_spot_price) >= float(strike_price) and twap_val < float(strike_price)) or (side_clean == "no" and float(settlement_spot_price) < float(strike_price) and twap_val >= float(strike_price))) else 0
+            is_ct = 1 if ((side_clean == "no" and macro_slope > 0.20) or (side_clean == "yes" and macro_slope < -0.20)) else 0
+            
+            wave_phys = getattr(active_bot, "_last_wave_physics", None) if active_bot else None
+            is_dw = 1 if (wave_phys and getattr(wave_phys, "is_double_wick_meatgrinder", False)) else 0
+            w_ratio = getattr(wave_phys, "upper_wick_dollars", 0.0) / max(1.0, getattr(wave_phys, "body_dollars", 1.0)) if wave_phys else 0.0
+            
+            # Salvage stop check (DEF-03)
+            was_salv = 1 if float(entry_price) >= 0.40 and abs(float(settlement_spot_price - strike_price)) >= 85.0 else 0
+            salv_lost = 0.12 * contracts if was_salv else 0.0
+
+            if is_twap_pin:
+                f_code = "ERR_TWAP_PIN_VICTIM"
+            elif is_ct:
+                f_code = "ERR_COUNTER_TREND"
+            elif is_dw:
+                f_code = "ERR_DOUBLE_WICK_TRAP"
+            elif was_salv:
+                f_code = "ERR_DOOMED_HOLD_TO_ZERO"
+            else:
+                f_code = "ERR_DISPERSION_EXCURSION"
+
+            get_db_writer().enqueue_failure_autopsy(
+                trade_id=report["report_id"],
+                ticker=ticker,
+                outcome="LOSS",
+                realized_pnl=float(pnl),
+                failure_code=f_code,
+                is_counter_trend=is_ct,
+                macro_1h_slope=macro_slope,
+                is_double_wick_trap=is_dw,
+                wick_to_body_ratio=w_ratio,
+                was_salvageable=was_salv,
+                salvageable_cents_lost=salv_lost,
+                is_twap_pin_victim=is_twap_pin,
+                twap_vs_spot_divergence=twap_div,
+                bot_type=bot_type_resolved,
+            )
+
         if exec_mode_resolved != "live" and state.sim_agent and state.sim_agent._portfolio:
             snap = state.sim_agent._portfolio.get_pnl_snapshot()
             get_db_writer().enqueue_equity_snapshot(

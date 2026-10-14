@@ -1353,6 +1353,35 @@ async def get_state() -> dict[str, Any]:
     """Return full state snapshot."""
     return _build_full_state_payload()
 
+
+@app.post("/api/batch-supervisor/evaluate")
+async def force_batch_evaluation() -> dict[str, Any]:
+    """Manually trigger a 6-trade evaluation batch, generate the report with market condition, and email operator."""
+    if hasattr(state, "batch_supervisor") and state.batch_supervisor:
+        res = await state.batch_supervisor.force_trigger_batch_evaluation()
+        return {"status": "success", "result": res}
+    raise HTTPException(status_code=503, detail="Batch supervisor not initialized")
+
+
+@app.get("/api/batch-supervisor/status")
+async def get_batch_supervisor_status() -> dict[str, Any]:
+    """Get batch supervisor current progress and active market condition."""
+    if hasattr(state, "batch_supervisor") and state.batch_supervisor:
+        bs = state.batch_supervisor
+        market_info = bs.determine_market_condition([])
+        return {
+            "current_batch_num": bs.current_batch_num,
+            "cumulative_trades": bs.cumulative_trades,
+            "cumulative_wins": bs.cumulative_wins,
+            "cumulative_losses": bs.cumulative_losses,
+            "cumulative_pnl": str(bs.cumulative_pnl),
+            "batch_trades_completed": getattr(state.guardrails_agent, "batch_trades_completed", 0),
+            "batch_trades_quota": getattr(state.guardrails_agent, "batch_trades_quota", 6),
+            "market_condition": market_info,
+            "is_running": bs.is_running,
+        }
+    raise HTTPException(status_code=503, detail="Batch supervisor not initialized")
+
 # ---------------------------------------------------------------------------
 # WebSocket Broadcast Logic
 # ---------------------------------------------------------------------------

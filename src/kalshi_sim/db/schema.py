@@ -18,7 +18,122 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
+
+SCHEMA_V5_SQL = """
+-- 12. Unfilled Orders & Opportunity Loss Ledger
+CREATE TABLE IF NOT EXISTS unfilled_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id TEXT UNIQUE NOT NULL,
+    ticker TEXT NOT NULL,
+    side TEXT NOT NULL,
+    limit_price REAL NOT NULL,
+    size INTEGER NOT NULL,
+    created_at_utc TEXT NOT NULL,
+    terminated_at_utc TEXT NOT NULL,
+    lifetime_seconds REAL NOT NULL,
+    time_remaining_at_cancel_s REAL,
+    cancellation_reason TEXT NOT NULL,
+    best_ask_at_placement REAL,
+    closest_ask_approach REAL,
+    price_gap_cents REAL,
+    initial_queue_ahead INTEGER,
+    volume_traded_at_price INTEGER,
+    queue_deficit INTEGER,
+    queue_exhaustion_pct REAL,
+    t1_spot_price REAL,
+    t1_strike_diff REAL,
+    t1_macro_1h_slope REAL,
+    t1_regime TEXT,
+    t1_vpin REAL,
+    t4_spot_price REAL,
+    t4_macro_1h_slope REAL,
+    t4_regime TEXT,
+    settlement_outcome_if_filled TEXT,
+    counterfactual_pnl REAL,
+    diagnostic_category TEXT,
+    bot_type TEXT DEFAULT 'bot1_v4_domination',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_unfilled_ticker ON unfilled_orders (ticker);
+CREATE INDEX IF NOT EXISTS idx_unfilled_diag ON unfilled_orders (diagnostic_category);
+CREATE INDEX IF NOT EXISTS idx_unfilled_reason ON unfilled_orders (cancellation_reason);
+
+-- 13. Trade Lifecycle Forensics (4-Checkpoint Executed Ledger)
+CREATE TABLE IF NOT EXISTS trade_lifecycle_forensics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id TEXT UNIQUE NOT NULL,
+    ticker TEXT NOT NULL,
+    side TEXT NOT NULL,
+    entry_price REAL NOT NULL,
+    role TEXT DEFAULT 'MAKER',
+    fee_paid REAL DEFAULT 0.0,
+    t1_timestamp TEXT,
+    t1_spot REAL,
+    t1_strike_diff REAL,
+    t1_1h_slope REAL,
+    t1_regime TEXT,
+    t1_vpin REAL,
+    t2_timestamp TEXT,
+    t2_queue_wait_seconds REAL,
+    t2_spot REAL,
+    t2_1h_slope REAL,
+    t2_regime TEXT,
+    t2_vpin REAL,
+    t3_timestamp TEXT,
+    t3_spot REAL,
+    t3_60s_twap REAL,
+    twap_vs_spot_divergence REAL,
+    t3_1h_slope REAL,
+    t3_regime TEXT,
+    mfe_favorable_excursion REAL,
+    mae_adverse_excursion REAL,
+    outcome TEXT NOT NULL,
+    realized_pnl REAL NOT NULL,
+    regime_mutated INTEGER DEFAULT 0,
+    trend_flipped INTEGER DEFAULT 0,
+    adverse_selection_fill INTEGER DEFAULT 0,
+    bot_type TEXT DEFAULT 'bot1_v4_domination',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_lifecycle_trade_id ON trade_lifecycle_forensics (trade_id);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_outcome ON trade_lifecycle_forensics (outcome);
+CREATE INDEX IF NOT EXISTS idx_lifecycle_regime ON trade_lifecycle_forensics (t1_regime, t3_regime);
+
+-- 14. Trade Failure & Mistake Autopsies Ledger
+CREATE TABLE IF NOT EXISTS trade_failure_autopsies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id TEXT UNIQUE NOT NULL,
+    ticker TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    realized_pnl REAL NOT NULL,
+    failure_code TEXT NOT NULL,
+    is_counter_trend INTEGER DEFAULT 0,
+    macro_1h_slope REAL,
+    is_double_wick_trap INTEGER DEFAULT 0,
+    wick_to_body_ratio REAL,
+    moat_deficit_dollars REAL DEFAULT 0.0,
+    was_salvageable INTEGER DEFAULT 0,
+    salvageable_cents_lost REAL DEFAULT 0.0,
+    mfe_price REAL,
+    peak_profit_giveback_pct REAL DEFAULT 0.0,
+    cents_left_on_table REAL DEFAULT 0.0,
+    stinginess_gap_cents REAL DEFAULT 0.0,
+    queue_deficit INTEGER DEFAULT 0,
+    is_toxic_dump_fill INTEGER DEFAULT 0,
+    vpin_spike_at_fill REAL DEFAULT 0.0,
+    is_twap_pin_victim INTEGER DEFAULT 0,
+    twap_vs_spot_divergence REAL DEFAULT 0.0,
+    bot_type TEXT DEFAULT 'bot1_v4_domination',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_failure_code ON trade_failure_autopsies (failure_code);
+CREATE INDEX IF NOT EXISTS idx_failure_salvage ON trade_failure_autopsies (was_salvageable);
+CREATE INDEX IF NOT EXISTS idx_failure_counter_trend ON trade_failure_autopsies (is_counter_trend);
+"""
 
 SCHEMA_V4_SQL = """
 -- 10. Batch Assessments Ledger Table
@@ -328,5 +443,15 @@ class MigrationEngine:
             await db.commit()
             current_version = 4
             logger.info("Successfully applied migration V4.")
+
+        if current_version < 5:
+            logger.info("Applying migration V5 (Unfilled Orders, Lifecycle Forensics & Failure Autopsies)...")
+            await db.executescript(SCHEMA_V5_SQL)
+            await db.execute(
+                "INSERT OR REPLACE INTO schema_migrations (version, description) VALUES (5, 'Unfilled orders, lifecycle forensics, and failure attribution autopsies')"
+            )
+            await db.commit()
+            current_version = 5
+            logger.info("Successfully applied migration V5.")
 
         return current_version
