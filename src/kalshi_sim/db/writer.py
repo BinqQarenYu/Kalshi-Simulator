@@ -178,7 +178,7 @@ class DatabaseWriter:
         side: str,
         size: int,
         price: float,
-        gross_value: float,
+        gross_value: Optional[float] = None,
         fees: float = 0.0,
         vpin: Optional[float] = None,
         kelly_fraction: Optional[float] = None,
@@ -190,6 +190,7 @@ class DatabaseWriter:
     ) -> None:
         """Enqueue an executed order record."""
         ts = timestamp or datetime.now(timezone.utc)
+        calc_gross = float(gross_value) if gross_value is not None else float(price * size)
         record = {
             "trade_id": trade_id,
             "timestamp_utc": ts.isoformat(),
@@ -199,7 +200,7 @@ class DatabaseWriter:
             "side": side,
             "size": size,
             "price": price,
-            "gross_value": gross_value,
+            "gross_value": calc_gross,
             "fees": fees,
             "vpin": vpin,
             "kelly_fraction": kelly_fraction,

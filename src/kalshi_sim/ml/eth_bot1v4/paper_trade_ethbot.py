@@ -121,6 +121,7 @@ async def run_eth_bot(
         order_client=order_client,
         orderflow_feed=feed,
         ticker=ticker,
+        load_persisted=True,
     )
 
     # Track already processed settlements to avoid duplicates

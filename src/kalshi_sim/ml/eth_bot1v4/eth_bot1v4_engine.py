@@ -60,6 +60,8 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         target_ticker = kwargs.pop("ticker", ticker)
         hist_file = kwargs.pop("history_file", None)
         min_bleed_diff = kwargs.pop("min_spot_diff_bleed", 5.00)
+        param_file = kwargs.pop("parameters_file", None)
+        load_persisted = kwargs.pop("load_persisted", param_file is not None)
 
         # Enforce ETH asset calibration
         kwargs.setdefault("asset", CryptoAsset.ETH)
@@ -81,8 +83,9 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         super().__init__(*args, **kwargs)
 
         self.history_file = buffer_path
-        self.parameters_file = Path("data/bot_parameters_eth.json")
-        self._load_persisted_parameters()
+        self.parameters_file = Path(param_file) if param_file else Path("data/bot_parameters_eth.json")
+        if load_persisted and self.parameters_file.exists():
+            self._load_persisted_parameters()
         self._active_trade_forensics: dict[str, dict[str, Any]] = {}
 
         self.min_spot_diff_bleed = float(min_bleed_diff)
@@ -417,7 +420,9 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                         ticker=target_ticker,
                         side=order_side.value,
                         price=float(limit_p),
+                        gross_value=float(limit_p),
                         size=1,
+                        vpin=float(vpin_score),
                         bot_type=self.STRATEGY_ID,
                         execution_mode="live" if hasattr(self.order_client, "shard_balances") else "simulated",
                     )

@@ -229,8 +229,7 @@ def test_eth_bot1v4_record_cycle_settlement_and_autopsy(tmp_path: Path) -> None:
 def test_eth_bot1v4_parameter_persistence(tmp_path: Path) -> None:
     """Verify EthBot1V4Engine dynamically loads and saves parameters to data/bot_parameters_eth.json."""
     param_file = tmp_path / "bot_parameters_eth.json"
-    engine = EthBot1V4Engine()
-    engine.parameters_file = param_file
+    engine = EthBot1V4Engine(parameters_file=param_file)
 
     # Update parameters
     engine.update_parameters(
