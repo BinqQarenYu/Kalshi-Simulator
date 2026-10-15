@@ -369,6 +369,7 @@ class KalshiLiveOrderClient:
         client_order_id: Optional[str] = None,
         resting_only: bool = False,
         exchange_index: Optional[int] = None,
+        time_in_force: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Place an order on Kalshi V2 Production Exchange.
 
@@ -382,6 +383,7 @@ class KalshiLiveOrderClient:
             client_order_id: Optional idempotency UUID. Generated automatically if omitted.
             resting_only: If true, enables post_only to guarantee maker liquidity.
             exchange_index: Specific exchange shard (defaults to primary funded shard, 0).
+            time_in_force: Optional Kalshi time_in_force override (e.g. 'immediate_or_cancel' or 'good_till_canceled').
 
         Returns:
             Dict containing order response and fill details, or None on failure.
@@ -442,7 +444,7 @@ class KalshiLiveOrderClient:
             "side": v2_side,
             "count": f"{count:.2f}",
             "price": f"{v2_price:.4f}",
-            "time_in_force": "good_till_canceled" if is_limit else "immediate_or_cancel",
+            "time_in_force": time_in_force or ("good_till_canceled" if is_limit else "immediate_or_cancel"),
             "self_trade_prevention_type": "taker_at_cross",
             "post_only": bool(resting_only and is_limit),
         }

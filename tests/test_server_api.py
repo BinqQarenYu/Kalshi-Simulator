@@ -41,13 +41,12 @@ def test_update_settings_endpoint(client: TestClient) -> None:
 
 
 def test_switch_timeframe_endpoint(client: TestClient) -> None:
-    # 1. Switch to 5m
+    # 1. Switch to 5m (maps to 15m standard)
     resp5m = client.post("/api/settings", json={"active_timeframe": "5m"})
     assert resp5m.status_code == 200
     data5m = resp5m.json()
     assert data5m["active_timeframe"] == "5m"
-    assert data5m["active_ticker"] == "KXBTC5M-T78600"
-    assert data5m["target_strike"] == 78600.0
+    assert data5m["active_ticker"] == "KXBTC15M-T78650"
 
     # 2. Switch to 1h
     resp1h = client.post("/api/settings", json={"active_timeframe": "1h"})

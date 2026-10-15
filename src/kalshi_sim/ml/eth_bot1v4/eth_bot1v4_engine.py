@@ -439,6 +439,21 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
 
         chosen_side = OrderSide.YES if kev_dir == "YES" else OrderSide.NO
 
+        # 3b. Moneyness Consistency Check (Anti-OTM Trap Filter)
+        # Prevent buying out-of-the-money contracts when spot is adverse to strike
+        if chosen_side == OrderSide.YES and spot_price < (target_strike - Decimal("3.00")):
+            logger.warning(
+                "🛑 [OTM TRAP FILTER] Kev recommended YES, but spot ($%s) is deep below strike ($%s) by -$%.2f. Stand down to WAIT.",
+                spot_price, target_strike, float(target_strike - spot_price)
+            )
+            return decision
+        if chosen_side == OrderSide.NO and spot_price > (target_strike + Decimal("3.00")):
+            logger.warning(
+                "🛑 [OTM TRAP FILTER] Kev recommended NO, but spot ($%s) is deep above strike ($%s) by +$%.2f. Stand down to WAIT.",
+                spot_price, target_strike, float(spot_price - target_strike)
+            )
+            return decision
+
         # 4. Continuous Math-of-Winning Formulation
         import math
         diff_float = float(spot_price - target_strike)
@@ -501,8 +516,40 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                     "count": 1,
                     "order_type": "limit",
                     "price_dollars": best_ask,
+                    "time_in_force": "immediate_or_cancel",
                 }
                 res = await self.order_client.place_order(**order_kwargs)
+
+                # Check for valid execution
+                if res is None or (isinstance(res, dict) and ("error" in res or res.get("status") in ("canceled", "rejected", "error"))):
+                    logger.error("[ETH BOT ORDER REJECTED/FAILED] Response: %s", res)
+                    guardrails.release_in_flight_intent(target_ticker)
+                    return decision
+
+                order_id = (
+                    res.get("order_id")
+                    or (res.get("order", {}).get("order_id") if isinstance(res.get("order"), dict) else None)
+                    or f"ord_eth_{int(time.time()*1000)}"
+                )
+
+                # Record trade inception into AgentGuardrails (locks cycle and enforces cooldown)
+                exec_mode = "live" if hasattr(self.order_client, "shard_balances") else "simulated"
+                guardrails.record_trade_inception(
+                    trade_id=order_id,
+                    ticker=target_ticker,
+                    side=chosen_side.value,
+                    size=1,
+                    price=best_ask,
+                    cost=best_ask,
+                    fee=Decimal("0.01"),
+                    bot_type=self.STRATEGY_ID,
+                    execution_mode=exec_mode,
+                    rationale=f"Kev-led taker: P_win {p_win*100:.1f}%, best_ask ${best_ask}",
+                    vpin=vpin_score,
+                    ai_prob=p_win,
+                    cycle_id=target_ticker,
+                )
+
                 self.record_completed_turnover(target_ticker)
                 logger.info(
                     "👑 [KEV LED TAKER ORDER EXECUTED] %s %s 1 ct @ $%s (Best Ask, Max Ceiling: $%s, P_win: %.1f%%, E[V]: +$%.2f) | Result: %s",
@@ -511,7 +558,6 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
 
                 # Capture T1 & T2 Forensics for trade lifecycle ledger
                 now_iso = datetime.now(timezone.utc).isoformat()
-                order_id = res.get("order_id", f"ord_eth_{int(time.time()*1000)}") if isinstance(res, dict) else f"ord_eth_{int(time.time()*1000)}"
                 self._active_trade_forensics[target_ticker] = {
                     "order_id": order_id,
                     "ticker": target_ticker,
@@ -540,10 +586,11 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                     size=1,
                     vpin=float(vpin_score),
                     bot_type=self.STRATEGY_ID,
-                    execution_mode="live" if hasattr(self.order_client, "shard_balances") else "simulated",
+                    execution_mode=exec_mode,
                 )
             except Exception as ex:
                 logger.error("[ETH BOT ORDER FAILED] %s: %s", target_ticker, ex)
+                guardrails.release_in_flight_intent(target_ticker)
 
         return decision
 
@@ -559,20 +606,24 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         execution_mode: str = "live",
         twap_60s: Optional[Decimal] = None,
         market_condition: Optional[str] = None,
+        target_ticker: Optional[str] = None,
+        pnl: Optional[Union[Decimal, float]] = None,
     ) -> Optional[dict[str, Any]]:
         """Record cycle settlement across ETH database, lifecycle forensics, autopsies, and experience buffer."""
         # Simple boolean feedback invocation from server or loop
-        if isinstance(won_or_pnl, bool) and ticker is None:
+        if isinstance(won_or_pnl, bool) and ticker is None and target_ticker is None:
             super().record_cycle_settlement(won_or_pnl)
             return None
 
         is_win = bool(won_or_pnl) if isinstance(won_or_pnl, bool) else (Decimal(str(won_or_pnl)) > 0)
-        target_ticker = ticker or self.target_ticker or "KXETH15M-CYCLE"
+        target_ticker = ticker or target_ticker or self.target_ticker or "KXETH15M-CYCLE"
         entry_p = entry_price or self.discount_limit_price
         if not isinstance(entry_p, Decimal):
             entry_p = Decimal(str(round(entry_p, 2)))
 
-        if isinstance(won_or_pnl, (Decimal, float)) and not isinstance(won_or_pnl, bool):
+        if pnl is not None:
+            pnl = Decimal(str(pnl))
+        elif isinstance(won_or_pnl, (Decimal, float)) and not isinstance(won_or_pnl, bool):
             pnl = Decimal(str(won_or_pnl))
         else:
             pnl = Decimal(str(contracts)) * (Decimal("1.00") - entry_p) if is_win else -Decimal(str(contracts)) * entry_p

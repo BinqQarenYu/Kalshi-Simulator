@@ -601,8 +601,8 @@ async def place_order(req: OrderRequest) -> dict[str, Any]:
             )
             return {
                 "success": False,
-                "status": "5m_live_prohibited",
-                "reason": "5-Minute event contracts (KXBTC5M) are strictly exclusive to Mother Dash Paper Live. Real-money live trading is permanently prohibited.",
+                "status": "5m_decommissioned",
+                "reason": "5-Minute event contracts are permanently decommissioned and prohibited. The fleet operates strictly and exclusively on 15-Minute events.",
             }
 
         live_p = state.live_portfolio or {}

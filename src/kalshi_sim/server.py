@@ -146,12 +146,12 @@ logger = logging.getLogger("kalshi_sim.server")
 
 TIMEFRAME_CONFIGS: dict[Timeframe, dict[str, Any]] = {
     Timeframe.FIVE_MIN: {
-        "series": "KXBTC5M",
-        "ticker": "KXBTC5M-T78600",
-        "target_strike": Decimal("78600.00"),
-        "title": "BTC 5 min",
-        "duration": "5m",
-        "expiry_seconds": 300,
+        "series": "KXBTC15M",
+        "ticker": "KXBTC15M-T78650",
+        "target_strike": Decimal("77645.14"),
+        "title": "BTC 15 min",
+        "duration": "15m",
+        "expiry_seconds": 900,
     },
     Timeframe.FIFTEEN_MIN: {
         "series": "KXBTC15M",
@@ -700,7 +700,7 @@ def resolve_active_market(now_utc: datetime | None = None) -> tuple[Any | None, 
             strike = state.cycle_open_strikes.get(cycle_key, state.current_btc_price)
             state.target_strike = strike
         remaining_secs = (interval_mins * 60) - passed_secs
-        tf_prefix = ("KXBTC15M" if is_btc else active_cfg.series_ticker_15m) if tf_val == "15m" else ("KXBTC5M" if tf_val == "5m" else "KXBTCD")
+        tf_prefix = ("KXBTC15M" if is_btc else active_cfg.series_ticker_15m) if tf_val in ("15m", "5m") else "KXBTCD"
         state.active_ticker = f"{tf_prefix}-{w_end.strftime('%y%b%d%H%M').upper()}-{w_end.minute:02d}"
 
     state.market_expiry_seconds = remaining_secs

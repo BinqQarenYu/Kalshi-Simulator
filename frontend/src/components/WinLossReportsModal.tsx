@@ -24,7 +24,7 @@ interface WinLossReportsModalProps {
   isLiveMode?: boolean;
 }
 
-export type TraderCategory = 'all' | '3_step_dom' | 'onnx_macro' | 'macro_onnx' | 'dominion_2' | 'macro_trend' | 'ofi_sprint' | 'onnx_ml' | 'live';
+export type TraderCategory = 'all' | '3_step_dom' | 'onnx_macro' | 'macro_onnx' | 'dominion_2' | 'macro_trend' | 'onnx_ml' | 'live';
 
 export const isLiveReport = (r: any): boolean =>
   r.execution_mode === 'live' || r.bot_type === 'live' || Boolean(r.report_id?.startsWith('WLR-LIVE-'));
@@ -75,12 +75,6 @@ export const isOnnxMacroBot = (r: any) =>
     r.strategy_name?.toLowerCase().includes('onnx')
   );
 
-export const isOfiSprintBot = (r: any) =>
-  r.bot_id === 'ofi_sprint_scalper' ||
-  r.bot_type === 'ofi_sprint_scalper' ||
-  r.bot_type === 'ofi_scalper' ||
-  Boolean(r.ai_rationale?.toLowerCase().includes('ofi sprint'));
-
 export const isMacroOnnxBot = (r: any) => r.bot_type === 'macro_onnx' || r.bot_type === 'macro_onnx_bot' || r.bot_type === 'macro_trend_onnx_fusion' || (r.ai_rationale?.toLowerCase().includes('macro') && r.ai_rationale?.toLowerCase().includes('onnx'));
 export const isMacroBot = (r: any) => !isMacroOnnxBot(r) && !isOnnxMacroBot(r) && (r.bot_type === 'macro_trend_dominion' || r.bot_type === 'macro_trend' || r.ai_rationale?.toLowerCase().includes('macro trend'));
 export const isDom2Bot = (r: any) => r.bot_type === 'dominion_2_bot' || r.bot_type === 'dominion2' || r.bot_type === 'dominion_v2' || r.ai_rationale?.toLowerCase().includes('dominion 2');
@@ -93,7 +87,6 @@ export const getTraderCategory = (r: any): TraderCategory => {
   if (isMacroOnnxBot(r)) return 'macro_onnx';
   if (isMacroBot(r)) return 'macro_trend';
   if (isDom2Bot(r)) return 'dominion_2';
-  if (isOfiSprintBot(r)) return 'ofi_sprint';
   if (isOnnxBot(r)) return 'onnx_ml';
   return '3_step_dom';
 };
@@ -105,7 +98,6 @@ export const getTraderBadge = (cat: TraderCategory) => {
     case 'macro_onnx': return { name: 'Macro ONNX Fusion', short: 'Macro ONNX', icon: '🧠', color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40' };
     case 'macro_trend': return { name: 'Macro Trend Dominion', short: 'Macro Trend', icon: '📈', color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40' };
     case 'dominion_2': return { name: 'Dominion 2 (Multi-Asset)', short: 'Dominion 2', icon: '👑', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' };
-    case 'ofi_sprint': return { name: 'OFI Sprint Scalper', short: 'OFI Scalp', icon: '⚡', color: 'bg-blue-500/20 text-blue-300 border-blue-500/40' };
     case 'onnx_ml': return { name: 'ONNX ML Net', short: 'ONNX ML', icon: '🔬', color: 'bg-teal-500/20 text-teal-300 border-teal-500/40' };
     default: return { name: '3-Step Domination', short: '3-Step Dom', icon: '⚡', color: 'bg-amber-500/20 text-amber-300 border-amber-500/40' };
   }
@@ -136,7 +128,7 @@ export const WinLossReportsModal: React.FC<WinLossReportsModalProps> = ({
   }, [isOpen, isLiveMode, reports]);
 
   const traderStats = useMemo(() => {
-    const categories: TraderCategory[] = ['3_step_dom', 'onnx_macro', 'dominion_2', 'macro_trend', 'ofi_sprint', 'macro_onnx', 'onnx_ml', 'live'];
+    const categories: TraderCategory[] = ['3_step_dom', 'onnx_macro', 'dominion_2', 'macro_trend', 'macro_onnx', 'onnx_ml', 'live'];
     return categories.map((cat) => {
       const subset = reports.filter((r) => getTraderCategory(r) === cat);
       const w = subset.filter((r) => r.outcome === 'win').length;

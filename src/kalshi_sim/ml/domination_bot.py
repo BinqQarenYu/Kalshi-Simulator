@@ -534,10 +534,8 @@ class ThreeStepDominationBot:
                               f"Suppressing all entries to prevent illiquid slippage trap.",
                 )
 
-        # Classify Active Playbook & Cycle Duration by Expiration Window
-        ticker_str = (getattr(book, "market_ticker", "") or getattr(book, "ticker", "")) if book else ""
-        is_5m = ("5M" in ticker_str.upper() and "15M" not in ticker_str.upper()) or "5MIN" in ticker_str.upper()
-        cycle_duration_s = 300.0 if is_5m else 900.0
+        # Classify Active Playbook & Cycle Duration by Expiration Window (strictly 15-Minute events)
+        cycle_duration_s = 900.0
 
         cfg = get_asset_config(self.asset)
 
@@ -557,20 +555,11 @@ class ThreeStepDominationBot:
                           f"Asset too close to strike for current volatility regime, skipping.",
             )
 
-        # Dynamic Playbook Timing Thresholds:
-        # Standard 15M cycle: P3 in [45s, 240s], P2 in (240s, 600s], P1 in (600s, p1_max_s], lock < 45s
-        # 5M Sprint cycle:    P3 in [20s, 80s],  P2 in (80s, 200s],   P1 in (200s, p1_max_s], lock < 20s
-        if is_5m:
-            p3_min_s, p3_max_s = 20, 80
-            p2_min_s, p2_max_s = 80, 200
-            p1_min_s = 200
-            quarantine_s = min(30.0, self.opening_quarantine_seconds / 3.0)
-            p1_max_s = cycle_duration_s - quarantine_s
-        else:
-            p3_min_s, p3_max_s = 45, 240
-            p2_min_s, p2_max_s = 240, 600
-            p1_min_s = 600
-            p1_max_s = cycle_duration_s - self.opening_quarantine_seconds
+        # Dynamic Playbook Timing Thresholds (strictly 15M cycle: P3 in [45s, 240s], P2 in (240s, 600s], P1 in (600s, p1_max_s], lock < 45s)
+        p3_min_s, p3_max_s = 45, 240
+        p2_min_s, p2_max_s = 240, 600
+        p1_min_s = 600
+        p1_max_s = cycle_duration_s - self.opening_quarantine_seconds
 
         tau_mins = max(0.1, time_to_expiry_s / 60.0)
 

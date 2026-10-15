@@ -64,7 +64,7 @@ class MockKalshiFeed:
 
         contract_configs = [
             ("KXBTC15M-T78650", "KXBTC15M", Timeframe.FIFTEEN_MIN, Decimal("78656.27"), "Bitcoin above $78,656.27 (15m)", 900),
-            ("KXBTC5M-T78600",  "KXBTC5M",  Timeframe.FIVE_MIN,    Decimal("78600.00"), "Bitcoin above $78,600.00 (5m)",  300),
+            ("KXBTC15M-T78600", "KXBTC15M", Timeframe.FIFTEEN_MIN, Decimal("78600.00"), "Bitcoin above $78,600.00 (15m)", 900),
             ("KXBTCH-T78500",   "KXBTCH",   Timeframe.ONE_HOUR,    Decimal("78500.00"), "Bitcoin above $78,500.00 (1h)",  3600),
         ]
 

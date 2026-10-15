@@ -276,23 +276,22 @@ class AgentGuardrails:
             is_brave = temp_auditor.has_seal_of_the_brave(bot_type)
             is_star_player = temp_auditor.has_seal_of_star_player(bot_type)
 
-        # 0a. 5M Expansion Live Prohibition Veto
-        # 5-minute event contracts (KXBTC5M or 5m cycle) are strictly exclusive to Mother Dash Paper Live.
-        # Live real-money trading is permanently prohibited under all conditions.
-        # Ensure "15M" is not falsely matched when testing for "5M" substring!
+        # 0a. 5M Decommission Veto
+        # The fleet strictly and exclusively executes 15-Minute event contracts (KXETH15M, KXBTC15M).
+        # All 5-minute contracts and bots are permanently decommissioned and forbidden.
         is_5m_contract = (
             ("5M" in ticker.upper() and "15M" not in ticker.upper())
             or "5MIN" in ticker.upper()
             or (cycle_id is not None and "5M" in cycle_id.upper() and "15M" not in cycle_id.upper())
             or (cycle_id is not None and "_5m" in cycle_id.lower())
         )
-        if is_live and is_5m_contract:
+        if is_5m_contract:
             msg = (
-                f"5M LIVE TRADING PROHIBITED: Contract '{ticker}' is part of the 5-Minute Expansion series. "
-                f"5M events are strictly exclusive to Mother Dash Paper Live. Live real-money trading is permanently prohibited."
+                f"5M TRADING PROHIBITED: Contract '{ticker}' is a 5-Minute contract. "
+                f"The fleet operates strictly and exclusively on 15-Minute events."
             )
-            self._record_rejection("5m_live_prohibited", msg, ticker, now_utc)
-            return False, msg, 0, {"veto": "5m_live_prohibited", "ticker": ticker, "is_live": True}
+            self._record_rejection("5m_decommissioned", msg, ticker, now_utc)
+            return False, msg, 0, {"veto": "5m_decommissioned", "ticker": ticker}
 
         # 0b. Macro Event News Blackout Veto (e.g. GOLD during high-impact US economic releases)
         is_macro_blackout, macro_reason = self.check_macro_news_blackout(ticker)
@@ -774,42 +773,44 @@ class AgentGuardrails:
                         logger.warning("🛑 [GUARDRAIL BTC GATE] 10th BTC trade evaluated. Net PnL is NON-POSITIVE (${%s}). HALTING BTC Bot per directive!", self._btc_pnl)
                         self.is_btc_bot_armed = False
 
-            if outcome.lower() == "loss":
-                self._consecutive_losses += 1
-                logger.info("🛡️ [GUARDRAIL SETTLEMENT] Live loss recorded. Consecutive losses = %d", self._consecutive_losses)
-                if self._consecutive_losses >= self.harakiri_loss_limit:
-                    logger.warning(
-                        "🚨 [GUARDRAIL HARAKIRI] Consecutive losses (%d) reached limit (%d)! Current strategy failed.",
-                        self._consecutive_losses, self.harakiri_loss_limit
-                    )
-                    # Attempt automated failover to Dynamic Trading Strategy
-                    try:
-                        from kalshi_sim.preset_manager import PresetManager
-                        pm = PresetManager()
-                        active_preset = pm.get_active_preset_id()
-                        if active_preset != "dynamic_trading_strategy_v1":
-                            success, msg, _ = pm.load_preset("dynamic_trading_strategy_v1")
-                            if success:
-                                logger.info("⚡ [FAILOVER HOT-SWAP] Current strategy failed Harakiri. Activated Dynamic Trading Strategy: %s", msg)
-                                self._consecutive_losses = 0
-                                self.is_bot_armed = True
-                                try:
-                                    from kalshi_sim.server import state
-                                    state.active_strategy_bot = "dynamic_trading_strategy"
-                                    if hasattr(state, "sim_agent") and state.sim_agent:
-                                        state.sim_agent.active_strategy_bot = "dynamic_trading_strategy"
-                                except Exception:
-                                    pass
+            # Global Harakiri Streak Breaker (only applies to non-isolated fleet bots)
+            if not is_eth and not is_btc:
+                if outcome.lower() == "loss":
+                    self._consecutive_losses += 1
+                    logger.info("🛡️ [GUARDRAIL SETTLEMENT] Live loss recorded. Consecutive losses = %d", self._consecutive_losses)
+                    if self._consecutive_losses >= self.harakiri_loss_limit:
+                        logger.warning(
+                            "🚨 [GUARDRAIL HARAKIRI] Consecutive losses (%d) reached limit (%d)! Current strategy failed.",
+                            self._consecutive_losses, self.harakiri_loss_limit
+                        )
+                        # Attempt automated failover to Dynamic Trading Strategy
+                        try:
+                            from kalshi_sim.preset_manager import PresetManager
+                            pm = PresetManager()
+                            active_preset = pm.get_active_preset_id()
+                            if active_preset != "dynamic_trading_strategy_v1":
+                                success, msg, _ = pm.load_preset("dynamic_trading_strategy_v1")
+                                if success:
+                                    logger.info("⚡ [FAILOVER HOT-SWAP] Current strategy failed Harakiri. Activated Dynamic Trading Strategy: %s", msg)
+                                    self._consecutive_losses = 0
+                                    self.is_bot_armed = True
+                                    try:
+                                        from kalshi_sim.server import state
+                                        state.active_strategy_bot = "dynamic_trading_strategy"
+                                        if hasattr(state, "sim_agent") and state.sim_agent:
+                                            state.sim_agent.active_strategy_bot = "dynamic_trading_strategy"
+                                    except Exception:
+                                        pass
+                                else:
+                                    self.is_bot_armed = False
                             else:
                                 self.is_bot_armed = False
-                        else:
+                        except Exception as fo_err:
+                            logger.error("Harakiri failover error: %s", fo_err)
                             self.is_bot_armed = False
-                    except Exception as fo_err:
-                        logger.error("Harakiri failover error: %s", fo_err)
-                        self.is_bot_armed = False
-            elif outcome.lower() == "win":
-                self._consecutive_losses = 0
-                logger.info("🛡️ [GUARDRAIL SETTLEMENT] Live win recorded. Consecutive losses reset to 0.")
+                elif outcome.lower() == "win":
+                    self._consecutive_losses = 0
+                    logger.info("🛡️ [GUARDRAIL SETTLEMENT] Live win recorded. Consecutive losses reset to 0.")
 
             # Update peak equity and circuit breaker
             if self._peak_equity is None or balance_after > self._peak_equity:

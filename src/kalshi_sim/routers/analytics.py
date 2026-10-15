@@ -352,11 +352,6 @@ def _matches_bot_id(r: dict[str, Any], target_bot: str) -> bool:
             r_bot in ("macro_trend_dominion", "macro_trend", "macro_trend_dominion_bot", "macro_onnx", "macro_onnx_bot", "macro_trend_onnx_fusion")
             or ("macro trend" in r_strat and "contradiction" not in r_strat)
         )
-    elif target in ("ofi_sprint_scalper", "ofi_scalper"):
-        return (
-            r_bot in ("ofi_sprint_scalper", "ofi_scalper")
-            or "ofi sprint" in r_strat
-        )
     elif target in ("eth_bot1v4", "eth_bot", "eth_domination", "eth_domination_bot", "bot1v4_eth"):
         return (
             r_bot in ("eth_bot1v4", "eth_bot", "eth_domination", "eth_domination_bot", "bot1v4_eth")
@@ -411,7 +406,6 @@ async def get_win_loss_reports_endpoint(
             "dual_onnx",
             "the_onnx_strategy",
             "onnx_macro_v2",
-            "ofi_sprint_scalper",
         ):
             effective_asset = "BTC"
 
@@ -499,7 +493,6 @@ async def get_win_loss_reports_endpoint(
         "dual_onnx": "The ONNX Strategy (Dual-Brain)",
         "dominion_2_bot": "Dominion 2 (Anti-Pin Scalper)",
         "macro_trend_dominion": "Macro Trend Dominion",
-        "ofi_sprint_scalper": "OFI Sprint Scalper",
         "eth_bot1v4": "Bot 1 V4 (ETH Domination)",
         "eth_bot": "Bot 1 V4 (ETH Domination)",
         "eth_domination": "Bot 1 V4 (ETH Domination)",

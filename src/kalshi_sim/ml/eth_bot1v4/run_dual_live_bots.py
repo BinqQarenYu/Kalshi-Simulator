@@ -140,7 +140,7 @@ async def _reconcile_settlements_loop(client, guardrails, eth_engine, btc_engine
                     try:
                         eth_engine.record_cycle_settlement(
                             won_or_pnl=won,
-                            target_ticker=t,
+                            ticker=t,
                             entry_price=yes_cost if yes_cost > 0 else no_cost,
                             pnl=net_pnl,
                             side="yes" if yes_cost > 0 else "no",

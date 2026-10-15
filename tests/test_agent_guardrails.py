@@ -91,7 +91,7 @@ def test_cooldown_throttle() -> None:
     
     # Order on a different ticker within cooldown window
     ok, reason, size, _ = guardrails.validate_pre_trade_intent(
-        ticker="KXBTC5M-T78600",
+        ticker="KXBTC15M-T78651",
         side="yes",
         requested_size=2,
         est_price=Decimal("0.50"),
@@ -646,14 +646,14 @@ def test_live_settlements_trip_harakiri_breaker_and_rearm() -> None:
     guardrails.harakiri_loss_limit = 3
     assert guardrails.is_bot_armed is True
 
-    # 3 consecutive live losses
+    # 3 consecutive live losses on non-isolated asset
     for i in range(3):
         guardrails.record_cycle_settlement(
-            ticker=f"KXBTC15M-LIVE-LOSS-{i}",
+            ticker=f"KXSOL15M-LIVE-LOSS-{i}",
             outcome="loss",
             pnl=Decimal("-1.00"),
             balance_after=Decimal("50.00"),
-            cycle_id=f"KXBTC15M-LIVE-LOSS-{i}",
+            cycle_id=f"KXSOL15M-LIVE-LOSS-{i}",
             execution_mode="live",
         )
 
@@ -662,7 +662,7 @@ def test_live_settlements_trip_harakiri_breaker_and_rearm() -> None:
 
     # Intent must now be vetoed
     ok, reason, size, diag = guardrails.validate_pre_trade_intent(
-        ticker="KXBTC15M-LIVE-INTENT-TEST",
+        ticker="KXSOL15M-LIVE-INTENT-TEST",
         side="yes",
         requested_size=1,
         est_price=Decimal("0.50"),
@@ -682,7 +682,7 @@ def test_live_settlements_trip_harakiri_breaker_and_rearm() -> None:
 
     # Intent must now pass
     ok2, reason2, size2, _ = guardrails.validate_pre_trade_intent(
-        ticker="KXBTC15M-LIVE-INTENT-TEST-2",
+        ticker="KXSOL15M-LIVE-INTENT-TEST-2",
         side="yes",
         requested_size=1,
         est_price=Decimal("0.50"),
@@ -693,4 +693,86 @@ def test_live_settlements_trip_harakiri_breaker_and_rearm() -> None:
     )
     assert ok2 is True
     assert reason2 == "PASSED_GUARDRAILS"
+
+
+def test_eth_consecutive_losses_trip_circuit_breaker() -> None:
+    """Ensure ETH bot trips its dedicated 7-consecutive-loss circuit breaker."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    assert guardrails.eth_loss_limit == 7
+    assert guardrails.is_eth_bot_armed is True
+
+    # 6 consecutive live losses should NOT disarm yet
+    for i in range(6):
+        guardrails.record_cycle_settlement(
+            ticker=f"KXETH15M-LIVE-LOSS-{i}",
+            outcome="loss",
+            pnl=Decimal("-1.00"),
+            balance_after=Decimal("50.00"),
+            cycle_id=f"KXETH15M-LIVE-LOSS-{i}",
+            execution_mode="live",
+        )
+    assert guardrails._eth_consecutive_losses == 6
+    assert guardrails.is_eth_bot_armed is True
+
+    # 7th consecutive loss trips breaker
+    guardrails.record_cycle_settlement(
+        ticker="KXETH15M-LIVE-LOSS-6",
+        outcome="loss",
+        pnl=Decimal("-1.00"),
+        balance_after=Decimal("50.00"),
+        cycle_id="KXETH15M-LIVE-LOSS-6",
+        execution_mode="live",
+    )
+    assert guardrails._eth_consecutive_losses == 7
+    assert guardrails.is_eth_bot_armed is False
+
+    # Intent must now be vetoed for ETH
+    ok, reason, size, diag = guardrails.validate_pre_trade_intent(
+        ticker="KXETH15M-LIVE-INTENT-TEST",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.50"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="eth_bot1v4_sniper",
+    )
+    assert ok is False
+    assert "ETH CIRCUIT BREAKER VETO" in reason
+    assert diag.get("veto") == "eth_consecutive_losses_disarmed"
+
+
+def test_btc_10th_trade_gate_evaluation() -> None:
+    """Ensure BTC bot evaluates cumulative PnL at 10th trade."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+    assert guardrails.is_btc_bot_armed is True
+
+    # 10 losing trades
+    for i in range(10):
+        guardrails.record_cycle_settlement(
+            ticker=f"KXBTC15M-LIVE-TEST-{i}",
+            outcome="loss",
+            pnl=Decimal("-1.00"),
+            balance_after=Decimal("50.00"),
+            cycle_id=f"KXBTC15M-LIVE-TEST-{i}",
+            execution_mode="live",
+        )
+    assert guardrails.btc_gate_evaluated is True
+    assert guardrails.is_btc_bot_armed is False
+
+    # Intent must be vetoed for BTC
+    ok, reason, size, diag = guardrails.validate_pre_trade_intent(
+        ticker="KXBTC15M-LIVE-INTENT-TEST",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.50"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        bot_type="3_step_domination_bot",
+    )
+    assert ok is False
+    assert "BTC 10TH-TRADE GATE VETO" in reason
+    assert diag.get("veto") == "btc_10th_trade_halted"
+
 

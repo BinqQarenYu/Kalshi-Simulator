@@ -86,6 +86,17 @@ class StrategyEvaluationCoordinator:
             "SOL": DynamicRegimeStrategy(asset="SOL"),
         }
 
+        # Cooldown and rate-limiting caches
+        self._last_macro_eval_time: dict[str, float] = {}
+        self._last_dom_eval_time: dict[str, float] = {}
+        self._last_dynamic_eval_time: dict[str, float] = {}
+        self._last_dom_exit_eval_time: dict[str, float] = {}
+        self._last_dual_onnx_eval_time: dict[str, float] = {}
+        self._last_onnx_ts: dict[str, float] = {}
+        self._last_pred_log_time: dict[str, float] = {}
+        self._spot_price_history: dict[str, list[tuple[float, float]]] = {}
+        self._eval_count: int = 0
+
     @property
     def _dynamic_regime_engine(self) -> DynamicRegimeStrategy:
         return self._dynamic_regime_engines.get("BTC", DynamicRegimeStrategy(asset="BTC"))
@@ -156,17 +167,6 @@ class StrategyEvaluationCoordinator:
 
         # Default fallback: target_strike of the market
         return target_strike
-
-        # Cooldown and rate-limiting caches
-        self._last_macro_eval_time: dict[str, float] = {}
-        self._last_dom_eval_time: dict[str, float] = {}
-        self._last_dynamic_eval_time: dict[str, float] = {}
-        self._last_dom_exit_eval_time: dict[str, float] = {}
-        self._last_dual_onnx_eval_time: dict[str, float] = {}
-        self._last_onnx_ts: dict[str, float] = {}
-        self._last_pred_log_time: dict[str, float] = {}
-        self._spot_price_history: dict[str, list[tuple[float, float]]] = {}
-        self._eval_count: int = 0
 
     async def evaluate_market(
         self,

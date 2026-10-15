@@ -163,3 +163,67 @@ def test_council_langgraph_deliberation_for_eth() -> None:
     assert "vance" in res.get("council_votes", {})
     assert "silas" in res.get("council_votes", {})
     assert len(res.get("task_contract", [])) > 0
+
+
+@pytest.mark.asyncio
+async def test_eth_bot1v4_otm_trap_protection() -> None:
+    """Ensure OTM trap filter prevents buying YES when spot is > $3.00 below strike."""
+    mock_order_client = AsyncMock()
+    feed = EthOrderflowFeed()
+    feed.last_spot_price = Decimal("2595.00")  # $5 below strike
+
+    engine = EthBot1V4Engine(
+        order_client=mock_order_client,
+        orderflow_feed=feed,
+        ticker="KXETH15M-26OCT132100-2600",
+    )
+
+    async def mock_fetch_orderbook(ticker: str, rest_base: str = None) -> L2BookState:
+        book = L2BookState(ticker)
+        book.yes_book = {Decimal("0.40"): Decimal("10")}
+        book.no_book = {Decimal("0.60"): Decimal("10")}
+        return book
+
+    engine.fetch_orderbook = mock_fetch_orderbook
+
+    # Force Kev to recommend YES
+    from kalshi_sim.ml.kev_oracle import KevDecisionResult, KevQuestionType
+    async def mock_answer_batch(*args, **kwargs):
+        return [
+            KevDecisionResult(
+                key="trade_direction",
+                question_type=KevQuestionType.CHOICE,
+                selected_option="YES",
+                probabilities={"YES": Decimal("0.85"), "NO": Decimal("0.10"), "WAIT": Decimal("0.05")},
+                confidence=Decimal("0.85"),
+            ),
+            KevDecisionResult(
+                key="is_toxic_sweep",
+                question_type=KevQuestionType.BOOLEAN,
+                selected_option="false",
+                probabilities={"true": Decimal("0.05"), "false": Decimal("0.95")},
+                confidence=Decimal("0.95"),
+            )
+        ]
+    engine.kev_oracle.answer_batch = mock_answer_batch
+
+    decision = await engine.run_cycle()
+    # Must NOT place order because spot $2595 is $5 below strike $2600 (OTM trap)
+    assert mock_order_client.place_order.call_count == 0
+
+
+def test_eth_bot1v4_record_cycle_settlement_tolerance() -> None:
+    """Ensure record_cycle_settlement accepts flexible parameter signatures without throwing."""
+    engine = EthBot1V4Engine(ticker="KXETH15M-26OCT132100-2600")
+    # Call with ticker, pnl, entry_price, side
+    res = engine.record_cycle_settlement(
+        won_or_pnl=True,
+        ticker="KXETH15M-26OCT132100-2600",
+        entry_price=Decimal("0.42"),
+        pnl=Decimal("0.58"),
+        side="yes",
+    )
+    assert res is not None
+    assert res.get("outcome") == "win"
+    assert res.get("contracts") == 1
+

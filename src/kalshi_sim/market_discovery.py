@@ -16,35 +16,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Mapping per crypto asset and timeframe to Kalshi series tickers
+# Mapping per crypto asset and timeframe to Kalshi series tickers (15M event standard)
 ASSET_TIMEFRAME_SERIES: dict[CryptoAsset, dict[Timeframe, list[str]]] = {
     CryptoAsset.BTC: {
-        Timeframe.FIVE_MIN: ["KXBTC5M", "KXBTC15M"],
+        Timeframe.FIVE_MIN: [],
         Timeframe.FIFTEEN_MIN: ["KXBTC15M"],
         Timeframe.ONE_HOUR: ["KXBTCH"],
         Timeframe.DAILY: ["KXBTCD"],
     },
     CryptoAsset.ETH: {
-        Timeframe.FIVE_MIN: ["KXETH5M", "KXETH15M"],
+        Timeframe.FIVE_MIN: [],
         Timeframe.FIFTEEN_MIN: ["KXETH15M"],
         Timeframe.ONE_HOUR: ["KXETHD", "KXETH"],
         Timeframe.DAILY: ["KXETH"],
     },
     CryptoAsset.SOL: {
-        Timeframe.FIVE_MIN: ["KXSOL5M", "KXSOL15M"],
+        Timeframe.FIVE_MIN: [],
         Timeframe.FIFTEEN_MIN: ["KXSOL15M"],
         Timeframe.ONE_HOUR: ["KXSOLD", "KXSOL"],
         Timeframe.DAILY: ["KXSOL"],
     },
     CryptoAsset.DOGE: {
-        Timeframe.FIVE_MIN: ["KXDOGE5M", "KXDOGE15M"],
+        Timeframe.FIVE_MIN: [],
         Timeframe.FIFTEEN_MIN: ["KXDOGE15M"],
         Timeframe.ONE_HOUR: ["KXDOGED", "KXDOGE"],
         Timeframe.DAILY: ["KXDOGE"],
     },
     CryptoAsset.GOLD: {},  # Excluded per operator directive: not part of the active bot
     CryptoAsset.HYPER: {
-        Timeframe.FIVE_MIN: ["KXHYPE5M", "KXHYPE15M"],
+        Timeframe.FIVE_MIN: [],
         Timeframe.FIFTEEN_MIN: ["KXHYPE15M"],
         Timeframe.ONE_HOUR: ["KXHYPEH", "KXHYPE"],
         Timeframe.DAILY: ["KXHYPE"],
@@ -222,8 +222,8 @@ def get_all_tickers(
     seen: set[str] = set()
     tickers: list[str] = []
 
-    # 1. First pass: prioritize 15M, 5M, 1H contracts
-    for tf in (Timeframe.FIFTEEN_MIN, Timeframe.FIVE_MIN, Timeframe.ONE_HOUR):
+    # 1. First pass: prioritize 15M and 1H contracts
+    for tf in (Timeframe.FIFTEEN_MIN, Timeframe.ONE_HOUR):
         market_list = markets.get(tf, [])
         for m in market_list:
             if m.ticker not in seen:
@@ -232,7 +232,7 @@ def get_all_tickers(
 
     # 2. Second pass: remaining daily/other markets up to max_total
     for tf, market_list in markets.items():
-        if tf in (Timeframe.FIFTEEN_MIN, Timeframe.FIVE_MIN, Timeframe.ONE_HOUR):
+        if tf in (Timeframe.FIFTEEN_MIN, Timeframe.ONE_HOUR):
             continue
         for m in market_list:
             if len(tickers) >= max_total:

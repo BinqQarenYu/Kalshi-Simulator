@@ -88,10 +88,9 @@ import { SettingsView } from './parenthub/SettingsView';
 import { BotsBenchmarkingView } from './parenthub/BotsBenchmarkingView';
 import { TradeJournalView } from './parenthub/TradeJournalView';
 import { BabyBotRightRail } from './parenthub/BabyBotRightRail';
-import { SprintBotView } from './parenthub/SprintBotView';
 import { MarketMakerView } from './parenthub/MarketMakerView';
 
-type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'sprint' | 'marketmaker' | 'settings' | 'dual_onnx' | 'macro_dominion' | 'dominion_v2' | 'v4_domination';
+type PrimaryNav = 'analytics' | 'journal' | 'bots' | 'marketmaker' | 'settings' | 'dual_onnx' | 'macro_dominion' | 'dominion_v2' | 'v4_domination';
 type SettingsSubNav =
   | 'account'
   | 'keys'
@@ -572,7 +571,6 @@ export const ParentHub: React.FC<ParentHubProps> = ({
       macro_onnx: { count: 0, wins: 0, pnl: 0 },
       dominion_2: { count: 0, wins: 0, pnl: 0 },
       macro_trend: { count: 0, wins: 0, pnl: 0 },
-      ofi_sprint: { count: 0, wins: 0, pnl: 0 },
       onnx_ml: { count: 0, wins: 0, pnl: 0 },
       live: { count: liveTotal, wins: liveWins, pnl: livePnl },
     };
@@ -675,23 +673,6 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               </span>
             </button>
 
-            <button
-              onClick={() => {
-                soundFX.playClickSound();
-                setPrimaryNav('sprint');
-              }}
-              className={`w-full px-3 py-2.5 rounded-lg flex items-center gap-3 transition-all text-left ${
-                primaryNav === 'sprint'
-                  ? 'bg-orange-500/15 text-white border-l-2 border-orange-400 font-bold'
-                  : 'text-[#8c9ba5] hover:text-white hover:bg-[#171c22]'
-              }`}
-            >
-              <Timer className={`w-4 h-4 ${primaryNav === 'sprint' ? 'text-orange-400' : 'text-[#8c9ba5]'}`} />
-              <span>Bot 5 Sprint</span>
-              <span className="ml-auto text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-orange-500/20 text-orange-300 font-bold border border-orange-500/30">
-                5M
-              </span>
-            </button>
 
             <button
               onClick={() => {
@@ -891,7 +872,6 @@ export const ParentHub: React.FC<ParentHubProps> = ({
               {primaryNav === 'bots' && 'BOT MANAGEMENT & BENCHMARKING MATRIX'}
               {primaryNav === 'journal' && "TRADE JOURNAL & TODAY'S TIMELINE"}
               {primaryNav === 'analytics' && 'LIVE WORKBENCH & MICROSTRUCTURE'}
-              {primaryNav === 'sprint' && 'BOT 5 / 5-MINUTE SPRINT LIVE EXECUTION'}
               {primaryNav === 'marketmaker' && 'BOT 6 / MARKET MAKER LIVE EXECUTION'}
             </h1>
           </div>
@@ -1003,13 +983,6 @@ export const ParentHub: React.FC<ParentHubProps> = ({
 
         {/* DYNAMIC VIEW BODY */}
         <div className="p-6 space-y-6">
-          {/* BOT 5 SPRINT VIEW */}
-          {primaryNav === 'sprint' && (
-            <SprintBotView
-              reports={reports}
-              tradingMode={tradingMode}
-            />
-          )}
 
           {/* BOT 6 MARKET MAKER VIEW */}
           {primaryNav === 'marketmaker' && (
@@ -1250,18 +1223,13 @@ export const ParentHub: React.FC<ParentHubProps> = ({
             <div className="space-y-3 text-xs">
               <div className="p-3 rounded-lg bg-[#00bda5]/10 border border-[#00bda5]/30 text-[#2dd4bf] leading-relaxed">
                 ✔ Passed all 6 hard gates over 520 events.<br />
-                Candidate: <b>OFI Sprint Scalper (BTC-5M)</b>
+                Candidate: <b>3-Step Dominion v3.2 (BTC-15M)</b>
               </div>
 
               <div className="space-y-2">
                 <label className="text-[#8c9ba5] text-[10px] uppercase font-bold">Target Timeframe</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="p-2.5 rounded bg-[#171c22] border border-[#00bda5] text-center font-bold text-[#00bda5]">
-                    5-Minute Sprint
-                  </div>
-                  <div className="p-2.5 rounded bg-[#13171c] border border-[#262d35] text-center text-[#8c9ba5]">
-                    15-Minute Cycle
-                  </div>
+                <div className="p-2.5 rounded bg-[#171c22] border border-[#00bda5] text-center font-bold text-[#00bda5]">
+                  15-Minute Cycle
                 </div>
               </div>
 
