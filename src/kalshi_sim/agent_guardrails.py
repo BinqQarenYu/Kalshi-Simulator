@@ -74,7 +74,7 @@ class AgentGuardrails:
         # Asset-Isolated Circuit Breakers & Gates
         self.is_eth_bot_armed: bool = True
         self._eth_consecutive_losses: int = 0
-        self.eth_loss_limit: int = 3
+        self.eth_loss_limit: int = 7
         self.is_btc_bot_armed: bool = True
         self._btc_trades_count: int = 0
         self._btc_pnl: Decimal = Decimal("0.00")

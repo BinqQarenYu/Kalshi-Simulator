@@ -13,30 +13,26 @@ from kalshi_sim.agent_guardrails import AgentGuardrails
 
 
 def test_eth_consecutive_loss_circuit_breaker():
-    """Verify ETH bot auto-disarms on 3 consecutive losses and leaves BTC unharmed."""
+    """Verify ETH bot auto-disarms on 7 consecutive losses and leaves BTC unharmed."""
     guard = AgentGuardrails()
     assert guard.is_eth_bot_armed is True
     assert guard.is_btc_bot_armed is True
 
-    # 1st ETH loss
-    guard.record_trade_settlement("KXETH15M-1", Decimal("-0.45"), was_win=False, execution_mode="live")
-    assert guard._eth_consecutive_losses == 1
-    assert guard.is_eth_bot_armed is True
+    # 1st to 6th ETH loss
+    for i in range(1, 7):
+        guard.record_trade_settlement(f"KXETH15M-{i}", Decimal("-0.45"), was_win=False, execution_mode="live")
+        assert guard._eth_consecutive_losses == i
+        assert guard.is_eth_bot_armed is True
 
     # Interleaving BTC trade (should not reset or contaminate ETH counter)
     guard.record_trade_settlement("KXBTC15M-1", Decimal("0.52"), was_win=True, execution_mode="live")
-    assert guard._eth_consecutive_losses == 1
+    assert guard._eth_consecutive_losses == 6
     assert guard._btc_trades_count == 1
     assert guard._btc_pnl == Decimal("0.52")
 
-    # 2nd ETH loss
-    guard.record_trade_settlement("KXETH15M-2", Decimal("-0.42"), was_win=False, execution_mode="live")
-    assert guard._eth_consecutive_losses == 2
-    assert guard.is_eth_bot_armed is True
-
-    # 3rd consecutive ETH loss: TRIPS ETH CIRCUIT BREAKER
-    guard.record_trade_settlement("KXETH15M-3", Decimal("-0.40"), was_win=False, execution_mode="live")
-    assert guard._eth_consecutive_losses == 3
+    # 7th consecutive ETH loss: TRIPS ETH CIRCUIT BREAKER
+    guard.record_trade_settlement("KXETH15M-7", Decimal("-0.40"), was_win=False, execution_mode="live")
+    assert guard._eth_consecutive_losses == 7
     assert guard.is_eth_bot_armed is False
     # BTC bot MUST remain armed!
     assert guard.is_btc_bot_armed is True

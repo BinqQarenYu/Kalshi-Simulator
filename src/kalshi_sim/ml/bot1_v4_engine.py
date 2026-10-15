@@ -264,6 +264,17 @@ class Bot1V4DominationEngine:
         self._current_cycle_id: Optional[str] = None
         self._completed_turnovers_map: dict[str, int] = {}
         self._last_exit_timestamp: float = 0.0
+        self._session: Optional[aiohttp.ClientSession] = None
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or reuse connection-pooled HTTP session to prevent socket exhaustion."""
+        from kalshi_sim.ws_connection import create_aiohttp_connector
+        import aiohttp
+        if self.order_client and hasattr(self.order_client, "_get_session"):
+            return await self.order_client._get_session()
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(connector=create_aiohttp_connector())
+        return self._session
 
     def compute_chop_limit_price(self, win_prob: float) -> Decimal:
         """Warrior 2 Chop Harvester pricing coupling:
@@ -1416,45 +1427,45 @@ class Bot1V4DominationEngine:
 
         try:
             timeout = aiohttp.ClientTimeout(total=4.0)
-            async with aiohttp.ClientSession(connector=connector, headers=headers, timeout=timeout) as session:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        markets_raw = data.get("markets", [])
-                        valid_markets = []
-                        for m in markets_raw:
-                            t_str = m.get("ticker", "")
-                            close_str = m.get("close_time")
-                            if not t_str or not close_str:
-                                continue
-                            close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00"))
-                            if close_dt > now_utc:
-                                valid_markets.append((close_dt, m))
+            session = await self._get_session()
+            async with session.get(url, headers=headers, timeout=timeout) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    markets_raw = data.get("markets", [])
+                    valid_markets = []
+                    for m in markets_raw:
+                        t_str = m.get("ticker", "")
+                        close_str = m.get("close_time")
+                        if not t_str or not close_str:
+                            continue
+                        close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00"))
+                        if close_dt > now_utc:
+                            valid_markets.append((close_dt, m))
 
-                        if valid_markets:
-                            valid_markets.sort(key=lambda x: x[0])
-                            _, chosen = valid_markets[0]
-                            floor_str = chosen.get("floor_strike")
-                            floor_dec = Decimal(str(floor_str)) if floor_str is not None else None
-                            close_dt = datetime.fromisoformat(chosen["close_time"].replace("Z", "+00:00"))
-                            open_dt = datetime.fromisoformat(chosen["open_time"].replace("Z", "+00:00")) if chosen.get("open_time") else None
+                    if valid_markets:
+                        valid_markets.sort(key=lambda x: x[0])
+                        _, chosen = valid_markets[0]
+                        floor_str = chosen.get("floor_strike")
+                        floor_dec = Decimal(str(floor_str)) if floor_str is not None else None
+                        close_dt = datetime.fromisoformat(chosen["close_time"].replace("Z", "+00:00"))
+                        open_dt = datetime.fromisoformat(chosen["open_time"].replace("Z", "+00:00")) if chosen.get("open_time") else None
 
-                            minfo = MarketInfo(
-                                ticker=chosen.get("ticker", ""),
-                                series_ticker=chosen.get("series_ticker", series_ticker),
-                                title=chosen.get("title", ""),
-                                subtitle=chosen.get("subtitle", ""),
-                                status=MarketStatus.OPEN,
-                                open_time=open_dt,
-                                close_time=close_dt,
-                                expiration_time=close_dt,
-                                floor_strike=floor_dec,
-                                cap_strike=None,
-                                strike_type="greater",
-                            )
-                            self._cached_market = minfo
-                            self._last_market_fetch_ts = now_mono
-                            return minfo
+                        minfo = MarketInfo(
+                            ticker=chosen.get("ticker", ""),
+                            series_ticker=chosen.get("series_ticker", series_ticker),
+                            title=chosen.get("title", ""),
+                            subtitle=chosen.get("subtitle", ""),
+                            status=MarketStatus.OPEN,
+                            open_time=open_dt,
+                            close_time=close_dt,
+                            expiration_time=close_dt,
+                            floor_strike=floor_dec,
+                            cap_strike=None,
+                            strike_type="greater",
+                        )
+                        self._cached_market = minfo
+                        self._last_market_fetch_ts = now_mono
+                        return minfo
         except Exception as exc:
             logger.debug("[%s BOT] Error discovering %s market: %s", self.asset.value.upper(), series_ticker, exc)
 
@@ -1463,7 +1474,6 @@ class Bot1V4DominationEngine:
     async def fetch_orderbook(self, ticker: str, rest_base: Optional[str] = None) -> Optional[L2BookState]:
         """Fetch live Level-2 Orderbook snapshot for the target contract."""
         from kalshi_sim.auth import PROD_REST_BASE, DEMO_REST_BASE
-        from kalshi_sim.ws_connection import create_aiohttp_connector
         import aiohttp
         import os
 
@@ -1472,14 +1482,13 @@ class Bot1V4DominationEngine:
             rest_base = PROD_REST_BASE if env in ("prod", "live") else DEMO_REST_BASE
 
         url = f"{rest_base}/markets/{ticker}/orderbook"
-        connector = create_aiohttp_connector()
         headers = {"User-Agent": "KalshiSim-Bot1V4/1.0", "Accept": "application/json"}
 
         try:
             timeout = aiohttp.ClientTimeout(total=3.0)
-            async with aiohttp.ClientSession(connector=connector, headers=headers, timeout=timeout) as session:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
+            session = await self._get_session()
+            async with session.get(url, headers=headers, timeout=timeout) as resp:
+                if resp.status == 200:
                         data = await resp.json()
                         raw_book = data.get("orderbook_fp") or data.get("orderbook") or {}
                         bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []

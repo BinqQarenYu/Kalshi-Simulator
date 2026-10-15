@@ -171,7 +171,7 @@ async def _run_engine(engine, name: str, interval: float, guardrails) -> None:
             # Check directive halts
             if is_eth and not guardrails.is_eth_bot_armed:
                 logger.warning(
-                    "🛑 [%s HALTED] 3 consecutive losses reached (%d/3). ETH bot loop STOPPED per user directive.",
+                    "🛑 [%s HALTED] 7 consecutive losses reached (%d/7). ETH bot loop STOPPED per user directive.",
                     name, guardrails._eth_consecutive_losses
                 )
                 break
@@ -195,10 +195,10 @@ async def _periodic_telemetry_loop(guardrails, interval: float = 30.0) -> None:
     while True:
         await asyncio.sleep(interval)
         st = guardrails.get_status()
-        eth_status = "ARMED" if st["is_eth_bot_armed"] else "HALTED (3-loss breaker)"
+        eth_status = "ARMED" if st["is_eth_bot_armed"] else "HALTED (7-loss breaker)"
         btc_status = "ARMED" if st["is_btc_bot_armed"] else "HALTED (10-trade gate)"
         logger.info(
-            "📊 [FLEET STATUS] ETH Bot: %s (Loss Streak: %d/3) | BTC Bot: %s (Trades: %d/10, PnL: $%0.2f)",
+            "📊 [FLEET STATUS] ETH Bot: %s (Loss Streak: %d/7) | BTC Bot: %s (Trades: %d/10, PnL: $%0.2f)",
             eth_status, st["eth_consecutive_losses"], btc_status, st["btc_trades_count"], st["btc_cumulative_pnl"]
         )
 

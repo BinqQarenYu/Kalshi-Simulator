@@ -98,7 +98,16 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         self.target_ticker: Optional[str] = target_ticker
         self._cached_market: Optional[MarketInfo] = None
         self._last_market_fetch_ts: float = 0.0
+        self._session: Optional[aiohttp.ClientSession] = None
         self.kev_oracle = KevDecisionOracle()
+
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Get or reuse connection-pooled HTTP session to prevent socket exhaustion."""
+        if self.order_client and hasattr(self.order_client, "_get_session"):
+            return await self.order_client._get_session()
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(connector=create_aiohttp_connector())
+        return self._session
 
     def _load_persisted_parameters(self) -> None:
         """Load persisted ETH bot parameters from disk if available."""
@@ -191,47 +200,47 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
 
         try:
             timeout = aiohttp.ClientTimeout(total=4.0)
-            async with aiohttp.ClientSession(connector=connector, headers=headers, timeout=timeout) as session:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        markets_raw = data.get("markets", [])
-                        valid_markets: list[tuple[datetime, dict[str, Any]]] = []
+            session = await self._get_session()
+            async with session.get(url, headers=headers, timeout=timeout) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    markets_raw = data.get("markets", [])
+                    valid_markets: list[tuple[datetime, dict[str, Any]]] = []
 
-                        for m in markets_raw:
-                            t_str = m.get("ticker", "")
-                            close_str = m.get("close_time")
-                            if not t_str or not close_str:
-                                continue
-                            close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00"))
-                            if close_dt > now_utc:
-                                valid_markets.append((close_dt, m))
+                    for m in markets_raw:
+                        t_str = m.get("ticker", "")
+                        close_str = m.get("close_time")
+                        if not t_str or not close_str:
+                            continue
+                        close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00"))
+                        if close_dt > now_utc:
+                            valid_markets.append((close_dt, m))
 
-                        if valid_markets:
-                            valid_markets.sort(key=lambda x: x[0])
-                            _, chosen = valid_markets[0]
+                    if valid_markets:
+                        valid_markets.sort(key=lambda x: x[0])
+                        _, chosen = valid_markets[0]
 
-                            floor_str = chosen.get("floor_strike")
-                            floor_dec = Decimal(str(floor_str)) if floor_str is not None else None
-                            close_dt = datetime.fromisoformat(chosen["close_time"].replace("Z", "+00:00"))
-                            open_dt = datetime.fromisoformat(chosen["open_time"].replace("Z", "+00:00")) if chosen.get("open_time") else None
+                        floor_str = chosen.get("floor_strike")
+                        floor_dec = Decimal(str(floor_str)) if floor_str is not None else None
+                        close_dt = datetime.fromisoformat(chosen["close_time"].replace("Z", "+00:00"))
+                        open_dt = datetime.fromisoformat(chosen["open_time"].replace("Z", "+00:00")) if chosen.get("open_time") else None
 
-                            minfo = MarketInfo(
-                                ticker=chosen.get("ticker", ""),
-                                series_ticker=chosen.get("series_ticker", "KXETH15M"),
-                                title=chosen.get("title", ""),
-                                subtitle=chosen.get("subtitle", ""),
-                                status=MarketStatus.OPEN,
-                                open_time=open_dt,
-                                close_time=close_dt,
-                                expiration_time=close_dt,
-                                floor_strike=floor_dec,
-                                cap_strike=None,
-                                strike_type="greater",
-                            )
-                            self._cached_market = minfo
-                            self._last_market_fetch_ts = now_mono
-                            return minfo
+                        minfo = MarketInfo(
+                            ticker=chosen.get("ticker", ""),
+                            series_ticker=chosen.get("series_ticker", "KXETH15M"),
+                            title=chosen.get("title", ""),
+                            subtitle=chosen.get("subtitle", ""),
+                            status=MarketStatus.OPEN,
+                            open_time=open_dt,
+                            close_time=close_dt,
+                            expiration_time=close_dt,
+                            floor_strike=floor_dec,
+                            cap_strike=None,
+                            strike_type="greater",
+                        )
+                        self._cached_market = minfo
+                        self._last_market_fetch_ts = now_mono
+                        return minfo
         except Exception as exc:
             logger.debug("[ETH BOT] Error discovering KXETH15M market: %s", exc)
 
@@ -244,7 +253,6 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             rest_base = PROD_REST_BASE if env in ("prod", "live") else DEMO_REST_BASE
 
         url = f"{rest_base}/markets/{ticker}/orderbook"
-        connector = create_aiohttp_connector()
         headers = {
             "User-Agent": "KalshiSim-EthBot1V4/1.0",
             "Accept": "application/json",
@@ -252,9 +260,9 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
 
         try:
             timeout = aiohttp.ClientTimeout(total=3.0)
-            async with aiohttp.ClientSession(connector=connector, headers=headers, timeout=timeout) as session:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
+            session = await self._get_session()
+            async with session.get(url, headers=headers, timeout=timeout) as resp:
+                if resp.status == 200:
                         data = await resp.json()
                         raw_book = data.get("orderbook_fp") or data.get("orderbook") or {}
                         bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []
@@ -375,7 +383,11 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             decision.rationale[:60],
         )
 
-        # Kev Decision Model Shadow Evaluation (Zero-interference telemetry)
+        # ------------------------------------------------------------------
+        # KEV DECISIVE LEAD & MATH-OF-WINNING TAKER ENGINE
+        # ------------------------------------------------------------------
+        kev_rec = None
+        kev_toxic = None
         try:
             kev_ctx = self.kev_oracle.build_market_context(
                 asset="ETH",
@@ -393,88 +405,145 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             ]
             kev_res = await self.kev_oracle.evaluate(kev_ctx, kev_questions)
             kev_rec = kev_res.get("trade_direction")
+            kev_toxic = kev_res.get("is_toxic_sweep")
             if kev_rec:
-                matches_onnx = (kev_rec.selected_option.lower() == decision.recommended_side.lower())
                 logger.info(
-                    "🔮 [KEV SHADOW ORACLE] Rec: %s (Conf: %.1f%%) | Match Engine: %s | Latency: %.1fms | Source: %s",
+                    "🔮 [KEV DECISION ORACLE] Rec: %s (Conf: %.1f%%) | Toxic: %s | Latency: %.1fms | Source: %s",
                     kev_rec.selected_option,
                     float(kev_rec.confidence) * 100.0,
-                    matches_onnx,
+                    kev_toxic.selected_option if kev_toxic else "false",
                     kev_rec.latency_ms,
                     kev_rec.source,
                 )
         except Exception as kev_err:
-            logger.debug("[KEV SHADOW EVAL ERROR] %s", kev_err)
+            logger.debug("[KEV EVAL ERROR] %s", kev_err)
 
-        # Execution guardrails: 1 trade per cycle & micro-bankroll sizing (1 contract)
-        if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
-            if self.order_client:
-                # 1-trade-per-cycle lock check
-                completed = self.get_completed_turnovers(target_ticker)
-                if completed >= self.max_turnover_per_event:
-                    logger.info("[ETH BOT] Cycle %s already locked (turnover limit reached).", target_ticker)
-                    return decision
+        # 1. Toxic Sweep Veto (Anti-Whale Armor)
+        is_toxic = (kev_toxic and kev_toxic.selected_option.lower() == "true") or (vpin_score >= 0.60)
+        if is_toxic:
+            logger.warning("🛑 [KEV TOXIC SWEEP VETO] Toxic order flow / sweep detected (VPIN: %.2f). Stand down.", vpin_score)
+            return decision
 
-                order_side = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
-                limit_p = getattr(decision, "limit_price", Decimal("0.42"))
-                if not isinstance(limit_p, Decimal):
-                    limit_p = Decimal(str(round(limit_p, 2)))
+        # 2. Strict Moneyness Moat (Anti-Tie / Strict Inequality Protection)
+        spot_diff = abs(spot_price - target_strike)
+        if spot_diff < Decimal("2.50"):
+            logger.info("⏸️ [PROXIMITY MOAT VETO] |Diff| $%.2f < $2.50 noise threshold. Stand down.", float(spot_diff))
+            return decision
 
-                try:
-                    order_kwargs: dict[str, Any] = {
-                        "ticker": target_ticker,
-                        "side": order_side.value,
-                        "count": 1,
-                        "order_type": getattr(decision, "order_type", "limit"),
-                    }
-                    try:
-                        sig = inspect.signature(self.order_client.place_order)
-                        if "price_dollars" in sig.parameters:
-                            order_kwargs["price_dollars"] = limit_p
-                        else:
-                            order_kwargs["price"] = limit_p
-                    except Exception:
-                        order_kwargs["price_dollars"] = limit_p
+        # 3. Kev Lead Direction Gate
+        kev_dir = kev_rec.selected_option.upper() if kev_rec else "WAIT"
+        kev_conf = float(kev_rec.confidence) if kev_rec else 0.50
+        if kev_dir not in ("YES", "NO") or kev_conf < 0.60:
+            logger.info("⏸️ [KEV STAND DOWN] Kev recommends %s (Conf: %.1f%%). No trade.", kev_dir, kev_conf * 100.0)
+            return decision
 
-                    res = await self.order_client.place_order(**order_kwargs)
-                    self.record_completed_turnover(target_ticker)
-                    logger.info("🚀 [ETH BOT ORDER EXECUTED] %s %s 1 ct @ $%s | Result: %s", target_ticker, order_side.value, limit_p, res)
+        chosen_side = OrderSide.YES if kev_dir == "YES" else OrderSide.NO
 
-                    # Capture T1 & T2 Forensics for trade lifecycle ledger
-                    now_iso = datetime.now(timezone.utc).isoformat()
-                    order_id = res.get("order_id", f"ord_eth_{int(time.time()*1000)}") if isinstance(res, dict) else f"ord_eth_{int(time.time()*1000)}"
-                    self._active_trade_forensics[target_ticker] = {
-                        "order_id": order_id,
-                        "ticker": target_ticker,
-                        "side": order_side.value,
-                        "entry_price": float(limit_p),
-                        "contracts": 1,
-                        "t1_timestamp": now_iso,
-                        "t1_spot": float(spot_price),
-                        "t1_strike_diff": float(spot_price - target_strike),
-                        "t1_regime": getattr(self, "_current_regime", "CHOP").upper(),
-                        "t1_vpin": float(vpin_score),
-                        "t1_1h_slope": float(getattr(self, "_last_1h_slope", 0.0) or 0.0),
-                        "t2_timestamp": now_iso,
-                        "t2_spot": float(spot_price),
-                        "t2_regime": getattr(self, "_current_regime", "CHOP").upper(),
-                        "t2_vpin": float(vpin_score),
-                    }
+        # 4. Continuous Math-of-Winning Formulation
+        import math
+        diff_float = float(spot_price - target_strike)
+        sigma_15m = 6.0  # typical 15m ETH volatility
+        tau_norm = max(0.01, time_to_expiry_s / 900.0)
+        z = diff_float / (sigma_15m * math.sqrt(tau_norm))
+        p_physics = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+        p_physics_side = p_physics if chosen_side == OrderSide.YES else (1.0 - p_physics)
 
-                    # Enqueue trade into separate ETH database
-                    get_eth_db_writer().enqueue_trade(
-                        trade_id=order_id,
-                        ticker=target_ticker,
-                        side=order_side.value,
-                        price=float(limit_p),
-                        gross_value=float(limit_p),
-                        size=1,
-                        vpin=float(vpin_score),
-                        bot_type=self.STRATEGY_ID,
-                        execution_mode="live" if hasattr(self.order_client, "shard_balances") else "simulated",
-                    )
-                except Exception as ex:
-                    logger.error("[ETH BOT ORDER FAILED] %s: %s", target_ticker, ex)
+        # Kev has 75% higher weight in winning decision
+        p_win = (0.75 * kev_conf) + (0.25 * p_physics_side)
+        p_win = max(0.51, min(0.99, p_win))
+
+        # Dynamic Anti-Toxic Hurdle: widens when VPIN is elevated
+        hurdle = Decimal("0.08") + Decimal(str(round(vpin_score * 0.10, 4)))
+        max_taker_price = Decimal(str(round(p_win, 2))) - hurdle
+        max_taker_price = min(Decimal("0.55"), max(Decimal("0.10"), max_taker_price))
+
+        # 5. Live L2 Orderbook Taker Pricing & Zero-Liquidity Trap Protection
+        best_ask = book.best_yes_ask if chosen_side == OrderSide.YES else book.best_no_ask
+        if best_ask is None:
+            logger.warning("🛑 [ZERO LIQUIDITY TRAP] Book has no resting asks for %s on %s. Stand down.", chosen_side.value.upper(), target_ticker)
+            return decision
+
+        if best_ask > max_taker_price:
+            logger.info(
+                "⏸️ [MATH HURDLE VETO] Best ask $%s > Max Taker Ceiling $%s (P_win: %.1f%%, Hurdle: $%.2f). Refusing to overpay.",
+                best_ask, max_taker_price, p_win * 100.0, float(hurdle)
+            )
+            return decision
+
+        # 6. Execution Guardrails: 1 trade per cycle & micro-bankroll sizing (1 contract)
+        if self.order_client:
+            completed = self.get_completed_turnovers(target_ticker)
+            if completed >= self.max_turnover_per_event or guardrails.is_cycle_locked(target_ticker):
+                logger.info("[ETH BOT] Cycle %s already locked (turnover limit reached).", target_ticker)
+                return decision
+
+            # Validate pre-trade intent with guardrails
+            allowed, reason, approved_size, diag = guardrails.validate_pre_trade_intent(
+                ticker=target_ticker,
+                side=chosen_side.value,
+                requested_size=1,
+                est_price=best_ask,
+                total_equity=Decimal("100.00"),
+                vpin=vpin_score,
+                cycle_id=target_ticker,
+                is_bot=True,
+                bot_type=self.STRATEGY_ID,
+                is_live=True,
+            )
+            if not allowed:
+                logger.warning("[ETH BOT GUARDRAIL BLOCKED] %s", reason)
+                return decision
+
+            try:
+                order_kwargs: dict[str, Any] = {
+                    "ticker": target_ticker,
+                    "side": chosen_side.value,
+                    "count": 1,
+                    "order_type": "limit",
+                    "price_dollars": best_ask,
+                }
+                res = await self.order_client.place_order(**order_kwargs)
+                self.record_completed_turnover(target_ticker)
+                logger.info(
+                    "👑 [KEV LED TAKER ORDER EXECUTED] %s %s 1 ct @ $%s (Best Ask, Max Ceiling: $%s, P_win: %.1f%%, E[V]: +$%.2f) | Result: %s",
+                    target_ticker, chosen_side.value.upper(), best_ask, max_taker_price, p_win * 100.0, float(Decimal(str(round(p_win, 2))) - best_ask), res
+                )
+
+                # Capture T1 & T2 Forensics for trade lifecycle ledger
+                now_iso = datetime.now(timezone.utc).isoformat()
+                order_id = res.get("order_id", f"ord_eth_{int(time.time()*1000)}") if isinstance(res, dict) else f"ord_eth_{int(time.time()*1000)}"
+                self._active_trade_forensics[target_ticker] = {
+                    "order_id": order_id,
+                    "ticker": target_ticker,
+                    "side": chosen_side.value,
+                    "entry_price": float(best_ask),
+                    "contracts": 1,
+                    "t1_timestamp": now_iso,
+                    "t1_spot": float(spot_price),
+                    "t1_strike_diff": float(spot_price - target_strike),
+                    "t1_regime": getattr(self, "_current_regime", "CHOP").upper(),
+                    "t1_vpin": float(vpin_score),
+                    "t1_1h_slope": float(getattr(self, "_last_1h_slope", 0.0) or 0.0),
+                    "t2_timestamp": now_iso,
+                    "t2_spot": float(spot_price),
+                    "t2_regime": getattr(self, "_current_regime", "CHOP").upper(),
+                    "t2_vpin": float(vpin_score),
+                }
+
+                # Enqueue trade into separate ETH database
+                get_eth_db_writer().enqueue_trade(
+                    trade_id=order_id,
+                    ticker=target_ticker,
+                    side=chosen_side.value,
+                    price=float(best_ask),
+                    gross_value=float(best_ask),
+                    size=1,
+                    vpin=float(vpin_score),
+                    bot_type=self.STRATEGY_ID,
+                    execution_mode="live" if hasattr(self.order_client, "shard_balances") else "simulated",
+                )
+            except Exception as ex:
+                logger.error("[ETH BOT ORDER FAILED] %s: %s", target_ticker, ex)
 
         return decision
 
