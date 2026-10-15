@@ -780,34 +780,10 @@ class AgentGuardrails:
                     logger.info("🛡️ [GUARDRAIL SETTLEMENT] Live loss recorded. Consecutive losses = %d", self._consecutive_losses)
                     if self._consecutive_losses >= self.harakiri_loss_limit:
                         logger.warning(
-                            "🚨 [GUARDRAIL HARAKIRI] Consecutive losses (%d) reached limit (%d)! Current strategy failed.",
+                            "🚨 [GUARDRAIL HARAKIRI] Consecutive losses (%d) reached limit (%d)! Strategy execution halted (TOTAL STOP per operator directive).",
                             self._consecutive_losses, self.harakiri_loss_limit
                         )
-                        # Attempt automated failover to Dynamic Trading Strategy
-                        try:
-                            from kalshi_sim.preset_manager import PresetManager
-                            pm = PresetManager()
-                            active_preset = pm.get_active_preset_id()
-                            if active_preset != "dynamic_trading_strategy_v1":
-                                success, msg, _ = pm.load_preset("dynamic_trading_strategy_v1")
-                                if success:
-                                    logger.info("⚡ [FAILOVER HOT-SWAP] Current strategy failed Harakiri. Activated Dynamic Trading Strategy: %s", msg)
-                                    self._consecutive_losses = 0
-                                    self.is_bot_armed = True
-                                    try:
-                                        from kalshi_sim.server import state
-                                        state.active_strategy_bot = "dynamic_trading_strategy"
-                                        if hasattr(state, "sim_agent") and state.sim_agent:
-                                            state.sim_agent.active_strategy_bot = "dynamic_trading_strategy"
-                                    except Exception:
-                                        pass
-                                else:
-                                    self.is_bot_armed = False
-                            else:
-                                self.is_bot_armed = False
-                        except Exception as fo_err:
-                            logger.error("Harakiri failover error: %s", fo_err)
-                            self.is_bot_armed = False
+                        self.is_bot_armed = False
                 elif outcome.lower() == "win":
                     self._consecutive_losses = 0
                     logger.info("🛡️ [GUARDRAIL SETTLEMENT] Live win recorded. Consecutive losses reset to 0.")
