@@ -58,10 +58,12 @@ class DynamicRegimeStrategy:
         max_spread: Optional[Decimal] = None,
         vpin_toxic_threshold: Optional[Decimal] = None,
         enable_chop_trading: bool = False,
+        max_momentum_price: Optional[Decimal] = None,
     ) -> None:
         self.asset = asset.upper()
         self.dwell_time_seconds = dwell_time_seconds
         self.enable_chop_trading = enable_chop_trading
+        self.max_momentum_price = max_momentum_price or Decimal("0.52")
 
         # Asset-specific calibrated thresholds (Lesson Q8 / BLEED#01 Sweetspot)
         if self.asset == "ETH":
@@ -269,43 +271,49 @@ class DynamicRegimeStrategy:
                 f"Defensive Quarantine: Spread=${spread} or VPIN={effective_vpin} exceeds safety limits."
             )
 
-        # Case C: Directional Trend Regime (Spot Front-Running)
+        # Case C: Directional Trend Regime (Storm Hunter Taker)
         if regime == self.REGIME_TREND:
+            trend_limit_yes = min(self.max_momentum_price, max(Decimal("0.46"), best_ask))
+            no_ask = Decimal("1.00") - best_bid
+            trend_limit_no = min(self.max_momentum_price, max(Decimal("0.46"), no_ask))
+
             if spot_diff >= spot_threshold:
-                return DynamicRegimeDecision(
-                    strategy_id="dynamic_trading_strategy",
-                    strategy_name="Dynamic Regime-State Strategy",
-                    regime=regime,
-                    recommended_side="yes",
-                    recommended_contracts=1,
-                    limit_price=limit_price,
-                    is_maker=True,
-                    expected_value=Decimal("0.06"),
-                    edge_pct=Decimal("9.0"),
-                    spot_diff=spot_diff,
-                    time_to_expiry_s=time_to_expiry_s,
-                    volatility_1m=volatility_1m,
-                    spread=spread,
-                    rationale=f"Trend Expansion: Spot +${spot_diff} >= threshold ${spot_threshold}.",
-                )
+                if best_ask <= self.max_momentum_price:
+                    return DynamicRegimeDecision(
+                        strategy_id="dynamic_trading_strategy",
+                        strategy_name="Dynamic Regime-State Strategy",
+                        regime=regime,
+                        recommended_side="yes",
+                        recommended_contracts=1,
+                        limit_price=trend_limit_yes,
+                        is_maker=False,
+                        expected_value=Decimal("0.08"),
+                        edge_pct=Decimal("12.0"),
+                        spot_diff=spot_diff,
+                        time_to_expiry_s=time_to_expiry_s,
+                        volatility_1m=volatility_1m,
+                        spread=spread,
+                        rationale=f"Trend Expansion (Storm Hunter Taker): Spot +${spot_diff} >= threshold ${spot_threshold}. Marketable YES at ${trend_limit_yes}.",
+                    )
             elif spot_diff <= -spot_threshold:
-                return DynamicRegimeDecision(
-                    strategy_id="dynamic_trading_strategy",
-                    strategy_name="Dynamic Regime-State Strategy",
-                    regime=regime,
-                    recommended_side="no",
-                    recommended_contracts=1,
-                    limit_price=limit_price,
-                    is_maker=True,
-                    expected_value=Decimal("0.06"),
-                    edge_pct=Decimal("9.0"),
-                    spot_diff=spot_diff,
-                    time_to_expiry_s=time_to_expiry_s,
-                    volatility_1m=volatility_1m,
-                    spread=spread,
-                    rationale=f"Trend Expansion: Spot -${abs(spot_diff)} <= threshold -${spot_threshold}.",
-                )
-            return self._build_wait_decision(regime, spot_diff, time_to_expiry_s, volatility_1m, spread, "Trend regime awaiting spot velocity trigger.")
+                if no_ask <= self.max_momentum_price:
+                    return DynamicRegimeDecision(
+                        strategy_id="dynamic_trading_strategy",
+                        strategy_name="Dynamic Regime-State Strategy",
+                        regime=regime,
+                        recommended_side="no",
+                        recommended_contracts=1,
+                        limit_price=trend_limit_no,
+                        is_maker=False,
+                        expected_value=Decimal("0.08"),
+                        edge_pct=Decimal("12.0"),
+                        spot_diff=spot_diff,
+                        time_to_expiry_s=time_to_expiry_s,
+                        volatility_1m=volatility_1m,
+                        spread=spread,
+                        rationale=f"Trend Expansion (Storm Hunter Taker): Spot -${abs(spot_diff)} <= threshold -${spot_threshold}. Marketable NO at ${trend_limit_no}.",
+                    )
+            return self._build_wait_decision(regime, spot_diff, time_to_expiry_s, volatility_1m, spread, "Trend regime awaiting spot velocity trigger or ask within $0.52 armor.")
 
         # Case D: Low-Vol Chop Regime (Passive Discount Maker vs Stand-Down)
         if regime == self.REGIME_CHOP:

@@ -277,5 +277,35 @@ def test_storm_hunter_fights_when_volatility_expands():
     assert decision.regime == DynamicRegimeStrategy.REGIME_TREND
     assert decision.recommended_side == "yes", "Must enter YES in bullish storm/trend"
     assert decision.recommended_contracts == 1, "Must size 1 contract"
+    assert decision.limit_price == Decimal("0.48"), "Must match best_ask for immediate fill"
+    assert decision.is_maker is False, "Must execute as controlled aggressive taker"
     assert "Trend Expansion" in decision.rationale
+
+
+def test_storm_hunter_refuses_expensive_chase():
+    """Verify that when ask exceeds $0.52 armor ceiling, the bot refuses to chase."""
+    strategy = DynamicRegimeStrategy(asset="BTC", enable_chop_trading=False, dwell_time_seconds=0.0)
+    # Expensive book: ask = $0.58 (> $0.52 ceiling)
+    book = _mock_book("0.55", "0.58")
+
+    # Push into TREND
+    strategy.update_regime_state(Decimal("45.00"), Decimal("0.02"), Decimal("0.40"), 500.0)
+    strategy.update_regime_state(Decimal("45.00"), Decimal("0.02"), Decimal("0.40"), 500.0)
+    strategy.update_regime_state(Decimal("45.00"), Decimal("0.02"), Decimal("0.40"), 500.0)
+
+    decision = strategy.evaluate(
+        ticker="KXBTC15M-TEST",
+        book=book,
+        spot_price=Decimal("80150.00"),
+        strike_price=Decimal("80000.00"),
+        expiration_time=datetime.now(timezone.utc) + timedelta(minutes=7),
+        volatility_1m=Decimal("45.00"),
+        vpin=Decimal("0.40"),
+    )
+
+    assert decision.regime == DynamicRegimeStrategy.REGIME_TREND
+    assert decision.recommended_side == "wait", "Must not chase expensive asks > $0.52"
+    assert decision.recommended_contracts == 0
+    assert "armor" in decision.rationale
+
 

@@ -334,6 +334,8 @@ class StrategyEvaluationCoordinator:
                         reasoning=decision.rationale,
                         portfolio=portfolio,
                         bot_type="dynamic_trading_strategy",
+                        order_type="limit",
+                        limit_price=decision.limit_price,
                     )
             except Exception as exc:
                 logger.debug("Dynamic regime evaluation error: %s", exc)

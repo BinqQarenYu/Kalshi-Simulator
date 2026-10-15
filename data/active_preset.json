@@ -1,7 +1,7 @@
 {
-  "active_preset_id": "baseline_council_v3.2",
-  "active_preset_name": "Council Baseline v3.2 (Dynamic Fading)",
-  "loaded_at": "2026-10-15T04:29:22.289790+00:00",
+  "active_preset_id": "dynamic_trading_strategy_v1",
+  "active_preset_name": "Dynamic Trading Strategy v1.0 (DRSA)",
+  "loaded_at": "2026-10-15T04:40:59.799997+00:00",
   "is_council_certified": true,
-  "checksum": "sha256:0d64d1cfbb834be2"
+  "checksum": "sha256:ff09141995d541cd"
 }
