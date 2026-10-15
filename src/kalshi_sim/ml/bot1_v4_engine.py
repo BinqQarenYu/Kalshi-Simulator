@@ -157,7 +157,7 @@ class Bot1V4DominationEngine:
         self.maker_entry_timeout_seconds = maker_entry_timeout_seconds
         self.late_cycle_roi = late_cycle_roi
         self.fee_per_contract = fee_per_contract
-        self.min_spot_diff = min_spot_diff if min_spot_diff is not None else 25.0
+        self.min_spot_diff = min_spot_diff if min_spot_diff is not None else float(get_asset_config(self.asset).min_spot_diff)
         self.max_entry_price = max_entry_price
         self.min_confidence = min_confidence
         self.enable_trailing_ratchet = enable_trailing_ratchet
@@ -198,13 +198,29 @@ class Bot1V4DominationEngine:
         self.chop_vol_threshold = chop_vol_threshold
         self.hysteresis_cooldown_seconds = hysteresis_cooldown_seconds
 
-        # 1 Boat, 3 Warriors across 4 Regions Infrastructure
+        # 1 Boat, 3 Warriors across 4 Regions Infrastructure (Asset-calibrated scales)
         self.bleed_discount_limit_price = Decimal("0.30")
         self.bleed_max_entry_price = Decimal("0.35")
-        self.min_spot_diff_bleed = 85.0
+        if self.asset == CryptoAsset.ETH:
+            self.min_spot_diff_bleed = 8.50
+            eff_chop_range = 7.50 if chop_range_threshold == 48.0 else chop_range_threshold
+            eff_chop_vol = 0.60 if chop_vol_threshold == 12.0 else chop_vol_threshold
+            eff_tsunami = 15.0
+        elif self.asset == CryptoAsset.SOL:
+            self.min_spot_diff_bleed = 1.50
+            eff_chop_range = 1.00
+            eff_chop_vol = 0.08
+            eff_tsunami = 2.50
+        else:
+            self.min_spot_diff_bleed = 85.0
+            eff_chop_range = chop_range_threshold
+            eff_chop_vol = chop_vol_threshold
+            eff_tsunami = 250.0
+
         self.wave_classifier = WaveRegimeClassifier(
-            chop_range_threshold=chop_range_threshold,
-            chop_vol_threshold=chop_vol_threshold,
+            chop_range_threshold=eff_chop_range,
+            chop_vol_threshold=eff_chop_vol,
+            tsunami_threshold=eff_tsunami,
         )
         self.bleed_defender = BleedDefender(
             bleed_discount_limit_price=self.bleed_discount_limit_price,

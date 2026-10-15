@@ -269,6 +269,17 @@ class MarketInfo(BaseModel):
                 return Decimal(m.group(1))
             except Exception:
                 pass
+        asset = detect_asset_from_ticker(self.ticker)
+        if asset == CryptoAsset.ETH:
+            return Decimal("2600.00")
+        elif asset == CryptoAsset.SOL:
+            return Decimal("180.00")
+        elif asset == CryptoAsset.DOGE:
+            return Decimal("0.200000")
+        elif asset == CryptoAsset.GOLD:
+            return Decimal("2700.00")
+        elif asset == CryptoAsset.HYPER:
+            return Decimal("25.00")
         return Decimal("78650.00")
 
     @property

@@ -34,11 +34,14 @@ def compute_wave_physics(
     high_price: float,
     low_price: float,
     current_price: float,
-    tsunami_threshold: float = 250.0,
-    wick_meatgrinder_threshold: float = 45.0,
+    tsunami_threshold: Optional[float] = None,
+    wick_meatgrinder_threshold: Optional[float] = None,
     wick_ratio_threshold: float = 1.80,
+    false_breakout_rng_threshold: Optional[float] = None,
+    directional_body_threshold: Optional[float] = None,
+    asset: Optional[str] = None,
 ) -> MarketWavePhysics:
-    """Computes exact geometric wave features from candlestick boundaries."""
+    """Computes exact geometric wave features from candlestick boundaries with asset-aware scale."""
     high = max(high_price, open_price, current_price)
     low = min(low_price, open_price, current_price)
     rng = max(0.0, high - low)
@@ -46,21 +49,34 @@ def compute_wave_physics(
     upper_wick = max(0.0, high - max(open_price, current_price))
     lower_wick = max(0.0, min(open_price, current_price) - low)
 
+    # Scale calibration: if asset is ETH or price magnitude matches ETH (< $10,000)
+    is_eth_scale = (asset and asset.upper() == "ETH") or (asset is None and 100.0 <= current_price < 10000.0)
+
+    # Resolve asset-calibrated defaults if not explicitly specified
+    if tsunami_threshold is None:
+        tsunami_threshold = 15.0 if is_eth_scale else 250.0
+    if wick_meatgrinder_threshold is None:
+        wick_meatgrinder_threshold = 2.50 if is_eth_scale else 45.0
+    if false_breakout_rng_threshold is None:
+        false_breakout_rng_threshold = 5.0 if is_eth_scale else 100.0
+    if directional_body_threshold is None:
+        directional_body_threshold = 5.0 if is_eth_scale else 100.0
+
     is_tsunami = rng >= tsunami_threshold
     is_double_wick = (upper_wick >= wick_meatgrinder_threshold) and (lower_wick >= wick_meatgrinder_threshold)
     is_false_breakout = (
-        rng >= 100.0
+        rng >= false_breakout_rng_threshold
         and max(upper_wick, lower_wick) >= (wick_ratio_threshold * max(1.0, body))
     )
 
     if is_tsunami:
         summary = f"TSUNAMI EXPANSION (${rng:.1f} range)"
     elif is_double_wick:
-        summary = f"DOUBLE-WICK MEATGRINDER (up=${upper_wick:.0f}, dn=${lower_wick:.0f})"
+        summary = f"DOUBLE-WICK MEATGRINDER (up=${upper_wick:.1f}, dn=${lower_wick:.1f})"
     elif is_false_breakout:
-        summary = f"FALSE BREAKOUT WICK (wick=${max(upper_wick, lower_wick):.0f} vs body=${body:.0f})"
-    elif body >= 100.0:
-        summary = f"DIRECTIONAL EXPANSION (${body:.0f} body)"
+        summary = f"FALSE BREAKOUT WICK (wick=${max(upper_wick, lower_wick):.1f} vs body=${body:.1f})"
+    elif body >= directional_body_threshold:
+        summary = f"DIRECTIONAL EXPANSION (${body:.1f} body)"
     else:
         summary = f"BOUNDED CHOP (${rng:.1f} range)"
 

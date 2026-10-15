@@ -1076,6 +1076,7 @@ async def start_background_simulation() -> None:
         bot_auditor=state.bot_auditor,
         hmm_brain=state.hmm_brain,
         experience_buffer=state.experience_buffer,
+        eth_orderflow_feed=getattr(state, "eth_orderflow_feed", None),
     )
     state.onnx_engine = state.sim_agent._onnx_engine
     if hasattr(state, "bot1_v4_engine") and state.bot1_v4_engine and state.bot1_v4_engine.onnx_engine is None:

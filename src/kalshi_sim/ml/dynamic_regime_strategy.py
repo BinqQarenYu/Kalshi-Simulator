@@ -72,12 +72,36 @@ class DynamicRegimeStrategy:
             self.base_spot_threshold = Decimal("4.50")
             self.vol_base = Decimal("0.60")
             self.vol_slope = Decimal("0.04")
+            self.silas_spot_moat = Decimal("1.50")
+            self.chop_harvester_spot_moat = Decimal("1.00")
+            self.tsunami_threshold = 15.0
+            self.wick_meatgrinder_threshold = 2.50
+            self.false_breakout_rng_threshold = 5.0
+            self.directional_body_threshold = 5.0
+        elif self.asset == "SOL":
+            self.vol_trend_trigger = vol_trend_trigger or Decimal("0.25")
+            self.vol_chop_trigger = vol_chop_trigger or Decimal("0.10")
+            self.base_spot_threshold = Decimal("0.60")
+            self.vol_base = Decimal("0.05")
+            self.vol_slope = Decimal("0.20")
+            self.silas_spot_moat = Decimal("0.30")
+            self.chop_harvester_spot_moat = Decimal("0.20")
+            self.tsunami_threshold = 2.50
+            self.wick_meatgrinder_threshold = 0.40
+            self.false_breakout_rng_threshold = 0.80
+            self.directional_body_threshold = 0.80
         else:  # Default BTC
             self.vol_trend_trigger = vol_trend_trigger or Decimal("30.00")
             self.vol_chop_trigger = vol_chop_trigger or Decimal("18.00")
             self.base_spot_threshold = Decimal("55.00")
             self.vol_base = Decimal("14.00")
             self.vol_slope = Decimal("0.002")
+            self.silas_spot_moat = Decimal("15.00")
+            self.chop_harvester_spot_moat = Decimal("8.00")
+            self.tsunami_threshold = 250.0
+            self.wick_meatgrinder_threshold = 45.0
+            self.false_breakout_rng_threshold = 100.0
+            self.directional_body_threshold = 100.0
 
         self.max_spread = max_spread or Decimal("0.04")
         self.vpin_toxic_threshold = vpin_toxic_threshold or Decimal("0.65")
@@ -209,6 +233,11 @@ class DynamicRegimeStrategy:
             high_price=float(max(spot_price, strike_price)),
             low_price=float(min(spot_price, strike_price)),
             current_price=float(spot_price),
+            tsunami_threshold=self.tsunami_threshold,
+            wick_meatgrinder_threshold=self.wick_meatgrinder_threshold,
+            false_breakout_rng_threshold=self.false_breakout_rng_threshold,
+            directional_body_threshold=self.directional_body_threshold,
+            asset=self.asset,
         )
 
         # 4. State Machine Update
@@ -228,7 +257,7 @@ class DynamicRegimeStrategy:
         # 6. Regime Execution Logic
         # Case A: Silas Settlement Freeze (T <= 120s)
         if regime == self.REGIME_SILAS:
-            if spot_diff >= Decimal("15.00"):
+            if spot_diff >= self.silas_spot_moat:
                 return DynamicRegimeDecision(
                     strategy_id="dynamic_trading_strategy",
                     strategy_name="Dynamic Regime-State Strategy",
@@ -245,7 +274,7 @@ class DynamicRegimeStrategy:
                     spread=spread,
                     rationale=f"Silas Settlement Parity (T={time_to_expiry_s:.0f}s): Spot +${spot_diff} exceeds TWAP drift.",
                 )
-            elif spot_diff <= Decimal("-15.00"):
+            elif spot_diff <= -self.silas_spot_moat:
                 return DynamicRegimeDecision(
                     strategy_id="dynamic_trading_strategy",
                     strategy_name="Dynamic Regime-State Strategy",
@@ -324,7 +353,7 @@ class DynamicRegimeStrategy:
                 )
             chop_limit = min(Decimal("0.44"), limit_price)
             # Exploit Kalshi settlement rule: At strike, NO wins, so in chop favor NO or deep discount YES
-            if spot_diff >= Decimal("8.00"):
+            if spot_diff >= self.chop_harvester_spot_moat:
                 return DynamicRegimeDecision(
                     strategy_id="dynamic_trading_strategy",
                     strategy_name="Dynamic Regime-State Strategy",
@@ -341,7 +370,7 @@ class DynamicRegimeStrategy:
                     spread=spread,
                     rationale=f"Chop Harvester: Resting maker bid on YES at ${chop_limit} (Spot +${spot_diff}).",
                 )
-            elif spot_diff <= Decimal("-8.00"):
+            elif spot_diff <= -self.chop_harvester_spot_moat:
                 return DynamicRegimeDecision(
                     strategy_id="dynamic_trading_strategy",
                     strategy_name="Dynamic Regime-State Strategy",

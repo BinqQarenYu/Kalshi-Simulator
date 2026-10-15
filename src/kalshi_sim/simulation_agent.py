@@ -86,6 +86,7 @@ class SimulationAgent:
         simulator: Optional[OrderSimulator] = None,
         realistic_simulation: bool = False,
         experience_buffer: Optional[ContinuousExperienceBuffer] = None,
+        eth_orderflow_feed: Optional[Any] = None,
     ) -> None:
         self._orderbook = orderbook_manager
         self._timeframes = timeframes
@@ -94,6 +95,7 @@ class SimulationAgent:
         self._spot_price_getter = spot_price_getter
         self._guardrails = guardrails or AgentGuardrails()
         self._btc_orderflow_feed = btc_orderflow_feed or BtcOrderflowFeed()
+        self._eth_orderflow_feed = eth_orderflow_feed
         self.bot_auditor = bot_auditor or BotDeploymentAuditor(guardrails=self._guardrails)
         self.hmm_brain = hmm_brain
         self.experience_buffer = experience_buffer
@@ -157,6 +159,7 @@ class SimulationAgent:
             spot_price_getter=self._spot_price_getter,
             bot1_v4_engine=self._bot1_v4_engine,
             eth_bot1_v4_engine=self._eth_bot1_v4_engine,
+            eth_orderflow_feed=self._eth_orderflow_feed,
         )
         self._settlement_coordinator = SimulationSettlementCoordinator(
             exec_logger=self._exec_logger,

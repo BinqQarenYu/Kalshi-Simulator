@@ -36,7 +36,7 @@ from kalshi_sim.order_simulator import OrderSimulator
 from kalshi_sim.portfolio import Portfolio
 from kalshi_sim.process_lock import get_active_lock_holder
 from kalshi_sim.ml.dynamic_regime_strategy import DynamicRegimeStrategy
-from kalshi_sim.schemas import L2BookState, MarketInfo, OrderSide, Timeframe, TradeEvent
+from kalshi_sim.schemas import CryptoAsset, L2BookState, MarketInfo, OrderSide, Timeframe, TradeEvent, detect_asset_from_ticker
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,7 @@ class StrategyEvaluationCoordinator:
         market_maker_engine: Optional[MarketMakerEngine] = None,
         eth_bot1_v4_engine: Optional[Any] = None,
         dynamic_regime_engine: Optional[DynamicRegimeStrategy] = None,
+        eth_orderflow_feed: Optional[Any] = None,
     ) -> None:
         self._guardrails = guardrails
         self._simulator = simulator
@@ -78,7 +79,83 @@ class StrategyEvaluationCoordinator:
         self._bot1_v4_engine = bot1_v4_engine
         self._market_maker_engine = market_maker_engine or (MarketMakerEngine() if MarketMakerEngine is not None else None)
         self._eth_bot1_v4_engine = eth_bot1_v4_engine
-        self._dynamic_regime_engine = dynamic_regime_engine or DynamicRegimeStrategy(asset="BTC")
+        self._eth_orderflow_feed = eth_orderflow_feed
+        self._dynamic_regime_engines: dict[str, DynamicRegimeStrategy] = {
+            "BTC": dynamic_regime_engine or DynamicRegimeStrategy(asset="BTC"),
+            "ETH": DynamicRegimeStrategy(asset="ETH"),
+            "SOL": DynamicRegimeStrategy(asset="SOL"),
+        }
+
+    @property
+    def _dynamic_regime_engine(self) -> DynamicRegimeStrategy:
+        return self._dynamic_regime_engines.get("BTC", DynamicRegimeStrategy(asset="BTC"))
+
+    def get_dynamic_regime_engine(self, ticker: str) -> DynamicRegimeStrategy:
+        asset_str = detect_asset_from_ticker(ticker).value
+        if asset_str not in self._dynamic_regime_engines:
+            self._dynamic_regime_engines[asset_str] = DynamicRegimeStrategy(asset=asset_str)
+        return self._dynamic_regime_engines[asset_str]
+
+    def _resolve_target_strike(self, ticker: str, market_info: Optional[MarketInfo]) -> Decimal:
+        """Resolves target strike strictly according to asset digit scale."""
+        if market_info and market_info.target_strike:
+            return Decimal(str(market_info.target_strike))
+        asset = detect_asset_from_ticker(ticker)
+        if asset == CryptoAsset.ETH:
+            return Decimal("2600.00")
+        elif asset == CryptoAsset.SOL:
+            return Decimal("180.00")
+        elif asset == CryptoAsset.DOGE:
+            return Decimal("0.200000")
+        elif asset == CryptoAsset.GOLD:
+            return Decimal("2700.00")
+        elif asset == CryptoAsset.HYPER:
+            return Decimal("25.00")
+        return Decimal("78650.00")
+
+    def _resolve_spot_price(self, ticker: str, market_info: Optional[MarketInfo], target_strike: Decimal) -> Decimal:
+        """Resolves spot price ensuring asset digits and scale never cross-contaminate."""
+        asset = detect_asset_from_ticker(ticker)
+        candidate_spot: Optional[Decimal] = None
+        if self._spot_price_getter:
+            try:
+                candidate_spot = Decimal(str(self._spot_price_getter()))
+            except Exception:
+                candidate_spot = None
+
+        # Sanity check candidate spot against asset expected magnitude
+        if candidate_spot is not None:
+            if asset == CryptoAsset.ETH:
+                # ETH magnitude: between $100 and $15,000 (never BTC magnitude $80,000+)
+                if Decimal("100.00") <= candidate_spot <= Decimal("15000.00"):
+                    return candidate_spot
+            elif asset == CryptoAsset.BTC:
+                # BTC magnitude: >= $10,000 (never ETH magnitude $2,500)
+                if candidate_spot >= Decimal("10000.00"):
+                    return candidate_spot
+            elif asset == CryptoAsset.SOL:
+                if Decimal("5.00") <= candidate_spot <= Decimal("2000.00"):
+                    return candidate_spot
+            elif asset == CryptoAsset.DOGE:
+                if candidate_spot <= Decimal("5.00"):
+                    return candidate_spot
+            else:
+                return candidate_spot
+
+        # Candidate rejected or missing; try dedicated asset orderflow feeds
+        if asset == CryptoAsset.ETH:
+            if hasattr(self, "_eth_orderflow_feed") and self._eth_orderflow_feed and hasattr(self._eth_orderflow_feed, "last_spot_price"):
+                return Decimal(str(self._eth_orderflow_feed.last_spot_price))
+            if self._eth_bot1_v4_engine and hasattr(self._eth_bot1_v4_engine, "orderflow_feed"):
+                feed = getattr(self._eth_bot1_v4_engine, "orderflow_feed", None)
+                if feed and hasattr(feed, "last_spot_price"):
+                    return Decimal(str(feed.last_spot_price))
+        elif asset == CryptoAsset.BTC:
+            if self._btc_orderflow_feed and hasattr(self._btc_orderflow_feed, "last_spot_price"):
+                return Decimal(str(self._btc_orderflow_feed.last_spot_price))
+
+        # Default fallback: target_strike of the market
+        return target_strike
 
         # Cooldown and rate-limiting caches
         self._last_macro_eval_time: dict[str, float] = {}
@@ -277,16 +354,18 @@ class StrategyEvaluationCoordinator:
             self._last_dynamic_eval_time[ticker] = _now
 
             try:
-                target_strike = Decimal(str(market_info.target_strike if market_info and market_info.target_strike else "78650.0"))
-                if self._spot_price_getter:
-                    try:
-                        spot_price = Decimal(str(self._spot_price_getter()))
-                    except Exception:
-                        spot_price = target_strike
-                else:
-                    spot_price = target_strike
+                target_strike = self._resolve_target_strike(ticker, market_info)
+                spot_price = self._resolve_spot_price(ticker, market_info, target_strike)
+                asset = detect_asset_from_ticker(ticker)
 
-                volatility_1m = Decimal("16.0")
+                # Asset-scaled default volatility
+                if asset == CryptoAsset.ETH:
+                    volatility_1m = Decimal("0.60")
+                elif asset == CryptoAsset.SOL:
+                    volatility_1m = Decimal("0.04")
+                else:
+                    volatility_1m = Decimal("16.00")
+
                 if hasattr(self, "_spot_price_history") and ticker in self._spot_price_history:
                     hist = self._spot_price_history[ticker]
                     if len(hist) >= 5:
@@ -296,15 +375,16 @@ class StrategyEvaluationCoordinator:
                             volatility_1m = Decimal(str(round(sum(diffs) / len(diffs) * 60, 2)))
 
                 vpin_val = Decimal("0.50")
-                if self._btc_orderflow_feed and hasattr(self._btc_orderflow_feed, "current_vpin"):
+                if self._btc_orderflow_feed and hasattr(self._btc_orderflow_feed, "current_vpin") and asset == CryptoAsset.BTC:
                     try:
                         vpin_val = Decimal(str(round(self._btc_orderflow_feed.current_vpin, 3)))
                     except Exception:
                         pass
 
                 exp_time = market_info.expiration_time if market_info else None
+                engine = self.get_dynamic_regime_engine(ticker)
 
-                decision = self._dynamic_regime_engine.evaluate(
+                decision = engine.evaluate(
                     ticker=ticker,
                     book=book,
                     spot_price=spot_price,
@@ -361,14 +441,9 @@ class StrategyEvaluationCoordinator:
             if _m_now - self._last_macro_eval_time.get(ticker, 0.0) >= 3.0:
                 self._last_macro_eval_time[ticker] = _m_now
                 try:
-                    target_strike = float(market_info.target_strike if market_info else 78650.0)
-                    if self._spot_price_getter:
-                        try:
-                            spot_price = float(self._spot_price_getter())
-                        except Exception:
-                            spot_price = target_strike
-                    else:
-                        spot_price = float(market_info.target_strike if market_info else 78650.0)
+                    strike_dec = self._resolve_target_strike(ticker, market_info)
+                    target_strike = float(strike_dec)
+                    spot_price = float(self._resolve_spot_price(ticker, market_info, strike_dec))
                     time_to_expiry_s = 600.0
 
                     if market_info and market_info.expiration_time:
@@ -459,14 +534,9 @@ class StrategyEvaluationCoordinator:
             and portfolio.get_position(ticker) is None
         ):
             try:
-                target_strike = float(market_info.target_strike if market_info else 78650.0)
-                if self._spot_price_getter:
-                    try:
-                        spot_price = float(self._spot_price_getter())
-                    except Exception:
-                        spot_price = target_strike
-                else:
-                    spot_price = float(market_info.target_strike if market_info else 78650.0)
+                strike_dec = self._resolve_target_strike(ticker, market_info)
+                target_strike = float(strike_dec)
+                spot_price = float(self._resolve_spot_price(ticker, market_info, strike_dec))
                 time_to_expiry_s = 600.0
 
                 if market_info and market_info.expiration_time:
@@ -555,14 +625,9 @@ class StrategyEvaluationCoordinator:
                 return
             self._last_dom_eval_time[ticker] = _eval_now
             try:
-                target_strike = float(market_info.target_strike if market_info else 78650.0)
-                if self._spot_price_getter:
-                    try:
-                        spot_price = float(self._spot_price_getter())
-                    except Exception:
-                        spot_price = target_strike
-                else:
-                    spot_price = float(market_info.target_strike if market_info else 78650.0)
+                strike_dec = self._resolve_target_strike(ticker, market_info)
+                target_strike = float(strike_dec)
+                spot_price = float(self._resolve_spot_price(ticker, market_info, strike_dec))
                 time_to_expiry_s = 600.0
 
                 if market_info and market_info.expiration_time:
@@ -713,14 +778,9 @@ class StrategyEvaluationCoordinator:
         self._last_dom_exit_eval_time[ticker] = _eval_now
 
         try:
-            target_strike = float(market_info.target_strike if market_info else 78650.0)
-            if self._spot_price_getter:
-                try:
-                    spot_price = float(self._spot_price_getter())
-                except Exception:
-                    spot_price = target_strike
-            else:
-                spot_price = float(market_info.target_strike if market_info else 78650.0)
+            strike_dec = self._resolve_target_strike(ticker, market_info)
+            target_strike = float(strike_dec)
+            spot_price = float(self._resolve_spot_price(ticker, market_info, strike_dec))
 
             time_to_expiry_s = 600.0
             if market_info and market_info.expiration_time:
@@ -839,14 +899,9 @@ class StrategyEvaluationCoordinator:
             if _d_now - self._last_dual_onnx_eval_time.get(ticker, 0.0) >= 1.0:
                 self._last_dual_onnx_eval_time[ticker] = _d_now
                 try:
-                    target_strike = float(market_info.target_strike if market_info else 78650.0)
-                    if self._spot_price_getter:
-                        try:
-                            spot_price = float(self._spot_price_getter())
-                        except Exception:
-                            spot_price = target_strike
-                    else:
-                        spot_price = float(market_info.target_strike if market_info else 78650.0)
+                    strike_dec = self._resolve_target_strike(ticker, market_info)
+                    target_strike = float(strike_dec)
+                    spot_price = float(self._resolve_spot_price(ticker, market_info, strike_dec))
                     time_to_expiry_s = 600.0
 
                     if market_info and market_info.expiration_time:

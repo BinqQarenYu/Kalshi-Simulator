@@ -225,8 +225,8 @@ def test_harakiri_streak_triggers_dynamic_failover():
     assert guard.is_bot_armed is True
     assert guard._consecutive_losses == 0
 
-    # Clean up: restore baseline
-    pm.load_preset("baseline_council_v3.2")
+    # Clean up: restore active strategy preset
+    pm.load_preset("dynamic_trading_strategy_v1")
 
 
 def test_chop_stand_down_directive_vetoes_chop_bets():
@@ -307,5 +307,126 @@ def test_storm_hunter_refuses_expensive_chase():
     assert decision.recommended_side == "wait", "Must not chase expensive asks > $0.52"
     assert decision.recommended_contracts == 0
     assert "armor" in decision.rationale
+
+
+def test_eth_btc_digit_scale_and_moat_isolation():
+    """Verify that BTC and ETH strategies evaluate with isolated calibrated moats and thresholds."""
+    btc_strat = DynamicRegimeStrategy(asset="BTC")
+    eth_strat = DynamicRegimeStrategy(asset="ETH")
+
+    assert btc_strat.silas_spot_moat == Decimal("15.00")
+    assert eth_strat.silas_spot_moat == Decimal("1.50")
+    assert btc_strat.chop_harvester_spot_moat == Decimal("8.00")
+    assert eth_strat.chop_harvester_spot_moat == Decimal("1.00")
+    assert btc_strat.base_spot_threshold == Decimal("55.00")
+    assert eth_strat.base_spot_threshold == Decimal("4.50")
+
+    # In Silas Settlement (T=60s), spot diff = +$2.50
+    book_eth = _mock_book("0.44", "0.46")
+    exp_time = datetime.now(timezone.utc) + timedelta(seconds=60)
+
+    # On ETH, +$2.50 exceeds the $1.50 moat -> YES
+    dec_eth = eth_strat.evaluate(
+        ticker="KXETH15M-T2600",
+        book=book_eth,
+        spot_price=Decimal("2602.50"),
+        strike_price=Decimal("2600.00"),
+        expiration_time=exp_time,
+        volatility_1m=Decimal("0.60"),
+    )
+    assert dec_eth.regime == DynamicRegimeStrategy.REGIME_SILAS
+    assert dec_eth.recommended_side == "yes"
+    assert dec_eth.recommended_contracts == 1
+    assert "Silas Settlement Parity" in dec_eth.rationale
+
+    # On BTC, +$2.50 is tiny (< $15.00 moat) -> WAIT
+    book_btc = _mock_book("0.44", "0.46")
+    dec_btc = btc_strat.evaluate(
+        ticker="KXBTC15M-T80000",
+        book=book_btc,
+        spot_price=Decimal("80002.50"),
+        strike_price=Decimal("80000.00"),
+        expiration_time=exp_time,
+        volatility_1m=Decimal("14.00"),
+    )
+    assert dec_btc.regime == DynamicRegimeStrategy.REGIME_SILAS
+    assert dec_btc.recommended_side == "wait"
+    assert dec_btc.recommended_contracts == 0
+    assert "Quarantine" in dec_btc.rationale
+
+
+def test_strategy_evaluator_cross_asset_spot_price_isolation():
+    """Verify that BTC spot price ($85,000+) never leaks into ETH contracts and vice versa."""
+    from kalshi_sim.strategy_evaluator import StrategyEvaluationCoordinator
+    from kalshi_sim.schemas import MarketInfo
+
+    # Mock coordinator with a BTC spot getter returning $88,000
+    coord = StrategyEvaluationCoordinator(
+        guardrails=None,  # type: ignore
+        simulator=None,  # type: ignore
+        db_writer=None,  # type: ignore
+        onnx_engine=None,  # type: ignore
+        ev_engine=None,  # type: ignore
+        macro_trend_bot=None,  # type: ignore
+        dominion2_bot=None,  # type: ignore
+        domination_bot=None,  # type: ignore
+        dual_onnx_bot=None,  # type: ignore
+        btc_orderflow_feed=None,  # type: ignore
+        spot_price_getter=lambda: Decimal("88000.00"),
+    )
+
+    # 1. Fallback strike resolution for ETH vs BTC
+    m_eth = MarketInfo(ticker="KXETH15M-UNKNOWN")
+    m_btc = MarketInfo(ticker="KXBTC15M-UNKNOWN")
+    assert coord._resolve_target_strike("KXETH15M-UNKNOWN", m_eth) == Decimal("2600.00")
+    assert coord._resolve_target_strike("KXBTC15M-UNKNOWN", m_btc) == Decimal("78650.00")
+
+    # 2. Spot price resolution for ETH when getter returns $88,000 (BTC scale)
+    # The sanity check must reject $88,000 as BTC scale leak and resolve to ETH strike
+    target_strike_eth = Decimal("2650.00")
+    resolved_eth_spot = coord._resolve_spot_price("KXETH15M-T2650", None, target_strike_eth)
+    assert resolved_eth_spot == Decimal("2650.00"), f"Expected 2650.00, got {resolved_eth_spot}"
+
+    # 3. Spot price resolution for BTC when getter returns $88,000 (valid BTC scale)
+    target_strike_btc = Decimal("88000.00")
+    resolved_btc_spot = coord._resolve_spot_price("KXBTC15M-T88000", None, target_strike_btc)
+    assert resolved_btc_spot == Decimal("88000.00"), f"Expected 88000.00, got {resolved_btc_spot}"
+
+
+def test_wave_classifier_asset_scale_adaptation():
+    """Verify that wave physics accurately classifies geometric wicks for both ETH and BTC."""
+    from kalshi_sim.ml.wave_classifier import compute_wave_physics
+
+    # BTC wave: range $150, wick $30 -> Bounded Chop on BTC
+    btc_wave = compute_wave_physics(
+        open_price=80000.0,
+        high_price=80150.0,
+        low_price=80000.0,
+        current_price=80100.0,
+        asset="BTC",
+    )
+    assert not btc_wave.is_tsunami
+    assert not btc_wave.is_double_wick_meatgrinder
+
+    # ETH wave: range $20 (high=2620, low=2600) -> Tsunami Expansion on ETH (> $15 threshold)
+    eth_wave = compute_wave_physics(
+        open_price=2600.0,
+        high_price=2620.0,
+        low_price=2600.0,
+        current_price=2610.0,
+        asset="ETH",
+    )
+    assert eth_wave.is_tsunami is True, "ETH $20 move must be recognized as tsunami"
+
+    # ETH double-wick: upper wick $3.50, lower wick $3.50 -> Double-Wick Meatgrinder on ETH
+    eth_wick = compute_wave_physics(
+        open_price=2605.0,
+        high_price=2610.0,
+        low_price=2600.0,
+        current_price=2605.0,
+        asset="ETH",
+    )
+    assert eth_wick.is_double_wick_meatgrinder is True, "ETH wicks of $5 must trigger double-wick meatgrinder"
+
 
 
