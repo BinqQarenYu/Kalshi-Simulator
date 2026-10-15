@@ -109,13 +109,27 @@ def validate_asset_isolation(contract_ticker: str, target_asset: str = "ETH") ->
 
 ---
 
-## 3. Kev AI Auxiliary Architecture Integration
+## 3. Kev Lead Taker Architecture & Math-of-Winning
 
-Kev AI provides real-time auxiliary macro-sentiment and multi-timeframe pattern recognition. To protect execution latency and prevent credit burn, Kev AI operates strictly as an **asynchronous shadow oracle**:
+Kev has been elevated from an auxiliary shadow oracle to the **Chief Directional Lead Taker**. Rather than passively waiting in the bid queue where adverse selection occurs, the engine executes crossing taker orders governed by real-time math-of-winning:
 
-1. **Non-Blocking Inference:** Kev AI runs in an asynchronous worker thread; execution on the Kalshi CLOB is never blocked waiting for external LLM inference.
-2. **Confidence Corroboration:** When available, Kev AI provides a secondary confidence weight $w_{\text{kev}} \in [0.0, 1.0]$. If Kev AI flags extreme systemic distress ($w_{\text{kev}} < 0.20$), entry size is clamped to zero.
-3. **Audit Ledger:** Kev AI outputs are stored in `data/kev_ai_shadow_ledger.jsonl` for offline counterfactual analysis.
+1. **Directional Conviction (75% Weight):** Kev evaluates real-time order flow imbalances (OFI), whale sweeps, and cross-venue spot momentum with sub-2ms latency to issue `YES` or `NO` signals ($\ge 60\%$ confidence).
+2. **Physical Diffusion (25% Weight):** Continuous Black-Scholes Gaussian erf strike crossing probability:
+   $$z = \frac{S_t - K}{\sigma_{15\text{m}} \sqrt{\tau / 900.0}}, \quad P_{\text{physics}} = \frac{1}{2}\left[1 + \text{erf}\left(\frac{z}{\sqrt{2}}\right)\right]$$
+3. **Continuous Math-of-Winning Formulation:**
+   $$P_{\text{win}} = 0.75 \cdot P_{\text{kev}} + 0.25 \cdot P_{\text{physics}}$$
+4. **Anti-Toxic Dynamic Hurdle & Taker Ceiling:**
+   $$\delta_{\text{hurdle}} = \$0.08 + (0.10 \times \text{VPIN})$$
+   $$\text{Max Taker Price} = \min\left(P_{\text{win}} - \delta_{\text{hurdle}}, \$0.55\right)$$
+   The bot refuses to overpay when the best ask exceeds this ceiling (`[MATH HURDLE VETO]`).
+5. **Anti-OTM Moneyness Trap Protection:**
+   Blocks speculative out-of-the-money purchases:
+   - If Kev recommends `YES` but Spot $S < K - \$3.00$, the bot stands down to `WAIT`.
+   - If Kev recommends `NO` but Spot $S > K + \$3.00$, the bot stands down to `WAIT`.
+6. **Immediate-or-Cancel (IOC) Execution:**
+   All taker limit orders specify `time_in_force="immediate_or_cancel"`. If liquidity is absent or price shifts, the order cancels immediately with zero resting exposure.
+7. **Dedicated 7-Consecutive-Loss Total Stop Circuit Breaker:**
+   Isolated from BTC, if the ETH bot incurs 7 consecutive live losses, execution enters an immediate **TOTAL STOP** (`is_eth_bot_armed = False`). No unmonitored hot-swap or failover occurs.
 
 ---
 
@@ -123,26 +137,24 @@ Kev AI provides real-time auxiliary macro-sentiment and multi-timeframe pattern 
 
 | Parameter Name | Canonical Value | Data Type | Purpose |
 | :--- | :--- | :--- | :--- |
-| `min_time_remaining` | `150` | `int` | Late pin boundary for Chop |
-| `max_time_remaining` | `780` | `int` | Opening quarantine boundary |
-| `storm_max_time_remaining`| `840` | `int` | Max time allowed for Storm entries |
-| `storm_min_time_remaining`| `60` | `int` | Late pin cutoff for Storm entries |
-| `min_edge` | `Decimal("0.02")`| `Decimal` | Minimum expected value hurdle |
-| `min_probability` | `Decimal("0.58")`| `Decimal` | Probability threshold |
-| `max_price_cents` | `Decimal("45")` | `Decimal` | Conservative buy ceiling for ETH |
-| `min_price_cents` | `Decimal("38")` | `Decimal` | Deep discount floor |
-| `max_spread_cents` | `Decimal("5")` | `Decimal` | Spread limit |
-| `vpin_threshold` | `Decimal("0.65")`| `Decimal` | Max allowable toxicity |
+| `min_time_remaining` | `120` | `int` | Terminal freeze boundary |
+| `max_time_remaining` | `840` | `int` | Opening quarantine boundary |
+| `max_taker_ceiling` | `Decimal("0.55")` | `Decimal` | Hard ceiling for taker limit orders |
+| `hurdle_base` | `Decimal("0.08")` | `Decimal` | Base mathematical edge requirement |
+| `vpin_toxic_threshold`| `Decimal("0.60")` | `Decimal` | Max allowable orderflow toxicity |
 | `proximity_moat` | `Decimal("2.50")` | `Decimal` | Dollar moat calibrated to ETH spot scale |
+| `otm_trap_threshold` | `Decimal("3.00")` | `Decimal` | Anti-OTM moneyness tolerance |
+| `eth_loss_limit` | `7` | `int` | Consecutive loss total stop threshold |
 
 ---
 
 ## 5. Walk-Forward Operational Protocol
 
 1. **Trade Collection:** Batches run in increments of 6 settled trades.
-2. **Forensic Autopsy:** Losses are analyzed by [`src/kalshi_sim/ml/eth_bot1v4/eth_autopsy.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/ml/eth_bot1v4/eth_autopsy.py) with 7 causal failure codes.
+2. **Forensic Autopsy:** Losses are analyzed by [`src/kalshi_sim/ml/eth_bot1v4/eth_autopsy.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/ml/eth_bot1v4/eth_autopsy.py) with 6 causal failure codes.
 3. **Dynamic Calibration:** Platt scalars $(A, B)$ are refreshed and written to `bot_parameters_eth.json`.
 4. **ASVL Verification:** Post-batch parameter updates must pass the autonomous test suite:
    ```bash
-   python -m pytest tests/test_eth_bot1v4_integration.py -q
+   python -m pytest tests/test_eth_bot1v4.py -v
    ```
+

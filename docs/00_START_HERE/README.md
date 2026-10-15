@@ -19,6 +19,8 @@ docs/
 │   ├── SYSTEM_MAP.md
 │   └── KNOWLEDGE_GRAPH.md
 ├── 02_TRADING_SYSTEM/       <-- Multi-asset bots, warriors, regions, and pricing math
+│   ├── FLEET_STRATEGY_GUIDE.md
+│   ├── KEV_LEAD_TAKER_ENGINE.md
 │   ├── BOT1_V4_SPECIFICATION.md
 │   ├── ETH_DOMINATION_SPECIFICATION.md
 │   ├── DUAL_WARRIOR_4_REGIONS.md

@@ -122,7 +122,19 @@ To prevent losses arising from zero liquidity, ghost spreads, or settlement tech
 - If institutional trade flow exhibits aggressive toxic sweeping (`is_toxic_sweep == "true"` or $\text{VPIN} \ge 0.60$), all entries are suspended.
 
 ### Layer 4: 7-Consecutive-Loss Circuit Breaker
-- In accordance with risk management updates, if 7 consecutive settled losses occur without an intervening win, all trading halts completely across the asset class, requiring manual diagnostic intervention.
+- In accordance with risk management updates, if 7 consecutive settled losses occur without an intervening win, all trading halts completely across the asset class (`is_eth_bot_armed = False`), requiring manual diagnostic intervention.
+
+### Layer 5: Anti-OTM Moneyness Trap Protection
+- **The Trap:** If Kev generates a strong directional confidence based on short-term delta or momentum while the underlying spot price is deep out-of-the-money (e.g. Spot is $\$5.00$ below Strike, but Kev recommends YES), taking the position represents a low-probability lottery ticket in a 15-minute timeframe.
+- **The Defense:** Strict moneyness consistency check:
+  - If Kev recommends `YES` and Spot $S < K - \$3.00$, the bot aborts entry and logs:  
+    `🛑 [OTM TRAP FILTER] Kev recommended YES, but spot is deep below strike by -$X.XX. Stand down to WAIT.`
+  - If Kev recommends `NO` and Spot $S > K + \$3.00$, the bot aborts entry and logs:  
+    `🛑 [OTM TRAP FILTER] Kev recommended NO, but spot is deep above strike by +$X.XX. Stand down to WAIT.`
+
+### Layer 6: Immediate-or-Cancel (IOC) Taker Limit Execution
+- **The Trap:** When executing with `order_type="limit"`, if the resting ask liquidity moves or vanishes during the transit millisecond, a standard limit order would rest in the orderbook as a maker (`good_till_canceled`), exposing the bot to adverse selection.
+- **The Defense:** All crossing taker limit orders are explicitly submitted with `time_in_force="immediate_or_cancel"`. Any unfillable quantity is cancelled instantly by the matching engine, ensuring 0% resting order exposure.
 
 ---
 

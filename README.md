@@ -7,19 +7,20 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-green.svg)]()
 
-An institutional-grade quantitative trading platform, market data ingestion pipeline, and real-time execution engine for **Kalshi Binary Prediction Event Contracts** across ultra-short **5-minute** and **15-minute** cycles for **Bitcoin (`KXBTC`)**, **Ethereum (`KXETH`)**, **Solana (`KXSOL`)**, and **Dogecoin (`KXDOGE`)**.
+An institutional-grade quantitative trading platform, market data ingestion pipeline, and real-time execution engine for **Kalshi Binary Prediction Event Contracts** across standardized **15-minute cycles** for **Bitcoin (`KXBTC15M`)** and **Ethereum (`KXETH15M`)**.
 
 ---
 
 ## 📚 Complete Documentation Index
 
+- [🏆 Fleet Strategy Architecture & Operational Guide (15M Standard)](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/02_TRADING_SYSTEM/FLEET_STRATEGY_GUIDE.md)
+- [👑 KEV the Lead: Dynamic Math-of-Winning Taker Engine](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/02_TRADING_SYSTEM/KEV_LEAD_TAKER_ENGINE.md)
+- [💎 ETH Bot 1 V4 (QuoLas ETH Domination Specification)](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/02_TRADING_SYSTEM/ETH_DOMINATION_SPECIFICATION.md)
+- [⚡ Bot 1 V4 (QuoLas BTC Domination Specification)](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/02_TRADING_SYSTEM/BOT1_V4_SPECIFICATION.md)
 - [🏛 System Architecture & Infrastructure](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/ARCHITECTURE.md)
 - [⚡ 24/7 Standalone Engine & Pocket Cockpit Runbook](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/STANDALONE_BOT_RUNBOOK.md)
 - [🤖 Dynamic Regime-State Architecture (DRSA v1.0 Blueprint)](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/03_STRATEGIES/DYNAMIC_REGIME_STRATEGY_DRSA.md)
 - [🏆 Dual-Asset 10-Trade Battle Ledger & Continuation Protocol](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/09_REPORTS/DUAL_ASSET_10_TRADE_BATTLE_LEDGER.md)
-- [🤖 Quantitative Strategy Bots & Playbooks](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/STRATEGY_BOTS.md)
-- [🔌 REST & WebSocket API Reference (Port 8000 & 8001)](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/API_REFERENCE.md)
-- [🚀 Trader Operations & Bankroll Guide](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/TRADING_GUIDE.md)
 - [🛡️ Data Integrity & Continuous Audit Rules](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/DATA_INTEGRITY.md)
 
 ---
