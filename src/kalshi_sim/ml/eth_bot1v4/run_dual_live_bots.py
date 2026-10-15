@@ -17,8 +17,16 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[4]
 _SRC = _ROOT / "src"
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(_ROOT / ".env")
+except Exception:
+    pass
 
 # ----------------------------------------------------------------------
 # 1️⃣  Environment validation – reuse the same checks as Bot 1 V4
@@ -47,6 +55,11 @@ def _assert_live_environment() -> None:
 # 2️⃣  Logging configuration – shared log file for both bots
 # ----------------------------------------------------------------------
 def _setup_logging() -> None:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except Exception:
+        pass
     log_dir = Path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "live_dual_bots.log"
@@ -239,14 +252,16 @@ def main() -> None:
     )
 
     # Run both engines and settlement reconciler concurrently.
-    loop = asyncio.get_event_loop()
-    tasks = [
-        _run_engine(eth_engine, "ETH_Bot", args.eth_interval, guardrails),
-        _run_engine(secondary_engine, f"{args.secondary_asset.upper()}_Bot", args.secondary_interval, guardrails),
-        _reconcile_settlements_loop(client, guardrails, eth_engine, secondary_engine, interval=15.0),
-        _periodic_telemetry_loop(guardrails, interval=30.0),
-    ]
-    loop.run_until_complete(asyncio.gather(*tasks))
+    async def _async_main():
+        tasks = [
+            _run_engine(eth_engine, "ETH_Bot", args.eth_interval, guardrails),
+            _run_engine(secondary_engine, f"{args.secondary_asset.upper()}_Bot", args.secondary_interval, guardrails),
+            _reconcile_settlements_loop(client, guardrails, eth_engine, secondary_engine, interval=15.0),
+            _periodic_telemetry_loop(guardrails, interval=30.0),
+        ]
+        await asyncio.gather(*tasks)
+
+    asyncio.run(_async_main())
 
 
 if __name__ == "__main__":
