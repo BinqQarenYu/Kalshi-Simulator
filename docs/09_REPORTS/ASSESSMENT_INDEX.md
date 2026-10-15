@@ -37,3 +37,6 @@
 | **#109** | 2026-10-12 | BTC | 4W – 2L | $+\$0.58$ | Bounded Range | ✅ PASSED | [`docs/assessment_2026-10-12_#109_.md`](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/assessment_2026-10-12_#109_.md) |
 | **#108** | 2026-10-11 | BTC | 4W – 2L | $+\$0.62$ | Baseline Calibration | ✅ PASSED | [`docs/assessment_2026-10-11_#108_.md`](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/assessment_2026-10-11_#108_.md) |
 | **#135** | `2026-10-15` | `BTC` | 4W - 2L | **66.7%** | **$+0.76** | `CHOPPY` | ✅ PASSED | [Report](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/09_REPORTS/assessments/assessment_2026-10-15_#135_BTC_.md) |
+| **#136** | `2026-10-15` | `BTC` | 10W - 0L | **100.0%** | **+$5.20** | `TREND` | ✅ PASSED | [Report](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/09_REPORTS/assessments/assessment_2026-10-15_#136_BTC_10TRADE.md) |
+| **#137** | `2026-10-15` | `ETH` | 10W - 0L | **100.0%** | **+$5.59** | `TREND` | ✅ PASSED | [Report](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/09_REPORTS/assessments/assessment_2026-10-15_#137_ETH_10TRADE.md) |
+
