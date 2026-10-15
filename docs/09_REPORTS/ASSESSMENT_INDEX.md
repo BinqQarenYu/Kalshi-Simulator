@@ -36,3 +36,4 @@
 | **#110** | 2026-10-12 | BTC | 4W – 2L | $+\$0.60$ | Chop Harvester | ✅ PASSED | [`docs/assessment_2026-10-12_#110_.md`](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/assessment_2026-10-12_#110_.md) |
 | **#109** | 2026-10-12 | BTC | 4W – 2L | $+\$0.58$ | Bounded Range | ✅ PASSED | [`docs/assessment_2026-10-12_#109_.md`](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/assessment_2026-10-12_#109_.md) |
 | **#108** | 2026-10-11 | BTC | 4W – 2L | $+\$0.62$ | Baseline Calibration | ✅ PASSED | [`docs/assessment_2026-10-11_#108_.md`](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/assessment_2026-10-11_#108_.md) |
+| **#135** | `2026-10-15` | `BTC` | 4W - 2L | **66.7%** | **$+0.76** | `CHOPPY` | ✅ PASSED | [Report](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/09_REPORTS/assessments/assessment_2026-10-15_#135_BTC_.md) |
