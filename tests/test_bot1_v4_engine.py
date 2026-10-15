@@ -263,7 +263,7 @@ def test_bot1_v4_frozen_sensor_veto() -> None:
 
 def test_bot1_v4_warrior2_chop_harvester_pricing() -> None:
     """Verify Warrior 2 (Chop Harvester) executes asymmetric deep discount ($0.38 - $0.42)."""
-    engine = Bot1V4DominationEngine()
+    engine = Bot1V4DominationEngine(enable_warrior_2_chop=True)
     l2 = L2BookState("KXBTC15M-TEST")
 
     # Feed 10 calm ticks (range = $2, std < $1) to establish calm state
@@ -305,7 +305,7 @@ def test_bot1_v4_warrior2_chop_harvester_pricing() -> None:
 
 def test_bot1_v4_warrior2_timing_gates() -> None:
     """Verify Warrior 2 timing sweet spot gates: 150s <= T <= 450s."""
-    engine = Bot1V4DominationEngine()
+    engine = Bot1V4DominationEngine(enable_warrior_2_chop=True)
     l2 = L2BookState("KXBTC15M-TEST")
     engine._current_regime = "CHOP"  # Force CHOP
 
@@ -330,6 +330,25 @@ def test_bot1_v4_warrior2_timing_gates() -> None:
     )
     assert d_late.recommended_side == "wait"
     assert d_late.active_playbook == "chop_late_cycle_freeze"
+
+
+def test_bot1_v4_warrior2_stand_down_by_default() -> None:
+    """Verify Warrior 2 stands down in CHOP by default (enable_warrior_2_chop=False)."""
+    engine = Bot1V4DominationEngine(enable_warrior_2_chop=False)
+    l2 = L2BookState("KXBTC15M-TEST")
+    engine._current_regime = "CHOP"
+    decision = engine.evaluate_market_opportunity(
+        spot_price=85008.0,
+        target_strike=85000.0,
+        time_to_expiry_s=300.0,
+        l2_book=l2,
+        cycle_id="GATE_CYCLE_STANDDOWN",
+    )
+    assert decision.regime == "CHOP"
+    assert decision.recommended_side == "wait"
+    assert decision.recommended_contracts == 0
+    assert decision.active_playbook == "chop_stand_down_quarantine"
+
 
 
 def test_bot1_v4_storm_onnx_wait_consensus() -> None:

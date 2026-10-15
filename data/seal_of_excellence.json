@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-10-14T11:20:07.698689+00:00",
+  "last_updated": "2026-10-15T04:29:22.521534+00:00",
   "active_live_strategy": "dynamic_trading_strategy",
   "seals": {
     "3_step_domination_bot": {
@@ -9,7 +9,7 @@
       "seal_status": "SEALED_EXCELLENT",
       "seal_token": "SEAL-DOM1-3E05D344C773",
       "live_trading_authorized": true,
-      "granted_at": "2026-10-14T11:20:07.684240+00:00",
+      "granted_at": "2026-10-15T04:29:22.511437+00:00",
       "council_signoff": "COUNCIL-SANCTIONED-BASELINE-V3.2",
       "settled_cycles_verified": 48,
       "graduation_threshold": 30,
@@ -25,7 +25,7 @@
       "simsim_verified": false,
       "regime_distribution": {},
       "details": {
-        "evaluated_mode": "simulated"
+        "evaluated_mode": "live"
       }
     },
     "bot1_v4_domination": {
@@ -59,13 +59,13 @@
       "seal_status": "IN_INCUBATION",
       "seal_token": "DENIED-DOMI",
       "live_trading_authorized": false,
-      "granted_at": "2026-10-14T11:20:07.687777+00:00",
+      "granted_at": "2026-10-15T04:29:22.521428+00:00",
       "council_signoff": null,
       "settled_cycles_verified": 18,
       "graduation_threshold": 30,
       "empirical_win_rate": 0.556,
       "profit_factor": 1.12,
-      "pillars_passed": 5,
+      "pillars_passed": 4,
       "pillars_total": 5,
       "quarantine_lane": "Lane 2 Shadow",
       "net_expected_value": 0.0,
@@ -75,16 +75,16 @@
       "simsim_verified": false,
       "regime_distribution": {},
       "details": {
-        "evaluated_mode": "simulated"
+        "evaluated_mode": "live"
       }
     },
     "the_onnx_strategy": {
       "bot_id": "the_onnx_strategy",
-      "bot_name": "The ONNX Strategy",
+      "bot_name": "Dominion 2 Bot (Anti-Pin Scalper)",
       "seal_status": "IN_INCUBATION",
       "seal_token": "DENIED-THE_",
       "live_trading_authorized": false,
-      "granted_at": "2026-10-14T11:20:07.693236+00:00",
+      "granted_at": "2026-10-15T04:29:22.517327+00:00",
       "council_signoff": null,
       "settled_cycles_verified": 18,
       "graduation_threshold": 30,

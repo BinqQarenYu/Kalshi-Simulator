@@ -135,8 +135,10 @@ class Bot1V4DominationEngine:
         chop_vol_threshold: float = 12.0,                     # 1m rolling vol < $12 defines low kinetic energy
         hysteresis_cooldown_seconds: float = 45.0,            # 45s sustained calm to return to chop
         experience_buffer: Optional[ContinuousExperienceBuffer] = None,
+        enable_warrior_2_chop: bool = False,                  # Stand down in chop by default (anti-adverse selection)
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
+        self.enable_warrior_2_chop = enable_warrior_2_chop
         self.max_turnover_per_event = max_turnover_per_event
         self.min_ev_hurdle_dollars = min_ev_hurdle_dollars
         self.discount_limit_price = discount_limit_price
@@ -623,6 +625,7 @@ class Bot1V4DominationEngine:
             "max_taker_entry_price": float(self.max_taker_entry_price),
             "taker_breakout_min_velocity": float(self.taker_breakout_min_velocity),
             "taker_breakout_min_confidence": float(self.taker_breakout_min_confidence),
+            "enable_warrior_2_chop": bool(self.enable_warrior_2_chop),
             "healing_status": self.healing_protocol.get_status(),
         }
 
@@ -639,9 +642,14 @@ class Bot1V4DominationEngine:
         chop_max_entry_price: Optional[float] = None,
         chop_range_threshold: Optional[float] = None,
         chop_vol_threshold: Optional[float] = None,
+        enable_warrior_2_chop: Optional[bool] = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Dynamically update strategy parameters on the fly."""
+        if enable_warrior_2_chop is not None:
+            self.enable_warrior_2_chop = bool(enable_warrior_2_chop)
+        if kwargs.get("enable_warrior_2_chop") is not None:
+            self.enable_warrior_2_chop = bool(kwargs["enable_warrior_2_chop"])
         if min_confidence is not None:
             val = float(min_confidence)
             self.min_confidence = val if val <= 1.0 else (val / 100.0)
@@ -1043,6 +1051,26 @@ class Bot1V4DominationEngine:
         # WARRIOR 2: CHOP HARVESTER (Regime == 'CHOP')
         # =========================================================================
         if regime == "CHOP":
+            if not self.enable_warrior_2_chop:
+                return Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="chop_stand_down_quarantine",
+                    playbook_stage="none",
+                    p_up=p_up, p_down=p_down, p_wait=1.0,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale=f"Warrior 2 Chop Stand-Down Directive: Standing down in chop to eliminate adverse selection bleed ({regime_reason}). Awaiting Storm breakout.",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=float(self.chop_discount_limit_price),
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                    regime="CHOP",
+                )
+
             # A. Timing Window Gates
             if time_to_expiry_s > self.chop_max_time_s:
                 return Bot1V4Decision(

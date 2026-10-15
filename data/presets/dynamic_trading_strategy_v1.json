@@ -55,7 +55,8 @@
       "max_clob_spread_cents": 0.04,
       "regime_chop_vol_ceiling": 18.0,
       "regime_trend_vol_floor": 30.0,
-      "regime_dwell_time_seconds": 30.0
+      "regime_dwell_time_seconds": 30.0,
+      "enable_chop_trading": false
     },
     "ETH": {
       "discount_limit_price": 0.45,
@@ -98,7 +99,8 @@
       "max_clob_spread_cents": 0.04,
       "regime_chop_vol_ceiling": 0.8,
       "regime_trend_vol_floor": 1.8,
-      "regime_dwell_time_seconds": 30.0
+      "regime_dwell_time_seconds": 30.0,
+      "enable_chop_trading": false
     }
   },
   "active_asset": "BTC",

@@ -24,6 +24,7 @@
     "chop_max_entry_price": 0.42,
     "chop_range_threshold": 7.5,
     "chop_vol_threshold": 0.6,
+    "enable_warrior_2_chop": false,
     "current_regime": "STORM",
     "regime_reason": "Session boot initial state",
     "wave_summary": "NORMAL WAVE",

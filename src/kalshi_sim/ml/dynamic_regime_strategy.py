@@ -57,9 +57,11 @@ class DynamicRegimeStrategy:
         vol_chop_trigger: Optional[Decimal] = None,
         max_spread: Optional[Decimal] = None,
         vpin_toxic_threshold: Optional[Decimal] = None,
+        enable_chop_trading: bool = False,
     ) -> None:
         self.asset = asset.upper()
         self.dwell_time_seconds = dwell_time_seconds
+        self.enable_chop_trading = enable_chop_trading
 
         # Asset-specific calibrated thresholds (Lesson Q8 / BLEED#01 Sweetspot)
         if self.asset == "ETH":
@@ -305,8 +307,13 @@ class DynamicRegimeStrategy:
                 )
             return self._build_wait_decision(regime, spot_diff, time_to_expiry_s, volatility_1m, spread, "Trend regime awaiting spot velocity trigger.")
 
-        # Case D: Low-Vol Chop Regime (Passive Discount Maker)
+        # Case D: Low-Vol Chop Regime (Passive Discount Maker vs Stand-Down)
         if regime == self.REGIME_CHOP:
+            if not self.enable_chop_trading:
+                return self._build_wait_decision(
+                    regime, spot_diff, time_to_expiry_s, volatility_1m, spread,
+                    "Chop Stand-Down Directive: Zero betting in chop to eliminate adverse selection drag. Standing by for Storm/Trend breakout."
+                )
             chop_limit = min(Decimal("0.44"), limit_price)
             # Exploit Kalshi settlement rule: At strike, NO wins, so in chop favor NO or deep discount YES
             if spot_diff >= Decimal("8.00"):

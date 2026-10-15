@@ -227,3 +227,55 @@ def test_harakiri_streak_triggers_dynamic_failover():
 
     # Clean up: restore baseline
     pm.load_preset("baseline_council_v3.2")
+
+
+def test_chop_stand_down_directive_vetoes_chop_bets():
+    """Verify that when in CHOP with enable_chop_trading=False (default),
+    the bot strictly stands down (0 contracts, wait) to eliminate adverse selection drag."""
+    strategy = DynamicRegimeStrategy(asset="BTC", enable_chop_trading=False)
+    book = _mock_book("0.42", "0.44")
+
+    # In CHOP regime (low vol = 14.0), spot diff is +$10 (would have triggered chop maker if enabled)
+    decision = strategy.evaluate(
+        ticker="KXBTC15M-TEST",
+        book=book,
+        spot_price=Decimal("80010.00"),
+        strike_price=Decimal("80000.00"),
+        expiration_time=datetime.now(timezone.utc) + timedelta(minutes=7),
+        volatility_1m=Decimal("14.00"),
+        vpin=Decimal("0.40"),
+    )
+
+    assert decision.regime == DynamicRegimeStrategy.REGIME_CHOP
+    assert decision.recommended_side == "wait", "Must stand down in chop when enable_chop_trading is False"
+    assert decision.recommended_contracts == 0, "Must size strictly 0 contracts in chop stand-down"
+    assert "Chop Stand-Down Directive" in decision.rationale
+
+
+def test_storm_hunter_fights_when_volatility_expands():
+    """Verify that when market is in TREND/STORM, the bot enters with high conviction."""
+    strategy = DynamicRegimeStrategy(asset="BTC", enable_chop_trading=False, dwell_time_seconds=0.0)
+    book = _mock_book("0.46", "0.48")
+
+    # Push into TREND regime via sustained vol
+    strategy.update_regime_state(Decimal("45.00"), Decimal("0.02"), Decimal("0.40"), 500.0)
+    strategy.update_regime_state(Decimal("45.00"), Decimal("0.02"), Decimal("0.40"), 500.0)
+    regime = strategy.update_regime_state(Decimal("45.00"), Decimal("0.02"), Decimal("0.40"), 500.0)
+    assert regime == DynamicRegimeStrategy.REGIME_TREND
+
+    # Spot diff +$60 exceeds spot threshold ($55 * 1.5 = 82.5 or base 55)
+    decision = strategy.evaluate(
+        ticker="KXBTC15M-TEST",
+        book=book,
+        spot_price=Decimal("80150.00"),
+        strike_price=Decimal("80000.00"),
+        expiration_time=datetime.now(timezone.utc) + timedelta(minutes=7),
+        volatility_1m=Decimal("45.00"),
+        vpin=Decimal("0.40"),
+    )
+
+    assert decision.regime == DynamicRegimeStrategy.REGIME_TREND
+    assert decision.recommended_side == "yes", "Must enter YES in bullish storm/trend"
+    assert decision.recommended_contracts == 1, "Must size 1 contract"
+    assert "Trend Expansion" in decision.rationale
+

@@ -74,6 +74,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         chop_vol_threshold: float = 12.0,
         hysteresis_cooldown_seconds: float = 45.0,
         experience_buffer=None,
+        enable_warrior_2_chop: bool = False,
     ) -> None:
         super().__init__(
             max_turnover_per_event=max_turnover_per_event,
@@ -119,6 +120,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             chop_vol_threshold=chop_vol_threshold,
             hysteresis_cooldown_seconds=hysteresis_cooldown_seconds,
             experience_buffer=experience_buffer,
+            enable_warrior_2_chop=enable_warrior_2_chop,
         )
 
         # No additional ETH‑specific logic is required at this layer – the
