@@ -15,6 +15,8 @@ An institutional-grade quantitative trading platform, market data ingestion pipe
 
 - [🏛 System Architecture & Infrastructure](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/ARCHITECTURE.md)
 - [⚡ 24/7 Standalone Engine & Pocket Cockpit Runbook](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/STANDALONE_BOT_RUNBOOK.md)
+- [🤖 Dynamic Regime-State Architecture (DRSA v1.0 Blueprint)](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/03_STRATEGIES/DYNAMIC_REGIME_STRATEGY_DRSA.md)
+- [🏆 Dual-Asset 10-Trade Battle Ledger & Continuation Protocol](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/09_REPORTS/DUAL_ASSET_10_TRADE_BATTLE_LEDGER.md)
 - [🤖 Quantitative Strategy Bots & Playbooks](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/STRATEGY_BOTS.md)
 - [🔌 REST & WebSocket API Reference (Port 8000 & 8001)](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/API_REFERENCE.md)
 - [🚀 Trader Operations & Bankroll Guide](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/TRADING_GUIDE.md)
