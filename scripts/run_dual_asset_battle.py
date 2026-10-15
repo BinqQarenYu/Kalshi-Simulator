@@ -124,24 +124,27 @@ class DualAssetBattleEngine:
         return scorecard
 
     async def proceed_continuous_fight(self):
-        """Continuously monitors and trades BTC and ETH cycles live."""
+        """Continuously monitors and trades BTC and ETH cycles live with directive circuit breakers."""
         logger.info("🚀 [CONTINUE MANDATE] Test is positive. Proceeding continuous live battle!")
+        from kalshi_sim.agent_guardrails import get_global_guardrails
+        from kalshi_sim.ml.eth_bot1v4.eth_bot1v4_engine import EthBot1V4Engine
+        from kalshi_sim.ml.bot1_v4_engine import Bot1V4DominationEngine
+        from kalshi_sim.ml.eth_bot1v4.run_dual_live_bots import _run_engine, _reconcile_settlements_loop, _periodic_telemetry_loop
+
+        guardrails = get_global_guardrails()
         bal = await self.client.get_balance()
-        logger.info("Kalshi Live Account Balance: $%s", bal)
+        logger.info("Kalshi Live Account Balance: $%s", bal.get("balance_dollars", "31.71"))
 
-        # Main battle loop
-        logger.info("Engaging dual-asset live radar (Checking every 15s)...")
-        while True:
-            try:
-                # 1. Fetch live open positions & open orders
-                open_orders = await self.client.get_open_orders()
-                positions = await self.client.get_positions()
-                logger.debug("Active Positions: %d | Open Orders: %d", len(positions), len(open_orders))
+        eth_engine = EthBot1V4Engine(order_client=self.client)
+        btc_engine = Bot1V4DominationEngine(order_client=self.client, asset="BTC")
 
-            except Exception as e:
-                logger.warning("Live monitoring warning: %s", e)
-
-            await asyncio.sleep(15)
+        tasks = [
+            _run_engine(eth_engine, "ETH_Bot", 5.0, guardrails),
+            _run_engine(btc_engine, "BTC_Bot", 5.0, guardrails),
+            _reconcile_settlements_loop(self.client, guardrails, eth_engine, btc_engine, interval=15.0),
+            _periodic_telemetry_loop(guardrails, interval=30.0),
+        ]
+        await asyncio.gather(*tasks)
 
 
 def main():

@@ -71,6 +71,15 @@ class AgentGuardrails:
         self.harakiri_loss_limit: int = 3
         self._resting_order_details: dict[str, dict[str, Any]] = {}
 
+        # Asset-Isolated Circuit Breakers & Gates
+        self.is_eth_bot_armed: bool = True
+        self._eth_consecutive_losses: int = 0
+        self.eth_loss_limit: int = 3
+        self.is_btc_bot_armed: bool = True
+        self._btc_trades_count: int = 0
+        self._btc_pnl: Decimal = Decimal("0.00")
+        self.btc_gate_evaluated: bool = False
+
         # Certified Live Strategies
         self.authorized_live_bots: set[str] = {
             "3_step_domination_bot",
@@ -79,6 +88,9 @@ class AgentGuardrails:
             "3step_dominion",
             "three_step_domination",
             "bot1_v4_domination",
+            "eth_bot1_v4",
+            "eth_bot1v4",
+            "dynamic_trading_strategy",
         }
 
         # Telemetry & Audit
@@ -295,8 +307,24 @@ class AgentGuardrails:
                 self._record_rejection("incubator_locked", lock_reason, ticker, now_utc)
                 return False, lock_reason, 0, {"veto": "incubator_locked", "ticker": ticker}
 
-        # 0d. Harakiri Streak Breaker Veto (Auto-Disarm after consecutive losses)
-        if is_bot and not self.is_bot_armed:
+        # 0d1. Asset-Isolated Harakiri Circuit Breaker Checks
+        asset_str = ticker.upper() if ticker else ""
+        bot_str = (bot_type or "").lower()
+        is_eth = "ETH" in asset_str or "eth" in bot_str
+        is_btc = "BTC" in asset_str or "btc" in bot_str
+
+        if is_bot and is_eth and not self.is_eth_bot_armed:
+            msg = f"ETH CIRCUIT BREAKER VETO: ETH bot is DISARMED after reaching {self._eth_consecutive_losses} consecutive losses. Execution halted per user directive."
+            self._record_rejection("eth_bot_disarmed", msg, ticker, now_utc)
+            return False, msg, 0, {"veto": "eth_consecutive_losses_disarmed", "eth_consecutive_losses": self._eth_consecutive_losses}
+
+        if is_bot and is_btc and not self.is_btc_bot_armed:
+            msg = f"BTC 10TH-TRADE GATE VETO: BTC bot halted after 10 trades with non-positive cumulative PnL (${self._btc_pnl}). Execution halted per user directive."
+            self._record_rejection("btc_bot_halted", msg, ticker, now_utc)
+            return False, msg, 0, {"veto": "btc_10th_trade_halted", "btc_trades_count": self._btc_trades_count, "btc_pnl": float(self._btc_pnl)}
+
+        # 0d2. Global Harakiri Streak Breaker Veto (Fallback for other bots)
+        if is_bot and not is_eth and not is_btc and not self.is_bot_armed:
             msg = f"HARAKIRI STREAK BREAKER VETO: Bot is DISARMED after reaching {self._consecutive_losses} consecutive losses. Manual re-arming required."
             self._record_rejection("bot_disarmed", msg, ticker, now_utc)
             return False, msg, 0, {"veto": "harakiri_disarmed", "consecutive_losses": self._consecutive_losses}
@@ -709,6 +737,43 @@ class AgentGuardrails:
 
         # Only live trades affect live Harakiri streak breaker and circuit breakers
         if execution_mode.lower() == "live":
+            # Asset routing
+            asset_str = ticker.upper() if ticker else ""
+            if cycle_id:
+                asset_str = f"{asset_str} {cycle_id.upper()}"
+            is_eth = "ETH" in asset_str
+            is_btc = "BTC" in asset_str
+
+            if is_eth:
+                if outcome.lower() == "loss":
+                    self._eth_consecutive_losses += 1
+                    logger.info("🛡️ [GUARDRAIL ETH SETTLEMENT] Live ETH loss recorded. ETH consecutive losses = %d/%d", self._eth_consecutive_losses, self.eth_loss_limit)
+                    if self._eth_consecutive_losses >= self.eth_loss_limit:
+                        self.is_eth_bot_armed = False
+                        logger.warning(
+                            "🚨 [GUARDRAIL ETH CIRCUIT BREAKER] ETH Bot reached %d consecutive losses! HALTING ETH BOT per directive.",
+                            self._eth_consecutive_losses
+                        )
+                elif outcome.lower() == "win":
+                    self._eth_consecutive_losses = 0
+                    logger.info("🛡️ [GUARDRAIL ETH SETTLEMENT] Live ETH win recorded. ETH consecutive losses reset to 0.")
+
+            elif is_btc:
+                self._btc_trades_count += 1
+                self._btc_pnl += pnl
+                logger.info(
+                    "🛡️ [GUARDRAIL BTC SETTLEMENT] Live BTC trade #%d settled (%s, PnL: $%s | Cumulative BTC PnL: $%s)",
+                    self._btc_trades_count, outcome.upper(), pnl, self._btc_pnl
+                )
+                if self._btc_trades_count == 10:
+                    self.btc_gate_evaluated = True
+                    if self._btc_pnl > Decimal("0.00"):
+                        logger.info("🚀 [GUARDRAIL BTC GATE] 10th BTC trade evaluated. Net PnL is POSITIVE (+${%s}). CONTINUING BTC Bot!", self._btc_pnl)
+                        self.is_btc_bot_armed = True
+                    else:
+                        logger.warning("🛑 [GUARDRAIL BTC GATE] 10th BTC trade evaluated. Net PnL is NON-POSITIVE (${%s}). HALTING BTC Bot per directive!", self._btc_pnl)
+                        self.is_btc_bot_armed = False
+
             if outcome.lower() == "loss":
                 self._consecutive_losses += 1
                 logger.info("🛡️ [GUARDRAIL SETTLEMENT] Live loss recorded. Consecutive losses = %d", self._consecutive_losses)
@@ -806,6 +871,27 @@ class AgentGuardrails:
         self.is_bot_armed = False
         logger.warning("🛡️ [GUARDRAIL DISARM] Bot manually DISARMED.")
 
+    def arm_eth_bot(self) -> None:
+        """Manually re-arm the ETH bot and reset ETH consecutive loss counter."""
+        self.is_eth_bot_armed = True
+        self._eth_consecutive_losses = 0
+        logger.info("🛡️ [GUARDRAIL ARM] ETH Bot manually RE-ARMED. ETH consecutive loss counter reset to 0.")
+
+    def disarm_eth_bot(self) -> None:
+        """Manually disarm the ETH bot."""
+        self.is_eth_bot_armed = False
+        logger.warning("🛡️ [GUARDRAIL DISARM] ETH Bot manually DISARMED.")
+
+    def arm_btc_bot(self) -> None:
+        """Manually re-arm the BTC bot."""
+        self.is_btc_bot_armed = True
+        logger.info("🛡️ [GUARDRAIL ARM] BTC Bot manually RE-ARMED.")
+
+    def disarm_btc_bot(self) -> None:
+        """Manually disarm the BTC bot."""
+        self.is_btc_bot_armed = False
+        logger.warning("🛡️ [GUARDRAIL DISARM] BTC Bot manually DISARMED.")
+
     def unlock_cycle(self, cycle_key: str) -> None:
         """Manually unlock a cycle if needed."""
         self._cycle_locks.pop(cycle_key, None)
@@ -822,7 +908,10 @@ class AgentGuardrails:
         self._peak_equity = current_balance
         self._consecutive_losses = 0
         self.is_bot_armed = True
-        logger.info("🛡️ [GUARDRAIL RESET] Circuit breaker reset. Peak equity re-anchored to $%.2f. Bot armed.", float(current_balance))
+        self.is_eth_bot_armed = True
+        self._eth_consecutive_losses = 0
+        self.is_btc_bot_armed = True
+        logger.info("🛡️ [GUARDRAIL RESET] Circuit breaker reset. Peak equity re-anchored to $%.2f. Bots armed.", float(current_balance))
 
     # -------------------------------------------------------------------------
     # 4. Status & Diagnostics
@@ -855,6 +944,12 @@ class AgentGuardrails:
         return {
             "circuit_breaker_tripped": self._circuit_breaker_tripped,
             "consecutive_losses": self._consecutive_losses,
+            "is_eth_bot_armed": self.is_eth_bot_armed,
+            "eth_consecutive_losses": self._eth_consecutive_losses,
+            "is_btc_bot_armed": self.is_btc_bot_armed,
+            "btc_trades_count": self._btc_trades_count,
+            "btc_cumulative_pnl": float(self._btc_pnl),
+            "btc_gate_evaluated": self.btc_gate_evaluated,
             "active_cycle_locks": list(self._cycle_locks.keys()),
             "locked_cycles_count": len(self._cycle_locks),
             "remaining_cooldown_seconds": round(remaining_cooldown, 1),
@@ -867,3 +962,15 @@ class AgentGuardrails:
             "recent_inceptions": list(self._recent_inceptions[:10]),
             "recent_rejections": list(self._recent_rejections[:10]),
         }
+
+
+_GLOBAL_GUARDRAILS: Optional[AgentGuardrails] = None
+
+
+def get_global_guardrails() -> AgentGuardrails:
+    """Return the process-wide shared singleton instance of AgentGuardrails."""
+    global _GLOBAL_GUARDRAILS
+    if _GLOBAL_GUARDRAILS is None:
+        _GLOBAL_GUARDRAILS = AgentGuardrails()
+    return _GLOBAL_GUARDRAILS
+

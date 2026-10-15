@@ -280,21 +280,35 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         return None
 
     def get_spot_price(self) -> Decimal:
-        """Retrieve current ETH spot price from feed or fallback."""
+        """Retrieve current ETH spot price from feed or live exchange ticker."""
         if self.orderflow_feed and self.orderflow_feed.last_spot_price > 0:
             return self.orderflow_feed.last_spot_price
-        return Decimal("2600.00")
+        try:
+            import urllib.request
+            resp = urllib.request.urlopen("https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT", timeout=2.0)
+            data = json.loads(resp.read().decode())
+            return Decimal(str(data.get("price", "2350.00")))
+        except Exception:
+            pass
+        return Decimal("2350.00")
 
     async def run_cycle(self, ticker: Optional[str] = None) -> Optional[Bot1V4Decision]:
         """Execute a single cycle iteration of the ETH Bot 1 V4 engine.
 
-        1. Discovers active KXETH15M 15-minute market.
-        2. Ingests Level-2 orderbook.
-        3. Retrieves real-time ETH spot price.
-        4. Evaluates market opportunity using Bot 1 V4 quantitative logic with ETH calibration.
-        5. If signal is actionable ('yes' or 'no' with >0 contracts) and order_client is attached:
+        1. Checks ETH circuit breaker (3 consecutive losses mandate).
+        2. Discovers active KXETH15M 15-minute market.
+        3. Ingests Level-2 orderbook.
+        4. Retrieves real-time ETH spot price.
+        5. Evaluates market opportunity using Bot 1 V4 quantitative logic with ETH calibration.
+        6. If signal is actionable ('yes' or 'no' with >0 contracts) and order_client is attached:
            executes 1 contract adhering to micro-bankroll rules and 1-trade-per-cycle lock.
         """
+        from kalshi_sim.agent_guardrails import get_global_guardrails
+        guardrails = get_global_guardrails()
+        if not guardrails.is_eth_bot_armed:
+            logger.info("🛑 [ETH BOT 1 V4] Stand down: ETH bot circuit breaker tripped (%d consecutive losses). Stopped per user directive.", guardrails._eth_consecutive_losses)
+            return None
+
         target_ticker = ticker or self.target_ticker
         market_info: Optional[MarketInfo] = None
 

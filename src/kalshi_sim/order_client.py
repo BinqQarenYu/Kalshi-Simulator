@@ -17,6 +17,8 @@ from pathlib import Path
 import time
 import uuid
 from decimal import Decimal
+import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -44,15 +46,16 @@ class KalshiLiveOrderClient:
 
     def __init__(
         self,
-        api_key_id: str,
-        private_key_path: str | Path | Any,
+        api_key_id: Optional[str] = None,
+        private_key_path: Optional[str | Path | Any] = None,
         base_url: str = PROD_REST_BASE,
     ) -> None:
-        self.api_key_id = api_key_id
-        if hasattr(private_key_path, "sign"):
-            self.private_key = private_key_path
+        self.api_key_id = api_key_id or os.getenv("KALSHI_API_KEY_ID", "")
+        pk_path = private_key_path or os.getenv("KALSHI_PRIVATE_KEY_PATH", "keys/kalshi_live.pem")
+        if hasattr(pk_path, "sign"):
+            self.private_key = pk_path
         else:
-            self.private_key = load_private_key(private_key_path)
+            self.private_key = load_private_key(pk_path)
         self.base_url = base_url.rstrip("/")
         self._session: Optional[aiohttp.ClientSession] = None
         self._primary_exchange_index: int = 0

@@ -36,9 +36,10 @@ def _assert_live_environment() -> None:
     missing = [v for v in required if not os.getenv(v)]
     if missing:
         sys.exit(f"[FATAL] Missing required env vars: {', '.join(missing)}")
-    seal_path = Path("seal.sha256")
-    if not seal_path.is_file():
-        sys.exit("[FATAL] Seal file (seal.sha256) not found – aborting live start.")
+    from kalshi_sim.bot_deployment_auditor import BotDeploymentAuditor
+    auth_eth, reason_eth = BotDeploymentAuditor.check_live_authorization_on_disk("eth_bot1_v4")
+    if not auth_eth:
+        sys.exit(f"[FATAL] ETH bot seal verification failed: {reason_eth}")
 
 # ----------------------------------------------------------------------
 # 2️⃣  Logging configuration – shared with other bots

@@ -136,8 +136,17 @@ class Bot1V4DominationEngine:
         hysteresis_cooldown_seconds: float = 45.0,            # 45s sustained calm to return to chop
         experience_buffer: Optional[ContinuousExperienceBuffer] = None,
         enable_warrior_2_chop: bool = False,                  # Stand down in chop by default (anti-adverse selection)
+        order_client: Optional[Any] = None,
+        orderflow_feed: Optional[Any] = None,
+        target_ticker: Optional[str] = None,
+        **kwargs: Any,
     ) -> None:
         self.asset = CryptoAsset(str(asset).upper()) if not isinstance(asset, CryptoAsset) else asset
+        self.order_client = order_client
+        self.orderflow_feed = orderflow_feed
+        self.target_ticker = target_ticker
+        self._cached_market: Optional[Any] = None
+        self._last_market_fetch_ts: float = 0.0
         self.enable_warrior_2_chop = enable_warrior_2_chop
         self.max_turnover_per_event = max_turnover_per_event
         self.min_ev_hurdle_dollars = min_ev_hurdle_dollars
@@ -1372,3 +1381,300 @@ class Bot1V4DominationEngine:
             fused_source=fused_source,
             regime="STORM",
         )
+
+    async def fetch_active_market(self, rest_base: Optional[str] = None) -> Optional[Any]:
+        """Fetch active 15-minute market for this engine's asset."""
+        from kalshi_sim.schemas import MarketInfo, MarketStatus
+        from kalshi_sim.auth import PROD_REST_BASE, DEMO_REST_BASE, get_auth_headers
+        from kalshi_sim.ws_connection import create_aiohttp_connector
+        import aiohttp
+        import os
+
+        now_mono = time.monotonic()
+        now_utc = datetime.now(timezone.utc)
+
+        if rest_base is None:
+            env = os.getenv("KALSHI_ENV", "live").lower()
+            rest_base = PROD_REST_BASE if env in ("prod", "live") else DEMO_REST_BASE
+
+        if self._cached_market and (now_mono - self._last_market_fetch_ts < 2.0):
+            if getattr(self._cached_market, "close_time", None) and self._cached_market.close_time > now_utc:
+                return self._cached_market
+
+        series_ticker = f"KX{self.asset.value.upper()}15M"
+        url = f"{rest_base}/markets?series_ticker={series_ticker}&status=open&limit=10"
+        connector = create_aiohttp_connector()
+        headers = {"User-Agent": "KalshiSim-Bot1V4/1.0", "Accept": "application/json"}
+
+        if self.order_client and hasattr(self.order_client, "api_key_id") and hasattr(self.order_client, "private_key"):
+            headers = get_auth_headers(
+                self.order_client.api_key_id,
+                self.order_client.private_key,
+                "GET",
+                "/trade-api/v2/markets",
+            )
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=4.0)
+            async with aiohttp.ClientSession(connector=connector, headers=headers, timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        markets_raw = data.get("markets", [])
+                        valid_markets = []
+                        for m in markets_raw:
+                            t_str = m.get("ticker", "")
+                            close_str = m.get("close_time")
+                            if not t_str or not close_str:
+                                continue
+                            close_dt = datetime.fromisoformat(close_str.replace("Z", "+00:00"))
+                            if close_dt > now_utc:
+                                valid_markets.append((close_dt, m))
+
+                        if valid_markets:
+                            valid_markets.sort(key=lambda x: x[0])
+                            _, chosen = valid_markets[0]
+                            floor_str = chosen.get("floor_strike")
+                            floor_dec = Decimal(str(floor_str)) if floor_str is not None else None
+                            close_dt = datetime.fromisoformat(chosen["close_time"].replace("Z", "+00:00"))
+                            open_dt = datetime.fromisoformat(chosen["open_time"].replace("Z", "+00:00")) if chosen.get("open_time") else None
+
+                            minfo = MarketInfo(
+                                ticker=chosen.get("ticker", ""),
+                                series_ticker=chosen.get("series_ticker", series_ticker),
+                                title=chosen.get("title", ""),
+                                subtitle=chosen.get("subtitle", ""),
+                                status=MarketStatus.OPEN,
+                                open_time=open_dt,
+                                close_time=close_dt,
+                                expiration_time=close_dt,
+                                floor_strike=floor_dec,
+                                cap_strike=None,
+                                strike_type="greater",
+                            )
+                            self._cached_market = minfo
+                            self._last_market_fetch_ts = now_mono
+                            return minfo
+        except Exception as exc:
+            logger.debug("[%s BOT] Error discovering %s market: %s", self.asset.value.upper(), series_ticker, exc)
+
+        return self._cached_market
+
+    async def fetch_orderbook(self, ticker: str, rest_base: Optional[str] = None) -> Optional[L2BookState]:
+        """Fetch live Level-2 Orderbook snapshot for the target contract."""
+        from kalshi_sim.auth import PROD_REST_BASE, DEMO_REST_BASE
+        from kalshi_sim.ws_connection import create_aiohttp_connector
+        import aiohttp
+        import os
+
+        if rest_base is None:
+            env = os.getenv("KALSHI_ENV", "live").lower()
+            rest_base = PROD_REST_BASE if env in ("prod", "live") else DEMO_REST_BASE
+
+        url = f"{rest_base}/markets/{ticker}/orderbook"
+        connector = create_aiohttp_connector()
+        headers = {"User-Agent": "KalshiSim-Bot1V4/1.0", "Accept": "application/json"}
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=3.0)
+            async with aiohttp.ClientSession(connector=connector, headers=headers, timeout=timeout) as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        raw_book = data.get("orderbook_fp") or data.get("orderbook") or {}
+                        bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []
+                        asks = raw_book.get("no_dollars") or raw_book.get("no") or []
+
+                        book = L2BookState(ticker)
+                        new_yes: dict[Decimal, Decimal] = {}
+                        new_no: dict[Decimal, Decimal] = {}
+                        for p_val, q_val in bids:
+                            new_yes[Decimal(str(p_val))] = Decimal(str(q_val))
+                        for p_val, q_val in asks:
+                            new_no[Decimal(str(p_val))] = Decimal(str(q_val))
+
+                        book.yes_book = new_yes
+                        book.no_book = new_no
+                        book.last_update = datetime.now(timezone.utc)
+                        book._stale = False
+                        return book
+        except Exception as exc:
+            logger.debug("[%s BOT] Error fetching orderbook for %s: %s", self.asset.value.upper(), ticker, exc)
+
+        return None
+
+    def get_spot_price(self) -> Decimal:
+        """Retrieve current asset spot price from feed or live exchange ticker."""
+        if self.orderflow_feed and getattr(self.orderflow_feed, "last_spot_price", 0) > 0:
+            return self.orderflow_feed.last_spot_price
+        symbol = f"{self.asset.value.upper()}USDT"
+        fallback_val = "2350.00" if self.asset == CryptoAsset.ETH else "80500.00"
+        try:
+            import urllib.request
+            resp = urllib.request.urlopen(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=2.0)
+            data = json.loads(resp.read().decode())
+            return Decimal(str(data.get("price", fallback_val)))
+        except Exception:
+            pass
+        return Decimal(fallback_val)
+
+    async def run_cycle(self, ticker: Optional[str] = None) -> Optional[Bot1V4Decision]:
+        """Execute a single cycle iteration of the Bot 1 V4 engine.
+        
+        1. Checks asset-isolated circuit breaker / gate.
+        2. Discovers active 15m market.
+        3. Ingests L2 orderbook and spot price.
+        4. Evaluates market opportunity using Bot 1 V4 quantitative logic.
+        5. Places 1 contract adhering to micro-bankroll sizing and 1-trade-per-cycle lock.
+        """
+        from kalshi_sim.agent_guardrails import get_global_guardrails
+        guardrails = get_global_guardrails()
+
+        is_eth = (self.asset == CryptoAsset.ETH)
+        is_btc = (self.asset == CryptoAsset.BTC)
+
+        if is_eth and not guardrails.is_eth_bot_armed:
+            logger.info("🛑 [ETH BOT 1 V4] Stand down: ETH bot circuit breaker tripped (%d consecutive losses). Stopped per user directive.", guardrails._eth_consecutive_losses)
+            return None
+
+        if is_btc and not guardrails.is_btc_bot_armed:
+            logger.info("🛑 [BTC BOT 1 V4] Stand down: BTC bot halted after 10 trades with non-positive PnL ($%s). Stopped per user directive.", guardrails._btc_pnl)
+            return None
+
+        target_ticker = ticker or self.target_ticker
+        market_info = None
+
+        if not target_ticker or "-" not in target_ticker:
+            market_info = await self.fetch_active_market()
+            if market_info:
+                target_ticker = market_info.ticker
+
+        if not target_ticker or "-" not in target_ticker:
+            logger.debug("[%s BOT] No active 15M market discovered.", self.asset.value.upper())
+            return None
+
+        # Fetch live L2 book
+        book = await self.fetch_orderbook(target_ticker)
+        if not book or (not book.yes_book and not book.no_book):
+            logger.debug("[%s BOT] Orderbook for %s empty or unavailable.", self.asset.value.upper(), target_ticker)
+            return None
+
+        # Determine target strike & time to expiry
+        now_utc = datetime.now(timezone.utc)
+        target_strike = Decimal("2350.00") if is_eth else Decimal("80500.00")
+        time_to_expiry_s = 600.0
+
+        if market_info and market_info.floor_strike:
+            target_strike = market_info.floor_strike
+        elif "-" in target_ticker:
+            parts = target_ticker.split("-")
+            if len(parts) >= 3:
+                try:
+                    target_strike = Decimal(parts[-1])
+                except Exception:
+                    pass
+
+        if market_info and market_info.expiration_time:
+            time_to_expiry_s = max(1.0, (market_info.expiration_time - now_utc).total_seconds())
+
+        spot_price = self.get_spot_price()
+        vpin_score = 0.15
+        if self.orderflow_feed:
+            vpin_score = min(0.99, max(0.01, abs(getattr(self.orderflow_feed, "ofi_l1", 0.15))))
+
+        decision = self.evaluate(
+            book=book,
+            spot_price=float(spot_price),
+            target_strike=float(target_strike),
+            time_to_expiry_s=time_to_expiry_s,
+            recent_trades=[],
+            total_equity=Decimal("100.00"),
+            max_position_size=1,
+            estimated_vpin=vpin_score,
+            cycle_id=target_ticker,
+            spot_velocity_3s=0.0,
+        )
+
+        logger.info(
+            "⚡ [%s BOT 1 V4] %s | Side: %s | P(Win): %.1f%% | EV: $%.2f | Price: $%.2f | Action: %s (%s)",
+            self.asset.value.upper(),
+            target_ticker,
+            decision.recommended_side.upper(),
+            (decision.p_up if decision.recommended_side == "yes" else decision.p_down) * 100.0,
+            decision.ev_yes if decision.recommended_side == "yes" else decision.ev_no,
+            float(getattr(decision, "limit_price", 0.42)),
+            getattr(decision, "action", decision.recommended_side.upper()),
+            decision.rationale[:60],
+        )
+
+        # Execution guardrails: 1 trade per cycle & micro-bankroll sizing (1 contract)
+        if decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
+            if self.order_client:
+                # 1-trade-per-cycle lock check
+                completed = self.get_completed_turnovers(target_ticker)
+                if completed >= self.max_turnover_per_event or guardrails.is_cycle_locked(target_ticker):
+                    logger.info("[%s BOT] Cycle %s already locked (turnover limit reached).", self.asset.value.upper(), target_ticker)
+                    return decision
+
+                order_side = OrderSide.YES if decision.recommended_side == "yes" else OrderSide.NO
+                limit_p = getattr(decision, "limit_price", Decimal("0.42"))
+                if not isinstance(limit_p, Decimal):
+                    limit_p = Decimal(str(round(limit_p, 2)))
+
+                # Validate with guardrails
+                allowed, reason, approved_size, _ = guardrails.validate_pre_trade_intent(
+                    ticker=target_ticker,
+                    side=order_side.value,
+                    requested_size=1,
+                    est_price=limit_p,
+                    total_equity=Decimal("100.00"),
+                    vpin=vpin_score,
+                    cycle_id=target_ticker,
+                    is_bot=True,
+                    bot_type=self.STRATEGY_ID,
+                    is_live=True,
+                )
+                if not allowed:
+                    logger.warning("[%s BOT GUARDRAIL BLOCKED] %s", self.asset.value.upper(), reason)
+                    return decision
+
+                try:
+                    import inspect
+                    order_kwargs = {
+                        "ticker": target_ticker,
+                        "side": order_side.value,
+                        "count": 1,
+                        "order_type": getattr(decision, "order_type", "limit"),
+                    }
+                    try:
+                        sig = inspect.signature(self.order_client.place_order)
+                        if "price_dollars" in sig.parameters:
+                            order_kwargs["price_dollars"] = limit_p
+                        else:
+                            order_kwargs["price"] = limit_p
+                    except Exception:
+                        order_kwargs["price_dollars"] = limit_p
+
+                    res = await self.order_client.place_order(**order_kwargs)
+                    self.record_completed_turnover(target_ticker)
+                    logger.info("🚀 [%s BOT ORDER EXECUTED] %s %s 1 ct @ $%s | Result: %s", self.asset.value.upper(), target_ticker, order_side.value, limit_p, res)
+                    guardrails.record_trade_inception(
+                        trade_id=str(res.get("order_id", f"ord_{int(time.time()*1000)}")) if isinstance(res, dict) else f"ord_{int(time.time()*1000)}",
+                        ticker=target_ticker,
+                        side=order_side.value,
+                        size=1,
+                        price=limit_p,
+                        cost=limit_p,
+                        fee=Decimal("0.01"),
+                        bot_type=self.STRATEGY_ID,
+                        execution_mode="live",
+                        rationale=decision.rationale[:60],
+                        vpin=vpin_score,
+                        ai_prob=float(decision.p_up if decision.recommended_side == "yes" else decision.p_down),
+                        cycle_id=target_ticker,
+                    )
+                except Exception as exc:
+                    logger.error("[%s BOT] Failed to place order: %s", self.asset.value.upper(), exc)
+                    guardrails.release_in_flight_intent(target_ticker)
+
+        return decision

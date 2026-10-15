@@ -184,6 +184,7 @@ class VirtualOrderRouter:
                 active_strategy_bot is None
                 or b_type == active_strategy_bot
                 or (b_type in ("3_step_domination_bot", "bot1_v4_domination") and active_strategy_bot in ("3_step_domination_bot", "bot1_v4_domination", "both", "dual", "all", "dual_fleet"))
+                or (b_type in ("eth_bot1_v4", "eth_bot1v4", "dynamic_trading_strategy") and active_strategy_bot in ("eth_bot1_v4", "eth_bot1v4", "dynamic_trading_strategy", "both", "dual", "all", "dual_fleet"))
                 or (b_type in ("macro_trend_dominion", "macro_onnx") and active_strategy_bot in ("macro_trend_dominion", "macro_onnx"))
                 or active_strategy_bot in ("both", "dual", "all", "dual_fleet")
             )
