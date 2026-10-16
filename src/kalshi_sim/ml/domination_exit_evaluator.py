@@ -190,9 +190,19 @@ class DominationExitEvaluator:
             if side is None:
                 side = getattr(pos_obj, "side", OrderSide.YES)
             if entry_price is None:
-                entry_price = getattr(pos_obj, "entry_price", Decimal("0.55"))
+                raw_px = getattr(pos_obj, "entry_price", None)
+                if raw_px is None:
+                    raw_px = getattr(pos_obj, "avg_entry_price", Decimal("0.55"))
+                try:
+                    entry_price = Decimal(str(raw_px))
+                except Exception:
+                    entry_price = Decimal("0.55")
             if size is None or size == 0:
-                size = getattr(pos_obj, "size", 1)
+                raw_size = getattr(pos_obj, "size", 1)
+                try:
+                    size = int(raw_size)
+                except Exception:
+                    size = 1
 
         if side is None:
             side = OrderSide.YES
@@ -439,13 +449,24 @@ class DominationExitEvaluator:
                 twap_safe_itm = True
 
         # Asymmetric Peak Harvest Floor: In choppy regimes or after +50% ROI, risking 75c for 25c upside is negative EV.
+        # Mid-Cycle Bargain Harvest: If bought at bargain (entry <= $0.45 or ROI >= 75%) and bid reaches >= $0.78 with T >= 180s,
+        # harvest immediately to prevent flash reversals.
+        is_mid_cycle_bargain = (
+            time_to_expiry_s >= 180.0
+            and best_bid >= Decimal("0.78")
+            and (roi >= 0.75 or (entry_price <= Decimal("0.45") and roi >= 0.70))
+        )
+        req_rev = getattr(bot, "require_reversal_for_asymmetric_peak", getattr(bot, "require_reversal_for_tp_ceiling", False))
         if (
             bot.enable_take_profit_ceiling
-            and best_bid >= asymmetric_peak
             and net_pnl_per_ct > Decimal("0.02")
             and not twap_safe_itm
-            and ((not getattr(bot, "require_reversal_for_asymmetric_peak", False)) or reverse_prob >= dyn_reversal_threshold)
+            and (
+                is_mid_cycle_bargain
+                or (best_bid >= asymmetric_peak and ((not req_rev) or reverse_prob >= dyn_reversal_threshold))
+            )
         ):
+            reason_label = "MID_CYCLE_BARGAIN" if is_mid_cycle_bargain else "ASYMMETRIC_PEAK"
             return DominationExitDecision(
                 should_exit=True,
                 exit_reason="ASYMMETRIC_PEAK_HARVEST",
@@ -453,9 +474,10 @@ class DominationExitEvaluator:
                 profit_pct=round(roi * 100.0, 2),
                 unrealized_pnl=round(total_net_pnl, 4),
                 rationale=(
-                    f"⛰️ [ASYMMETRIC PEAK HARVEST] Bid ${best_bid:.2f} >= ${asymmetric_peak:.2f} ceiling reached | "
-                    f"Remaining upside only +${(Decimal('1.00')-best_bid):.2f} vs -${best_bid:.2f} downside | "
-                    f"Net profit +${total_net_pnl:.2f} (+{roi*100:.1f}% ROI) | Harvesting optimal EV peak."
+                    f"⛰️ [ASYMMETRIC PROFIT HARVEST ({reason_label})] Best bid ${best_bid:.2f} reached with "
+                    f"+{roi*100:.1f}% ROI (+${total_net_pnl:.2f}) at T={int(time_to_expiry_s)}s | "
+                    f"Remaining upside only +${(Decimal('1.00')-best_bid):.2f} vs downside -${best_bid:.2f} | "
+                    f"Banking whopping profit immediately rather than gambling on late-cycle reversal."
                 ),
                 order_type="market",
             )
@@ -480,7 +502,7 @@ class DominationExitEvaluator:
         # Rule 5.2: Fast Taker Win Lock ("A Win is Truly a Win Even With Fees")
         # In specific asymmetric scenarios, taking liquidity fast and paying the exchange fee ($0.01)
         # locks in guaranteed cash and prevents late-cycle variance from destroying banked gains.
-        enable_fast_win_lock = getattr(bot, "enable_fast_win_lock", True)
+        enable_fast_win_lock = getattr(bot, "enable_fast_win_lock", False)
         if enable_fast_win_lock and net_pnl_per_ct > Decimal("0.02") and not twap_safe_itm:
             fast_asym_bid = getattr(bot, "fast_lock_asymmetric_bid", Decimal("0.78"))
             min_fast_bid = getattr(bot, "min_fast_lock_bid", Decimal("0.68"))

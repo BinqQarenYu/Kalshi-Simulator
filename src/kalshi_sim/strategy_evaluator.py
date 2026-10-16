@@ -95,6 +95,7 @@ class StrategyEvaluationCoordinator:
         self._last_onnx_ts: dict[str, float] = {}
         self._last_pred_log_time: dict[str, float] = {}
         self._spot_price_history: dict[str, list[tuple[float, float]]] = {}
+        self._peak_bids: dict[str, Decimal] = {}
         self._eval_count: int = 0
 
     @property
@@ -156,14 +157,23 @@ class StrategyEvaluationCoordinator:
         # Candidate rejected or missing; try dedicated asset orderflow feeds
         if asset == CryptoAsset.ETH:
             if hasattr(self, "_eth_orderflow_feed") and self._eth_orderflow_feed and hasattr(self._eth_orderflow_feed, "last_spot_price"):
-                return Decimal(str(self._eth_orderflow_feed.last_spot_price))
+                try:
+                    return Decimal(str(self._eth_orderflow_feed.last_spot_price))
+                except Exception:
+                    pass
             if self._eth_bot1_v4_engine and hasattr(self._eth_bot1_v4_engine, "orderflow_feed"):
                 feed = getattr(self._eth_bot1_v4_engine, "orderflow_feed", None)
                 if feed and hasattr(feed, "last_spot_price"):
-                    return Decimal(str(feed.last_spot_price))
+                    try:
+                        return Decimal(str(feed.last_spot_price))
+                    except Exception:
+                        pass
         elif asset == CryptoAsset.BTC:
             if self._btc_orderflow_feed and hasattr(self._btc_orderflow_feed, "last_spot_price"):
-                return Decimal(str(self._btc_orderflow_feed.last_spot_price))
+                try:
+                    return Decimal(str(self._btc_orderflow_feed.last_spot_price))
+                except Exception:
+                    pass
 
         # Default fallback: target_strike of the market
         return target_strike
@@ -226,10 +236,19 @@ class StrategyEvaluationCoordinator:
             if holder and holder[1] != os.getpid():
                 return
 
+        # Check if an open position is held in any portfolio for this ticker
+        has_open_pos = any(
+            p.get_position(ticker) is not None
+            for p in (portfolio_domination, portfolio_macro_trend, portfolio_dominion2, portfolio_onnx, portfolio_dual_onnx)
+            if p is not None
+        )
+
         # Guardrails cycle lock check (exempt market maker to permit two-sided continuous liquidity)
+        # CRITICAL: If an open position exists, DO NOT early-return; we must allow exit evaluation to execute!
         cycle_key = market_info.event_ticker if (market_info and market_info.event_ticker) else ticker
-        if is_live and active_strategy_bot not in ("market_maker", "bot6_market_maker", "dual_fleet", "both") and (cycle_key in self._guardrails._cycle_locks or ticker in self._guardrails._cycle_locks):
-            return
+        if is_live and active_strategy_bot not in ("market_maker", "bot6_market_maker", "dual_fleet", "both"):
+            if not has_open_pos and (cycle_key in self._guardrails._cycle_locks or ticker in self._guardrails._cycle_locks):
+                return
 
         # BOT 3: Macro ONNX & Macro Trend Dominion
         if active_strategy_bot in (
@@ -345,6 +364,18 @@ class StrategyEvaluationCoordinator:
     ) -> None:
         pos = portfolio.get_position(ticker)
         if pos is not None:
+            await self._eval_domination_exit(
+                ticker=ticker,
+                pos=pos,
+                book=book,
+                market_info=market_info,
+                trades=[],
+                timeframe=timeframe,
+                portfolio=portfolio,
+                is_live=is_live,
+                place_order_fn=place_order_fn,
+                active_bot_type="dynamic_trading_strategy",
+            )
             return
 
         if not portfolio.circuit_breaker_tripped and len(portfolio.open_positions) < MAX_CONCURRENT_POSITIONS:
@@ -809,8 +840,21 @@ class StrategyEvaluationCoordinator:
                 if dt >= 0.5:
                     spot_velocity_3s = (spot_price - oldest_in_window[1]) / dt * 3.0
 
+            # Track peak bid for trailing ratchet and profit protection
+            side_is_yes = (pos.side == OrderSide.YES) if isinstance(pos.side, OrderSide) else (str(pos.side).lower() == "yes")
+            curr_bid = book.best_yes_bid if side_is_yes else book.best_no_bid
+            if curr_bid is not None and curr_bid > Decimal("0.00"):
+                prev_peak = self._peak_bids.get(ticker, pos.entry_price)
+                if curr_bid > prev_peak:
+                    self._peak_bids[ticker] = curr_bid
+            peak_bid = self._peak_bids.get(ticker)
+
             # Retrieve active strategy engine for exit evaluation
-            bot_engine = getattr(self, "_bot1_v4_engine", None) or self._domination_bot
+            asset = detect_asset_from_ticker(ticker)
+            if asset == CryptoAsset.ETH and getattr(self, "_eth_bot1_v4_engine", None) is not None:
+                bot_engine = self._eth_bot1_v4_engine
+            else:
+                bot_engine = getattr(self, "_bot1_v4_engine", None) or self._domination_bot
             exit_eval = getattr(bot_engine, "exit_evaluator", None) or getattr(bot_engine, "_exit_evaluator", None)
 
             if exit_eval:
@@ -825,9 +869,11 @@ class StrategyEvaluationCoordinator:
                     time_to_expiry_s=time_to_expiry_s,
                     vpin=vpin_score,
                     spot_velocity_3s=spot_velocity_3s,
+                    peak_bid=peak_bid,
                 )
 
                 if exit_decision and exit_decision.should_exit:
+                    self._peak_bids.pop(ticker, None)
                     exit_price = Decimal(str(exit_decision.exit_price or "0.75"))
                     logger.info(
                         "🎯 [%s SCALP EXIT TRIGGERED] %-18s | Action: SELL %s 1 ct @ $%s | Reason: %s | Profit: %+.1f%% (%s)",
@@ -853,7 +899,7 @@ class StrategyEvaluationCoordinator:
                                 final_pnl=float(res.pnl),
                                 outcome=res.outcome,
                                 ending_equity=float(portfolio.equity),
-                                bot_type="bot1_v4_domination",
+                                bot_type=active_bot_type,
                                 execution_mode="simulated",
                             )
                             if hasattr(bot_engine, "record_completed_turnover"):
@@ -868,8 +914,8 @@ class StrategyEvaluationCoordinator:
                             timeframe=timeframe,
                             reasoning=f"Scalp Take-Profit Exit: {exit_decision.exit_reason} ({exit_decision.rationale})",
                             portfolio=portfolio,
-                            bot_type="bot1_v4_domination",
-                            order_type=getattr(exit_decision, "order_type", "limit"),
+                            bot_type=active_bot_type,
+                            order_type=getattr(exit_decision, "order_type", "market"),
                             limit_price=exit_price,
                             action="sell",
                         )

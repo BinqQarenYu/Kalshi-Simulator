@@ -293,58 +293,90 @@ class VirtualOrderRouter:
                                 ticker, avg_price, order_id,
                             )
 
-                        # Track position in portfolio for early-exit and lifecycle management
-                        try:
-                            side_enum = OrderSide.YES if live_side.lower() == "yes" else OrderSide.NO
-                            sim_fill = SimulatedFill(
-                                order_id=f"live_{order_id}",
+                        if action == "sell":
+                            try:
+                                close_res = active_p.close_position(ticker, Decimal(str(avg_price)))
+                                logger.info(
+                                    "[PORTFOLIO EXIT] Live position closed: %s %d cts @ $%s on %s (PnL: %s)",
+                                    live_side.upper(), actual_fills, avg_price, ticker,
+                                    f"+${close_res.pnl:.4f}" if close_res else "N/A"
+                                )
+                                if close_res:
+                                    self._db_writer.enqueue_settlement_record(
+                                        settlement_id=f"SCALP_{ticker}_{int(time.time())}",
+                                        ticker=ticker,
+                                        side=close_res.side.value if hasattr(close_res.side, "value") else str(close_res.side),
+                                        count=close_res.size,
+                                        price=float(close_res.settlement_price),
+                                        final_pnl=float(close_res.pnl),
+                                        outcome=close_res.outcome,
+                                        ending_equity=float(active_p.equity),
+                                        bot_type=b_type,
+                                        execution_mode="live",
+                                    )
+                                    self._guardrails.record_trade_settlement(
+                                        ticker=ticker,
+                                        pnl=close_res.pnl,
+                                        was_win=(close_res.pnl > Decimal("0.00")),
+                                        balance_after=active_p.balance,
+                                        cycle_id=ticker,
+                                        execution_mode="live",
+                                    )
+                            except Exception as p_err:
+                                logger.error("Failed to close live position in portfolio: %s", p_err)
+                        else:
+                            # Track position in portfolio for early-exit and lifecycle management
+                            try:
+                                side_enum = OrderSide.YES if live_side.lower() == "yes" else OrderSide.NO
+                                sim_fill = SimulatedFill(
+                                    order_id=f"live_{order_id}",
+                                    ticker=ticker,
+                                    side=side_enum,
+                                    size=actual_fills,
+                                    fill_price=Decimal(str(avg_price)),
+                                    cost=Decimal(str(cost)),
+                                    fee=Decimal(str(fee)),
+                                )
+                                active_p.open_position(
+                                    fill=sim_fill,
+                                    timeframe=timeframe,
+                                    entry_confidence=float(snapshot.win_rate or 0.70),
+                                    entry_vpin=0.15,
+                                )
+                                logger.info(
+                                    "[PORTFOLIO TRACKING] Live position registered: %s %d cts @ $%s on %s",
+                                    live_side.upper(), actual_fills, avg_price, ticker
+                                )
+                            except Exception as p_err:
+                                logger.error("Failed to register live fill in portfolio: %s", p_err)
+
+                            self._guardrails.record_trade_inception(
+                                trade_id=f"live_{order_id}",
                                 ticker=ticker,
-                                side=side_enum,
+                                side=live_side,
                                 size=actual_fills,
-                                fill_price=Decimal(str(avg_price)),
+                                price=Decimal(str(avg_price)),
                                 cost=Decimal(str(cost)),
                                 fee=Decimal(str(fee)),
+                                bot_type=b_type,
+                                execution_mode="live",
+                                rationale=reasoning,
+                                vpin=0.15,
+                                ai_prob=float(snapshot.win_rate or 0.70),
+                                cycle_id=ticker,
                             )
-                            active_p.open_position(
-                                fill=sim_fill,
-                                timeframe=timeframe,
-                                entry_confidence=float(snapshot.win_rate or 0.70),
-                                entry_vpin=0.15,
+                            self._db_writer.enqueue_trade(
+                                trade_id=f"live_{order_id}",
+                                ticker=ticker,
+                                side=live_side,
+                                size=actual_fills,
+                                price=avg_price,
+                                gross_value=cost,
+                                timeframe=timeframe.value,
+                                bot_type=b_type,
+                                execution_mode="live",
+                                status="filled",
                             )
-                            logger.info(
-                                "[PORTFOLIO TRACKING] Live position registered: %s %d cts @ $%s on %s",
-                                live_side.upper(), actual_fills, avg_price, ticker
-                            )
-                        except Exception as p_err:
-                            logger.error("Failed to register live fill in portfolio: %s", p_err)
-
-                        self._guardrails.record_trade_inception(
-                            trade_id=f"live_{order_id}",
-                            ticker=ticker,
-                            side=live_side,
-                            size=actual_fills,
-                            price=Decimal(str(avg_price)),
-                            cost=Decimal(str(cost)),
-                            fee=Decimal(str(fee)),
-                            bot_type=b_type,
-                            execution_mode="live",
-                            rationale=reasoning,
-                            vpin=0.15,
-                            ai_prob=float(snapshot.win_rate or 0.70),
-                            cycle_id=ticker,
-                        )
-                        self._db_writer.enqueue_trade(
-                            trade_id=f"live_{order_id}",
-                            ticker=ticker,
-                            side=live_side,
-                            size=actual_fills,
-                            price=avg_price,
-                            gross_value=cost,
-                            timeframe=timeframe.value,
-                            bot_type=b_type,
-                            execution_mode="live",
-                            status="filled",
-                        )
                         logger.info(
                             "[KALSHI LIVE PRODUCTION EXCHANGE] Order FILLED: %s | Fills: %d | Ticker: %s | Side: %s | Cost: $%.4f",
                             order_id, actual_fills, ticker, live_side.upper(), cost,

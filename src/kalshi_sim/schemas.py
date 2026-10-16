@@ -856,6 +856,11 @@ class Position(BaseModel):
     entry_confidence: float = 0.0
     entry_vpin: float = 0.0
 
+    @property
+    def entry_price(self) -> Decimal:
+        """Alias for avg_entry_price for evaluation convenience."""
+        return self.avg_entry_price
+
     model_config = {"extra": "ignore"}
 
 
