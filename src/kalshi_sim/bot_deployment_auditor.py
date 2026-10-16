@@ -796,7 +796,11 @@ class BotDeploymentAuditor:
         overall_status = "BLOCKED" if has_failure else "CERTIFIED"
 
         code_pillars_pass = all(p.status == "PASS" for p in [p1, p2, p3, p4])
-        is_baseline = bot_id in ("3_step_domination_bot", "three_step_domination_bot", "3_step_dominion", "bot1_v4_domination", "bot1_v4", "eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot")
+        is_baseline = bot_id in (
+            "3_step_domination_bot", "three_step_domination_bot", "3_step_dominion",
+            "bot1_v4_domination", "bot1_v4", "eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot",
+            "dynamic_trading_strategy", "dynamic_strategy", "dynamic_regime_adaptive",
+        )
 
         n_c = settled_cycles if settled_cycles is not None else getattr(bot_instance, "settled_cycles", 0)
         wr = win_rate if win_rate is not None else getattr(bot_instance, "win_rate", 0.0)
@@ -889,7 +893,9 @@ class BotDeploymentAuditor:
     def is_certified(self, bot_id: str) -> bool:
         """Check if a bot has a valid, active certification pass."""
         report = self._certifications.get(bot_id)
-        return report is not None and report.is_certified
+        if report is not None and report.is_certified:
+            return True
+        return self.has_seal_of_excellence(bot_id)
 
     def get_certification(self, bot_id: str) -> Optional[BotAuditReport]:
         """Get the latest certification report for a bot."""

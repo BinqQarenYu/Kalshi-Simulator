@@ -169,9 +169,11 @@ class SimulationAgent:
         )
 
         # Run Pre-Deployment Audit Certification Gate on all candidate bots
+        dyn_eng = getattr(self._strategy_evaluator, "_dynamic_regime_engine", None)
         for b_id, b_inst in [
             ("3_step_domination_bot", self._domination_bot),
             ("bot1_v4_domination", self._bot1_v4_engine),
+            ("dynamic_trading_strategy", dyn_eng),
             ("eth_bot1_v4", self._eth_bot1_v4_engine),
             ("dominion_2_bot", self._dominion2_bot),
             ("macro_trend_dominion", self._macro_trend_bot),
