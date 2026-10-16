@@ -239,10 +239,13 @@ class KevDecisionOracle:
         diff_val = 0.0
         vpin_val = 0.20
         ofi_val = 0.0
+        asset_val = "ETH"
         try:
             for part in context.split("|"):
                 part_clean = part.strip()
-                if part_clean.startswith("Diff:"):
+                if part_clean.startswith("Asset:"):
+                    asset_val = part_clean.replace("Asset:", "").strip().upper()
+                elif part_clean.startswith("Diff:"):
                     diff_val = float(part_clean.replace("Diff:", "").strip())
                 elif part_clean.startswith("VPIN:"):
                     vpin_val = float(part_clean.replace("VPIN:", "").strip())
@@ -250,6 +253,17 @@ class KevDecisionOracle:
                     ofi_val = float(part_clean.split("OFI_L1:")[-1].strip())
         except Exception:
             pass
+
+        # Asset-calibrated moneyness thresholds
+        if asset_val == "BTC":
+            diff_thresh = 25.0
+            storm_thresh = 75.0
+        elif asset_val == "SOL":
+            diff_thresh = 0.40
+            storm_thresh = 1.20
+        else:  # ETH
+            diff_thresh = 1.50
+            storm_thresh = 6.00
 
         for q in questions:
             probs: Dict[str, Decimal] = {}
@@ -263,7 +277,7 @@ class KevDecisionOracle:
             elif q.key == "regime":
                 if vpin_val >= 0.70:
                     probs = {"CHOP": Decimal("0.1000"), "STORM": Decimal("0.2000"), "BLEED": Decimal("0.7000"), "HEALING": Decimal("0.0000")}
-                elif abs(diff_val) >= 7.50:
+                elif abs(diff_val) >= storm_thresh:
                     probs = {"CHOP": Decimal("0.1500"), "STORM": Decimal("0.7500"), "BLEED": Decimal("0.1000"), "HEALING": Decimal("0.0000")}
                 else:
                     probs = {"CHOP": Decimal("0.8000"), "STORM": Decimal("0.1500"), "BLEED": Decimal("0.0500"), "HEALING": Decimal("0.0000")}
@@ -271,11 +285,11 @@ class KevDecisionOracle:
 
             elif q.key in ("trade_direction", "consensus_direction"):
                 # Calibrate probabilities from moneyness diff and OFI
-                if diff_val > 1.50 and ofi_val >= 0.0:
+                if diff_val > diff_thresh and ofi_val >= -0.30:
                     p_yes = Decimal("0.7800")
                     p_no = Decimal("0.1000")
                     p_wait = Decimal("0.1200")
-                elif diff_val < -1.50 and ofi_val <= 0.0:
+                elif diff_val < -diff_thresh and ofi_val <= 0.30:
                     p_yes = Decimal("0.1000")
                     p_no = Decimal("0.7800")
                     p_wait = Decimal("0.1200")

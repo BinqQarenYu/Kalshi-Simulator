@@ -383,6 +383,65 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             decision.rationale[:60],
         )
 
+        # IN-FLIGHT ACTIVE POSITION DERISKING & TAKE-PROFIT
+        if self.order_client and target_ticker in self._active_trade_forensics:
+            active_info = self._active_trade_forensics[target_ticker]
+            if not active_info.get("exited", False):
+                pos_side = active_info.get("side", "yes")
+                entry_pr = Decimal(str(active_info.get("entry_price", "0.50")))
+                bid_to_sell = book.best_yes_bid if pos_side == "yes" else book.best_no_bid
+
+                # 1. Take Profit: If position gained strongly (bid >= $0.88) with >= 120s left
+                if bid_to_sell is not None and bid_to_sell >= Decimal("0.88") and time_to_expiry_s >= 120.0:
+                    try:
+                        logger.info("🎯 [TAKE PROFIT TRIGGER] Selling %s %s @ $%s (Entry: $%s) to lock profit.", target_ticker, pos_side.upper(), bid_to_sell, entry_pr)
+                        sell_kwargs = {
+                            "ticker": target_ticker,
+                            "side": pos_side,
+                            "action": "sell",
+                            "count": 1,
+                            "order_type": "limit",
+                            "price_dollars": bid_to_sell,
+                            "time_in_force": "immediate_or_cancel",
+                        }
+                        res_sell = await self.order_client.place_order(**sell_kwargs)
+                        if res_sell and not ("error" in res_sell or res_sell.get("status") in ("canceled", "rejected", "error")):
+                            active_info["exited"] = True
+                            active_info["exit_price"] = float(bid_to_sell)
+                            active_info["exit_reason"] = "take_profit"
+                            logger.info("✅ [TAKE PROFIT EXECUTED] Successfully locked profit @ $%s!", bid_to_sell)
+                    except Exception as tp_err:
+                        logger.debug("Take profit error: %s", tp_err)
+
+                # 2. Catastrophic Derisk / Salvage Stop:
+                # If spot drifted adverse past strike by >= $2.00 with >= 90s left, salvage at market bid
+                is_doomed = False
+                if pos_side == "yes" and spot_price < (target_strike - Decimal("2.00")):
+                    is_doomed = True
+                elif pos_side == "no" and spot_price > (target_strike + Decimal("2.00")):
+                    is_doomed = True
+
+                if is_doomed and bid_to_sell is not None and bid_to_sell >= Decimal("0.15") and time_to_expiry_s >= 90.0:
+                    try:
+                        logger.warning("🛡️ [SALVAGE DERISK TRIGGER] Position doomed (Spot: $%s vs Strike: $%s). Selling to salvage $%s/ct (Entry: $%s).", spot_price, target_strike, bid_to_sell, entry_pr)
+                        sell_kwargs = {
+                            "ticker": target_ticker,
+                            "side": pos_side,
+                            "action": "sell",
+                            "count": 1,
+                            "order_type": "limit",
+                            "price_dollars": bid_to_sell,
+                            "time_in_force": "immediate_or_cancel",
+                        }
+                        res_sell = await self.order_client.place_order(**sell_kwargs)
+                        if res_sell and not ("error" in res_sell or res_sell.get("status") in ("canceled", "rejected", "error")):
+                            active_info["exited"] = True
+                            active_info["exit_price"] = float(bid_to_sell)
+                            active_info["exit_reason"] = "salvage_derisk"
+                            logger.warning("🛡️ [SALVAGE DERISK EXECUTED] Salvaged $%s/ct! Loss capped at -$%s (Saved 100%% wipeout)", bid_to_sell, float(entry_pr - bid_to_sell))
+                    except Exception as sl_err:
+                        logger.debug("Salvage derisk error: %s", sl_err)
+
         # ------------------------------------------------------------------
         # KEV DECISIVE LEAD & MATH-OF-WINNING TAKER ENGINE
         # ------------------------------------------------------------------
@@ -426,8 +485,8 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
 
         # 2. Strict Moneyness Moat (Anti-Tie / Strict Inequality Protection)
         spot_diff = abs(spot_price - target_strike)
-        if spot_diff < Decimal("2.50"):
-            logger.info("⏸️ [PROXIMITY MOAT VETO] |Diff| $%.2f < $2.50 noise threshold. Stand down.", float(spot_diff))
+        if spot_diff < Decimal("1.50"):
+            logger.info("⏸️ [PROXIMITY MOAT VETO] |Diff| $%.2f < $1.50 noise threshold. Stand down.", float(spot_diff))
             return decision
 
         # 3. Kev Lead Direction Gate
@@ -441,13 +500,13 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
 
         # 3b. Moneyness Consistency Check (Anti-OTM Trap Filter)
         # Prevent buying out-of-the-money contracts when spot is adverse to strike
-        if chosen_side == OrderSide.YES and spot_price < (target_strike - Decimal("3.00")):
+        if chosen_side == OrderSide.YES and spot_price < (target_strike - Decimal("2.50")):
             logger.warning(
                 "🛑 [OTM TRAP FILTER] Kev recommended YES, but spot ($%s) is deep below strike ($%s) by -$%.2f. Stand down to WAIT.",
                 spot_price, target_strike, float(target_strike - spot_price)
             )
             return decision
-        if chosen_side == OrderSide.NO and spot_price > (target_strike + Decimal("3.00")):
+        if chosen_side == OrderSide.NO and spot_price > (target_strike + Decimal("2.50")):
             logger.warning(
                 "🛑 [OTM TRAP FILTER] Kev recommended NO, but spot ($%s) is deep above strike ($%s) by +$%.2f. Stand down to WAIT.",
                 spot_price, target_strike, float(spot_price - target_strike)
@@ -470,7 +529,8 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         # Dynamic Anti-Toxic Hurdle: widens when VPIN is elevated
         hurdle = Decimal("0.08") + Decimal(str(round(vpin_score * 0.10, 4)))
         max_taker_price = Decimal(str(round(p_win, 2))) - hurdle
-        max_taker_price = min(Decimal("0.55"), max(Decimal("0.10"), max_taker_price))
+        # Cap at $0.65 to enable symmetric high-conviction taker executions on both YES and NO
+        max_taker_price = min(Decimal("0.65"), max(Decimal("0.10"), max_taker_price))
 
         # 5. Live L2 Orderbook Taker Pricing & Zero-Liquidity Trap Protection
         best_ask = book.best_yes_ask if chosen_side == OrderSide.YES else book.best_no_ask
