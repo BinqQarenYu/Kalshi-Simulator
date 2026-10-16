@@ -137,6 +137,7 @@ async def test_eth_bot1v4_run_cycle_with_mock_order_client() -> None:
 
     engine.fetch_orderbook = mock_fetch_orderbook
     engine.get_macro_1h_slope = lambda: 0.0
+    engine.experience_buffer = None
 
     # Cycle 1: Execute opportunity
     decision = await engine.run_cycle()
