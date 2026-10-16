@@ -240,6 +240,7 @@ class KevDecisionOracle:
         vpin_val = 0.20
         ofi_val = 0.0
         asset_val = "ETH"
+        macro_val = 0.0
         try:
             for part in context.split("|"):
                 part_clean = part.strip()
@@ -251,6 +252,8 @@ class KevDecisionOracle:
                     vpin_val = float(part_clean.replace("VPIN:", "").strip())
                 elif "OFI_L1:" in part_clean:
                     ofi_val = float(part_clean.split("OFI_L1:")[-1].strip())
+                elif part_clean.startswith("Macro Slope:"):
+                    macro_val = float(part_clean.replace("Macro Slope:", "").strip())
         except Exception:
             pass
 
@@ -275,28 +278,63 @@ class KevDecisionOracle:
                 selected = "true" if p_toxic >= Decimal("0.5000") else "false"
 
             elif q.key == "regime":
-                if vpin_val >= 0.70:
-                    probs = {"CHOP": Decimal("0.1000"), "STORM": Decimal("0.2000"), "BLEED": Decimal("0.7000"), "HEALING": Decimal("0.0000")}
-                elif abs(diff_val) >= storm_thresh:
+                if macro_val <= -0.10 or (vpin_val >= 0.70 and ofi_val < -0.30):
+                    probs = {"CHOP": Decimal("0.0500"), "STORM": Decimal("0.1500"), "BLEED": Decimal("0.8000"), "HEALING": Decimal("0.0000")}
+                elif vpin_val >= 0.70 or abs(diff_val) >= storm_thresh:
                     probs = {"CHOP": Decimal("0.1500"), "STORM": Decimal("0.7500"), "BLEED": Decimal("0.1000"), "HEALING": Decimal("0.0000")}
                 else:
                     probs = {"CHOP": Decimal("0.8000"), "STORM": Decimal("0.1500"), "BLEED": Decimal("0.0500"), "HEALING": Decimal("0.0000")}
                 selected = max(probs.keys(), key=lambda k: probs[k])
 
             elif q.key in ("trade_direction", "consensus_direction"):
-                # Calibrate probabilities from moneyness diff and OFI
-                if diff_val > diff_thresh and ofi_val >= -0.30:
-                    p_yes = Decimal("0.7800")
-                    p_no = Decimal("0.1000")
-                    p_wait = Decimal("0.1200")
-                elif diff_val < -diff_thresh and ofi_val <= 0.30:
-                    p_yes = Decimal("0.1000")
-                    p_no = Decimal("0.7800")
-                    p_wait = Decimal("0.1200")
+                # Bleed / Macro Downtrend Mode (Slope <= -0.10): Asymmetric Bleed Inversion
+                if macro_val <= -0.10:
+                    # In a macro bleed, favor taking NO into the downward trend
+                    if diff_val < -diff_thresh * 0.5 and ofi_val <= 0.30:
+                        p_yes = Decimal("0.0800")
+                        p_no = Decimal("0.8200")
+                        p_wait = Decimal("0.1000")
+                    elif diff_val > diff_thresh * 2.0 and ofi_val >= 0.50:
+                        # Only permit counter-trend YES on overwhelming bullish surge
+                        p_yes = Decimal("0.7500")
+                        p_no = Decimal("0.1000")
+                        p_wait = Decimal("0.1500")
+                    else:
+                        p_yes = Decimal("0.1000")
+                        p_no = Decimal("0.3500")
+                        p_wait = Decimal("0.5500")
+
+                # Expansion / Macro Uptrend Mode (Slope >= +0.10)
+                elif macro_val >= 0.10:
+                    # In a macro uptrend, favor taking YES
+                    if diff_val > diff_thresh * 0.5 and ofi_val >= -0.30:
+                        p_yes = Decimal("0.8200")
+                        p_no = Decimal("0.0800")
+                        p_wait = Decimal("0.1000")
+                    elif diff_val < -diff_thresh * 2.0 and ofi_val <= -0.50:
+                        # Only permit counter-trend NO on overwhelming bearish plunge
+                        p_yes = Decimal("0.1000")
+                        p_no = Decimal("0.7500")
+                        p_wait = Decimal("0.1500")
+                    else:
+                        p_yes = Decimal("0.3500")
+                        p_no = Decimal("0.1000")
+                        p_wait = Decimal("0.5500")
+
+                # Neutral / Chop Mode (Symmetric baseline)
                 else:
-                    p_yes = Decimal("0.2500")
-                    p_no = Decimal("0.2500")
-                    p_wait = Decimal("0.5000")
+                    if diff_val > diff_thresh and ofi_val >= -0.30:
+                        p_yes = Decimal("0.7800")
+                        p_no = Decimal("0.1000")
+                        p_wait = Decimal("0.1200")
+                    elif diff_val < -diff_thresh and ofi_val <= 0.30:
+                        p_yes = Decimal("0.1000")
+                        p_no = Decimal("0.7800")
+                        p_wait = Decimal("0.1200")
+                    else:
+                        p_yes = Decimal("0.2500")
+                        p_no = Decimal("0.2500")
+                        p_wait = Decimal("0.5000")
 
                 probs = {"YES": p_yes, "NO": p_no, "WAIT": p_wait}
                 selected = max(probs.keys(), key=lambda k: probs[k])

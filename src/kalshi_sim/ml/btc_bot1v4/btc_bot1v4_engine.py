@@ -261,6 +261,48 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
 
         return None
 
+    def get_macro_1h_slope(self) -> float:
+        """Fetch 1h macro trend percentage slope with 60-second caching."""
+        now_mono = time.monotonic()
+        if hasattr(self, "_last_1h_slope") and hasattr(self, "_last_1h_slope_ts"):
+            if now_mono - getattr(self, "_last_1h_slope_ts", 0.0) < 60.0:
+                return float(self._last_1h_slope)
+
+        symbol = "BTCUSDT"
+        fallback = 0.0
+        try:
+            import urllib.request
+            url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1h&limit=2"
+            req = urllib.request.Request(url, headers={"User-Agent": "KalshiSim-BtcBot1V4/1.0"})
+            resp = urllib.request.urlopen(req, timeout=2.5)
+            data = json.loads(resp.read().decode())
+            if data and len(data) >= 1:
+                curr_kline = data[-1]
+                open_pr = float(curr_kline[1])
+                close_pr = float(curr_kline[4])
+                if open_pr > 0.0:
+                    slope_pct = ((close_pr - open_pr) / open_pr) * 100.0
+                    self._last_1h_slope = slope_pct
+                    self._last_1h_slope_ts = now_mono
+                    return slope_pct
+        except Exception as e:
+            logger.debug("[BTC MACRO SLOPE] Fallback reading candles: %s", e)
+
+        if self.orderflow_feed and hasattr(self.orderflow_feed, "candle_builder_5m"):
+            candles = self.orderflow_feed.candle_builder_5m.get_candles(symbol, count=12)
+            if len(candles) >= 2:
+                o = float(candles[0].open)
+                c = float(candles[-1].close)
+                if o > 0.0:
+                    slope = ((c - o) / o) * 100.0
+                    self._last_1h_slope = slope
+                    self._last_1h_slope_ts = now_mono
+                    return slope
+
+        self._last_1h_slope = fallback
+        self._last_1h_slope_ts = now_mono
+        return fallback
+
     def get_spot_price(self) -> Decimal:
         """Retrieve current BTC spot price from feed or Binance live ticker."""
         if self.orderflow_feed and self.orderflow_feed.last_spot_price > 0:
@@ -322,6 +364,7 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
         if self.orderflow_feed:
             vpin_score = min(0.99, max(0.01, abs(self.orderflow_feed.ofi_l1)))
 
+        macro_slope = self.get_macro_1h_slope()
         dof_gov = getattr(self, "dof_governor", None) or get_dof_governor()
 
         decision = self.evaluate(
@@ -397,11 +440,12 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
                     logger.debug("Take profit error: %s", tp_err)
 
             # 2. Catastrophic Derisk / Salvage Stop (DEF-03 Anti-Dispersion Armor):
-            # If spot drifted adverse past strike by >= $25.00 with >= 45s left, salvage at market bid
+            # Dynamic salvage breach: In a macro bleed (slope <= -0.10%), adverse drift breach is tightened to $15.00
+            salvage_breach = Decimal("15.00") if macro_slope <= -0.10 else Decimal("25.00")
             is_doomed = False
-            if pos_side == "yes" and spot_price < (target_strike - Decimal("25.00")):
+            if pos_side == "yes" and spot_price < (target_strike - salvage_breach):
                 is_doomed = True
-            elif pos_side == "no" and spot_price > (target_strike + Decimal("25.00")):
+            elif pos_side == "no" and spot_price > (target_strike + salvage_breach):
                 is_doomed = True
 
             dof_gov = getattr(self, "dof_governor", None) or get_dof_governor()
@@ -427,11 +471,11 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
 
             can_salvage = is_doomed and (not twap_safe) and (persist_ticks >= 2 if patch_04_active else True)
 
-            # Determine salvage floor (DoF-03)
+            # Determine salvage floor (DoF-03 & Bleed Inversion Floor)
             ofi_val = float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0)
-            if patch_03_active and ofi_val <= -0.70:
-                salvage_floor = Decimal("0.10")
-                logger.info("🛡️ [BTC DoF-03 STEPPED SALVAGE ACTIVE] Intense negative OFI (%.2f). Salvage floor lowered to $0.10.", ofi_val)
+            if (patch_03_active and ofi_val <= -0.70) or macro_slope <= -0.10:
+                salvage_floor = Decimal("0.08")
+                logger.info("🛡️ [BTC STEPPED SALVAGE ACTIVE] Macro bleed / negative OFI. Salvage floor lowered to $0.08.")
             else:
                 salvage_floor = Decimal("0.15")
 
@@ -472,6 +516,7 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
         kev_rec = None
         kev_toxic = None
         try:
+            kev_regime = "BLEED" if macro_slope <= -0.10 else getattr(self, "_current_regime", "CHOP")
             kev_ctx = self.kev_oracle.build_market_context(
                 asset="BTC",
                 spot_price=spot_price,
@@ -480,7 +525,8 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
                 ofi=float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0),
                 vpin=vpin_score,
                 spread_cents=0.02,
-                current_regime=getattr(self, "_current_regime", "CHOP"),
+                current_regime=kev_regime,
+                macro_slope=macro_slope,
             )
             kev_questions = [
                 KevQuestion("is_toxic_sweep", "Is toxic sweep?", KevQuestionType.BOOLEAN),
@@ -525,6 +571,17 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
             w_ratio = (getattr(wave_phys, "upper_wick_dollars", 0.0) / max(1.0, getattr(wave_phys, "body_dollars", 1.0))) if wave_phys else 0.0
             if w_ratio >= 2.5:
                 logger.warning("🛑 [BTC DoF-05 ANTI-EXHAUSTION ACTIVE] Wick ratio %.2f >= 2.5. Exhaustion wick detected. Stand down.", w_ratio)
+                return decision
+
+        # 1d. Opening Noise Maturity Gate (Anti-Brownian Noise Trap)
+        # The first 5 minutes of a 15m cycle (tau > 600s) have high Brownian dispersion (+- $116 on BTC).
+        # Require tau <= 600s before committing capital unless a structural breakout (|diff| >= $75.00) occurs.
+        if time_to_expiry_s > 600.0:
+            if abs(spot_price - target_strike) < Decimal("75.00"):
+                logger.info(
+                    "⏸️ [BTC OPENING NOISE MATURITY GATE] Tau %.0fs > 600s (|diff| $%.2f < $75.00). Waiting for cycle direction to mature.",
+                    time_to_expiry_s, float(abs(spot_price - target_strike))
+                )
                 return decision
 
         # 2. Dynamic Moneyness Moat (Anti-Dispersion Excursion Shield: $25 base for BTC)
@@ -583,6 +640,24 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
                 spot_price, target_strike
             )
             return decision
+
+        # 3c. Asymmetric Macro-Trend Alignment Guard (Anti-Bleed Inversion)
+        ofi_val = float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0)
+        if macro_slope <= -0.10 and chosen_side == OrderSide.YES:
+            if (spot_price - target_strike) < Decimal("50.00") or ofi_val < 0.20:
+                logger.warning(
+                    "🛑 [BTC MACRO BLEED VETO] Macro 1h slope (%.2f%%) is bearish. Refusing counter-trend YES (Diff: $%.2f). Stand down.",
+                    macro_slope, float(spot_price - target_strike)
+                )
+                return decision
+
+        if macro_slope >= 0.10 and chosen_side == OrderSide.NO:
+            if (target_strike - spot_price) < Decimal("50.00") or ofi_val > -0.20:
+                logger.warning(
+                    "🛑 [BTC MACRO EXPANSION VETO] Macro 1h slope (+%.2f%%) is bullish. Refusing counter-trend NO (Diff: $%.2f). Stand down.",
+                    macro_slope, float(spot_price - target_strike)
+                )
+                return decision
 
         # 4. Continuous Math-of-Winning Formulation (BTC Volatility Scale: sigma = 120.0)
         diff_float = float(spot_price - target_strike)

@@ -13,8 +13,10 @@ Verifies:
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
@@ -128,3 +130,119 @@ def test_btc_bot1v4_engine_evaluation_yes_and_no() -> None:
 def test_btc_seal_of_excellence_verification() -> None:
     """Verify that bot1_v4_domination holds a valid Seal on disk."""
     assert verify_seal_of_excellence() is True
+
+
+def test_btc_bot1v4_macro_slope_caching() -> None:
+    """Verify get_macro_1h_slope caches result for 60 seconds."""
+    engine = BtcBot1V4Engine()
+    engine._last_1h_slope = -0.45
+    engine._last_1h_slope_ts = time.monotonic()
+    
+    # Should immediately return cached value without hitting network
+    assert engine.get_macro_1h_slope() == -0.45
+
+
+@pytest.mark.asyncio
+async def test_btc_bot1v4_opening_noise_maturity_gate() -> None:
+    """Verify that tau > 600s with spot_diff < $75.00 triggers opening noise gate."""
+    from unittest.mock import AsyncMock
+    engine = BtcBot1V4Engine(ticker="KXBTC15M-TEST-85000")
+    engine.get_spot_price = lambda: Decimal("85030.00")  # diff = +$30 < $75 threshold
+    engine.get_macro_1h_slope = lambda: -0.25
+
+    mock_client = AsyncMock()
+    engine.order_client = mock_client
+
+    async def mock_fetch_orderbook(ticker: str, rest_base: str = None) -> L2BookState:
+        book = L2BookState(ticker)
+        book.yes_book = {Decimal("0.45"): Decimal("10")}
+        book.no_book = {Decimal("0.55"): Decimal("10")}
+        return book
+
+    engine.fetch_orderbook = mock_fetch_orderbook
+
+    # Create market info with 750 seconds to expiry (within opening 5 minutes)
+    from datetime import timedelta
+    now_utc = datetime.now(timezone.utc)
+    engine._cached_market = MarketInfo(
+        ticker="KXBTC15M-TEST-85000",
+        event_ticker="KXBTC15M",
+        status=MarketStatus.ACTIVE,
+        open_time=now_utc - timedelta(seconds=150),
+        close_time=now_utc + timedelta(seconds=750),
+        expiration_time=now_utc + timedelta(seconds=750),
+        floor_strike=Decimal("85000.00"),
+        cap_strike=None,
+        strike_type="greater",
+    )
+    engine._last_market_fetch_ts = time.monotonic()
+
+    decision = await engine.run_cycle()
+    assert decision is not None
+    # No order should be placed because opening noise maturity gate triggered
+    assert mock_client.place_order.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_btc_bot1v4_macro_bleed_veto() -> None:
+    """Verify that in a macro bleed (slope <= -0.10%), counter-trend YES is vetoed."""
+    from unittest.mock import AsyncMock
+    engine = BtcBot1V4Engine(ticker="KXBTC15M-TEST-85000")
+    engine.get_spot_price = lambda: Decimal("85030.00")  # diff = +$30 < $50 moat requirement
+    engine.get_macro_1h_slope = lambda: -0.35  # Bearish macro slope
+
+    mock_client = AsyncMock()
+    engine.order_client = mock_client
+
+    async def mock_fetch_orderbook(ticker: str, rest_base: str = None) -> L2BookState:
+        book = L2BookState(ticker)
+        book.yes_book = {Decimal("0.45"): Decimal("10")}
+        book.no_book = {Decimal("0.55"): Decimal("10")}
+        return book
+
+    engine.fetch_orderbook = mock_fetch_orderbook
+
+    from datetime import timedelta
+    now_utc = datetime.now(timezone.utc)
+    engine._cached_market = MarketInfo(
+        ticker="KXBTC15M-TEST-85000",
+        event_ticker="KXBTC15M",
+        status=MarketStatus.ACTIVE,
+        open_time=now_utc - timedelta(seconds=400),
+        close_time=now_utc + timedelta(seconds=500),
+        expiration_time=now_utc + timedelta(seconds=500),  # tau = 500s <= 600s
+        floor_strike=Decimal("85000.00"),
+        cap_strike=None,
+        strike_type="greater",
+    )
+    engine._last_market_fetch_ts = time.monotonic()
+
+    # Mock kev_oracle to recommend YES
+    from kalshi_sim.ml.kev_oracle import KevDecisionResult, KevQuestionType
+    mock_kev_res = {
+        "trade_direction": KevDecisionResult(
+            key="trade_direction",
+            question_type=KevQuestionType.CHOICE,
+            selected_option="YES",
+            probabilities={"YES": Decimal("0.85"), "NO": Decimal("0.10"), "WAIT": Decimal("0.05")},
+            confidence=Decimal("0.85"),
+            latency_ms=1.0,
+            source="test",
+        ),
+        "is_toxic_sweep": KevDecisionResult(
+            key="is_toxic_sweep",
+            question_type=KevQuestionType.BOOLEAN,
+            selected_option="false",
+            probabilities={"false": Decimal("0.90"), "true": Decimal("0.10")},
+            confidence=Decimal("0.90"),
+            latency_ms=1.0,
+            source="test",
+        ),
+    }
+    engine.kev_oracle.evaluate = AsyncMock(return_value=mock_kev_res)
+
+    decision = await engine.run_cycle()
+    assert decision is not None
+    # Order should be blocked by Macro Bleed Veto
+    assert mock_client.place_order.call_count == 0
+
