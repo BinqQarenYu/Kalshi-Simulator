@@ -18,6 +18,7 @@ import logging
 import os
 from pathlib import Path
 import json
+import math
 import random
 import time
 from typing import Any, Optional, Union
@@ -384,63 +385,81 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         )
 
         # IN-FLIGHT ACTIVE POSITION DERISKING & TAKE-PROFIT
-        if self.order_client and target_ticker in self._active_trade_forensics:
-            active_info = self._active_trade_forensics[target_ticker]
-            if not active_info.get("exited", False):
-                pos_side = active_info.get("side", "yes")
-                entry_pr = Decimal(str(active_info.get("entry_price", "0.50")))
-                bid_to_sell = book.best_yes_bid if pos_side == "yes" else book.best_no_bid
-
-                # 1. Take Profit: If position gained strongly (bid >= $0.88) with >= 120s left
-                if bid_to_sell is not None and bid_to_sell >= Decimal("0.88") and time_to_expiry_s >= 120.0:
-                    try:
-                        logger.info("🎯 [TAKE PROFIT TRIGGER] Selling %s %s @ $%s (Entry: $%s) to lock profit.", target_ticker, pos_side.upper(), bid_to_sell, entry_pr)
-                        sell_kwargs = {
+        # Check active position from local forensics or live exchange portfolio (survives restarts)
+        active_info = self._active_trade_forensics.get(target_ticker)
+        if not active_info and self.order_client and hasattr(self.order_client, "get_live_portfolio_state"):
+            try:
+                st = await self.order_client.get_live_portfolio_state()
+                for p in st.positions:
+                    if p.ticker == target_ticker and p.position > 0:
+                        active_info = {
+                            "order_id": f"synced_{target_ticker}",
                             "ticker": target_ticker,
-                            "side": pos_side,
-                            "action": "sell",
-                            "count": 1,
-                            "order_type": "limit",
-                            "price_dollars": bid_to_sell,
-                            "time_in_force": "immediate_or_cancel",
+                            "side": p.side.value.lower(),
+                            "entry_price": 0.40,
+                            "contracts": p.position,
+                            "exited": False,
                         }
-                        res_sell = await self.order_client.place_order(**sell_kwargs)
-                        if res_sell and not ("error" in res_sell or res_sell.get("status") in ("canceled", "rejected", "error")):
-                            active_info["exited"] = True
-                            active_info["exit_price"] = float(bid_to_sell)
-                            active_info["exit_reason"] = "take_profit"
-                            logger.info("✅ [TAKE PROFIT EXECUTED] Successfully locked profit @ $%s!", bid_to_sell)
-                    except Exception as tp_err:
-                        logger.debug("Take profit error: %s", tp_err)
+                        self._active_trade_forensics[target_ticker] = active_info
+                        break
+            except Exception:
+                pass
 
-                # 2. Catastrophic Derisk / Salvage Stop:
-                # If spot drifted adverse past strike by >= $2.00 with >= 90s left, salvage at market bid
-                is_doomed = False
-                if pos_side == "yes" and spot_price < (target_strike - Decimal("2.00")):
-                    is_doomed = True
-                elif pos_side == "no" and spot_price > (target_strike + Decimal("2.00")):
-                    is_doomed = True
+        if self.order_client and active_info and not active_info.get("exited", False):
+            pos_side = active_info.get("side", "yes")
+            entry_pr = Decimal(str(active_info.get("entry_price", "0.50")))
+            bid_to_sell = book.best_yes_bid if pos_side == "yes" else book.best_no_bid
 
-                if is_doomed and bid_to_sell is not None and bid_to_sell >= Decimal("0.15") and time_to_expiry_s >= 90.0:
-                    try:
-                        logger.warning("🛡️ [SALVAGE DERISK TRIGGER] Position doomed (Spot: $%s vs Strike: $%s). Selling to salvage $%s/ct (Entry: $%s).", spot_price, target_strike, bid_to_sell, entry_pr)
-                        sell_kwargs = {
-                            "ticker": target_ticker,
-                            "side": pos_side,
-                            "action": "sell",
-                            "count": 1,
-                            "order_type": "limit",
-                            "price_dollars": bid_to_sell,
-                            "time_in_force": "immediate_or_cancel",
-                        }
-                        res_sell = await self.order_client.place_order(**sell_kwargs)
-                        if res_sell and not ("error" in res_sell or res_sell.get("status") in ("canceled", "rejected", "error")):
-                            active_info["exited"] = True
-                            active_info["exit_price"] = float(bid_to_sell)
-                            active_info["exit_reason"] = "salvage_derisk"
-                            logger.warning("🛡️ [SALVAGE DERISK EXECUTED] Salvaged $%s/ct! Loss capped at -$%s (Saved 100%% wipeout)", bid_to_sell, float(entry_pr - bid_to_sell))
-                    except Exception as sl_err:
-                        logger.debug("Salvage derisk error: %s", sl_err)
+            # 1. Take Profit: If position gained strongly (bid >= $0.88) with >= 120s left
+            if bid_to_sell is not None and bid_to_sell >= Decimal("0.88") and time_to_expiry_s >= 120.0:
+                try:
+                    logger.info("🎯 [TAKE PROFIT TRIGGER] Selling %s %s @ $%s (Entry: $%s) to lock profit.", target_ticker, pos_side.upper(), bid_to_sell, entry_pr)
+                    sell_kwargs = {
+                        "ticker": target_ticker,
+                        "side": pos_side,
+                        "action": "sell",
+                        "count": 1,
+                        "order_type": "limit",
+                        "price_dollars": bid_to_sell,
+                        "time_in_force": "immediate_or_cancel",
+                    }
+                    res_sell = await self.order_client.place_order(**sell_kwargs)
+                    if res_sell and not ("error" in res_sell or res_sell.get("status") in ("canceled", "rejected", "error")):
+                        active_info["exited"] = True
+                        active_info["exit_price"] = float(bid_to_sell)
+                        active_info["exit_reason"] = "take_profit"
+                        logger.info("✅ [TAKE PROFIT EXECUTED] Successfully locked profit @ $%s!", bid_to_sell)
+                except Exception as tp_err:
+                    logger.debug("Take profit error: %s", tp_err)
+
+            # 2. Catastrophic Derisk / Salvage Stop (DEF-03 Anti-Dispersion Armor):
+            # If spot drifted adverse past strike by >= $2.00 with >= 45s left, salvage at market bid
+            is_doomed = False
+            if pos_side == "yes" and spot_price < (target_strike - Decimal("2.00")):
+                is_doomed = True
+            elif pos_side == "no" and spot_price > (target_strike + Decimal("2.00")):
+                is_doomed = True
+
+            if is_doomed and bid_to_sell is not None and bid_to_sell >= Decimal("0.15") and time_to_expiry_s >= 45.0:
+                try:
+                    logger.warning("🛡️ [SALVAGE DERISK TRIGGER] Position doomed (Spot: $%s vs Strike: $%s). Selling to salvage $%s/ct (Entry: $%s).", spot_price, target_strike, bid_to_sell, entry_pr)
+                    sell_kwargs = {
+                        "ticker": target_ticker,
+                        "side": pos_side,
+                        "action": "sell",
+                        "count": 1,
+                        "order_type": "limit",
+                        "price_dollars": bid_to_sell,
+                        "time_in_force": "immediate_or_cancel",
+                    }
+                    res_sell = await self.order_client.place_order(**sell_kwargs)
+                    if res_sell and not ("error" in res_sell or res_sell.get("status") in ("canceled", "rejected", "error")):
+                        active_info["exited"] = True
+                        active_info["exit_price"] = float(bid_to_sell)
+                        active_info["exit_reason"] = "salvage_derisk"
+                        logger.warning("🛡️ [SALVAGE DERISK EXECUTED] Salvaged $%s/ct! Loss capped at -$%s (Saved 100%% wipeout)", bid_to_sell, float(entry_pr - bid_to_sell))
+                except Exception as sl_err:
+                    logger.debug("Salvage derisk error: %s", sl_err)
 
         # ------------------------------------------------------------------
         # KEV DECISIVE LEAD & MATH-OF-WINNING TAKER ENGINE
@@ -483,10 +502,23 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             logger.warning("🛑 [KEV TOXIC SWEEP VETO] Toxic order flow / sweep detected (VPIN: %.2f). Stand down.", vpin_score)
             return decision
 
-        # 2. Strict Moneyness Moat (Anti-Tie / Strict Inequality Protection)
+        # 1b. Late Cycle TWAP Guard (Anti-Pinning Trap)
+        if time_to_expiry_s < 90.0:
+            logger.info("⏸️ [LATE CYCLE TWAP GUARD] Tau %.0fs < 90s. Pin risk elevated. Stand down.", time_to_expiry_s)
+            return decision
+
+        # 2. Dynamic Moneyness Moat (Anti-Dispersion Excursion Shield)
+        # In early cycle (tau > 720s), wide noise moat ($3.00). Between 450s-720s, scales with sqrt(tau).
+        effective_moat = Decimal("1.50")
+        if time_to_expiry_s > 720.0:
+            effective_moat = Decimal("3.00")
+        elif time_to_expiry_s > 450.0:
+            scale = math.sqrt(time_to_expiry_s / 450.0)
+            effective_moat = Decimal(str(round(1.50 * scale, 2)))
+
         spot_diff = abs(spot_price - target_strike)
-        if spot_diff < Decimal("1.50"):
-            logger.info("⏸️ [PROXIMITY MOAT VETO] |Diff| $%.2f < $1.50 noise threshold. Stand down.", float(spot_diff))
+        if spot_diff < effective_moat:
+            logger.info("⏸️ [PROXIMITY MOAT VETO] |Diff| $%.2f < $%.2f dynamic noise threshold (Tau: %.0fs). Stand down.", float(spot_diff), float(effective_moat), time_to_expiry_s)
             return decision
 
         # 3. Kev Lead Direction Gate
@@ -513,8 +545,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             )
             return decision
 
-        # 4. Continuous Math-of-Winning Formulation
-        import math
+        # 4. Continuous Math-of-Winning Formulation & Physics Dispersion Gate
         diff_float = float(spot_price - target_strike)
         sigma_15m = 6.0  # typical 15m ETH volatility
         tau_norm = max(0.01, time_to_expiry_s / 900.0)
@@ -522,8 +553,13 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         p_physics = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
         p_physics_side = p_physics if chosen_side == OrderSide.YES else (1.0 - p_physics)
 
-        # Kev has 75% higher weight in winning decision
-        p_win = (0.75 * kev_conf) + (0.25 * p_physics_side)
+        # Physics Dispersion Gate: spot must have a statistical diffusion edge in trade direction
+        if p_physics_side < 0.52:
+            logger.info("⏸️ [PHYSICS DISPERSION GATE] P(Physics) %.1f%% < 52%% hurdle. Insufficient diffusion edge against dispersion. Stand down.", p_physics_side * 100.0)
+            return decision
+
+        # Balanced 50/50 synthesis of Kev qualitative conviction and diffusion physics
+        p_win = (0.50 * kev_conf) + (0.50 * p_physics_side)
         p_win = max(0.51, min(0.99, p_win))
 
         # Dynamic Anti-Toxic Hurdle: widens when VPIN is elevated
