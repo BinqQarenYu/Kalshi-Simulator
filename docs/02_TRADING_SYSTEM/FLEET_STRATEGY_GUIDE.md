@@ -102,6 +102,31 @@ flowchart TD
 
 ---
 
+### 2.3 Cross-Fleet In-Flight Profit Harvesting & Mid-Cycle Bargain Lock Engine
+Both fleet engines (BTC QuoLas and ETH Kev-Led Domination, as well as the Dynamic Regime Strategy) share the autonomous **[`DominationExitEvaluator`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/ml/domination_exit_evaluator.py)**.
+
+#### The BTC 15M Incident & The Commonsense Patch
+In live execution (e.g. `KXBTC15M-26OCT160600-00`), an entry purchased at deep discount ($P_{\text{entry}} = \$0.38$) surged to a high of $P_{\text{bid}} = \$0.80$ (+110% ROI) with 7–8 minutes ($T_{\text{rem}} \ge 180\text{s}$) remaining. Under legacy logic, the position was blindly held into settlement, only to be wiped out by late-cycle spot reversal to $\$0.00$ ($-100\%$).
+
+**The Asymmetric 4:1 Negative Risk-Reward Reality:**
+Holding an $\$0.80$ bid risks $\$0.80$ of banked capital to gain merely $\$0.20$ remaining upside ($4:1$ negative payoff). With 7+ minutes left in a volatile asset, holding is mathematically negative EV. The **Mid-Cycle Bargain Harvest (Rule 5.1)** resolves this empirical flaw:
+- If a position is acquired at bargain ($P_{\text{entry}} \le \$0.45$ with $\text{ROI} \ge +70\%$, or any entry with $\text{ROI} \ge +75\%$),
+- And the CLOB bid reaches $P_{\text{bid}} \ge \$0.78$ with $T_{\text{rem}} \ge 180\text{s}$,
+- The engine dispatches an immediate market sell (`action="sell"`) to bank the whopping return.
+
+#### The 6 In-Flight Exit Rules
+1. **Rule 1: Asymmetric Tail Risk Ceiling (`TAKE_PROFIT_CEILING`):** Liquidates when bid reaches $\$0.90 - \$0.94$.
+2. **Rule 2: Spot Delta Front-Runner (`SPOT_DELTA_FRONT_RUN`):** Front-runs adverse order book vacuums with Silas TWAP gravity protection.
+3. **Rule 3: High-Water Mark Trailing Ratchet & Deep Breakeven Armor (`TRAILING_PROFIT_RATCHET`):** Locks gains when bid drops $\$0.06 - \$0.08$ from a peak $\ge \$0.88$, or protects capital at entry+fee floor once peak reached $\ge \$0.85$.
+4. **Rule 4: Late-Cycle Gamma Defense (`LATE_CYCLE_HARVEST`):** Liquidates positions with $\text{ROI} \ge 15\%$ when $15\text{s} < T_{\text{rem}} \le 120\text{s}$ and bid $\ge \$0.85$.
+5. **Rule 5: Dynamic Reversal Take-Profit (`TAKE_PROFIT_ROI`):** Liquidates when reverse indicator signals cross the dynamic threshold.
+6. **Rule 5.1 / 5.2: Asymmetric Bargain & Fast Taker Win Lock (`FAST_WIN_LOCK_FEE_ADVANTAGE`):** Crosses the spread, paying the $\$0.01$ fee: "A win is truly a win in the bank."
+
+#### Anti-Lockout Invariant (`has_open_pos`)
+The fleet's 1-trade-per-cycle lock physically prevents duplicate entry orders, but explicitly exempts active positions via `has_open_pos`. As long as a position is open, the engine executes 1Hz CLOB exit evaluations until liquidation or settlement.
+
+---
+
 ## 3. Dynamism: Conceptual & Mathematical Reality
 
 In this architecture, **Dynamism does NOT mean random or unstable behavior.** It means that order pricing, risk hurdles, and execution timing are recalculated dynamically on every market tick rather than being governed by hardcoded static values.
@@ -113,6 +138,7 @@ In this architecture, **Dynamism does NOT mean random or unstable behavior.** It
 | **Moneyness Verification** | Assumed from signal | Real-time distance $|S_t - K|$ checked against $\$3.00$ noise threshold |
 | **Time Decay ($\tau$)** | Uniform 15-minute treatment | Dynamic volatility scaling: $\sigma_{\tau} = \sigma_{15\text{m}} \sqrt{\tau / 900.0}$ |
 | **Liquidity Handling** | Resting maker order waits | Strict IOC taker; stands down if asks are empty |
+| **Exit & Profit Management** | Blind hold-to-settlement ($0 or $100) | Autonomous 6-rule exit engine; mid-cycle bargain lock (+70% to +110% ROI) |
 
 ---
 

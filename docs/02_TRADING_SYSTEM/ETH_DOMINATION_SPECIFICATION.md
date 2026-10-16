@@ -130,6 +130,10 @@ Kev has been elevated from an auxiliary shadow oracle to the **Chief Directional
    All taker limit orders specify `time_in_force="immediate_or_cancel"`. If liquidity is absent or price shifts, the order cancels immediately with zero resting exposure.
 7. **Dedicated 7-Consecutive-Loss Total Stop Circuit Breaker:**
    Isolated from BTC, if the ETH bot incurs 7 consecutive live losses, execution enters an immediate **TOTAL STOP** (`is_eth_bot_armed = False`). No unmonitored hot-swap or failover occurs.
+8. **In-Flight Profit Harvesting & Mid-Cycle Bargain Lock (`DominationExitEvaluator`):**
+   Once filled, open ETH positions are monitored at 1Hz (`has_open_pos` bypasses cycle entry locks). Positions are evaluated against the 6-rule exit hierarchy:
+   - **Rule 5.1 (Mid-Cycle Bargain Harvest)**: If $P_{\text{bid}} \ge \$0.78$ with $T_{\text{rem}} \ge 180\text{s}$ and $\text{ROI} \ge +70\%$ (entry $\le \$0.45$) or $\text{ROI} \ge +75\%$, the position is harvested immediately at market. Holding into late cycle risks $\$0.78$ to make $\$0.22$ ($3.5:1$ negative risk-reward trap).
+   - **Rule 1–5.2**: Tail risk ceiling ($\ge \$0.90$), trailing ratchet ($\ge \$0.88$), late-cycle harvest ($T \le 120\text{s}$), and fast taker win lock.
 
 ---
 

@@ -119,6 +119,13 @@ $$\Delta_{\text{thresh}} = \text{Decimal}('55.0') \times \left(1 + \frac{\text{S
 - **Trend Regime**: Expands to $\text{Decimal}('0.88') - \text{Decimal}('0.92')$ to maximize runner gains.
 - **Chop Regime**: Compresses to $\text{Decimal}('0.72') - \text{Decimal}('0.75')$ to harvest quick mean-reversion profits before re-entry.
 
+#### 4. Active In-Flight Exit Routing & Commonsense Bargain Lock
+In DRSA, entry and exit responsibilities are strictly separated:
+- **Pre-Entry / In-Flight Guard**: [`_eval_dynamic_regime`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/strategy_evaluator.py#L355-L380) checks `pos = portfolio.get_position(ticker)`.
+- If an open position exists, dynamic entry generation is immediately bypassed, and the position routes directly to [`_eval_domination_exit`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/strategy_evaluator.py#L792-L925).
+- In-flight positions are continuously monitored against the 6-rule exit hierarchy in [`DominationExitEvaluator`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/ml/domination_exit_evaluator.py), including Rule 5.1 (Mid-Cycle Bargain Harvest: exits at $P_{\text{bid}} \ge \$0.78$ when $\text{ROI} \ge +70\%$ for entry $\le \$0.45$ or $\text{ROI} \ge +75\%$) and Rule 5.2 (Fast Taker Win Lock).
+- This prevents dynamic positions from being trapped into expiration coin flips.
+
 ---
 
 ## 4. Schmitt-Trigger Hysteresis & Whipsaw Prevention
@@ -135,7 +142,8 @@ To prevent rapid oscillation between Chop and Trend:
 | Invariant | Specification | Enforcement Mechanism |
 | :--- | :--- | :--- |
 | **Zero Float Financial Math** | All prices, balances, and PnL use `decimal.Decimal` | Monitored by `agent-integrity-check`, enforced at type-check |
-| **1-Trade-Per-Cycle Lock** | Max 1 executed trade per 15-minute contract cycle | `self._guardrails._cycle_locks` in `AgentGuardrails` |
+| **1-Trade-Per-Cycle Lock** | Max 1 executed trade per 15-minute contract cycle | `self._guardrails._cycle_locks` in `AgentGuardrails` (`has_open_pos` bypass allows exit monitoring) |
+| **In-Flight Exit Delegation** | Open positions route directly to 6-rule exit evaluator | `_eval_dynamic_regime()` delegates to `_eval_domination_exit()` |
 | **Micro-Bankroll Sizing** | Exactly 1 contract per trade ($C = 1$) | Clamped by `PresetAuditor` and `OrderSimulator` |
 | **Atomic Order Sweep** | Open orders canceled before strategy/regime switch | `order_sweeper.py` prior to state migration |
 | **Deep Discount EV Bound** | Max limit price ceiling $P \le \$0.45$ | Clamped in parameter modulation surface |
