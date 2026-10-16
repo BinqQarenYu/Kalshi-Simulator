@@ -44,6 +44,11 @@ class DynamicRegimeDecision:
 class DynamicRegimeStrategy:
     """Institutional Dynamic Trading Strategy Engine."""
 
+    STRATEGY_ID: str = "dynamic_trading_strategy"
+    STRATEGY_NAME: str = "Dynamic Trading Strategy (DRSA v1.0)"
+    strategy_id: str = "dynamic_trading_strategy"
+    strategy_name: str = "Dynamic Trading Strategy (DRSA v1.0)"
+
     REGIME_CHOP = "CHOP"
     REGIME_TREND = "TREND"
     REGIME_BLEED = "BLEED_QUARANTINE"

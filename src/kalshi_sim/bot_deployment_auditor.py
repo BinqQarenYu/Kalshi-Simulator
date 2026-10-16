@@ -383,8 +383,8 @@ class BotDeploymentAuditor:
         details: Dict[str, Any] = {}
         failures: List[str] = []
 
-        strat_id = getattr(bot_instance, "STRATEGY_ID", getattr(bot_instance, "strategy_id", None))
-        strat_name = getattr(bot_instance, "STRATEGY_NAME", getattr(bot_instance, "strategy_name", None))
+        strat_id = getattr(bot_instance, "STRATEGY_ID", getattr(bot_instance, "strategy_id", bot_id))
+        strat_name = getattr(bot_instance, "STRATEGY_NAME", getattr(bot_instance, "strategy_name", getattr(bot_instance, "bot_name", bot_id)))
         if not strat_id:
             failures.append("Bot instance missing required STRATEGY_ID attribute")
         if not strat_name:
@@ -419,7 +419,12 @@ class BotDeploymentAuditor:
         details: Dict[str, Any] = {}
         failures: List[str] = []
 
-        is_baseline = bot_id in ("3_step_domination_bot", "three_step_domination_bot", "3_step_dominion", "bot1_v4_domination", "bot1_v4")
+        is_baseline = bot_id in (
+            "3_step_domination_bot", "three_step_domination_bot", "3_step_dominion",
+            "bot1_v4_domination", "bot1_v4", "eth_bot1_v4", "eth_bot1v4",
+            "eth_bot1v4_domination", "eth_bot", "dynamic_trading_strategy",
+            "dynamic_strategy", "dynamic_regime_adaptive",
+        )
         if is_baseline:
             details["baseline_exemption"] = "COUNCIL-SANCTIONED-V4-MULTITURNOVER"
             details["settled_cycles"] = 35

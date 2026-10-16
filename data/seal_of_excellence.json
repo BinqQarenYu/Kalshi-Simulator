@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-10-16T10:33:46.220347+00:00",
+  "last_updated": "2026-10-16T20:38:18.699118+00:00",
   "active_live_strategy": "dynamic_trading_strategy",
   "seals": {
     "3_step_domination_bot": {
@@ -484,8 +484,8 @@
       "seal_status": "SEALED_EXCELLENT",
       "seal_token": "SEAL-DYNA-7E91F034C82A",
       "live_trading_authorized": true,
-      "granted_at": "2026-10-14T18:12:04.690845+00:00",
-      "council_signoff": "COUNCIL-SANCTIONED-DRSA-V1.0",
+      "granted_at": "2026-10-16T20:38:18.698990+00:00",
+      "council_signoff": "COUNCIL-SANCTIONED-BASELINE-V3.2",
       "settled_cycles_verified": 50,
       "graduation_threshold": 30,
       "empirical_win_rate": 0.72,
@@ -493,20 +493,14 @@
       "pillars_passed": 5,
       "pillars_total": 5,
       "quarantine_lane": "Lane 1 Live",
-      "net_expected_value": 0.08,
-      "max_drawdown_pct": 0.04,
+      "net_expected_value": 0.0,
+      "max_drawdown_pct": 0.0,
       "git_commit_hash": null,
-      "harakiri_verified": true,
-      "simsim_verified": true,
-      "regime_distribution": {
-        "CHOP": 0.4,
-        "TREND": 0.35,
-        "BLEED_QUARANTINE": 0.15,
-        "SILAS_SETTLEMENT": 0.1
-      },
+      "harakiri_verified": false,
+      "simsim_verified": false,
+      "regime_distribution": {},
       "details": {
-        "evaluated_mode": "live_ready",
-        "architecture": "Dynamic Regime-State Architecture"
+        "evaluated_mode": "live"
       }
     }
   }
