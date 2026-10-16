@@ -212,18 +212,17 @@ def test_harakiri_streak_triggers_dynamic_failover():
     guard.harakiri_loss_limit = 3
 
     # First 2 losses
-    guard.record_trade_settlement("KXBTC15M-1", Decimal("-0.45"), was_win=False, execution_mode="live")
-    guard.record_trade_settlement("KXBTC15M-2", Decimal("-0.45"), was_win=False, execution_mode="live")
+    guard.record_trade_settlement("KXTEST15M-1", Decimal("-0.45"), was_win=False, execution_mode="live")
+    guard.record_trade_settlement("KXTEST15M-2", Decimal("-0.45"), was_win=False, execution_mode="live")
     assert guard._consecutive_losses == 2
     assert guard.is_bot_armed is True
 
-    # 3rd consecutive loss: triggers failure and automated failover
-    guard.record_trade_settlement("KXBTC15M-3", Decimal("-0.45"), was_win=False, execution_mode="live")
+    # 3rd consecutive loss: triggers failure and TOTAL STOP
+    guard.record_trade_settlement("KXTEST15M-3", Decimal("-0.45"), was_win=False, execution_mode="live")
 
-    # Failover must have activated dynamic_trading_strategy_v1 and kept bot armed
-    assert pm.get_active_preset_id() == "dynamic_trading_strategy_v1"
-    assert guard.is_bot_armed is True
-    assert guard._consecutive_losses == 0
+    # Invariant: Harakiri enforces TOTAL STOP (is_bot_armed = False)
+    assert guard.is_bot_armed is False
+    assert guard._consecutive_losses == 3
 
     # Clean up: restore active strategy preset
     pm.load_preset("dynamic_trading_strategy_v1")

@@ -115,9 +115,26 @@ class DynamicRegimeStrategy:
         self._consecutive_trend_ticks: int = 0
         self._last_eval_time: float = 0.0
 
+        # Learning Governance Dials (from Supreme Governor ContinuousExperienceBuffer)
+        self._adaptive_moat_multiplier: Decimal = Decimal("1.00")
+        self._active_price_cap: Optional[Decimal] = None
+
     @property
     def current_regime(self) -> str:
         return self._current_regime
+
+    def update_learning_dials(
+        self,
+        adaptive_moat_multiplier: float = 1.0,
+        active_price_cap: Optional[Decimal] = None,
+    ) -> None:
+        """Update dynamic dials received from the Supreme Governor (Experience Buffer)."""
+        self._adaptive_moat_multiplier = Decimal(str(round(max(0.50, min(3.00, adaptive_moat_multiplier)), 4)))
+        self._active_price_cap = active_price_cap
+        logger.info(
+            "🏛️ [DRSA LEARNING DIALS UPDATED] Moat Multiplier: %s | Price Cap: %s",
+            self._adaptive_moat_multiplier, self._active_price_cap
+        )
 
     def compute_dynamic_limit_price(self, volatility: Decimal) -> Decimal:
         """Modulates entry discount limit price along a calibrated positive-EV surface."""
@@ -127,10 +144,11 @@ class DynamicRegimeStrategy:
         return min(self.max_discount_limit_price, modulated.quantize(Decimal("0.01")))
 
     def compute_dynamic_spot_threshold(self, spread: Decimal) -> Decimal:
-        """Scales required spot displacement with current CLOB spread to protect EV."""
+        """Scales required spot displacement with current CLOB spread and learning moat multiplier to protect EV."""
         spread_cents = spread * Decimal("100.0")
         multiplier = Decimal("1.0") + (spread_cents / Decimal("2.0"))
-        threshold = self.base_spot_threshold * multiplier
+        moat_mult = getattr(self, "_adaptive_moat_multiplier", Decimal("1.00"))
+        threshold = self.base_spot_threshold * multiplier * moat_mult
         return threshold.quantize(Decimal("0.01"))
 
     def compute_take_profit_target(self, regime: str) -> Decimal:
@@ -254,10 +272,19 @@ class DynamicRegimeStrategy:
         limit_price = self.compute_dynamic_limit_price(volatility_1m)
         spot_threshold = self.compute_dynamic_spot_threshold(spread)
 
-        # 6. Regime Execution Logic
+        # 6. Learning Governance Parameters (Supreme Governor Scaling)
+        moat_mult = getattr(self, "_adaptive_moat_multiplier", Decimal("1.00"))
+        effective_silas_moat = self.silas_spot_moat * moat_mult
+        effective_chop_moat = self.chop_harvester_spot_moat * moat_mult
+
+        effective_momentum_cap = self.max_momentum_price
+        if getattr(self, "_active_price_cap", None) is not None:
+            effective_momentum_cap = min(effective_momentum_cap, self._active_price_cap)
+
+        # 7. Regime Execution Logic
         # Case A: Silas Settlement Freeze (T <= 120s)
         if regime == self.REGIME_SILAS:
-            if spot_diff >= self.silas_spot_moat:
+            if spot_diff >= effective_silas_moat:
                 return DynamicRegimeDecision(
                     strategy_id="dynamic_trading_strategy",
                     strategy_name="Dynamic Regime-State Strategy",
@@ -274,7 +301,7 @@ class DynamicRegimeStrategy:
                     spread=spread,
                     rationale=f"Silas Settlement Parity (T={time_to_expiry_s:.0f}s): Spot +${spot_diff} exceeds TWAP drift.",
                 )
-            elif spot_diff <= -self.silas_spot_moat:
+            elif spot_diff <= -effective_silas_moat:
                 return DynamicRegimeDecision(
                     strategy_id="dynamic_trading_strategy",
                     strategy_name="Dynamic Regime-State Strategy",
@@ -302,12 +329,12 @@ class DynamicRegimeStrategy:
 
         # Case C: Directional Trend Regime (Storm Hunter Taker)
         if regime == self.REGIME_TREND:
-            trend_limit_yes = min(self.max_momentum_price, max(Decimal("0.46"), best_ask))
+            trend_limit_yes = min(effective_momentum_cap, max(Decimal("0.46"), best_ask))
             no_ask = Decimal("1.00") - best_bid
-            trend_limit_no = min(self.max_momentum_price, max(Decimal("0.46"), no_ask))
+            trend_limit_no = min(effective_momentum_cap, max(Decimal("0.46"), no_ask))
 
             if spot_diff >= spot_threshold:
-                if best_ask <= self.max_momentum_price:
+                if best_ask <= effective_momentum_cap:
                     return DynamicRegimeDecision(
                         strategy_id="dynamic_trading_strategy",
                         strategy_name="Dynamic Regime-State Strategy",
@@ -325,7 +352,7 @@ class DynamicRegimeStrategy:
                         rationale=f"Trend Expansion (Storm Hunter Taker): Spot +${spot_diff} >= threshold ${spot_threshold}. Marketable YES at ${trend_limit_yes}.",
                     )
             elif spot_diff <= -spot_threshold:
-                if no_ask <= self.max_momentum_price:
+                if no_ask <= effective_momentum_cap:
                     return DynamicRegimeDecision(
                         strategy_id="dynamic_trading_strategy",
                         strategy_name="Dynamic Regime-State Strategy",
@@ -342,7 +369,7 @@ class DynamicRegimeStrategy:
                         spread=spread,
                         rationale=f"Trend Expansion (Storm Hunter Taker): Spot -${abs(spot_diff)} <= threshold -${spot_threshold}. Marketable NO at ${trend_limit_no}.",
                     )
-            return self._build_wait_decision(regime, spot_diff, time_to_expiry_s, volatility_1m, spread, "Trend regime awaiting spot velocity trigger or ask within $0.52 armor.")
+            return self._build_wait_decision(regime, spot_diff, time_to_expiry_s, volatility_1m, spread, f"Trend regime awaiting spot velocity trigger or ask within ${effective_momentum_cap} armor.")
 
         # Case D: Low-Vol Chop Regime (Passive Discount Maker vs Stand-Down)
         if regime == self.REGIME_CHOP:
@@ -353,7 +380,7 @@ class DynamicRegimeStrategy:
                 )
             chop_limit = min(Decimal("0.44"), limit_price)
             # Exploit Kalshi settlement rule: At strike, NO wins, so in chop favor NO or deep discount YES
-            if spot_diff >= self.chop_harvester_spot_moat:
+            if spot_diff >= effective_chop_moat:
                 return DynamicRegimeDecision(
                     strategy_id="dynamic_trading_strategy",
                     strategy_name="Dynamic Regime-State Strategy",
@@ -370,7 +397,7 @@ class DynamicRegimeStrategy:
                     spread=spread,
                     rationale=f"Chop Harvester: Resting maker bid on YES at ${chop_limit} (Spot +${spot_diff}).",
                 )
-            elif spot_diff <= -self.chop_harvester_spot_moat:
+            elif spot_diff <= -effective_chop_moat:
                 return DynamicRegimeDecision(
                     strategy_id="dynamic_trading_strategy",
                     strategy_name="Dynamic Regime-State Strategy",

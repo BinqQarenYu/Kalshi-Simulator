@@ -456,7 +456,17 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                 self._salvage_adverse_ticks[target_ticker] = 0
 
             persist_ticks = self._salvage_adverse_ticks.get(target_ticker, 0)
-            can_salvage = is_doomed and (persist_ticks >= 2 if patch_04_active else True)
+            
+            # Silas TWAP Parity Guard: Inside 60s, if trailing TWAP is safely in our favor, don't panic dump
+            twap_safe = False
+            if time_to_expiry_s <= 60.0 and hasattr(self, "_last_twap_60s") and self._last_twap_60s:
+                twap_val = float(self._last_twap_60s)
+                if pos_side == "yes" and twap_val >= float(target_strike) + 2.0:
+                    twap_safe = True
+                elif pos_side == "no" and twap_val <= float(target_strike) - 2.0:
+                    twap_safe = True
+
+            can_salvage = is_doomed and (not twap_safe) and (persist_ticks >= 2 if patch_04_active else True)
 
             # Determine salvage floor (DoF-03)
             ofi_val = float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0)
@@ -467,6 +477,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                 salvage_floor = Decimal("0.15")
 
             if can_salvage and bid_to_sell is not None and bid_to_sell >= salvage_floor and time_to_expiry_s >= 45.0:
+
                 try:
                     logger.warning("🛡️ [SALVAGE DERISK TRIGGER] Position doomed (Spot: $%s vs Strike: $%s). Selling to salvage $%s/ct (Entry: $%s).", spot_price, target_strike, bid_to_sell, entry_pr)
                     sell_kwargs = {
@@ -486,6 +497,16 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                         logger.warning("🛡️ [SALVAGE DERISK EXECUTED] Salvaged $%s/ct! Loss capped at -$%s (Saved 100%% wipeout)", bid_to_sell, float(entry_pr - bid_to_sell))
                 except Exception as sl_err:
                     logger.debug("Salvage derisk error: %s", sl_err)
+
+        # Short-circuit if cycle is locked, turnover limit reached, or active position held (Rule 8: Zero Credit Waste)
+        if self.order_client:
+            completed = self.get_completed_turnovers(target_ticker)
+            if completed >= self.max_turnover_per_event or guardrails.is_cycle_locked(target_ticker):
+                logger.info("[ETH BOT] Cycle %s already locked (turnover limit reached). Skipping Kev inference.", target_ticker)
+                return decision
+            if active_info and not active_info.get("exited", False):
+                logger.debug("[ETH BOT] Position already active for %s. Skipping Kev inference.", target_ticker)
+                return decision
 
         # ------------------------------------------------------------------
         # KEV DECISIVE LEAD & MATH-OF-WINNING TAKER ENGINE
@@ -560,19 +581,37 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                 effective_moat = Decimal(str(round(1.50 * scale, 2)))
             logger.info("🛡️ [ETH DoF-01 VOL MOAT ACTIVE] Dynamic scaling moat: $%.2f (Tau: %.0fs)", float(effective_moat), time_to_expiry_s)
 
+        # Apply Supreme Governor (Experience Buffer) adaptive proximity moat multiplier
+        if self.experience_buffer:
+            effective_moat = self.experience_buffer.get_effective_moat(effective_moat)
+
         spot_diff = abs(spot_price - target_strike)
         if spot_diff < effective_moat:
             logger.info("⏸️ [PROXIMITY MOAT VETO] |Diff| $%.2f < $%.2f noise threshold (Tau: %.0fs). Stand down.", float(spot_diff), float(effective_moat), time_to_expiry_s)
             return decision
 
-        # 3. Kev Lead Direction Gate
+        # 2b. 3D Mistake Matrix Quadrant Veto (Supreme Governor No-Fly Zone)
+        if self.experience_buffer and self.experience_buffer.is_quadrant_pruned(time_to_expiry_s, float(spot_price - target_strike)):
+            logger.warning(
+                "🛑 [MISTAKE MATRIX VETO] Current (Tau=%.0fs, Diff=$%.2f) quadrant is blacklisted by Experience Buffer. Stand down.",
+                time_to_expiry_s, float(spot_price - target_strike)
+            )
+            return decision
+
+        # 3. Kev Lead Direction Gate (Governed by Supreme Governor Platt Leash)
         kev_dir = kev_rec.selected_option.upper() if kev_rec else "WAIT"
-        kev_conf = float(kev_rec.confidence) if kev_rec else 0.50
+        raw_kev_conf = float(kev_rec.confidence) if kev_rec else 0.50
+        platt_alpha = getattr(self.experience_buffer, "platt_alpha", 1.0) if self.experience_buffer else 1.0
+        kev_conf = raw_kev_conf * platt_alpha
         if kev_dir not in ("YES", "NO") or kev_conf < 0.60:
-            logger.info("⏸️ [KEV STAND DOWN] Kev recommends %s (Conf: %.1f%%). No trade.", kev_dir, kev_conf * 100.0)
+            logger.info(
+                "⏸️ [KEV STAND DOWN] Kev recommends %s (Calibrated Conf: %.1f%%, Raw: %.1f%%, Platt Alpha: %.2f). No trade.",
+                kev_dir, kev_conf * 100.0, raw_kev_conf * 100.0, platt_alpha
+            )
             return decision
 
         chosen_side = OrderSide.YES if kev_dir == "YES" else OrderSide.NO
+
 
         # 3b. Moneyness Consistency Check (Anti-OTM Trap Filter)
         # Prevent buying out-of-the-money contracts when spot is adverse to strike
@@ -608,9 +647,13 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
 
         # Dynamic Anti-Toxic Hurdle: widens when VPIN is elevated
         hurdle = Decimal("0.08") + Decimal(str(round(vpin_score * 0.10, 4)))
-        max_taker_price = Decimal(str(round(p_win, 2))) - hurdle
         # Cap at $0.65 to enable symmetric high-conviction taker executions on both YES and NO
-        max_taker_price = min(Decimal("0.65"), max(Decimal("0.10"), max_taker_price))
+        base_cap = Decimal("0.65")
+        if self.experience_buffer:
+            base_cap = self.experience_buffer.get_effective_price_cap(base_cap)
+        max_taker_price = Decimal(str(round(p_win, 2))) - hurdle
+        max_taker_price = min(base_cap, max(Decimal("0.10"), max_taker_price))
+
 
         # 5. Live L2 Orderbook Taker Pricing & Zero-Liquidity Trap Protection
         best_ask = book.best_yes_ask if chosen_side == OrderSide.YES else book.best_no_ask
@@ -693,7 +736,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                 self.record_completed_turnover(target_ticker)
                 logger.info(
                     "👑 [KEV LED TAKER ORDER EXECUTED] %s %s 1 ct @ $%s (Best Ask, Max Ceiling: $%s, P_win: %.1f%%, E[V]: +$%.2f) | Result: %s",
-                    target_ticker, chosen_side.value.upper(), best_ask, max_taker_price, p_win * 100.0, float(Decimal(str(round(p_win, 2))) - best_ask), res
+                    target_ticker, chosen_side.value.upper(), best_ask, max_taker_price, p_win * 100.0, float(Decimal(str(round(p_win, 2))) - best_ask - Decimal("0.01")), res
                 )
 
                 # Capture T1 & T2 Forensics for trade lifecycle ledger
@@ -704,6 +747,9 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                     "side": chosen_side.value,
                     "entry_price": float(best_ask),
                     "contracts": 1,
+                    "time_to_expiry_s": float(time_to_expiry_s),
+                    "entry_spot_diff": float(spot_price - target_strike),
+                    "spot_diff": float(spot_price - target_strike),
                     "t1_timestamp": now_iso,
                     "t1_spot": float(spot_price),
                     "t1_strike_diff": float(spot_price - target_strike),
@@ -894,6 +940,9 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             "asset": "ETH",
             "strike_price": float(strike),
             "settlement_spot_price": float(spot),
+            "entry_spot_diff": float(t_forensics.get("entry_spot_diff", t_forensics.get("t1_strike_diff", float(spot - strike)))),
+            "spot_diff": float(t_forensics.get("entry_spot_diff", t_forensics.get("t1_strike_diff", float(spot - strike)))),
+            "time_to_expiry_s": float(t_forensics.get("time_to_expiry_s", 300.0)),
             "bot_side": side_clean,
             "contracts": contracts,
             "entry_price": float(entry_p),

@@ -102,6 +102,7 @@ class ContinuousExperienceBuffer:
         }
         self.recommended_take_profit_cap: float = 0.85
         self.adaptive_proximity_moat_multiplier: float = 1.0
+        self.active_price_cap: Optional[Decimal] = None
 
         self._load_initial_history()
 
@@ -191,8 +192,15 @@ class ContinuousExperienceBuffer:
             if prob > 1.0:
                 prob = prob / 100.0
             vpin_val = float(d.get("vpin_score", d.get("vpin", 0.15)))
-            t_exp = float(d.get("time_to_expiry_s", 300.0))
-            spot_diff_val = settle - strike if (settle > 0 and strike > 0) else float(d.get("spot_diff", 0.0))
+            t_exp = float(d.get("time_to_expiry_s", d.get("tau_s", 300.0)))
+            if "entry_spot_diff" in d:
+                spot_diff_val = float(d["entry_spot_diff"])
+            elif "spot_diff" in d:
+                spot_diff_val = float(d["spot_diff"])
+            elif settle > 0 and strike > 0:
+                spot_diff_val = settle - strike
+            else:
+                spot_diff_val = 0.0
 
             cause = self._classify_loss_cause(
                 outcome=outcome,
@@ -287,7 +295,7 @@ class ContinuousExperienceBuffer:
             prob_win_pairs.append((prob, actual))
 
             # Track 1D Deciles
-            decile_bucket = int(e.entry_price * 10)
+            decile_bucket = int(round(e.entry_price, 2) * 10)
             if decile_bucket in decile_pnl:
                 decile_pnl[decile_bucket].append(e.net_pnl)
 
@@ -308,7 +316,7 @@ class ContinuousExperienceBuffer:
 
         # 1. Online Platt Scaling (Adaptive Confidence Dampener)
         # If model is systematically overconfident (Brier > 0.22 or loss streaks), shrink platt_alpha
-        empirical_win_rate = sum(1 for _, a in prob_win_pairs) / len(prob_win_pairs)
+        empirical_win_rate = sum(a for _, a in prob_win_pairs) / len(prob_win_pairs)
         avg_confidence = sum(p for p, _ in prob_win_pairs) / len(prob_win_pairs)
         confidence_bias = avg_confidence - empirical_win_rate
         if confidence_bias > 0.05:
@@ -356,12 +364,38 @@ class ContinuousExperienceBuffer:
         calibrated = 1.0 / (1.0 + math.exp(-scaled_logit))
         return round(calibrated, 3)
 
+    @property
+    def pruned_quadrants(self) -> List[str]:
+        return self.pruned_regime_quadrants
+
+    @pruned_quadrants.setter
+    def pruned_quadrants(self, value: Any) -> None:
+        self.pruned_regime_quadrants = list(value)
+
     def is_quadrant_pruned(self, time_to_expiry_s: float, spot_diff: float) -> bool:
         """Check if current execution condition falls into a banned losing quadrant."""
         h_tag = "EARLY" if time_to_expiry_s > 600 else ("MID" if time_to_expiry_s > 180 else "LATE")
         d_tag = "TIGHT" if abs(spot_diff) < self.tight_spot_diff_threshold else ("MID" if abs(spot_diff) < self.mid_spot_diff_threshold else "WIDE")
         quad_key = f"{h_tag}_{d_tag}"
-        return quad_key in self.pruned_regime_quadrants
+        return (quad_key in self.pruned_regime_quadrants)
+
+    def get_effective_price_cap(self, default_cap: Decimal = Decimal("0.65")) -> Decimal:
+        """Return the effective price ceiling respecting empirical decile pruning."""
+        cap = default_cap
+        if self.active_price_cap is not None:
+            cap = min(cap, self.active_price_cap)
+        if self.pruned_price_deciles:
+            if any(d >= 60 for d in self.pruned_price_deciles):
+                cap = min(cap, Decimal("0.55"))
+            if any(d >= 50 for d in self.pruned_price_deciles):
+                cap = min(cap, Decimal("0.48"))
+        return cap
+
+    def get_effective_moat(self, base_moat: Decimal) -> Decimal:
+        """Return the effective proximity moat scaled by empirical adaptation multiplier."""
+        mult = Decimal(str(round(self.adaptive_proximity_moat_multiplier, 2)))
+        return (base_moat * mult).quantize(Decimal("0.01"))
+
 
     def get_recent_summary(self, n: int = 20) -> Dict[str, Any]:
         """Summarize the last N settled cycles for live logging and agent ingestion."""

@@ -19,7 +19,7 @@ from decimal import Decimal
 from typing import Any, Callable, Optional, Tuple
 
 from kalshi_sim.ml.lead_deer_quant_brain import ExitDecision, LeadDeerQuantBrain
-from kalshi_sim.schemas import L2BookState, OrderSide
+from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide
 
 logger = logging.getLogger("kalshi_sim.domination_bot.exit_evaluator")
 
@@ -609,21 +609,31 @@ class DominationExitEvaluator:
 
         # Rule 6: Valley Ejector (Early Loss Capping / Dynamic Capital Salvage)
         # 3-Minute Death Window patched. Now operates until expiration, but tightens criteria inside 180s.
-        is_valley_crash = best_bid <= Decimal("0.38") and reverse_prob >= 0.70
+        hmm_state = str(kwargs.get("hmm_regime") or getattr(bot, "current_regime", "")).upper()
+        is_hmm_risk_off = hmm_state in ("RISK_OFF", "REGIME_BLEED", "BLEED_QUARANTINE")
+
+        is_valley_crash = (best_bid <= Decimal("0.38") and reverse_prob >= 0.70) or (is_hmm_risk_off and best_bid <= Decimal("0.40") and reverse_prob >= 0.60)
         if time_to_expiry_s <= 180.0:
-            # Inside 3 mins, require higher conviction (85%) to prevent late-cycle jitter spoofing
-            is_valley_crash = best_bid <= Decimal("0.38") and reverse_prob >= 0.85
+            # Inside 3 mins, require higher conviction to prevent late-cycle jitter spoofing
+            if not is_hmm_risk_off:
+                is_valley_crash = best_bid <= Decimal("0.38") and reverse_prob >= 0.85
+            else:
+                is_valley_crash = best_bid <= Decimal("0.40") and reverse_prob >= 0.70
+
             # Silas TWAP Parity: If TWAP is still safely in our favor, ignore the spot-driven crash.
             if twap_60s is not None and target_strike > 0.0:
-                if side_is_yes and twap_60s >= target_strike + 3.0:
+                is_btc = (getattr(bot, "asset", None) == CryptoAsset.BTC) or ("btc" in str(getattr(bot, "STRATEGY_ID", "")).lower())
+                cushion = 25.0 if is_btc else 2.50
+                if side_is_yes and twap_60s >= target_strike + cushion:
                     is_valley_crash = False
-                elif not side_is_yes and twap_60s <= target_strike - 3.0:
+                elif not side_is_yes and twap_60s <= target_strike - cushion:
                     is_valley_crash = False
 
         if (
             is_valley_crash
             and (peak_bid is None or peak_bid < Decimal("0.80"))
         ):
+            risk_off_note = " [HMM RISK_OFF]" if is_hmm_risk_off else ""
             return DominationExitDecision(
                 should_exit=True,
                 exit_reason="VALLEY_EJECTOR",
@@ -631,7 +641,7 @@ class DominationExitEvaluator:
                 profit_pct=round(roi * 100.0, 2),
                 unrealized_pnl=round(total_net_pnl, 4),
                 rationale=(
-                    f"🛑 [VALLEY EJECTOR] Bid collapsed to ${best_bid:.2f} with {reverse_prob*100:.1f}% adverse conviction "
+                    f"🛑 [VALLEY EJECTOR{risk_off_note}] Bid collapsed to ${best_bid:.2f} with {reverse_prob*100:.1f}% adverse conviction "
                     f"(T={int(time_to_expiry_s)}s) | Liquidating early to salvage capital (PnL: -${abs(total_net_pnl):.2f}) "
                     f"instead of absorbing a -100% expiration loss."
                 ),

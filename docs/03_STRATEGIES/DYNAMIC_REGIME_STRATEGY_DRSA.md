@@ -108,3 +108,21 @@ Per operator instruction (*"proceed the fight both eth and btc max of 10 trades 
    - The system is permanently armed (`is_armed: true`) with preset `dynamic_trading_strategy_v1`.
    - The dual-asset battle runner [`scripts/run_dual_asset_battle.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/scripts/run_dual_asset_battle.py) evaluates every incoming 15-minute cycle live.
    - If cumulative PnL remains positive after every 10-trade checkpoint, the engine continues fighting autonomously without intervention.
+
+---
+
+## 6. Integration in the Balanced Division of Power & In-Flight Valley Ejector
+
+In the overarching constitutional framework ([`BALANCED_DIVISION_OF_POWER.md`](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/01_ARCHITECTURE/BALANCED_DIVISION_OF_POWER.md)), DRSA functions as the **Execution Container and Pricing Armor**:
+
+1. **Execution Host for Intelligence:** DRSA synthesizes the inputs from the intelligence tier:
+   - **HMM Brain:** Ingests macro state; if `RISK_OFF`, triggers immediate circuit breaker stand-down.
+   - **ONNX Brain:** Ingests sub-millisecond orderbook imbalance ($P_{\text{ONNX}}$).
+   - **Kev AI:** Ingests qualitative scenario conviction ($P_{\text{Kev}}$).
+2. **Controlled by the Supreme Governor (The Learning):**
+   - DRSA's `silas_spot_moat` is dynamically scaled by `adaptive_proximity_moat_multiplier` from the Experience Buffer.
+   - DRSA's `max_momentum_price` ($\le \$0.52$) is clamped by the Learning Engine's decile price cap.
+3. **The In-Flight Valley Ejector Connection:**
+   - Once entered into a contract, DRSA coordinates with the **Valley Ejector** (`Rule 6`): if spot breaks against the position, contract bid collapses to $\le \$0.38$ (or $\le \$0.40$ in HMM `RISK_OFF`), and ONNX/reversal probability confirms $\ge 65\%$ adverse conviction, the position is liquidated early to salvage $25\text{¢}\text{--}40\text{¢}$ of capital rather than absorbing a $100\%$ zero-settlement loss.
+   - Guarded by Silas TWAP Parity with asset-adaptive cushions: $\ge \$25.00$ for BTC and $\ge \$2.50$ for ETH.
+

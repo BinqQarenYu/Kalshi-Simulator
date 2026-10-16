@@ -22,17 +22,17 @@ Under the **Kev Lead Taker Architecture**, Kev is elevated from a passive observ
 
 ```mermaid
 flowchart TD
-    A["15-Minute Cycle Tick (Tau in [120s, 840s])"] --> B{"1-Trade Lock Clear?"}
-    B -- No --> C["STAND DOWN (Cycle Locked)"]
-    B -- Yes --> D{"Proximity Moat Veto\n|Spot - Strike| >= $2.50?"}
+    A["15-Minute Cycle Tick (Tau in [120s, 840s])"] --> B{"1-Trade Lock Clear & No Active Position?"}
+    B -- No --> C["STAND DOWN (Cycle Locked / Position Active)\nZero LLM Token Credit Burn (Rule 8)"]
+    B -- Yes --> D{"Proximity Moat Veto\n|Spot - Strike| >= Moat?"}
     D -- No --> E["STAND DOWN (Tie Trap Zone)"]
     D -- Yes --> F{"VPIN < 0.60 &\n!Toxic Sweep?"}
     F -- No --> G["STAND DOWN (Toxic Orderflow)"]
     F -- Yes --> H["Kev Oracle Evaluation\n(Direction & Confidence)"]
     H --> I{"Kev Direction:\nYES or NO?"}
     I -- WAIT --> J["STAND DOWN (Neutral Conviction)"]
-    I -- YES / NO --> K["Continuous Math-of-Winning\nP_win = 0.75 * P_kev + 0.25 * P_physics"]
-    K --> L["Compute Hurdle & Ceiling\ndelta_hurdle = 0.08 + (VPIN * 0.10)\nP_max = min(P_win - delta_hurdle, $0.55)"]
+    I -- YES / NO --> K["Continuous Math-of-Winning\nP_win = alpha_Learning * (0.75 * P_kev + 0.25 * P_physics)"]
+    K --> L["Compute Hurdle & Ceiling\ndelta_hurdle = 0.08 + (VPIN * 0.10)\nP_max = min(P_win - delta_hurdle, Cap)"]
     L --> M{"L2 Orderbook Check\nBest Ask <= P_max?"}
     M -- No (Ask > P_max or Empty) --> N["PAUSE (Math Hurdle Veto: Refuse to Overpay)"]
     M -- Yes --> O["Execute Taker Limit Order\n(Price = Best Ask, Size = 1 ct)"]
@@ -171,3 +171,28 @@ To prevent losses arising from zero liquidity, ghost spreads, or settlement tech
 2026-10-15 22:40:15 [INFO] 👑 [KEV LED TAKER ORDER EXECUTED] KXETH15M-26OCT151600-00 YES 1 ct @ $0.41 (Best Ask, Max Ceiling: $0.55, P_win: 81.2%, E[V]: +$0.40) | Result: {'order_id': 'ord_01jb8...'}
 ```
 *Outcome:* Immediate taker fill at $\$0.41$ capturing an opening discount with an expected return of $+40\text{¢}$.
+
+---
+
+## 7. The Balanced Division of Power: Learning as the Supreme Governor
+
+While Kev functions as the **Tactical Lead Taker** during live order execution, Kev is **not an unconstrained dictator**. In accordance with [`BALANCED_DIVISION_OF_POWER.md`](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/01_ARCHITECTURE/BALANCED_DIVISION_OF_POWER.md), the **Learning Engine** acts as the **Supreme Governor** over Kev:
+
+1. **Platt Confidence Dampener:** Kev's raw confidence $P_{\text{kev}}$ is scaled dynamically by the Learning Engine's empirical Brier score factor $\alpha_{\text{Learning}}$ ($P_{\text{calibrated}} = \alpha \cdot P_{\text{kev}}$). If Kev suffers a losing streak, $\alpha$ decreases (down to $0.65$), suppressing Kev's effective conviction below the $60\%\text{--}65\%$ hurdle and forcing a disciplined stand-down.
+2. **Mistake Matrix Blacklisting:** The Learning Engine's 3D Mistake Matrix maintains banned quadrants. If Kev recommends a trade in a historically toxic state-space (e.g. *Late-Cycle Expiration with Tight Strike Proximity*), the Learning Engine issues an executive veto.
+3. **Decile Price Armor:** If trades executed at $\ge 60\text{¢}$ fail to produce positive EV over rolling windows, the Learning Engine clamps Kev's maximum entry price down to $48\text{¢}\text{--}55\text{¢}$.
+4. **Pre-Inference Zero Credit Burning Gate:** Per AGENTS.md Rule 8 & Law 2, if the cycle is locked, the 1-trade limit has been satisfied, or an open inventory position exists, the bot aborts *before* calling `kev_oracle.evaluate()`, eliminating 100% of redundant LLM token expenditures on non-tradable cycles.
+
+---
+
+## 8. In-Flight Derisking: The Valley Ejector Protocol
+
+Kev's entries are paired with active in-flight risk management to avoid holding losing positions to 0¢:
+
+- **Valley Ejector (`Rule 6` / `EJECT_VALLEY`):** If a Kev-led position deteriorates, the contract bid collapses to $\le \$0.38$ (or $\le \$0.40$ in HMM `RISK_OFF`), and adverse reversal is confirmed ($\ge 65\%$), the engine executes an immediate market taker sell to salvage $\$0.25\text{--}\$0.38/\text{contract}$.
+- **Quantitative Benefit:** Loss is capped at $-\$0.15\text{--}\$0.20$ per contract rather than absorbing a $-100\%$ ($\$0.42$) expiration wipeout.
+- **Anti-Whipsaw Guard:** The exit is held back if the adverse move has not persisted for $\ge 2$ consecutive evaluation ticks (`DoF-04`), or if the trailing 60s TWAP has already mathematically locked in favorable settlement (`Silas TWAP Parity`).
+- **Asset-Adaptive Cushion:**
+  - **BTC:** $\ge \$25.00$ TWAP cushion required to assert safety.
+  - **ETH:** $\ge \$2.50$ TWAP cushion required to assert safety.
+
