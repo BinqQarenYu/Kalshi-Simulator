@@ -13,7 +13,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kalshi_sim.ml.domination_bot import ThreeStepDominationBot
@@ -132,22 +132,23 @@ async def test_strategy_evaluator_cycle_lock_allows_exit() -> None:
 
     place_order_mock = AsyncMock()
 
-    await evaluator.evaluate_market(
-        ticker="KXBTC15M-CYCLE-1",
-        book=book,
-        active_strategy_bot="bot1_v4_domination",
-        execution_mode="live",
-        market_cache=market_cache,
-        recent_trades={},
-        ticker_timeframe_map={},
-        portfolio_macro_trend=Portfolio(starting_balance=Decimal("50.00")),
-        portfolio_dominion2=Portfolio(starting_balance=Decimal("50.00")),
-        portfolio_domination=p_dom,
-        portfolio_onnx=Portfolio(starting_balance=Decimal("50.00")),
-        portfolio_dual_onnx=Portfolio(starting_balance=Decimal("50.00")),
-        portfolio_market_maker=Portfolio(starting_balance=Decimal("50.00")),
-        place_order_fn=place_order_mock,
-    )
+    with patch("kalshi_sim.strategy_evaluator.get_active_lock_holder", return_value=None):
+        await evaluator.evaluate_market(
+            ticker="KXBTC15M-CYCLE-1",
+            book=book,
+            active_strategy_bot="bot1_v4_domination",
+            execution_mode="live",
+            market_cache=market_cache,
+            recent_trades={},
+            ticker_timeframe_map={},
+            portfolio_macro_trend=Portfolio(starting_balance=Decimal("50.00")),
+            portfolio_dominion2=Portfolio(starting_balance=Decimal("50.00")),
+            portfolio_domination=p_dom,
+            portfolio_onnx=Portfolio(starting_balance=Decimal("50.00")),
+            portfolio_dual_onnx=Portfolio(starting_balance=Decimal("50.00")),
+            portfolio_market_maker=Portfolio(starting_balance=Decimal("50.00")),
+            place_order_fn=place_order_mock,
+        )
 
     # place_order_mock MUST be called with action='sell' and limit_price=Decimal('0.80')!
     assert place_order_mock.await_count == 1
@@ -206,22 +207,23 @@ async def test_dynamic_regime_delegates_to_exit_evaluator() -> None:
 
     place_order_mock = AsyncMock()
 
-    await evaluator.evaluate_market(
-        ticker="KXBTC15M-CYCLE-2",
-        book=book,
-        active_strategy_bot="dynamic_trading_strategy",
-        execution_mode="live",
-        market_cache=market_cache,
-        recent_trades={},
-        ticker_timeframe_map={},
-        portfolio_macro_trend=Portfolio(starting_balance=Decimal("50.00")),
-        portfolio_dominion2=Portfolio(starting_balance=Decimal("50.00")),
-        portfolio_domination=p_dom,
-        portfolio_onnx=Portfolio(starting_balance=Decimal("50.00")),
-        portfolio_dual_onnx=Portfolio(starting_balance=Decimal("50.00")),
-        portfolio_market_maker=Portfolio(starting_balance=Decimal("50.00")),
-        place_order_fn=place_order_mock,
-    )
+    with patch("kalshi_sim.strategy_evaluator.get_active_lock_holder", return_value=None):
+        await evaluator.evaluate_market(
+            ticker="KXBTC15M-CYCLE-2",
+            book=book,
+            active_strategy_bot="dynamic_trading_strategy",
+            execution_mode="live",
+            market_cache=market_cache,
+            recent_trades={},
+            ticker_timeframe_map={},
+            portfolio_macro_trend=Portfolio(starting_balance=Decimal("50.00")),
+            portfolio_dominion2=Portfolio(starting_balance=Decimal("50.00")),
+            portfolio_domination=p_dom,
+            portfolio_onnx=Portfolio(starting_balance=Decimal("50.00")),
+            portfolio_dual_onnx=Portfolio(starting_balance=Decimal("50.00")),
+            portfolio_market_maker=Portfolio(starting_balance=Decimal("50.00")),
+            place_order_fn=place_order_mock,
+        )
 
     assert place_order_mock.await_count == 1
     call_kwargs = place_order_mock.call_args.kwargs
