@@ -11,8 +11,10 @@ Verifies:
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
@@ -134,6 +136,7 @@ async def test_eth_bot1v4_run_cycle_with_mock_order_client() -> None:
         return book
 
     engine.fetch_orderbook = mock_fetch_orderbook
+    engine.get_macro_1h_slope = lambda: 0.0
 
     # Cycle 1: Execute opportunity
     decision = await engine.run_cycle()
@@ -226,4 +229,114 @@ def test_eth_bot1v4_record_cycle_settlement_tolerance() -> None:
     assert res is not None
     assert res.get("outcome") == "win"
     assert res.get("contracts") == 1
+
+
+def test_eth_bot1v4_macro_slope_caching() -> None:
+    """Verify get_macro_1h_slope caches result for 60 seconds on ETH."""
+    engine = EthBot1V4Engine()
+    engine._last_1h_slope = -0.32
+    engine._last_1h_slope_ts = time.monotonic()
+    assert engine.get_macro_1h_slope() == -0.32
+
+
+@pytest.mark.asyncio
+async def test_eth_bot1v4_opening_noise_maturity_gate() -> None:
+    """Verify that tau > 600s with spot_diff < $4.50 triggers opening noise gate on ETH."""
+    from unittest.mock import AsyncMock
+    engine = EthBot1V4Engine(ticker="KXETH15M-TEST-2600")
+    engine.get_spot_price = lambda: Decimal("2602.00")  # diff = +$2.00 < $4.50 threshold
+    engine.get_macro_1h_slope = lambda: -0.20
+
+    mock_client = AsyncMock()
+    engine.order_client = mock_client
+
+    async def mock_fetch_orderbook(ticker: str, rest_base: str = None) -> L2BookState:
+        book = L2BookState(ticker)
+        book.yes_book = {Decimal("0.45"): Decimal("10")}
+        book.no_book = {Decimal("0.55"): Decimal("10")}
+        return book
+
+    engine.fetch_orderbook = mock_fetch_orderbook
+
+    from datetime import timedelta
+    now_utc = datetime.now(timezone.utc)
+    engine._cached_market = MarketInfo(
+        ticker="KXETH15M-TEST-2600",
+        event_ticker="KXETH15M",
+        status=MarketStatus.ACTIVE,
+        open_time=now_utc - timedelta(seconds=150),
+        close_time=now_utc + timedelta(seconds=750),
+        expiration_time=now_utc + timedelta(seconds=750),
+        floor_strike=Decimal("2600.00"),
+        cap_strike=None,
+        strike_type="greater",
+    )
+    engine._last_market_fetch_ts = time.monotonic()
+
+    decision = await engine.run_cycle()
+    assert decision is not None
+    assert mock_client.place_order.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_eth_bot1v4_macro_bleed_veto() -> None:
+    """Verify that in an ETH macro bleed (slope <= -0.10%), counter-trend YES is vetoed."""
+    from unittest.mock import AsyncMock
+    engine = EthBot1V4Engine(ticker="KXETH15M-TEST-2600")
+    engine.get_spot_price = lambda: Decimal("2602.00")  # diff = +$2.00 < $3.50 moat requirement
+    engine.get_macro_1h_slope = lambda: -0.35
+
+    mock_client = AsyncMock()
+    engine.order_client = mock_client
+
+    async def mock_fetch_orderbook(ticker: str, rest_base: str = None) -> L2BookState:
+        book = L2BookState(ticker)
+        book.yes_book = {Decimal("0.45"): Decimal("10")}
+        book.no_book = {Decimal("0.55"): Decimal("10")}
+        return book
+
+    engine.fetch_orderbook = mock_fetch_orderbook
+
+    from datetime import timedelta
+    now_utc = datetime.now(timezone.utc)
+    engine._cached_market = MarketInfo(
+        ticker="KXETH15M-TEST-2600",
+        event_ticker="KXETH15M",
+        status=MarketStatus.ACTIVE,
+        open_time=now_utc - timedelta(seconds=400),
+        close_time=now_utc + timedelta(seconds=500),
+        expiration_time=now_utc + timedelta(seconds=500),  # tau = 500s <= 600s
+        floor_strike=Decimal("2600.00"),
+        cap_strike=None,
+        strike_type="greater",
+    )
+    engine._last_market_fetch_ts = time.monotonic()
+
+    from kalshi_sim.ml.kev_oracle import KevDecisionResult, KevQuestionType
+    mock_kev_res = {
+        "trade_direction": KevDecisionResult(
+            key="trade_direction",
+            question_type=KevQuestionType.CHOICE,
+            selected_option="YES",
+            probabilities={"YES": Decimal("0.85"), "NO": Decimal("0.10"), "WAIT": Decimal("0.05")},
+            confidence=Decimal("0.85"),
+            latency_ms=1.0,
+            source="test",
+        ),
+        "is_toxic_sweep": KevDecisionResult(
+            key="is_toxic_sweep",
+            question_type=KevQuestionType.BOOLEAN,
+            selected_option="false",
+            probabilities={"false": Decimal("0.90"), "true": Decimal("0.10")},
+            confidence=Decimal("0.90"),
+            latency_ms=1.0,
+            source="test",
+        ),
+    }
+    engine.kev_oracle.evaluate = AsyncMock(return_value=mock_kev_res)
+
+    decision = await engine.run_cycle()
+    assert decision is not None
+    assert mock_client.place_order.call_count == 0
+
 
