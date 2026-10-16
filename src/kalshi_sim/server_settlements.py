@@ -408,16 +408,40 @@ def record_win_loss_event_report(
             was_salv = 1 if float(entry_price) >= 0.40 and abs(float(settlement_spot_price - strike_price)) >= salv_diff_threshold else 0
             salv_lost = 0.12 * contracts if was_salv else 0.0
 
+            is_whipsaw = 1 if report.get("exit_reason") == "salvage_derisk" and (
+                (side_clean == "yes" and float(settlement_spot_price) >= float(strike_price)) or
+                (side_clean == "no" and float(settlement_spot_price) < float(strike_price))
+            ) else 0
+
             if is_twap_pin:
                 f_code = "ERR_TWAP_PIN_VICTIM"
+            elif is_whipsaw:
+                f_code = "ERR_SALVAGE_WHIPSAW"
             elif is_ct:
                 f_code = "ERR_COUNTER_TREND"
-            elif is_dw:
-                f_code = "ERR_DOUBLE_WICK_TRAP"
+            elif is_dw or w_ratio >= 2.0:
+                f_code = "ERR_MOMENTUM_EXHAUSTION"
             elif was_salv:
                 f_code = "ERR_DOOMED_HOLD_TO_ZERO"
             else:
                 f_code = "ERR_DISPERSION_EXCURSION"
+
+            report["failure_code"] = f_code
+            state.save_persisted_reports()
+
+            if is_eth_asset:
+                try:
+                    eth_file = Path("data/eth_win_loss_reports.json")
+                    if eth_file.exists():
+                        eth_reports = json.loads(eth_file.read_text(encoding="utf-8"))
+                        if eth_reports and isinstance(eth_reports, list):
+                            for r in eth_reports:
+                                if r.get("report_id") == report.get("report_id"):
+                                    r["failure_code"] = f_code
+                                    break
+                            eth_file.write_text(json.dumps(eth_reports, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
 
             db_writer.enqueue_failure_autopsy(
                 trade_id=report["report_id"],

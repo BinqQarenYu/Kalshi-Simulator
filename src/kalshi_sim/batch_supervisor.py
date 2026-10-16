@@ -261,13 +261,29 @@ class AutonomousBatchSupervisor:
         # 1.1 Classify Market Condition (Choppy, Stormy, Bleed, Healing)
         market_info = self.determine_market_condition(recent_trades)
 
+        # 1.2 Audit Failure Fingerprints and Auto-Arm Degree-of-Freedom (DoF) Patches
+        from kalshi_sim.ml.dof_governor import get_dof_governor
+        dof_gov = get_dof_governor()
+        dof_audit = dof_gov.evaluate_batch(
+            asset=self.asset,
+            batch_num=self.current_batch_num,
+            recent_trades=recent_trades,
+            win_rate=win_rate,
+        )
+        if dof_audit.get("newly_armed"):
+            logger.warning("🛡️ [DoF SUPERVISOR] Patches Armed in Batch #%d: %s", self.current_batch_num, dof_audit["newly_armed"])
+        if dof_audit.get("newly_deescalated"):
+            logger.info("🕊️ [DoF SUPERVISOR] Patches De-escalated in Batch #%d: %s", self.current_batch_num, dof_audit["newly_deescalated"])
+
         logger.info(
             "========================================================================\n"
             "📊 [QUANT COUNCIL BATCH REPORT] Batch #%d (%d Trades) | Condition: %s | Batch PnL: $%s | Win Rate: %.1f%%\n"
             "📈 [MACRO STATISTICAL SAMPLE] Total %d Trades | Net PnL: $%s | Overall Win Rate: %.1f%%\n"
+            "🛡️ [DoF ACTIVE PATCHES] %s\n"
             "========================================================================",
             self.current_batch_num, total_trades, market_info["tag"], batch_pnl, win_rate,
-            self.cumulative_trades, self.cumulative_pnl, macro_win_rate
+            self.cumulative_trades, self.cumulative_pnl, macro_win_rate,
+            dof_gov.get_active_summary(self.asset) or ["BASELINE_UNCONSTRAINED"]
         )
 
         # 2. Harvest Continuous Experience Buffer telemetry

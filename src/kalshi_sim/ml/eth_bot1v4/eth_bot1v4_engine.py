@@ -39,6 +39,7 @@ from kalshi_sim.schemas import (
     Timeframe,
     get_asset_config,
 )
+from kalshi_sim.ml.dof_governor import get_dof_governor
 from kalshi_sim.ml.kev_oracle import KevDecisionOracle, KevQuestion, KevQuestionType
 from kalshi_sim.ws_connection import create_aiohttp_connector
 
@@ -101,6 +102,8 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         self._last_market_fetch_ts: float = 0.0
         self._session: Optional[aiohttp.ClientSession] = None
         self.kev_oracle = KevDecisionOracle()
+        self.dof_governor = get_dof_governor()
+        self._salvage_adverse_ticks: dict[str, int] = {}
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or reuse connection-pooled HTTP session to prevent socket exhaustion."""
@@ -360,6 +363,8 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         if self.orderflow_feed:
             vpin_score = min(0.99, max(0.01, abs(self.orderflow_feed.ofi_l1)))
 
+        dof_gov = getattr(self, "dof_governor", None) or get_dof_governor()
+
         decision = self.evaluate(
             book=book,
             spot_price=float(spot_price),
@@ -440,7 +445,28 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             elif pos_side == "no" and spot_price > (target_strike + Decimal("2.00")):
                 is_doomed = True
 
-            if is_doomed and bid_to_sell is not None and bid_to_sell >= Decimal("0.15") and time_to_expiry_s >= 45.0:
+            dof_gov = getattr(self, "dof_governor", None) or get_dof_governor()
+            patch_03_active = dof_gov.is_patch_active("ETH", "dof_03_stepped_salvage")
+            patch_04_active = dof_gov.is_patch_active("ETH", "dof_04_salvage_persistence")
+
+            # Track adverse persistence (DoF-04)
+            if is_doomed:
+                self._salvage_adverse_ticks[target_ticker] = self._salvage_adverse_ticks.get(target_ticker, 0) + 1
+            else:
+                self._salvage_adverse_ticks[target_ticker] = 0
+
+            persist_ticks = self._salvage_adverse_ticks.get(target_ticker, 0)
+            can_salvage = is_doomed and (persist_ticks >= 2 if patch_04_active else True)
+
+            # Determine salvage floor (DoF-03)
+            ofi_val = float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0)
+            if patch_03_active and ofi_val <= -0.70:
+                salvage_floor = Decimal("0.10")
+                logger.info("🛡️ [ETH DoF-03 STEPPED SALVAGE ACTIVE] Intense negative OFI (%.2f). Salvage floor lowered to $0.10.", ofi_val)
+            else:
+                salvage_floor = Decimal("0.15")
+
+            if can_salvage and bid_to_sell is not None and bid_to_sell >= salvage_floor and time_to_expiry_s >= 45.0:
                 try:
                     logger.warning("🛡️ [SALVAGE DERISK TRIGGER] Position doomed (Spot: $%s vs Strike: $%s). Selling to salvage $%s/ct (Entry: $%s).", spot_price, target_strike, bid_to_sell, entry_pr)
                     sell_kwargs = {
@@ -503,22 +529,40 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             return decision
 
         # 1b. Late Cycle TWAP Guard (Anti-Pinning Trap)
-        if time_to_expiry_s < 90.0:
-            logger.info("⏸️ [LATE CYCLE TWAP GUARD] Tau %.0fs < 90s. Pin risk elevated. Stand down.", time_to_expiry_s)
-            return decision
+        patch_02_active = dof_gov.is_patch_active("ETH", "dof_02_twap_guard")
+        if patch_02_active:
+            if time_to_expiry_s < 90.0:
+                logger.info("⏸️ [ETH DoF-02 TWAP GUARD ACTIVE] Tau %.0fs < 90s. Pin risk elevated. Stand down.", time_to_expiry_s)
+                return decision
+        else:
+            if time_to_expiry_s < 45.0:
+                logger.info("⏸️ [EXPIRY CUTOFF] Tau %.0fs < 45s. Final seconds. Stand down.", time_to_expiry_s)
+                return decision
+
+        # 1c. Anti-Retail Momentum Exhaustion Gate (DoF-05)
+        patch_05_active = dof_gov.is_patch_active("ETH", "dof_05_anti_exhaustion")
+        if patch_05_active:
+            wave_phys = getattr(self, "_last_wave_physics", None)
+            w_ratio = (getattr(wave_phys, "upper_wick_dollars", 0.0) / max(1.0, getattr(wave_phys, "body_dollars", 1.0))) if wave_phys else 0.0
+            if w_ratio >= 2.5:
+                logger.warning("🛑 [ETH DoF-05 ANTI-EXHAUSTION ACTIVE] Wick ratio %.2f >= 2.5. Exhaustion wick detected. Stand down.", w_ratio)
+                return decision
 
         # 2. Dynamic Moneyness Moat (Anti-Dispersion Excursion Shield)
-        # In early cycle (tau > 720s), wide noise moat ($3.00). Between 450s-720s, scales with sqrt(tau).
+        # Baseline freedom: flat $1.50 moat. When DoF-01 active: dynamic sqrt(tau) scaling moat.
+        patch_01_active = dof_gov.is_patch_active("ETH", "dof_01_vol_moat")
         effective_moat = Decimal("1.50")
-        if time_to_expiry_s > 720.0:
-            effective_moat = Decimal("3.00")
-        elif time_to_expiry_s > 450.0:
-            scale = math.sqrt(time_to_expiry_s / 450.0)
-            effective_moat = Decimal(str(round(1.50 * scale, 2)))
+        if patch_01_active:
+            if time_to_expiry_s > 720.0:
+                effective_moat = Decimal("3.00")
+            elif time_to_expiry_s > 450.0:
+                scale = math.sqrt(time_to_expiry_s / 450.0)
+                effective_moat = Decimal(str(round(1.50 * scale, 2)))
+            logger.info("🛡️ [ETH DoF-01 VOL MOAT ACTIVE] Dynamic scaling moat: $%.2f (Tau: %.0fs)", float(effective_moat), time_to_expiry_s)
 
         spot_diff = abs(spot_price - target_strike)
         if spot_diff < effective_moat:
-            logger.info("⏸️ [PROXIMITY MOAT VETO] |Diff| $%.2f < $%.2f dynamic noise threshold (Tau: %.0fs). Stand down.", float(spot_diff), float(effective_moat), time_to_expiry_s)
+            logger.info("⏸️ [PROXIMITY MOAT VETO] |Diff| $%.2f < $%.2f noise threshold (Tau: %.0fs). Stand down.", float(spot_diff), float(effective_moat), time_to_expiry_s)
             return decision
 
         # 3. Kev Lead Direction Gate

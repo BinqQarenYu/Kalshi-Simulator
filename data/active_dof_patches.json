@@ -1,0 +1,122 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-10-16T04:42:04.186340+00:00",
+  "ETH": {
+    "dof_01_vol_moat": {
+      "name": "Dynamic Volatility Moat",
+      "active": false,
+      "error_code": "ERR_DISPERSION_EXCURSION",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "k_vol_mult": 2.0,
+        "early_cycle_mult": 2.0,
+        "early_tau_threshold": 720.0
+      }
+    },
+    "dof_02_twap_guard": {
+      "name": "60s Trailing TWAP Integral Guard",
+      "active": false,
+      "error_code": "ERR_TWAP_PIN_VICTIM",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "twap_window_s": 60.0,
+        "late_tau_veto_s": 90.0
+      }
+    },
+    "dof_03_stepped_salvage": {
+      "name": "Stepped Liquidity Salvage Floor",
+      "active": false,
+      "error_code": "ERR_DOOMED_HOLD_TO_ZERO",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "floor_price": "0.10",
+        "ofi_urgency_threshold": -0.7,
+        "min_tau_salvage_s": 45.0
+      }
+    },
+    "dof_04_salvage_persistence": {
+      "name": "2-Tick Adverse Persistence Filter",
+      "active": false,
+      "error_code": "ERR_SALVAGE_WHIPSAW",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "persistence_seconds": 3.0,
+        "mid_cycle_tau_s": 300.0
+      }
+    },
+    "dof_05_anti_exhaustion": {
+      "name": "Anti-Retail Momentum Exhaustion Gate",
+      "active": false,
+      "error_code": "ERR_MOMENTUM_EXHAUSTION",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "rsi_ceiling": 80.0,
+        "wick_ratio_ceiling": 2.5
+      }
+    }
+  },
+  "BTC": {
+    "dof_01_vol_moat": {
+      "name": "Dynamic Volatility Moat",
+      "active": false,
+      "error_code": "ERR_DISPERSION_EXCURSION",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "k_vol_mult": 2.0,
+        "early_cycle_mult": 2.0,
+        "early_tau_threshold": 720.0
+      }
+    },
+    "dof_02_twap_guard": {
+      "name": "60s Trailing TWAP Integral Guard",
+      "active": false,
+      "error_code": "ERR_TWAP_PIN_VICTIM",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "twap_window_s": 60.0,
+        "late_tau_veto_s": 90.0
+      }
+    },
+    "dof_03_stepped_salvage": {
+      "name": "Stepped Liquidity Salvage Floor",
+      "active": false,
+      "error_code": "ERR_DOOMED_HOLD_TO_ZERO",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "floor_price": "0.10",
+        "ofi_urgency_threshold": -0.7,
+        "min_tau_salvage_s": 45.0
+      }
+    },
+    "dof_04_salvage_persistence": {
+      "name": "2-Tick Adverse Persistence Filter",
+      "active": false,
+      "error_code": "ERR_SALVAGE_WHIPSAW",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "persistence_seconds": 3.0,
+        "mid_cycle_tau_s": 300.0
+      }
+    },
+    "dof_05_anti_exhaustion": {
+      "name": "Anti-Retail Momentum Exhaustion Gate",
+      "active": false,
+      "error_code": "ERR_MOMENTUM_EXHAUSTION",
+      "triggered_in_batch": null,
+      "cycles_since_activation": 0,
+      "params": {
+        "rsi_ceiling": 80.0,
+        "wick_ratio_ceiling": 2.5
+      }
+    }
+  }
+}
