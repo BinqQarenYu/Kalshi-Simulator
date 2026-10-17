@@ -44,6 +44,7 @@ from kalshi_sim.schemas import (
     MarketStatus,
     OrderSide,
     TradeEvent,
+    extract_strike_from_ticker,
 )
 
 logger = logging.getLogger("kalshi_sim.btc_bot1v4_engine")
@@ -348,18 +349,33 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
 
         if market_info and market_info.floor_strike:
             target_strike = market_info.floor_strike
-        elif "-" in target_ticker:
-            parts = target_ticker.split("-")
-            if len(parts) >= 3:
-                try:
-                    target_strike = Decimal(parts[-1])
-                except Exception:
-                    pass
+        else:
+            parsed_strike = extract_strike_from_ticker(target_ticker, asset=self.asset)
+            if parsed_strike is not None:
+                target_strike = parsed_strike
+            elif "-" in target_ticker:
+                parts = target_ticker.split("-")
+                if len(parts) >= 3:
+                    try:
+                        target_strike = Decimal(parts[-1])
+                    except Exception:
+                        pass
 
         if market_info and market_info.expiration_time:
             time_to_expiry_s = max(1.0, (market_info.expiration_time - now_utc).total_seconds())
 
         spot_price = self.get_spot_price()
+        now_mono = time.monotonic()
+        spot_f = float(spot_price)
+        self._recent_spot_history.append((now_mono, spot_f))
+        spot_velocity_3s = 0.0
+        if self._recent_spot_history:
+            for prev_ts, prev_p in reversed(self._recent_spot_history):
+                dt = now_mono - prev_ts
+                if dt >= 0.5:
+                    spot_velocity_3s = (spot_f - prev_p) / max(1.0, dt) * 3.0
+                    break
+
         vpin_score = 0.15
         if self.orderflow_feed:
             vpin_score = min(0.99, max(0.01, abs(self.orderflow_feed.ofi_l1)))
@@ -377,7 +393,7 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
             max_position_size=1,
             estimated_vpin=vpin_score,
             cycle_id=target_ticker,
-            spot_velocity_3s=0.0,
+            spot_velocity_3s=spot_velocity_3s,
         )
 
         logger.info(
@@ -678,16 +694,21 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
 
         # Dynamic Anti-Toxic Hurdle
         hurdle = Decimal("0.08") + Decimal(str(round(vpin_score * 0.10, 4)))
-        base_cap = Decimal("0.65")
+        base_cap = Decimal("0.55")
         if self.experience_buffer:
             base_cap = self.experience_buffer.get_effective_price_cap(base_cap)
         max_taker_price = Decimal(str(round(p_win, 2))) - hurdle
-        max_taker_price = min(base_cap, max(Decimal("0.10"), max_taker_price))
+        max_taker_price = min(base_cap, max(Decimal("0.38"), max_taker_price))
 
         # 5. Live L2 Orderbook Taker Pricing
         best_ask = book.best_yes_ask if chosen_side == OrderSide.YES else book.best_no_ask
         if best_ask is None:
             logger.warning("🛑 [BTC ZERO LIQUIDITY TRAP] Book has no resting asks for %s on %s. Stand down.", chosen_side.value.upper(), target_ticker)
+            return decision
+
+        # Adverse OTM Ask Floor ($0.38 Minimum Viable Floor)
+        if best_ask < Decimal("0.38"):
+            logger.info("⏸️ [BTC ADVERSE OTM ASK VETO] Best ask $%s < $0.38 minimum viable floor. Stand down.", best_ask)
             return decision
 
         if best_ask > max_taker_price:

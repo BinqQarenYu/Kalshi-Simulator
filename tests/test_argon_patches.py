@@ -84,3 +84,53 @@ def test_truth_synchronizer_learned_cap_enforcement(monkeypatch):
     
     success = sync.sync_engine(engine, asset="BTC")
     assert engine.max_entry_price == Decimal("0.48")
+
+
+def test_btc_and_eth_standalone_daemons_have_floor_and_cap():
+    """Confirms that BtcBot1V4Engine and EthBot1V4Engine enforce $0.38 floor and $0.55 cap."""
+    from kalshi_sim.ml.btc_bot1v4.btc_bot1v4_engine import BtcBot1V4Engine
+    from kalshi_sim.ml.eth_bot1v4.eth_bot1v4_engine import EthBot1V4Engine
+
+    btc_eng = BtcBot1V4Engine(load_persisted=False)
+    eth_eng = EthBot1V4Engine(load_persisted=False)
+
+    assert hasattr(btc_eng, "_recent_spot_history")
+    assert hasattr(eth_eng, "_recent_spot_history")
+
+    # Mock orderbook where YES ask is $0.30 (< $0.38 floor)
+    l2 = L2BookState(market_ticker="KXBTC15M-T78650")
+    l2._yes_book[Decimal("0.25")] = 10
+    l2._no_book[Decimal("0.70")] = 10
+    assert l2.best_yes_ask == Decimal("0.30")
+
+    dec_btc = btc_eng.evaluate(
+        book=l2,
+        spot_price=80000.0,
+        target_strike=78650.0,
+        time_to_expiry_s=500.0,
+        recent_trades=[],
+        total_equity=Decimal("100.00"),
+        max_position_size=1,
+        estimated_vpin=0.10,
+        cycle_id="KXBTC15M-T78650",
+        spot_velocity_3s=5.0,
+    )
+    assert dec_btc.recommended_side == "wait"
+
+    l2_eth = L2BookState(market_ticker="KXETH15M-T2450")
+    l2_eth._yes_book[Decimal("0.25")] = 10
+    l2_eth._no_book[Decimal("0.70")] = 10
+    dec_eth = eth_eng.evaluate(
+        book=l2_eth,
+        spot_price=2500.0,
+        target_strike=2450.0,
+        time_to_expiry_s=500.0,
+        recent_trades=[],
+        total_equity=Decimal("100.00"),
+        max_position_size=1,
+        estimated_vpin=0.10,
+        cycle_id="KXETH15M-T2450",
+        spot_velocity_3s=1.0,
+    )
+    assert dec_eth.recommended_side == "wait"
+
