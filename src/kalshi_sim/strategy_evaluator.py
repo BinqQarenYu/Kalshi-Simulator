@@ -215,7 +215,7 @@ class StrategyEvaluationCoordinator:
 
         # STRICT ISOLATION: In LIVE mode, execute only active bot on active 15M contract
         is_live = execution_mode == "live"
-        is_mm = active_strategy_bot in ("market_maker", "bot6_market_maker", "dual_fleet", "both")
+        is_mm = active_strategy_bot in ("market_maker", "bot6_market_maker")
         if is_live:
             if is_mm:
                 if not (ticker.startswith("KXBTC15M") or ticker.startswith("KXDOGE15M")):
@@ -223,9 +223,12 @@ class StrategyEvaluationCoordinator:
             elif active_strategy_bot in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot"):
                 if not ticker.startswith("KXETH15M"):
                     return
+            elif active_strategy_bot in ("both", "dual", "all", "dual_domination", "dual_fleet"):
+                if not (ticker.startswith("KXBTC15M") or ticker.startswith("KXETH15M")):
+                    return
             elif active_strategy_bot in ("dynamic_trading_strategy", "dynamic_regime_adaptive", "dynamic_strategy"):
-                target_prefix = "KXETH15M" if getattr(self._dynamic_regime_engine, "asset", "BTC") == "ETH" else "KXBTC15M"
-                if not ticker.startswith(target_prefix):
+                # Multi-asset dynamic regime permits both BTC and ETH 15M contracts
+                if not (ticker.startswith("KXBTC15M") or ticker.startswith("KXETH15M")):
                     return
             elif not ticker.startswith("KXBTC15M"):
                 return
@@ -692,10 +695,14 @@ class StrategyEvaluationCoordinator:
                 is_dual = active_bot_type in ("both", "dual", "all", "dual_domination", "dual_fleet")
                 engines_to_eval = []
                 if is_dual:
-                    engines_to_eval = [
-                        (self._domination_bot, "3_step_domination_bot", False),
-                        (self._bot1_v4_engine, "bot1_v4_domination", True),
-                    ]
+                    if ticker.startswith("KXETH"):
+                        eth_engine = getattr(self, "_eth_bot1_v4_engine", None) or self._bot1_v4_engine
+                        engines_to_eval = [(eth_engine, "eth_bot1_v4", True)]
+                    else:
+                        engines_to_eval = [
+                            (self._domination_bot, "3_step_domination_bot", False),
+                            (self._bot1_v4_engine, "bot1_v4_domination", True),
+                        ]
                 elif active_bot_type in ("bot1_v4_domination", "bot1_v4") and self._bot1_v4_engine is not None:
                     engines_to_eval = [(self._bot1_v4_engine, "bot1_v4_domination", True)]
                 elif active_bot_type in ("eth_bot1_v4", "eth_bot1v4", "eth_bot1v4_domination", "eth_bot") or ticker.startswith("KXETH"):

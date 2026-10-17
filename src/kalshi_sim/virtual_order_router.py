@@ -62,6 +62,13 @@ class VirtualOrderRouter:
         self._telemetry_alerts = telemetry_alerts
         self._last_guardrail_log: dict[str, float] = {}
 
+    def _resolve_db_writer(self, ticker: str) -> DatabaseWriter:
+        """Resolve the appropriate DatabaseWriter ensuring isolated storage for ETH vs BTC."""
+        if "ETH" in ticker.upper():
+            from kalshi_sim.db.writer import get_eth_db_writer
+            return get_eth_db_writer()
+        return self._db_writer
+
     async def execute_order(
         self,
         book: L2BookState,
@@ -183,10 +190,10 @@ class VirtualOrderRouter:
             bot_match = (
                 active_strategy_bot is None
                 or b_type == active_strategy_bot
-                or (b_type in ("3_step_domination_bot", "bot1_v4_domination") and active_strategy_bot in ("3_step_domination_bot", "bot1_v4_domination", "both", "dual", "all", "dual_fleet"))
-                or (b_type in ("eth_bot1_v4", "eth_bot1v4", "dynamic_trading_strategy") and active_strategy_bot in ("eth_bot1_v4", "eth_bot1v4", "dynamic_trading_strategy", "both", "dual", "all", "dual_fleet"))
+                or (b_type in ("3_step_domination_bot", "bot1_v4_domination") and active_strategy_bot in ("3_step_domination_bot", "bot1_v4_domination", "both", "dual", "all", "dual_fleet", "dual_domination"))
+                or (b_type in ("eth_bot1_v4", "eth_bot1v4", "dynamic_trading_strategy") and active_strategy_bot in ("eth_bot1_v4", "eth_bot1v4", "dynamic_trading_strategy", "both", "dual", "all", "dual_fleet", "dual_domination"))
                 or (b_type in ("macro_trend_dominion", "macro_onnx") and active_strategy_bot in ("macro_trend_dominion", "macro_onnx"))
-                or active_strategy_bot in ("both", "dual", "all", "dual_fleet")
+                or active_strategy_bot in ("both", "dual", "all", "dual_fleet", "dual_domination")
             )
             if self._order_client is None:
                 logger.error("🛑 [LIVE ORDER ROUTER] Order client is NULL! Cannot route live order for %s. Releasing in-flight lock.", ticker)
@@ -365,7 +372,7 @@ class VirtualOrderRouter:
                                 ai_prob=float(snapshot.win_rate or 0.70),
                                 cycle_id=ticker,
                             )
-                            self._db_writer.enqueue_trade(
+                            self._resolve_db_writer(ticker).enqueue_trade(
                                 trade_id=f"live_{order_id}",
                                 ticker=ticker,
                                 side=live_side,
@@ -470,7 +477,7 @@ class VirtualOrderRouter:
                     )
                     if self._exec_logger:
                         self._exec_logger.log_execution(order, fill)
-                    self._db_writer.enqueue_trade(
+                    self._resolve_db_writer(ticker).enqueue_trade(
                         trade_id=order.order_id,
                         ticker=ticker,
                         side=side.value if hasattr(side, "value") else str(side),
@@ -564,7 +571,7 @@ class VirtualOrderRouter:
             ai_prob=float(snapshot.win_rate or 0.70),
             cycle_id=ticker,
         )
-        self._db_writer.enqueue_trade(
+        self._resolve_db_writer(ticker).enqueue_trade(
             trade_id=sim_trade_id,
             ticker=ticker,
             side=fill.side.value,

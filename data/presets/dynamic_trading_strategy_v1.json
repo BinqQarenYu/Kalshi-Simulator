@@ -7,8 +7,12 @@
   "description": "Truth-Grounded Dynamic Regime-State Strategy (Lesson Q8/BLEED#01 Sweetspot): 55.0 proximity moat, .45 deep discount cap, 78% confidence floor, 4-regime Schmitt trigger.",
   "is_council_certified": true,
   "global_overrides": {
-    "asset_mode": "single",
+    "asset_mode": "multi",
     "active_asset": "BTC",
+    "active_assets": [
+      "BTC",
+      "ETH"
+    ],
     "is_armed": true,
     "max_contracts": 1,
     "active_strategy_bot": "dynamic_trading_strategy"
@@ -59,14 +63,15 @@
       "enable_chop_trading": false
     },
     "ETH": {
-      "discount_limit_price": 0.45,
-      "momentum_max_price": 0.55,
-      "min_confidence": 78.0,
-      "min_edge_pct": 6.0,
+      "discount_limit_price": 0.42,
+      "momentum_max_price": 0.52,
+      "min_confidence": 74.0,
+      "min_edge_pct": 5.0,
       "min_ev_dollars": 0.04,
-      "min_spot_diff": 4.5,
+      "min_spot_diff": 3.5,
+      "min_spot_diff_bleed": 5.0,
       "typical_1m_volatility": 0.65,
-      "vpin_toxic_threshold": 0.6,
+      "vpin_toxic_threshold": 0.65,
       "take_profit_price_threshold": 0.9,
       "enable_take_profit_ceiling": true,
       "require_reversal_for_tp_ceiling": true,
@@ -75,9 +80,9 @@
       "min_take_profit_roi": 25.0,
       "enable_trailing_ratchet": true,
       "trailing_ratchet_buffer": 0.08,
-      "spot_delta_front_run_threshold": 4.5,
+      "spot_delta_front_run_threshold": 3.5,
       "enable_dynamic_reversal_curve": true,
-      "entry_window_open_minutes": 13.0,
+      "entry_window_open_minutes": 13.5,
       "entry_window_close_minutes": 2.5,
       "max_contracts": 1,
       "opening_quarantine_seconds": 60.0,
@@ -105,9 +110,10 @@
   },
   "active_asset": "BTC",
   "active_assets": [
-    "BTC"
+    "BTC",
+    "ETH"
   ],
-  "asset_mode": "single",
+  "asset_mode": "multi",
   "is_armed": true,
   "updated_at": "2026-10-14T21:00:00Z",
   "max_contracts": 1,
@@ -145,5 +151,5 @@
   "tape_confirmation_ticks": 3,
   "taker_cross_ev_threshold": 0.09,
   "dynamic_moat_multiplier": 1.2,
-  "checksum": "sha256:ff09141995d541cd"
+  "checksum": "sha256:96a4bdfe9b1fa208"
 }

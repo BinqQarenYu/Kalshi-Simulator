@@ -318,7 +318,7 @@ def test_eth_btc_digit_scale_and_moat_isolation():
     assert btc_strat.chop_harvester_spot_moat == Decimal("8.00")
     assert eth_strat.chop_harvester_spot_moat == Decimal("1.00")
     assert btc_strat.base_spot_threshold == Decimal("55.00")
-    assert eth_strat.base_spot_threshold == Decimal("4.50")
+    assert eth_strat.base_spot_threshold == Decimal("3.50")
 
     # In Silas Settlement (T=60s), spot diff = +$2.50
     book_eth = _mock_book("0.44", "0.46")
@@ -426,6 +426,49 @@ def test_wave_classifier_asset_scale_adaptation():
         asset="ETH",
     )
     assert eth_wick.is_double_wick_meatgrinder is True, "ETH wicks of $5 must trigger double-wick meatgrinder"
+
+
+def test_multi_asset_dual_bot_live_execution_gates():
+    """Verify that both BTC and ETH tickers pass through the evaluation gate in dual/multi-asset live mode."""
+    from kalshi_sim.strategy_evaluator import StrategyEvaluationCoordinator
+    from kalshi_sim.virtual_order_router import VirtualOrderRouter
+    from unittest.mock import MagicMock
+
+    guard = MagicMock()
+    guard._cycle_locks = set()
+    coord = StrategyEvaluationCoordinator(
+        guardrails=guard,
+        simulator=MagicMock(),
+        db_writer=MagicMock(),
+        onnx_engine=MagicMock(),
+        ev_engine=MagicMock(),
+        macro_trend_bot=MagicMock(),
+        dominion2_bot=MagicMock(),
+        domination_bot=MagicMock(),
+        dual_onnx_bot=MagicMock(),
+        btc_orderflow_feed=MagicMock(),
+    )
+
+    # 1. Dynamic strategy: both KXBTC15M and KXETH15M must be supported
+    eng_btc = coord.get_dynamic_regime_engine("KXBTC15M-T80000")
+    eng_eth = coord.get_dynamic_regime_engine("KXETH15M-T2600")
+    assert eng_btc.asset == "BTC"
+    assert eng_eth.asset == "ETH"
+    assert eng_eth.base_spot_threshold == Decimal("3.50")
+    assert eng_eth.enable_chop_trading is False  # Stand-down in chop anti-bleed
+
+    # 2. VirtualOrderRouter DB writer resolution
+    router = VirtualOrderRouter(
+        guardrails=guard,
+        simulator=MagicMock(),
+        db_writer=MagicMock(),
+        exec_logger=MagicMock(),
+    )
+    writer_btc = router._resolve_db_writer("KXBTC15M-T80000")
+    writer_eth = router._resolve_db_writer("KXETH15M-T2600")
+    assert "kalshi_history_eth.db" in str(writer_eth.db_manager.db_path)
+    assert "kalshi_history_eth.db" not in str(writer_btc.db_manager.db_path)
+
 
 
 

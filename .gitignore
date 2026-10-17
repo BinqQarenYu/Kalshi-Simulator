@@ -57,4 +57,7 @@ data/archives/
 *.log
 temp_state.json
 state.json
+aws_*.txt
+aws_*.json
+tmp/
 scratch_merge_jules.py

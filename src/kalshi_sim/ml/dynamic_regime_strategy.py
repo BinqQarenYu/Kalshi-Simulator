@@ -74,7 +74,7 @@ class DynamicRegimeStrategy:
         if self.asset == "ETH":
             self.vol_trend_trigger = vol_trend_trigger or Decimal("1.80")
             self.vol_chop_trigger = vol_chop_trigger or Decimal("0.80")
-            self.base_spot_threshold = Decimal("4.50")
+            self.base_spot_threshold = Decimal("3.50")
             self.vol_base = Decimal("0.60")
             self.vol_slope = Decimal("0.04")
             self.silas_spot_moat = Decimal("1.50")
