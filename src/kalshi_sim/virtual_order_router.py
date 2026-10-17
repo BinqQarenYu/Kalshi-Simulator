@@ -126,6 +126,10 @@ class VirtualOrderRouter:
         if action == "sell":
             approved_size = max_size
         else:
+            time_to_expiry_s = None
+            if market_info and market_info.expiration_time:
+                time_to_expiry_s = (market_info.expiration_time - datetime.now(timezone.utc)).total_seconds()
+
             is_ok, g_reason, approved_size, _ = self._guardrails.validate_pre_trade_intent(
                 ticker=ticker,
                 side=side.value if hasattr(side, "value") else str(side),
@@ -137,6 +141,7 @@ class VirtualOrderRouter:
                 is_bot=True,
                 bot_type=b_type,
                 is_live=is_live_flag,
+                time_to_expiry_s=time_to_expiry_s,
             )
             if not is_ok or approved_size <= 0:
                 now_mono = time.monotonic()

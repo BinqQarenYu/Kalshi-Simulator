@@ -249,6 +249,19 @@ This document is the authoritative institutional repository of all quantitative 
 
 ---
 
+### Lesson Q9: Incident LATE-4M & The 4-Minute Late-Cycle Gamma Blackout (`PATCH-DRSA-2026-10-17-4M-BLACKOUT`)
+* **Incident & Forensic Trigger**:
+  * An audit of consecutive settled cycles revealed that entries and resting orders executed within the final 4 minutes ($T \le 240\text{s}$) face extreme gamma cliff convexity and TWAP pin slips.
+  * Stale resting maker orders in the final 4 minutes are systematically picked off by informed takers dumping doomed contracts right before settlement.
+  * Toxic pricing ($\ge \$0.94$) exposes capital to catastrophic negative payoff asymmetry ($94¢$ risked to win $6¢$).
+* **The Hardened Invariants**:
+  1. **Universal 4-Minute Entry Freeze ($T \le 240\text{s}$)**: All strategy engines (`DynamicRegimeStrategy`, `Bot1V4Engine`, `StrategyEvaluator`) and `AgentGuardrails` (Gate 0e) unconditionally reject new entries when time to expiry is $\le 240.0\text{s}$.
+  2. **Proactive Resting Order Sweep**: Whenever $T \le 240\text{s}$, `StrategyEvaluator` triggers `cancel_resting_orders_for_ticker` and clears active guardrail locks.
+  3. **Continuous Sweeper Daemon**: `OrderSweeper` monitors expiration timestamps in the background and purges any resting order where $T \le 240\text{s}$.
+  4. **Strict Anti-Toxic Price Cap**: Limit prices are capped strictly at $\le \$0.52$ (BTC) / $\le \$0.45$ (ETH); any contract $\ge \$0.94$ is permanently quarantined.
+
+---
+
 # 📋 SECTION IV: GRADUAL DEFICIENCY INTEGRATION PROTOCOL (GDIP)
 
 To avoid breaking working systems through premature or chaotic refactoring, all identified architectural and mathematical deficiencies are logged into this **Active Deficiencies Matrix**.
@@ -275,5 +288,7 @@ During every 6-trade batch review, Quant Council audit, or post-mortem, the agen
 | **DoF-03** | **Execution / Exit** | **Liquidity Vanishing Wipeout (`ERR_DOOMED_HOLD_TO_ZERO`):** Contract held to $\$0.00$ because book bid dropped below $\$0.15$. | $\ge 1$ loss with `ERR_DOOMED_HOLD_TO_ZERO` in a 6-trade batch. | Stepped salvage cascade down to $\$0.10$ if adverse OFI exceeds $-0.70$, salvaging remaining capital. | *"Did the contract expire to zero because resting bid was below \$0.15? Is DoF-03 active?"* |
 | **DoF-04** | **Risk / Whipsaw** | **Premature Salvage & Rebound (`ERR_SALVAGE_WHIPSAW`):** Trade salvaged at a loss on a temporary wick, then market reversed and won. | $\ge 1$ premature salvage at $\tau > 300\text{s}$ where market subsequently settled as a win. | Require 2-tick adverse persistence ($\ge 3\text{s}$) + negative OFI before triggering salvage at $\tau > 300\text{s}$. | *"Did the bot salvage prematurely on a fleeting wick? Should we activate DoF-04?"* |
 | **DoF-05** | **Execution / Flow** | **Retail Momentum Exhaustion (`ERR_MOMENTUM_EXHAUSTION`):** Chasing breakouts at the extreme top/bottom of extended wicks. | $\ge 1$ loss entered when 3m RSI $> 80$ or wick-to-body ratio $> 2.5\times$. | Barnaby Retail Inversion Gate: block taker entries during overextended wick exhaustion. | *"Did the bot chase retail breakout FOMO at the top of a candle wick? Is DoF-05 needed?"* |
+| **DEF-06** | **Execution / Settlement** | **Late-Cycle Gamma Trap & Resting Cannibalism (`PATCH-DRSA-2026-10-17-4M-BLACKOUT`):** Trading or maintaining resting orders within final 4 minutes of expiry ($T \le 240\text{s}$) or accepting toxic $\ge \$0.94$ fills. | Any trade entered with remaining cycle $\le 240\text{s}$ or toxic fill $\ge \$0.94$. | Universal 4-minute blackout ($T \le 240\text{s}$) across strategy state machine, Guardrails Gate 0e, Bot1 V4 Gate 2.26, and automatic resting maker order cancellation. | *"Did the bot enter within 4 minutes of expiry or suffer a late resting order fill? Is DEF-06 enforced?"* |
+
 
 

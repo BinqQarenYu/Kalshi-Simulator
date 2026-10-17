@@ -25,9 +25,9 @@ stateDiagram-v2
     CHOP --> BLEED_QUARANTINE: Spread > $0.04 OR VPIN >= 0.65 OR Double-Wick
     TREND --> BLEED_QUARANTINE: Spread > $0.04 OR VPIN >= 0.65 OR Double-Wick
     BLEED_QUARANTINE --> CHOP: Normal Spread/VPIN + 30s Dwell
-    CHOP --> SILAS_SETTLEMENT: T <= 120s
-    TREND --> SILAS_SETTLEMENT: T <= 120s
-    BLEED_QUARANTINE --> SILAS_SETTLEMENT: T <= 120s
+    CHOP --> SILAS_SETTLEMENT: T <= 240s
+    TREND --> SILAS_SETTLEMENT: T <= 240s
+    BLEED_QUARANTINE --> SILAS_SETTLEMENT: T <= 240s
 ```
 
 ---
@@ -56,9 +56,13 @@ stateDiagram-v2
 - **Operational Directive:** **Immediate Trading Halt**.
 - **Dwell Requirement:** Must observe normal spread and toxic flow below threshold for at least 30 continuous seconds before resuming normal state.
 
-### Regime 4: `SILAS_SETTLEMENT` (Late-Cycle Freeze, $T \le 120\text{s}$)
-- **Trigger Condition:** Time to cycle expiration $\le 120$ seconds.
-- **Operational Directive:** Only enter if spot price holds an insurmountable parity moat ($\ge \pm \$15.00$ on BTC, $\ge \pm \$2.50$ on ETH). Otherwise, halt all entries to avoid terminal TWAP pin whipsaws.
+### Regime 4: `SILAS_SETTLEMENT` (Late-Cycle 4-Minute Freeze & Purge, $T \le 240\text{s}$)
+- **Trigger Condition:** Time to cycle expiration $T \le 240$ seconds (4 minutes remaining in 15M cycle).
+- **Operational Directive:** **Strict Entry Blackout & Active Resting Purge (`WAIT`, `contracts = 0`)**.
+- **Execution Armor:**
+  - Complete entry halt across both YES and NO sides to eliminate gamma cliff volatility and terminal TWAP pin whipsaw.
+  - Immediate proactive cancellation of all resting maker limit orders in the order book (`cancel_resting_orders_for_ticker`) to prevent toxic taker dumping prior to settlement.
+  - Guardrail cycle locks cleared to ensure no orphaned state.
 
 ---
 
@@ -125,4 +129,37 @@ In the overarching constitutional framework ([`BALANCED_DIVISION_OF_POWER.md`](f
 3. **The In-Flight Valley Ejector Connection:**
    - Once entered into a contract, DRSA coordinates with the **Valley Ejector** (`Rule 6`): if spot breaks against the position, contract bid collapses to $\le \$0.38$ (or $\le \$0.40$ in HMM `RISK_OFF`), and ONNX/reversal probability confirms $\ge 65\%$ adverse conviction, the position is liquidated early to salvage $25\text{¢}\text{--}40\text{¢}$ of capital rather than absorbing a $100\%$ zero-settlement loss.
    - Guarded by Silas TWAP Parity with asset-adaptive cushions: $\ge \$25.00$ for BTC and $\ge \$2.50$ for ETH.
+
+---
+
+## 7. Patch: PATCH-DRSA-2026-10-17-4M-BLACKOUT & Anti-Toxic Defense Protocol
+
+| Field | Value |
+| :--- | :--- |
+| **Patch Code** | `PATCH-DRSA-2026-10-17-4M-BLACKOUT` |
+| **Effective Date** | 2026-10-17 |
+| **Status** | **ACTIVE & HARD-ENFORCED** |
+| **Preset Hash** | `sha256:80138b5e217195a2` |
+
+### 1. Empirical Forensic Motivation
+Following a forensic audit of recent trade histories, the system identified that entering or maintaining open orders in the final 4 minutes of a 15-minute cycle ($T \le 240\text{s}$) carried negative expected value ($EV < 0$):
+- **Terminal Gamma Convexity**: Minute price moves in the underlying spot index produce wild probability shifts on binary strikes near expiration.
+- **TWAP Pin Vulnerability**: The CF Benchmarks 60-second trailing TWAP window begins at $T = 60\text{s}$, but spot movements occurring between $T=240\text{s}$ and $T=60\text{s}$ create violent lead-lag dislocations.
+- **Toxic Fill Cannibalism**: Informed high-frequency takers actively search the order book in the final minutes to dump losing contracts onto stale resting bids.
+- **Toxic 94¢+ Trap**: Attempting to buy high-probability contracts at $94¢+$ is an anti-pattern that risks $\$0.94$ to win $\$0.06$. Any adverse settlement wipes out 16 consecutive wins.
+
+### 2. Concrete Architectural Defense Layers
+1. **Dynamic Strategy State Freeze**:
+   - `DynamicRegimeStrategy.evaluate()` enforces $T \le 240.0\text{s}$ entry block, returning `WAIT` and `recommended_contracts = 0`.
+2. **Bot1 V4 Gate 2.26**:
+   - Hard blackout intercept in `bot1_v4_engine.py` for all 15-minute expiration contracts when $T \le 240.0\text{s}$.
+3. **Guardrails Gate 0e**:
+   - In `agent_guardrails.py`, pre-trade intent validation strictly blocks any attempt to route an order within 4 minutes of expiration.
+4. **Proactive Resting Order Purge**:
+   - When remaining cycle time falls to $\le 240.0\text{s}$, `strategy_evaluator.py` immediately issues `cancel_resting_orders_for_ticker` to cancel resting orders and unlocks guardrail locks.
+5. **Maker Sweeper Daemon Sweep**:
+   - The background `OrderSweeper` monitors contract expiration times and purges open orders at or below 240 seconds.
+6. **Anti-Toxic Pricing Armor**:
+   - All contract purchase limit prices are hard-capped at $\le \$0.52$ (BTC) / $\le \$0.45$ (ETH).
+   - Any order intent $\ge \$0.94$ is permanently forbidden by guardrail invariants.
 

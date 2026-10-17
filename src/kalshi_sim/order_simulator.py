@@ -232,7 +232,7 @@ class OrderSimulator:
     def cancel_expired_orders(
         self,
         time_remaining_s: int,
-        cutoff_s: int = 270,
+        cutoff_s: int = 240,
         ticker: str | None = None,
     ) -> list[SimulatedOrder]:
         """Cancel resting limit orders when cycle entry window closes (T_rem <= cutoff_s)."""

@@ -256,6 +256,7 @@ class AgentGuardrails:
         is_bot: bool = True,
         bot_type: Optional[str] = None,
         is_live: bool = False,
+        time_to_expiry_s: Optional[float] = None,
     ) -> Tuple[bool, str, int, Dict[str, Any]]:
         """Validate an order against all safety guardrails before placement.
 
@@ -305,6 +306,15 @@ class AgentGuardrails:
             if is_locked:
                 self._record_rejection("incubator_locked", lock_reason, ticker, now_utc)
                 return False, lock_reason, 0, {"veto": "incubator_locked", "ticker": ticker}
+
+        # 0e. Universal Late-Cycle 4-Minute Expiration Blackout Veto (User Directive / Anti-Gamma Bleed)
+        if is_bot and time_to_expiry_s is not None and time_to_expiry_s <= 240.0:
+            msg = (
+                f"LATE-CYCLE 4-MINUTE QUARANTINE VETO: Time to expiry {time_to_expiry_s:.0f}s <= 240s left (last 4 minutes). "
+                f"All new trade entries halted to prevent expiry gamma & pin bleed."
+            )
+            self._record_rejection("late_cycle_4m_veto", msg, ticker, now_utc)
+            return False, msg, 0, {"veto": "late_cycle_4m_veto", "time_to_expiry_s": time_to_expiry_s}
 
         # 0d1. Asset-Isolated Harakiri Circuit Breaker Checks
         asset_str = ticker.upper() if ticker else ""

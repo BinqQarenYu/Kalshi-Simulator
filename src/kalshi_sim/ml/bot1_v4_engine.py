@@ -955,6 +955,27 @@ class Bot1V4DominationEngine:
                 regime=self._current_regime,
             )
 
+        # 2.26 Universal Late-Cycle 4-Minute Expiration Blackout Gate (User Directive / Anti-Gamma Bleed)
+        if time_to_expiry_s <= 240.0:
+            return Bot1V4Decision(
+                strategy_id=self.STRATEGY_ID,
+                strategy_name=self.STRATEGY_NAME,
+                active_playbook="late_cycle_4m_blackout",
+                playbook_stage="none",
+                p_up=p_up, p_down=p_down, p_wait=1.0,
+                vpin=vpin_eval, vpin_is_safe=True,
+                ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                kelly_f_yes=0.0, kelly_f_no=0.0,
+                recommended_side="wait", recommended_contracts=0,
+                rationale=f"Late-Cycle 4-Minute Quarantine Active: T={int(time_to_expiry_s)}s <= 240s remaining. Trading halted near expiration to prevent gamma & pin bleed.",
+                edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                limit_price=float(self.discount_limit_price),
+                turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                regime=self._current_regime,
+            )
+
         # 2.3 Real-Time Market Regime Classification (One Boat, Two Warriors)
         regime, regime_reason = self.detect_market_regime(
             spot_price=spot_price,

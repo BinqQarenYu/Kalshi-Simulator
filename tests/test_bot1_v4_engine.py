@@ -329,7 +329,7 @@ def test_bot1_v4_warrior2_timing_gates() -> None:
         cycle_id="GATE_CYCLE_1",
     )
     assert d_late.recommended_side == "wait"
-    assert d_late.active_playbook == "chop_late_cycle_freeze"
+    assert d_late.active_playbook in ("chop_late_cycle_freeze", "late_cycle_4m_blackout")
 
 
 def test_bot1_v4_warrior2_stand_down_by_default() -> None:

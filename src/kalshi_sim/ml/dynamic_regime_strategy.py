@@ -175,8 +175,8 @@ class DynamicRegimeStrategy:
         ts = now_ts or time.time()
         dwell_elapsed = ts - self._regime_entered_time
 
-        # 1. Silas Settlement Invariant: T <= 120s overrides all other regimes
-        if time_to_expiry_s <= 120.0:
+        # 1. Silas Settlement Invariant: T <= 240s overrides all other regimes into quarantine
+        if time_to_expiry_s <= 240.0:
             if self._current_regime != self.REGIME_SILAS:
                 self._current_regime = self.REGIME_SILAS
                 self._regime_entered_time = ts
@@ -243,14 +243,27 @@ class DynamicRegimeStrategy:
         spread = max(Decimal("0.01"), best_ask - best_bid)
         effective_vpin = vpin or Decimal("0.50")
 
-        # 2. Expiration delta
+        # 2. Geometric spot delta
+        spot_diff = spot_price - strike_price
+
+        # 3. Expiration delta
         time_to_expiry_s = 600.0
         if expiration_time:
             now_dt = datetime.now(timezone.utc)
             time_to_expiry_s = max(0.0, (expiration_time - now_dt).total_seconds())
 
-        # 3. Geometric Wave Physics
-        spot_diff = spot_price - strike_price
+        # Late-Cycle 4-Minute Expiration Blackout Gate (User Directive / Anti-Gamma Bleed)
+        if time_to_expiry_s <= 240.0:
+            return self._build_wait_decision(
+                self.REGIME_SILAS,
+                spot_diff,
+                time_to_expiry_s,
+                volatility_1m,
+                spread,
+                f"Late-Cycle 4-Minute Quarantine (T={time_to_expiry_s:.0f}s <= 240s): Trading halted near expiration to prevent gamma & pin bleed.",
+            )
+
+        # 4. Geometric Wave Physics
         wave_physics = compute_wave_physics(
             open_price=float(strike_price),
             high_price=float(max(spot_price, strike_price)),
@@ -287,43 +300,12 @@ class DynamicRegimeStrategy:
             effective_momentum_cap = min(effective_momentum_cap, self._active_price_cap)
 
         # 7. Regime Execution Logic
-        # Case A: Silas Settlement Freeze (T <= 120s)
+        # Case A: Silas Settlement Freeze & 4-Minute Late-Cycle Quarantine (T <= 240s)
         if regime == self.REGIME_SILAS:
-            if spot_diff >= effective_silas_moat:
-                return DynamicRegimeDecision(
-                    strategy_id="dynamic_trading_strategy",
-                    strategy_name="Dynamic Regime-State Strategy",
-                    regime=regime,
-                    recommended_side="yes",
-                    recommended_contracts=1,
-                    limit_price=limit_price,
-                    is_maker=True,
-                    expected_value=Decimal("0.08"),
-                    edge_pct=Decimal("12.0"),
-                    spot_diff=spot_diff,
-                    time_to_expiry_s=time_to_expiry_s,
-                    volatility_1m=volatility_1m,
-                    spread=spread,
-                    rationale=f"Silas Settlement Parity (T={time_to_expiry_s:.0f}s): Spot +${spot_diff} exceeds TWAP drift.",
-                )
-            elif spot_diff <= -effective_silas_moat:
-                return DynamicRegimeDecision(
-                    strategy_id="dynamic_trading_strategy",
-                    strategy_name="Dynamic Regime-State Strategy",
-                    regime=regime,
-                    recommended_side="no",
-                    recommended_contracts=1,
-                    limit_price=limit_price,
-                    is_maker=True,
-                    expected_value=Decimal("0.08"),
-                    edge_pct=Decimal("12.0"),
-                    spot_diff=spot_diff,
-                    time_to_expiry_s=time_to_expiry_s,
-                    volatility_1m=volatility_1m,
-                    spread=spread,
-                    rationale=f"Silas Settlement Parity (T={time_to_expiry_s:.0f}s): Spot -${abs(spot_diff)} below TWAP strike.",
-                )
-            return self._build_wait_decision(regime, spot_diff, time_to_expiry_s, volatility_1m, spread, "Silas TWAP Pin Quarantine.")
+            return self._build_wait_decision(
+                regime, spot_diff, time_to_expiry_s, volatility_1m, spread,
+                f"Silas Late-Cycle 4-Minute Quarantine (T={time_to_expiry_s:.0f}s <= 240s): Trading halted near expiration to prevent gamma & pin bleed.",
+            )
 
         # Case B: Bleed Defender & Toxic Flow (Strict capital preservation)
         if regime == self.REGIME_BLEED:

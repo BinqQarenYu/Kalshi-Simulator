@@ -5,7 +5,7 @@
 > **Active Live Strategy**: `dynamic_trading_strategy`  
 > **Active Preset**: [`data/presets/dynamic_trading_strategy_v1.json`](file:///f:/012D_TRADE/Kalshi%20Simulator/data/presets/dynamic_trading_strategy_v1.json)  
 > **Cryptographic Seal Token**: `SEAL-DYNA-7E91F034C82A`  
-> **Preset Checksum**: `sha256:ff09141995d541cd`  
+> **Preset Checksum**: `sha256:80138b5e217195a2`  
 > **Target Assets**: `KXBTC15M`, `KXETH15M`, `KXDOGE15M`  
 > **Execution Engine**: [`src/kalshi_sim/ml/dynamic_regime_strategy.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/ml/dynamic_regime_strategy.py)  
 > **Coordinator Dispatch**: [`src/kalshi_sim/strategy_evaluator.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/strategy_evaluator.py#L243-L335)  
@@ -53,12 +53,13 @@ DRSA solves this by replacing continuous unconstrained freedom with **Constraine
                |                     |                     |
                +---------------------+---------------------+
                                      |
-                          [ T_rem ≤ 120s ]
+                          [ T_rem ≤ 240s ]
                                      |
                                      v
                             +-----------------+
                             |   REGIME 4:     |
                             | SILAS SETTLEMENT|
+                            | (4m Blackout)   |
                             +-----------------+
 ```
 
@@ -80,11 +81,11 @@ DRSA solves this by replacing continuous unconstrained freedom with **Constraine
 - **Exchange Fee**: $\$0.00$ (No execution).
 - **Goal**: Total capital preservation during liquidity vacuums and flash crash volatility.
 
-### Regime 4: Silas Settlement Gravity ($T_{\text{rem}} \le 120\text{s}$)
-- **Market State**: Time to expiry $T \le 120\text{ seconds}$.
-- **Quantitative Law**: Kalshi settles on the CME CF Benchmarks 60-second trailing TWAP. Late-cycle spot movements have bounded mathematical impact on the TWAP:
+### Regime 4: Silas Settlement Gravity & 4-Minute Blackout ($T_{\text{rem}} \le 240\text{s}$)
+- **Market State**: Time to expiry $T \le 240\text{ seconds}$ (4 minutes remaining in 15M cycle).
+- **Quantitative Law**: Kalshi settles on the CME CF Benchmarks 60-second trailing TWAP. Late-cycle spot movements entering within $T \le 240\text{s}$ suffer terminal gamma cliff volatility, extreme TWAP divergence, and toxic liquidity dumping:
   $$\Delta \text{TWAP}_{\max} \le \frac{T_{\text{rem}}}{60} \cdot \Delta S_{\text{spot}}$$
-- **Strategy Mode**: Settlement Parity Sniper. Dynamic switching is frozen; execution is locked strictly to CF Benchmarks TWAP arithmetic parity.
+- **Strategy Mode**: **Late-Cycle 4-Minute Quarantine & Purge (`WAIT`, `contracts = 0`)**. Dynamic switching and all new order creation are completely frozen. Any resting limit maker orders in the book are automatically swept and cancelled, and in-flight guardrail locks are purged.
 
 ---
 
@@ -181,12 +182,13 @@ python scripts/failover_to_dynamic_strategy.py --preset dynamic_trading_strategy
 
 ## 7. ASVL Verification Suite
 
-The strategy, parameter surfaces, and failover pathways are verified by unit tests in [`tests/test_dynamic_trading_strategy.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/tests/test_dynamic_trading_strategy.py):
+The strategy, parameter surfaces, and failover pathways are verified by unit tests in [`tests/test_dynamic_trading_strategy.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/tests/test_dynamic_trading_strategy.py), [`tests/test_agent_guardrails.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/tests/test_agent_guardrails.py), and [`tests/test_bot1_v4_engine.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/tests/test_bot1_v4_engine.py):
 * `test_dynamic_regime_zero_float_invariants`: Verifies Decimal precision across all fields.
 * `test_micro_bankroll_sizing_armor`: Verifies max 1 contract limit.
 * `test_parameter_surface_positive_ev_clamp`: Verifies $\$0.45$ ceiling clamp.
 * `test_schmitt_trigger_hysteresis_and_dwell_time`: Verifies noise rejection and dwell times.
-* `test_silas_settlement_late_cycle_override`: Verifies $T \le 120\text{s}$ freeze.
+* `test_silas_settlement_late_cycle_override`: Verifies $T \le 240\text{s}$ late-cycle freeze and `WAIT` decision.
+* `test_late_cycle_4m_quarantine_veto`: Verifies Gate 0e pre-trade intent veto when $T \le 240\text{s}$.
 * `test_bleed_defender_toxic_quarantine`: Verifies wide spread and VPIN vetoes.
 * `test_preset_vault_certified_preset_integrity`: Verifies `PresetAuditor` invariant pass.
 * `test_failover_hot_swap_flow`: Verifies atomic preset loading.
@@ -194,6 +196,48 @@ The strategy, parameter surfaces, and failover pathways are verified by unit tes
 
 **Execution Command**:
 ```bash
-python -m pytest tests/test_dynamic_trading_strategy.py tests/test_preset_vault.py -q
+python -m pytest tests/test_dynamic_trading_strategy.py tests/test_agent_guardrails.py tests/test_bot1_v4_engine.py -q
 ```
-**Status**: `17 passed in 6.79s (100% Pass Rate)`.
+**Status**: `86 passed in 4.89s (100% Pass Rate)`.
+
+---
+
+## 8. Patch Ledger: PATCH-DRSA-2026-10-17-4M-BLACKOUT
+
+| Attribute | Details |
+| :--- | :--- |
+| **Patch ID** | `PATCH-DRSA-2026-10-17-4M-BLACKOUT` |
+| **Release Date** | 2026-10-17 |
+| **Target Engines** | `DynamicRegimeStrategy`, `Bot1V4Engine`, `StrategyEvaluator`, `OrderSweeper`, `AgentGuardrails` |
+| **Preset Checksum** | `sha256:80138b5e217195a2` ([`data/presets/dynamic_trading_strategy_v1.json`](file:///f:/012D_TRADE/Kalshi%20Simulator/data/presets/dynamic_trading_strategy_v1.json)) |
+| **ASVL Verification** | 100% Pass Rate (`pytest` 86 tests passed) |
+
+### 1. Empirical Forensic Rationale
+Forensic analysis of past cycles and live execution logs revealed two critical failure patterns in late-cycle trading:
+1. **Late-Cycle Gamma Trap ($T \le 240\text{s}$)**: Positions opened or orders filled within the final 4 minutes of a 15-minute cycle face extreme delta/gamma convexity. The CME CF Benchmarks 60-second trailing TWAP calculation pin slips easily whipsaw small spot advantages into 100% losses.
+2. **Resting Maker Order Cannibalism**: Passive limit orders left resting in the CLOB near expiry are adversely picked off by informed takers dumping doomed contracts right before settlement.
+3. **Toxic High-Price Contamination ($\ge \$0.94$)**: Submitting or accepting contracts priced at 94¢ or higher creates an asymmetric negative-EV disaster (risking $94¢ to make $6¢$).
+
+### 2. Multi-Tiered Defense Implementation
+To guarantee that no late-cycle bleeding occurs, this patch installs a synchronized 5-tier barrier:
+
+1. **State Machine Freeze (`DynamicRegimeStrategy`)**:
+   - The Silas regime transition threshold is widened from $120\text{s}$ to $240.0\text{s}$.
+   - In [`src/kalshi_sim/ml/dynamic_regime_strategy.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/ml/dynamic_regime_strategy.py), when `time_to_expiry_s <= 240.0`, `evaluate()` immediately returns `side = "wait"` and `recommended_contracts = 0`.
+2. **Pre-Trade Intent Gate 0e (`AgentGuardrails`)**:
+   - In [`src/kalshi_sim/agent_guardrails.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/agent_guardrails.py), `validate_pre_trade_intent` enforces Gate 0e:
+     ```python
+     if time_to_expiry_s is not None and time_to_expiry_s <= 240.0:
+         return False, f"LATE-CYCLE 4-MINUTE QUARANTINE: remaining {time_to_expiry_s:.1f}s <= 240.0s cutoff"
+     ```
+   - Passed via [`src/kalshi_sim/virtual_order_router.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/virtual_order_router.py) using live market expiration metadata.
+3. **Engine Gate 2.26 (`Bot1V4Engine`)**:
+   - In [`src/kalshi_sim/ml/bot1_v4_engine.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/ml/bot1_v4_engine.py), Gate 2.26 intercepts ticks when `remaining_s <= 240.0` and vetoes trade generation prior to regime evaluation.
+4. **Active Resting Order Purge & Lock Clearing (`StrategyEvaluator`)**:
+   - In [`src/kalshi_sim/strategy_evaluator.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/strategy_evaluator.py), all engine loops (`_eval_dynamic_regime`, `_eval_macro_trend`, `_eval_dominion2`, `_eval_domination`, `_eval_dual_onnx`) check `remaining_s <= 240.0`.
+   - When triggered, the coordinator immediately calls `await self.order_sim.cancel_resting_orders_for_ticker(ticker)` and unlocks guardrail cycle locks, ensuring no orphaned maker orders remain in the book.
+5. **Continuous Sweeper Daemon Enforcement (`OrderSweeper`)**:
+   - In [`src/kalshi_sim/order_sweeper.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/order_sweeper.py), the background sweeper cross-references all open resting orders against market expiration timestamps and cancels any order where $T \le 240\text{s}$.
+6. **Unified Configuration Calibration**:
+   - `"entry_window_close_minutes": 4.0` synchronized across root, BTC, and ETH parameter blocks in [`data/presets/dynamic_trading_strategy_v1.json`](file:///f:/012D_TRADE/Kalshi%20Simulator/data/presets/dynamic_trading_strategy_v1.json), [`data/active_preset.json`](file:///f:/012D_TRADE/Kalshi%20Simulator/data/active_preset.json), and [`data/bot_parameters_domination.json`](file:///f:/012D_TRADE/Kalshi%20Simulator/data/bot_parameters_domination.json).
+

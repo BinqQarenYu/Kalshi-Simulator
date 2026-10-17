@@ -776,3 +776,102 @@ def test_btc_10th_trade_gate_evaluation() -> None:
     assert diag.get("veto") == "btc_10th_trade_halted"
 
 
+def test_anti_toxic_and_price_ceiling_veto_94_plus() -> None:
+    """Ensure hard veto on toxic orderflow and asymmetric tail risk prices (90c+, specifically 94c+)."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0, vpin_toxic_threshold=0.65)
+
+    # 1. Reject 94c purchase (extreme asymmetric tail risk)
+    ok, reason, size, diag = guardrails.validate_pre_trade_intent(
+        ticker="KXBTC15M-T1",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.94"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+    )
+    assert ok is False
+    assert "PRICE CORRIDOR VETO" in reason
+    assert "0.90 ceiling" in reason
+    assert diag.get("veto") == "price_ceiling_veto" or "price" in diag
+    assert size == 0
+
+    # 2. Reject 91c purchase (any price > 0.90)
+    ok, reason, size, _ = guardrails.validate_pre_trade_intent(
+        ticker="KXETH15M-T1",
+        side="no",
+        requested_size=1,
+        est_price=Decimal("0.91"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+    )
+    assert ok is False
+    assert "PRICE CORRIDOR VETO" in reason
+    assert size == 0
+
+    # 3. Reject toxic VPIN orderflow (VPIN >= 0.65)
+    ok, reason, size, _ = guardrails.validate_pre_trade_intent(
+        ticker="KXBTC15M-T1",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.45"),
+        total_equity=Decimal("50.00"),
+        vpin=0.68,
+        is_bot=True,
+    )
+    assert ok is False
+    assert "VPIN TOXICITY VETO" in reason
+    assert size == 0
+
+
+def test_late_cycle_4m_quarantine_veto() -> None:
+    """Ensure hard veto on any trade intent placed with <= 240s remaining (last 4 minutes)."""
+    guardrails = AgentGuardrails(min_order_interval_seconds=0.0)
+
+    # 1. Reject order placed at T=200s (last 4 minutes)
+    ok, reason, size, diag = guardrails.validate_pre_trade_intent(
+        ticker="KXBTC15M-T1",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.45"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        time_to_expiry_s=200.0,
+    )
+    assert ok is False
+    assert "LATE-CYCLE 4-MINUTE QUARANTINE VETO" in reason
+    assert diag.get("veto") == "late_cycle_4m_veto"
+    assert size == 0
+
+    # 2. Reject order placed exactly at T=240.0s
+    ok, reason, size, diag = guardrails.validate_pre_trade_intent(
+        ticker="KXETH15M-T1",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.42"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        time_to_expiry_s=240.0,
+    )
+    assert ok is False
+    assert "LATE-CYCLE 4-MINUTE QUARANTINE VETO" in reason
+    assert size == 0
+
+    # 3. Allow order placed at T=300s (5 minutes left, outside 4-minute blackout)
+    ok, reason, size, _ = guardrails.validate_pre_trade_intent(
+        ticker="KXBTC15M-T1",
+        side="yes",
+        requested_size=1,
+        est_price=Decimal("0.45"),
+        total_equity=Decimal("50.00"),
+        vpin=0.10,
+        is_bot=True,
+        time_to_expiry_s=300.0,
+    )
+    assert ok is True
+    assert size == 1
+
+

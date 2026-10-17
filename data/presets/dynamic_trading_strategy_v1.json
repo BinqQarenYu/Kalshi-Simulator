@@ -38,7 +38,7 @@
       "spot_delta_front_run_threshold": 55.0,
       "enable_dynamic_reversal_curve": true,
       "entry_window_open_minutes": 13.5,
-      "entry_window_close_minutes": 2.5,
+      "entry_window_close_minutes": 4.0,
       "max_contracts": 1,
       "opening_quarantine_seconds": 60.0,
       "brain_priority_mode": "DYNAMIC_REGIME_ADAPTIVE",
@@ -83,7 +83,7 @@
       "spot_delta_front_run_threshold": 3.5,
       "enable_dynamic_reversal_curve": true,
       "entry_window_open_minutes": 13.5,
-      "entry_window_close_minutes": 2.5,
+      "entry_window_close_minutes": 4.0,
       "max_contracts": 1,
       "opening_quarantine_seconds": 60.0,
       "brain_priority_mode": "DYNAMIC_REGIME_ADAPTIVE",
@@ -141,7 +141,7 @@
   "twap_fading_window_seconds": 60.0,
   "enable_dynamic_reversal_curve": true,
   "entry_window_open_minutes": 13.5,
-  "entry_window_close_minutes": 2.5,
+  "entry_window_close_minutes": 4.0,
   "opening_quarantine_seconds": 60.0,
   "brain_priority_mode": "DYNAMIC_REGIME_ADAPTIVE",
   "contract_scaling_mode": "TIER_0_STRICT_1",
@@ -151,5 +151,5 @@
   "tape_confirmation_ticks": 3,
   "taker_cross_ev_threshold": 0.09,
   "dynamic_moat_multiplier": 1.2,
-  "checksum": "sha256:96a4bdfe9b1fa208"
+  "checksum": "sha256:80138b5e217195a2"
 }

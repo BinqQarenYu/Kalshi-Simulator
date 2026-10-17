@@ -210,8 +210,12 @@ class StrategyEvaluationCoordinator:
             remaining_s = (market_info.expiration_time - now_utc).total_seconds()
             if remaining_s <= 0 or remaining_s > 930:
                 return
-            if remaining_s <= 45:
-                self._simulator.cancel_resting_orders_for_ticker(ticker)
+            if remaining_s <= 240.0:
+                self._simulator.cancel_resting_orders_for_ticker(ticker, reason="4M_EXPIRATION_CUTOFF")
+                if hasattr(self._guardrails, "_resting_order_details"):
+                    for oid, details in list(self._guardrails._resting_order_details.items()):
+                        if details.get("ticker") == ticker:
+                            self._guardrails.release_resting_order(oid)
 
         # STRICT ISOLATION: In LIVE mode, execute only active bot on active 15M contract
         is_live = execution_mode == "live"
@@ -416,6 +420,17 @@ class StrategyEvaluationCoordinator:
                         pass
 
                 exp_time = market_info.expiration_time if market_info else None
+                if exp_time:
+                    now_utc = datetime.now(timezone.utc)
+                    rem_secs = (exp_time - now_utc).total_seconds()
+                    if rem_secs <= 240.0:
+                        self._simulator.cancel_resting_orders_for_ticker(ticker, reason="4M_EXPIRATION_CUTOFF")
+                        if hasattr(self._guardrails, "_resting_order_details"):
+                            for oid, details in list(self._guardrails._resting_order_details.items()):
+                                if details.get("ticker") == ticker:
+                                    self._guardrails.release_resting_order(oid)
+                        return
+
                 engine = self.get_dynamic_regime_engine(ticker)
 
                 decision = engine.evaluate(
@@ -483,7 +498,12 @@ class StrategyEvaluationCoordinator:
                     if market_info and market_info.expiration_time:
                         now_utc = datetime.now(timezone.utc)
                         rem_secs = (market_info.expiration_time - now_utc).total_seconds()
-                        if rem_secs <= 15.0:
+                        if rem_secs <= 240.0:
+                            self._simulator.cancel_resting_orders_for_ticker(ticker, reason="4M_EXPIRATION_CUTOFF")
+                            if hasattr(self._guardrails, "_resting_order_details"):
+                                for oid, details in list(self._guardrails._resting_order_details.items()):
+                                    if details.get("ticker") == ticker:
+                                        self._guardrails.release_resting_order(oid)
                             return
                         time_to_expiry_s = rem_secs
 
@@ -576,7 +596,12 @@ class StrategyEvaluationCoordinator:
                 if market_info and market_info.expiration_time:
                     now_utc = datetime.now(timezone.utc)
                     rem_secs = (market_info.expiration_time - now_utc).total_seconds()
-                    if rem_secs <= 15.0:
+                    if rem_secs <= 240.0:
+                        self._simulator.cancel_resting_orders_for_ticker(ticker, reason="4M_EXPIRATION_CUTOFF")
+                        if hasattr(self._guardrails, "_resting_order_details"):
+                            for oid, details in list(self._guardrails._resting_order_details.items()):
+                                if details.get("ticker") == ticker:
+                                    self._guardrails.release_resting_order(oid)
                         return
                     time_to_expiry_s = rem_secs
 
@@ -667,7 +692,12 @@ class StrategyEvaluationCoordinator:
                 if market_info and market_info.expiration_time:
                     now_utc = datetime.now(timezone.utc)
                     rem_secs = (market_info.expiration_time - now_utc).total_seconds()
-                    if rem_secs <= 15.0:
+                    if rem_secs <= 240.0:
+                        self._simulator.cancel_resting_orders_for_ticker(ticker, reason="4M_EXPIRATION_CUTOFF")
+                        if hasattr(self._guardrails, "_resting_order_details"):
+                            for oid, details in list(self._guardrails._resting_order_details.items()):
+                                if details.get("ticker") == ticker:
+                                    self._guardrails.release_resting_order(oid)
                         return
                     time_to_expiry_s = rem_secs
 
@@ -960,7 +990,12 @@ class StrategyEvaluationCoordinator:
                     if market_info and market_info.expiration_time:
                         now_utc = datetime.now(timezone.utc)
                         rem_secs = (market_info.expiration_time - now_utc).total_seconds()
-                        if rem_secs <= 15.0:
+                        if rem_secs <= 240.0:
+                            self._simulator.cancel_resting_orders_for_ticker(ticker, reason="4M_EXPIRATION_CUTOFF")
+                            if hasattr(self._guardrails, "_resting_order_details"):
+                                for oid, details in list(self._guardrails._resting_order_details.items()):
+                                    if details.get("ticker") == ticker:
+                                        self._guardrails.release_resting_order(oid)
                             return
                         time_to_expiry_s = rem_secs
 

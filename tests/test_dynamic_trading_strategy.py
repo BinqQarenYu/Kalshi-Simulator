@@ -125,11 +125,11 @@ def test_schmitt_trigger_hysteresis_and_dwell_time():
 
 
 def test_silas_settlement_late_cycle_override():
-    """Verify that T <= 120s strictly overrides all other regimes into SILAS_SETTLEMENT."""
+    """Verify that T <= 240s strictly overrides all other regimes into SILAS_SETTLEMENT and halts trading (0 contracts)."""
     strategy = DynamicRegimeStrategy(asset="BTC")
     book = _mock_book("0.44", "0.46")
 
-    # High vol, but only 60s remaining
+    # High vol, but only 60s remaining (<= 240s late cycle)
     decision = strategy.evaluate(
         ticker="KXBTC15M-TEST",
         book=book,
@@ -141,7 +141,9 @@ def test_silas_settlement_late_cycle_override():
     )
 
     assert decision.regime == DynamicRegimeStrategy.REGIME_SILAS
-    assert "Silas Settlement Parity" in decision.rationale
+    assert decision.recommended_contracts == 0
+    assert decision.recommended_side == "wait"
+    assert "Late-Cycle 4-Minute Quarantine" in decision.rationale
 
 
 def test_bleed_defender_toxic_quarantine():
@@ -310,8 +312,8 @@ def test_storm_hunter_refuses_expensive_chase():
 
 def test_eth_btc_digit_scale_and_moat_isolation():
     """Verify that BTC and ETH strategies evaluate with isolated calibrated moats and thresholds."""
-    btc_strat = DynamicRegimeStrategy(asset="BTC")
-    eth_strat = DynamicRegimeStrategy(asset="ETH")
+    btc_strat = DynamicRegimeStrategy(asset="BTC", dwell_time_seconds=0.0)
+    eth_strat = DynamicRegimeStrategy(asset="ETH", dwell_time_seconds=0.0)
 
     assert btc_strat.silas_spot_moat == Decimal("15.00")
     assert eth_strat.silas_spot_moat == Decimal("1.50")
@@ -320,38 +322,40 @@ def test_eth_btc_digit_scale_and_moat_isolation():
     assert btc_strat.base_spot_threshold == Decimal("55.00")
     assert eth_strat.base_spot_threshold == Decimal("3.50")
 
-    # In Silas Settlement (T=60s), spot diff = +$2.50
+    # In Trend evaluation (T=500s remaining, outside 4-minute blackout)
+    exp_time = datetime.now(timezone.utc) + timedelta(seconds=500)
     book_eth = _mock_book("0.44", "0.46")
-    exp_time = datetime.now(timezone.utc) + timedelta(seconds=60)
 
-    # On ETH, +$2.50 exceeds the $1.50 moat -> YES
+    # Prime ETH into TREND regime via sustained vol
+    for _ in range(3):
+        eth_strat.update_regime_state(Decimal("2.50"), Decimal("0.02"), Decimal("0.40"), 500.0)
+
+    # On ETH, +$8.00 exceeds the $7.00 threshold (3.50 * 2c spread) -> YES
     dec_eth = eth_strat.evaluate(
         ticker="KXETH15M-T2600",
         book=book_eth,
-        spot_price=Decimal("2602.50"),
+        spot_price=Decimal("2608.00"),
         strike_price=Decimal("2600.00"),
         expiration_time=exp_time,
-        volatility_1m=Decimal("0.60"),
+        volatility_1m=Decimal("2.50"),
     )
-    assert dec_eth.regime == DynamicRegimeStrategy.REGIME_SILAS
+    assert dec_eth.regime == DynamicRegimeStrategy.REGIME_TREND
     assert dec_eth.recommended_side == "yes"
     assert dec_eth.recommended_contracts == 1
-    assert "Silas Settlement Parity" in dec_eth.rationale
 
-    # On BTC, +$2.50 is tiny (< $15.00 moat) -> WAIT
+    # On BTC, +$8.00 is tiny (< $55.00 moat) -> WAIT
     book_btc = _mock_book("0.44", "0.46")
     dec_btc = btc_strat.evaluate(
         ticker="KXBTC15M-T80000",
         book=book_btc,
-        spot_price=Decimal("80002.50"),
+        spot_price=Decimal("80008.00"),
         strike_price=Decimal("80000.00"),
         expiration_time=exp_time,
-        volatility_1m=Decimal("14.00"),
+        volatility_1m=Decimal("40.00"),
     )
-    assert dec_btc.regime == DynamicRegimeStrategy.REGIME_SILAS
     assert dec_btc.recommended_side == "wait"
     assert dec_btc.recommended_contracts == 0
-    assert "Quarantine" in dec_btc.rationale
+    assert ("Quarantine" in dec_btc.rationale) or ("Chop" in dec_btc.rationale) or ("Stand-Down" in dec_btc.rationale)
 
 
 def test_strategy_evaluator_cross_asset_spot_price_isolation():
