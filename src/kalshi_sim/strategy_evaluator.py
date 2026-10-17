@@ -433,6 +433,18 @@ class StrategyEvaluationCoordinator:
 
                 engine = self.get_dynamic_regime_engine(ticker)
 
+                # Sync learning dials from asset ContinuousExperienceBuffer (Closing Siloed Learning Loop)
+                exp_buf = None
+                if asset == CryptoAsset.ETH and self._eth_bot1_v4_engine and hasattr(self._eth_bot1_v4_engine, "experience_buffer"):
+                    exp_buf = self._eth_bot1_v4_engine.experience_buffer
+                elif self._bot1_v4_engine and hasattr(self._bot1_v4_engine, "experience_buffer"):
+                    exp_buf = self._bot1_v4_engine.experience_buffer
+                if exp_buf is not None:
+                    engine.update_learning_dials(
+                        adaptive_moat_multiplier=getattr(exp_buf, "adaptive_proximity_moat_multiplier", 1.0),
+                        active_price_cap=exp_buf.get_effective_price_cap(engine.max_momentum_price),
+                    )
+
                 decision = engine.evaluate(
                     ticker=ticker,
                     book=book,
@@ -1132,6 +1144,19 @@ class StrategyEvaluationCoordinator:
                         )
 
                     if ev_result.has_positive_edge and ev_result.recommended_side is not None:
+                        # Moneyness Consistency & Price Corridor Guard: Prevent contrarian OTM bets against spot moat
+                        m_info = self._simulator and getattr(self, "_market_cache", {}).get(ticker) if hasattr(self, "_market_cache") else None
+                        strike_chk = self._resolve_target_strike(ticker, m_info)
+                        spot_chk = self._resolve_spot_price(ticker, m_info, strike_chk)
+                        diff_chk = float(spot_chk - strike_chk)
+                        asset_chk = detect_asset_from_ticker(ticker)
+                        moat_chk = 2.50 if asset_chk == CryptoAsset.ETH else 35.00
+                        if (diff_chk > moat_chk and ev_result.recommended_side == OrderSide.NO) or (diff_chk < -moat_chk and ev_result.recommended_side == OrderSide.YES):
+                            logger.info("[ONNX MONEYNESS VETO] Blocking contrarian %s on %s (Spot Diff: %+.2f vs Moat: %.2f)", ev_result.recommended_side.value.upper(), ticker, diff_chk, moat_chk)
+                            return
+                        if ev_result.market_price < Decimal("0.38") or ev_result.market_price > Decimal("0.55"):
+                            logger.info("[ONNX CORRIDOR VETO] Blocking %s on %s at price $%s outside $0.38-$0.55 winning corridor", ev_result.recommended_side.value.upper(), ticker, ev_result.market_price)
+                            return
                         logger.info(
                             "[STAGE 2 EV] %-18s | %-3s @ $%-4s | AI_P=%.1f%% | EV=+%s/ct | Edge=%+.1f%% | Kelly=%.1f%% (%d cts)",
                             ticker,

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -63,6 +64,13 @@ class DynamicTruthSynchronizer:
             return False
 
         try:
+            exp_buf = getattr(engine, "experience_buffer", None)
+            if exp_buf is not None and hasattr(exp_buf, "get_effective_price_cap"):
+                learned_cap = float(exp_buf.get_effective_price_cap(Decimal(str(truth_params.get("max_entry_price", truth_params.get("momentum_max_price", 0.55))))))
+                if "max_entry_price" in truth_params:
+                    truth_params["max_entry_price"] = min(float(truth_params["max_entry_price"]), learned_cap)
+                if "momentum_max_price" in truth_params:
+                    truth_params["momentum_max_price"] = min(float(truth_params["momentum_max_price"]), learned_cap)
             engine.update_parameters(**truth_params)
             return True
         except Exception as e:

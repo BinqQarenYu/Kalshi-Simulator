@@ -198,6 +198,51 @@ def detect_asset_from_ticker(ticker: str) -> CryptoAsset:
     return CryptoAsset.BTC
 
 
+def extract_strike_from_ticker(ticker: str, asset: CryptoAsset | str | None = None) -> Decimal | None:
+    """Safely extract strike price from a Kalshi ticker string, rejecting date/minute suffixes.
+
+    In Kalshi 15m series (e.g. KXBTC15M-26OCT111100-00 or KXETH15M-26OCT140545-45),
+    the trailing '-00', '-15', '-30', '-45' is the expiration minute, NOT the strike price.
+    Only explicit '-T<strike>' suffixes or trailing numbers within realistic asset price bounds
+    are accepted as valid strike prices.
+    """
+    if not ticker or "-" not in ticker:
+        return None
+    resolved_asset = (
+        asset if isinstance(asset, CryptoAsset)
+        else ( detect_asset_from_ticker(str(asset)) if asset else detect_asset_from_ticker(ticker) )
+    )
+    parts = ticker.strip().split("-")
+    if len(parts) < 2:
+        return None
+    last_part = parts[-1].strip().upper()
+    has_t_prefix = last_part.startswith("T") or last_part.startswith("B")
+    candidate_str = last_part[1:] if has_t_prefix else last_part
+    # Reject 2-digit minute suffixes (00, 05, 15, 30, 45) when not T-prefixed
+    if not has_t_prefix and len(candidate_str) <= 2 and resolved_asset in (CryptoAsset.BTC, CryptoAsset.ETH, CryptoAsset.GOLD, CryptoAsset.SOL):
+        return None
+    try:
+        val = Decimal(candidate_str)
+    except Exception:
+        return None
+
+    # Asset magnitude sanity bounds
+    if resolved_asset == CryptoAsset.BTC:
+        return val if val >= Decimal("10000") else None
+    elif resolved_asset == CryptoAsset.ETH:
+        return val if Decimal("100") <= val <= Decimal("15000") else None
+    elif resolved_asset == CryptoAsset.SOL:
+        return val if Decimal("5") <= val <= Decimal("2000") else None
+    elif resolved_asset == CryptoAsset.GOLD:
+        return val if Decimal("500") <= val <= Decimal("10000") else None
+    elif resolved_asset == CryptoAsset.DOGE:
+        return val if Decimal("0.0001") <= val <= Decimal("10") else None
+    elif resolved_asset == CryptoAsset.HYPER:
+        return val if Decimal("1") <= val <= Decimal("1000") else None
+    return val
+
+
+
 
 class CandleInterval(str, Enum):
     """Candlestick aggregation intervals."""
@@ -262,14 +307,10 @@ class MarketInfo(BaseModel):
             return self.floor_strike
         if self.cap_strike is not None:
             return self.cap_strike
-        import re
-        m = re.search(r"-T?([0-9]+(?:\.[0-9]+)?)", self.ticker)
-        if m:
-            try:
-                return Decimal(m.group(1))
-            except Exception:
-                pass
         asset = detect_asset_from_ticker(self.ticker)
+        parsed = extract_strike_from_ticker(self.ticker, asset)
+        if parsed is not None:
+            return parsed
         if asset == CryptoAsset.ETH:
             return Decimal("2600.00")
         elif asset == CryptoAsset.SOL:

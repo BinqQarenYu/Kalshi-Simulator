@@ -33,7 +33,7 @@ from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, Statistical
 from kalshi_sim.ml.wave_classifier import MarketWavePhysics, WaveRegimeClassifier, compute_wave_physics
 from kalshi_sim.ml.bleed_defender import BleedDefender
 from kalshi_sim.ml.healing_protocol import HealingProtocol
-from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, get_asset_config
+from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, extract_strike_from_ticker, get_asset_config
 
 logger = logging.getLogger("kalshi_sim.bot1_v4_engine")
 
@@ -1345,6 +1345,35 @@ class Bot1V4DominationEngine:
         playbook_stage = "breakout" if active_playbook == "playbook1_breakout" else "drift"
         order_type_val = "limit"
 
+        # Guardrail: Minimum Viable Ask Floor ($0.38) & Non-Crossing Maker Clamp
+        if recommended_side in ("yes", "no") and l2_book is not None and (l2_book.yes_book or l2_book.no_book):
+            live_side_ask = (
+                l2_book.best_yes_ask
+                if recommended_side == "yes"
+                else ((Decimal("1.00") - l2_book.best_yes_bid) if l2_book.best_yes_bid is not None else l2_book.best_no_ask)
+            )
+            if live_side_ask is not None:
+                ask_f = float(live_side_ask)
+                if ask_f < 0.38:
+                    return Bot1V4Decision(
+                        strategy_id=self.STRATEGY_ID,
+                        strategy_name=self.STRATEGY_NAME,
+                        active_playbook="adverse_otm_ask_veto",
+                        playbook_stage="none",
+                        p_up=p_up, p_down=p_down, p_wait=1.0,
+                        vpin=vpin_eval, vpin_is_safe=True,
+                        ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                        kelly_f_yes=0.0, kelly_f_no=0.0,
+                        recommended_side="wait", recommended_contracts=0,
+                        rationale=f"Adverse OTM Ask Veto: Live {recommended_side.upper()} ask ${ask_f:.2f} < $0.38 minimum viable floor (prevents buying doomed OTM dumps).",
+                        edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                        limit_price=float(self.discount_limit_price),
+                        turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                        ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                        onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                        regime="STORM",
+                    )
+
         # Part 3: Taker Dynamic Breakout Entry (High-Velocity Wave Penetration)
         # When high kinetic energy and high conviction confirm a runaway breakout,
         # paying the $0.01 taker fee guarantees immediate fill before the market escapes.
@@ -1594,27 +1623,37 @@ class Bot1V4DominationEngine:
         target_strike = Decimal("2350.00") if is_eth else Decimal("80500.00")
         time_to_expiry_s = 600.0
 
+        if market_info is None and self._cached_market and self._cached_market.ticker == target_ticker:
+            market_info = self._cached_market
+
         if market_info and market_info.floor_strike:
             target_strike = market_info.floor_strike
-        elif "-" in target_ticker:
-            parts = target_ticker.split("-")
-            if len(parts) >= 3:
-                try:
-                    target_strike = Decimal(parts[-1])
-                except Exception:
-                    pass
+        else:
+            parsed_strike = extract_strike_from_ticker(target_ticker, self.asset)
+            if parsed_strike is not None:
+                target_strike = parsed_strike
 
         if market_info and market_info.expiration_time:
             time_to_expiry_s = max(1.0, (market_info.expiration_time - now_utc).total_seconds())
 
         spot_price = self.get_spot_price()
+        now_mono = time.monotonic()
+        spot_f = float(spot_price)
+        spot_velocity_3s = 0.0
+        if self._recent_spot_history:
+            for prev_ts, prev_p in reversed(self._recent_spot_history):
+                dt = now_mono - prev_ts
+                if dt >= 0.5:
+                    spot_velocity_3s = (spot_f - prev_p) / max(1.0, dt) * 3.0
+                    break
+
         vpin_score = 0.15
         if self.orderflow_feed:
             vpin_score = min(0.99, max(0.01, abs(getattr(self.orderflow_feed, "ofi_l1", 0.15))))
 
         decision = self.evaluate(
             book=book,
-            spot_price=float(spot_price),
+            spot_price=spot_f,
             target_strike=float(target_strike),
             time_to_expiry_s=time_to_expiry_s,
             recent_trades=[],
@@ -1622,7 +1661,7 @@ class Bot1V4DominationEngine:
             max_position_size=1,
             estimated_vpin=vpin_score,
             cycle_id=target_ticker,
-            spot_velocity_3s=0.0,
+            spot_velocity_3s=spot_velocity_3s,
         )
 
         logger.info(

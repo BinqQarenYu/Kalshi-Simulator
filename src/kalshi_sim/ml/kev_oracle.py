@@ -139,6 +139,13 @@ class KevDecisionOracle:
         questions: List[KevQuestion],
     ) -> Dict[str, KevDecisionResult]:
         """Evaluates typed questions against context in a single prefill forward pass."""
+        if hasattr(self, "answer_batch") and callable(getattr(self, "answer_batch")):
+            batch_res = await self.answer_batch(context, questions)
+            if isinstance(batch_res, list):
+                return {r.key: r for r in batch_res if hasattr(r, "key")}
+            elif isinstance(batch_res, dict):
+                return batch_res
+
         now = time.monotonic()
         start_mono = now
 
