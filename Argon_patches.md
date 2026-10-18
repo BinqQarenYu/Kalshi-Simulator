@@ -105,13 +105,29 @@ MASTER REGISTRY WITH ARGON PATCHES    367    131      149        35.7%   +$186.3
 
 ---
 
-## 4. Verification & Operational Directives
+## 4. Standalone Daemon Fleet Unification (`btc_bot1v4_engine.py` & `eth_bot1v4_engine.py`)
 
-1. **ASVL Verification:**  
-   - Dedicated unit test suite: [`tests/test_argon_patches.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/tests/test_argon_patches.py) passing **5/5 (100%)**.
-   - Core strategy test suite passing **65/65 (100%)**.
+To eliminate any disparity between the central simulation engine (`bot1_v4_engine.py`) and the production daemons running on AWS EC2, all 4 microstructural armor features were ported directly into the standalone engines:
+
+1. **Adverse OTM Ask Floor (`$0.38` Minimum):**
+   - Wired in `evaluate()`: vetoes any live ask below `Decimal("0.38")` across both BTC and ETH daemons.
+2. **Winning Corridor Ceiling (`$0.55` Cap):**
+   - Replaced default `0.65` base ceiling with `Decimal("0.55")`, clamping entry within the optimal $[\$0.38, \$0.55]$ payoff asymmetry corridor.
+3. **Robust Strike Parser Fallback (`extract_strike_from_ticker`):**
+   - Replaced fragile string splitting `parts[-1]` with `extract_strike_from_ticker(target_ticker, asset=self.asset)`, eliminating trailing `-00` minute-suffix parsing errors.
+4. **Live 3-Second Kinetic Spot Velocity:**
+   - Populates `_recent_spot_history` on each evaluation cycle and computes rolling $3\text{s}$ spot velocity (`spot_velocity_3s`), replacing hardcoded `0.0`.
+
+---
+
+## 5. Verification & Operational Directives
+
+1. **ASVL Regression & Unit Verification:**  
+   - Dedicated unit test suite: [`tests/test_argon_patches.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/tests/test_argon_patches.py) passing **6/6 (100%)** locally and on AWS EC2.
+   - Core strategy and guardrail test suites passing **30/30 (100%)**.
 2. **Zero-Float Financial Math Law:**  
    All threshold checks, moats, corridors, and profit/loss values use `decimal.Decimal`.
 3. **Execution Armor Active:**  
    - PC local workspace armed.
-   - AWS EC2 production daemons armed and synced.
+   - AWS EC2 production daemons armed, anti-bloat vacuumed, and memory refreshed (PIDs: `kalshi-bot` 498681, `kalshi-btc-bot` 500412, `kalshi-eth-bot` 500413).
+

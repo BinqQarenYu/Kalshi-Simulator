@@ -12,34 +12,47 @@
 flowchart LR
     subgraph Systemd Supervision
         S1[kalshi-bot.service] -->|Spawns| P1[aws_headless_daemon.py]
-        S2[kalshi-eth-bot.service] -->|Spawns| P2[paper_trade_ethbot.py --mode live]
+        S2[kalshi-btc-bot.service] -->|Spawns| P2[paper_trade_btcbot.py --mode live]
+        S3[kalshi-eth-bot.service] -->|Spawns| P3[paper_trade_ethbot.py --mode live]
     end
 
     subgraph Memory Space
-        P1 -->|Hosts| BTC_ENG[Bot 1 V4 Quolas Engine]
-        P1 -->|Hosts| BTC_DBW[BTC Async DB Writer]
-        P1 -->|Hosts| BTC_SUP[BTC Batch Supervisor]
+        P1 -->|Hosts| MON_ENG[Central Server / WebCLOB Port 8000]
+        P1 -->|Hosts| BTC_SUP[Autonomous 6-Trade Batch Supervisor]
+        P1 -->|Hosts| ODIN[Odin Shadow Harvester]
 
-        P2 -->|Hosts| ETH_ENG[Bot 1 V4 Domination Engine]
-        P2 -->|Hosts| ETH_DBW[ETH Async DB Writer]
-        P2 -->|Hosts| ETH_SUP[ETH Batch Supervisor]
-        P2 -->|Hosts| KEV_ORC[Kev AI Decision Oracle]
+        P2 -->|Hosts| BTC_ENG[Bot 1 V4 BTC Domination Engine]
+        P2 -->|Hosts| BTC_DBW[BTC Async DB Writer]
+        P2 -->|Hosts| BTC_KEV[BTC Kev Decision Oracle]
+
+        P3 -->|Hosts| ETH_ENG[Bot 1 V4 ETH Domination Engine]
+        P3 -->|Hosts| ETH_DBW[ETH Async DB Writer]
+        P3 -->|Hosts| ETH_KEV[ETH Kev Decision Oracle]
     end
 ```
 
-### 1.1 `kalshi-bot.service`
+### 1.1 `kalshi-bot.service` (Headless Monolith & 6-Trade Batch Supervisor)
 - **Unit File:** `/etc/systemd/system/kalshi-bot.service`
-- **Entrypoint:** `aws_headless_daemon.py`
-- **Process Target:** Headless Bitcoin (`KXBTC15M`) Quolas Autonomous Quantitative Engine.
+- **Entrypoint:** `/home/ec2-user/kalshi-bot/venv/bin/python aws_headless_daemon.py`
+- **Process Target:** Central FastAPI / WebCLOB server (Port 8000) & Autonomous Batch Supervisor.
 - **Restart Policy:** `always`, restart delay 5 seconds.
-- **Resources:** Limit 1059 tasks, ~100MB RAM, sub-5% CPU.
+- **Resources:** Limit 1059 tasks, ~120MB RAM, sub-5% CPU.
 - **Log Source:** `journalctl -u kalshi-bot.service -f`
-- **Health Verification:** `curl -s http://localhost:8000/api/health` or orderbook sequence check.
+- **Health Verification:** `curl -s http://localhost:8000/api/health`
 
-### 1.2 `kalshi-eth-bot.service`
+### 1.2 `kalshi-btc-bot.service` (Dedicated Standalone BTC Live Taker Daemon)
+- **Unit File:** `/etc/systemd/system/kalshi-btc-bot.service`
+- **Entrypoint:** `/home/ec2-user/kalshi-bot/venv/bin/python src/kalshi_sim/ml/btc_bot1v4/paper_trade_btcbot.py --mode live --cycle-interval 5`
+- **Process Target:** Headless Bitcoin (`KXBTC15M`) Domination Engine with unified Argon armor ($0.38 floor, $0.55 cap, 3s velocity).
+- **Restart Policy:** `always`, restart delay 5 seconds.
+- **Resources:** Limit 1059 tasks, ~140MB RAM, sub-5% CPU.
+- **Log Source:** `journalctl -u kalshi-btc-bot.service -f`
+- **Health Verification:** `journalctl -u kalshi-btc-bot | grep "LIVE CAPITAL TRADING ENGAGED"`
+
+### 1.3 `kalshi-eth-bot.service` (Dedicated Standalone ETH Live Taker Daemon)
 - **Unit File:** `/etc/systemd/system/kalshi-eth-bot.service`
-- **Entrypoint:** `src/kalshi_sim/ml/eth_bot1v4/paper_trade_ethbot.py --mode live --cycle-interval 5`
-- **Process Target:** Headless Ethereum (`KXETH15M`) Domination Engine with Kev AI Oracle.
+- **Entrypoint:** `/home/ec2-user/kalshi-bot/venv/bin/python src/kalshi_sim/ml/eth_bot1v4/paper_trade_ethbot.py --mode live --cycle-interval 5`
+- **Process Target:** Headless Ethereum (`KXETH15M`) Domination Engine with Kev AI Oracle and unified Argon armor.
 - **Restart Policy:** `always`, restart delay 5 seconds.
 - **Resources:** Limit 1059 tasks, ~160MB RAM, sub-5% CPU.
 - **Log Source:** `journalctl -u kalshi-eth-bot.service -f`
@@ -67,20 +80,21 @@ flowchart LR
 
 ### 3.1 Service Lifecycle Commands
 ```bash
-# Check status of both AWS trading engines
-sudo systemctl status kalshi-bot.service kalshi-eth-bot.service --no-pager
+# Check status of all 3 AWS trading daemons
+sudo systemctl status kalshi-bot kalshi-btc-bot kalshi-eth-bot --no-pager
 
-# Restart both engines (Directive #6 Protocol)
-sudo systemctl restart kalshi-bot.service kalshi-eth-bot.service
+# Restart entire fleet forcefully (Rule 6 Protocol)
+sudo systemctl restart kalshi-bot kalshi-btc-bot kalshi-eth-bot
 
 # Live tail logs
 journalctl -u kalshi-bot.service -f
+journalctl -u kalshi-btc-bot.service -f
 journalctl -u kalshi-eth-bot.service -f
 ```
 
 ### 3.2 Emergency Circuit Breaker (Kill Switch)
 ```bash
 # Immediately halt all trading services on AWS EC2
-sudo systemctl stop kalshi-bot.service kalshi-eth-bot.service
+sudo systemctl stop kalshi-bot kalshi-btc-bot kalshi-eth-bot
 pkill -f "python.*kalshi"
 ```
