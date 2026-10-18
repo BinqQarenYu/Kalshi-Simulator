@@ -564,9 +564,9 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
             logger.debug("[BTC KEV EVAL ERROR] %s", kev_err)
 
         # 1. Toxic Sweep Veto (Anti-Whale Armor)
-        is_toxic = (kev_toxic and kev_toxic.selected_option.lower() == "true") or (vpin_score >= 0.60)
+        is_toxic = (kev_toxic and kev_toxic.selected_option.lower() == "true")
         if is_toxic:
-            logger.warning("🛑 [BTC TOXIC SWEEP VETO] Toxic order flow / sweep detected (VPIN: %.2f). Stand down.", vpin_score)
+            logger.warning("🛑 [BTC TOXIC SWEEP VETO] Toxic order flow / sweep detected by Kev Oracle. Stand down.")
             return decision
 
         # 1b. Late Cycle TWAP Guard (Anti-Pinning Trap)
@@ -634,7 +634,8 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
         raw_kev_conf = float(kev_rec.confidence) if kev_rec else 0.50
         platt_alpha = getattr(self.experience_buffer, "platt_alpha", 1.0) if self.experience_buffer else 1.0
         kev_conf = raw_kev_conf * platt_alpha
-        if kev_dir not in ("YES", "NO") or kev_conf < 0.60:
+        # Anti-deadlock gate: Requires strong qualitative conviction (raw >= 70%) and calibrated confidence >= 52%
+        if kev_dir not in ("YES", "NO") or raw_kev_conf < 0.70 or kev_conf < 0.52:
             logger.info(
                 "⏸️ [BTC KEV STAND DOWN] Kev recommends %s (Calibrated Conf: %.1f%%, Raw: %.1f%%, Platt Alpha: %.2f). No trade.",
                 kev_dir, kev_conf * 100.0, raw_kev_conf * 100.0, platt_alpha
@@ -657,8 +658,16 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
             )
             return decision
 
-        # 3c. Asymmetric Macro-Trend Alignment Guard (Anti-Bleed Inversion)
+        # 3c. Adverse Selection Flow Shield (Veto if queue pressure is aggressively opposing trade side)
         ofi_val = float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0)
+        if chosen_side == OrderSide.YES and ofi_val <= -0.65:
+            logger.warning("🛑 [BTC ADVERSE FLOW VETO] Aggressive sell flow against YES (OFI: %+.2f <= -0.65). Stand down.", ofi_val)
+            return decision
+        if chosen_side == OrderSide.NO and ofi_val >= 0.65:
+            logger.warning("🛑 [BTC ADVERSE FLOW VETO] Aggressive buy flow against NO (OFI: %+.2f >= +0.65). Stand down.", ofi_val)
+            return decision
+
+        # 3d. Asymmetric Macro-Trend Alignment Guard (Anti-Bleed Inversion)
         if macro_slope <= -0.10 and chosen_side == OrderSide.YES:
             if (spot_price - target_strike) < Decimal("50.00") or ofi_val < 0.20:
                 logger.warning(
