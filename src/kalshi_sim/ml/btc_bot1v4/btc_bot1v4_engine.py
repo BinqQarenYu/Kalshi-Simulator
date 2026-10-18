@@ -645,7 +645,10 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
         kev_dir = kev_rec.selected_option.upper() if kev_rec else "WAIT"
         raw_kev_conf = float(kev_rec.confidence) if kev_rec else 0.50
         platt_alpha = getattr(self.experience_buffer, "platt_alpha", 1.0) if self.experience_buffer else 1.0
-        kev_conf = raw_kev_conf * platt_alpha
+        if self.experience_buffer and hasattr(self.experience_buffer, "calibrate_probability"):
+            kev_conf = self.experience_buffer.calibrate_probability(raw_kev_conf)
+        else:
+            kev_conf = 0.50 + platt_alpha * (raw_kev_conf - 0.50)
         # Anti-deadlock gate: Requires strong qualitative conviction (raw >= 70%) and calibrated confidence >= 50%
         if kev_dir not in ("YES", "NO") or raw_kev_conf < 0.70 or kev_conf < 0.50:
             logger.info(
