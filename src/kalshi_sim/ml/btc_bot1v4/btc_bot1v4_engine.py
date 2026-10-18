@@ -646,8 +646,8 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
         raw_kev_conf = float(kev_rec.confidence) if kev_rec else 0.50
         platt_alpha = getattr(self.experience_buffer, "platt_alpha", 1.0) if self.experience_buffer else 1.0
         kev_conf = raw_kev_conf * platt_alpha
-        # Anti-deadlock gate: Requires strong qualitative conviction (raw >= 70%) and calibrated confidence >= 52%
-        if kev_dir not in ("YES", "NO") or raw_kev_conf < 0.70 or kev_conf < 0.52:
+        # Anti-deadlock gate: Requires strong qualitative conviction (raw >= 70%) and calibrated confidence >= 50%
+        if kev_dir not in ("YES", "NO") or raw_kev_conf < 0.70 or kev_conf < 0.50:
             logger.info(
                 "⏸️ [BTC KEV STAND DOWN] Kev recommends %s (Calibrated Conf: %.1f%%, Raw: %.1f%%, Platt Alpha: %.2f). No trade.",
                 kev_dir, kev_conf * 100.0, raw_kev_conf * 100.0, platt_alpha

@@ -121,10 +121,10 @@ class ContinuousExperienceBuffer:
                 item_asset = str(item.get("asset", "")).upper()
                 item_ticker = str(item.get("ticker", "")).upper()
                 if self.asset == "BTC":
-                    if item_asset == "ETH" or item_ticker.startswith("KXETH"):
+                    if not (item_ticker.startswith("KXBTC") or item_asset == "BTC"):
                         continue
                 elif self.asset == "ETH":
-                    if item_asset == "BTC" or item_ticker.startswith("KXBTC"):
+                    if not (item_ticker.startswith("KXETH") or item_asset == "ETH"):
                         continue
                 elif item_asset and item_asset != self.asset:
                     continue
