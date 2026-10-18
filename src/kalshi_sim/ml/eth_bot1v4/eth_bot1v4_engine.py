@@ -345,6 +345,20 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             pass
         return Decimal("2350.00")
 
+    def get_empirical_vpin(self) -> float:
+        """Compute empirical Volume-Synchronized Probability of Toxicity (VPIN) from aggressive trade tape."""
+        if not self.orderflow_feed or not hasattr(self.orderflow_feed, "trades") or not self.orderflow_feed.trades:
+            return 0.15
+        trades = list(self.orderflow_feed.trades)
+        if len(trades) < 5:
+            return 0.15
+        buy_vol = sum(float(getattr(t, "count", 0.0)) for t in trades if getattr(t, "taker_side", "") == "buy")
+        sell_vol = sum(float(getattr(t, "count", 0.0)) for t in trades if getattr(t, "taker_side", "") == "sell")
+        tot = buy_vol + sell_vol
+        if tot <= 0.0001:
+            return 0.15
+        return float(min(0.99, max(0.01, abs(buy_vol - sell_vol) / tot)))
+
     async def run_cycle(self, ticker: Optional[str] = None) -> Optional[Bot1V4Decision]:
         """Execute a single cycle iteration of the ETH Bot 1 V4 engine.
 
@@ -415,9 +429,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                     spot_velocity_3s = (spot_f - prev_p) / max(1.0, dt) * 3.0
                     break
 
-        vpin_score = 0.15
-        if self.orderflow_feed:
-            vpin_score = min(0.99, max(0.01, abs(self.orderflow_feed.ofi_l1)))
+        vpin_score = self.get_empirical_vpin()
 
         macro_slope = self.get_macro_1h_slope()
         dof_gov = getattr(self, "dof_governor", None) or get_dof_governor()
