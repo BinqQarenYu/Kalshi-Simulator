@@ -91,6 +91,157 @@ def extract_json_payload(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def compute_batch_sweetspot_profile(
+    recent_trades: List[Dict[str, Any]],
+    asset: str = "BTC",
+) -> Dict[str, Any]:
+    """Empirically profile price bands and tau windows for the 6 settled trades.
+
+    Identifies optimal entry corridors and adverse selection hazard zones
+    using Zero Float Financial Math (decimal.Decimal).
+    """
+    price_buckets: Dict[str, Dict[str, Any]] = {
+        "DEEP_DISCOUNT ($0.38-$0.43)": {"bounds": (0.38, 0.43), "wins": 0, "losses": 0, "pnl": Decimal("0.00")},
+        "PRIME_SWEETSPOT ($0.44-$0.48)": {"bounds": (0.44, 0.48), "wins": 0, "losses": 0, "pnl": Decimal("0.00")},
+        "MOMENTUM_UPPER ($0.49-$0.52)": {"bounds": (0.49, 0.52), "wins": 0, "losses": 0, "pnl": Decimal("0.00")},
+        "HIGH_CEILING (>$0.52)": {"bounds": (0.53, 0.99), "wins": 0, "losses": 0, "pnl": Decimal("0.00")},
+        "OTM_TAIL (<$0.38)": {"bounds": (0.01, 0.37), "wins": 0, "losses": 0, "pnl": Decimal("0.00")},
+    }
+
+    tau_buckets: Dict[str, Dict[str, Any]] = {
+        "EARLY_CYCLE (>600s)": {"bounds": (600.0, 900.0), "wins": 0, "losses": 0, "pnl": Decimal("0.00")},
+        "PRIME_MID_CYCLE (300s-600s)": {"bounds": (300.0, 600.0), "wins": 0, "losses": 0, "pnl": Decimal("0.00")},
+        "LATE_MID_CYCLE (180s-300s)": {"bounds": (180.0, 300.0), "wins": 0, "losses": 0, "pnl": Decimal("0.00")},
+        "PIN_ZONE (<180s)": {"bounds": (0.0, 180.0), "wins": 0, "losses": 0, "pnl": Decimal("0.00")},
+    }
+
+    win_entries: List[Decimal] = []
+    loss_entries: List[Decimal] = []
+    yes_wins = yes_losses = no_wins = no_losses = 0
+
+    for t in recent_trades:
+        pnl_dec = Decimal(str(t.get("pnl", t.get("net_pnl", "0.00")) or "0.00"))
+        ep_dec = Decimal(str(t.get("entry_price", "0.45") or "0.45"))
+        ep_f = float(ep_dec)
+        tau_f = float(t.get("time_to_expiry_s", t.get("tau_s", 420.0)) or 420.0)
+        side = str(t.get("bot_side", t.get("side", "yes"))).lower()
+        outcome = str(t.get("outcome", "")).lower()
+        is_win = outcome == "win" or pnl_dec > Decimal("0.00")
+
+        if is_win:
+            win_entries.append(ep_dec)
+            if side == "yes":
+                yes_wins += 1
+            else:
+                no_wins += 1
+        else:
+            loss_entries.append(ep_dec)
+            if side == "yes":
+                yes_losses += 1
+            else:
+                no_losses += 1
+
+        # Match price bucket
+        matched_p = False
+        for p_name, p_data in price_buckets.items():
+            b_low, b_high = p_data["bounds"]
+            if b_low <= ep_f <= b_high:
+                if is_win:
+                    p_data["wins"] += 1
+                else:
+                    p_data["losses"] += 1
+                p_data["pnl"] += pnl_dec
+                matched_p = True
+                break
+        if not matched_p:
+            bucket_key = "HIGH_CEILING (>$0.52)" if ep_f > 0.52 else "OTM_TAIL (<$0.38)"
+            if is_win:
+                price_buckets[bucket_key]["wins"] += 1
+            else:
+                price_buckets[bucket_key]["losses"] += 1
+            price_buckets[bucket_key]["pnl"] += pnl_dec
+
+        # Match tau bucket
+        matched_tau = False
+        for tau_name, tau_data in tau_buckets.items():
+            t_low, t_high = tau_data["bounds"]
+            if t_low <= tau_f <= t_high:
+                if is_win:
+                    tau_data["wins"] += 1
+                else:
+                    tau_data["losses"] += 1
+                tau_data["pnl"] += pnl_dec
+                matched_tau = True
+                break
+        if not matched_tau:
+            bucket_key = "EARLY_CYCLE (>600s)" if tau_f > 600.0 else "PIN_ZONE (<180s)"
+            if is_win:
+                tau_buckets[bucket_key]["wins"] += 1
+            else:
+                tau_buckets[bucket_key]["losses"] += 1
+            tau_buckets[bucket_key]["pnl"] += pnl_dec
+
+    # Determine best and worst price corridors
+    active_price_buckets = {k: v for k, v in price_buckets.items() if (v["wins"] + v["losses"]) > 0}
+    if active_price_buckets:
+        best_p = max(active_price_buckets.items(), key=lambda x: (x[1]["pnl"], x[1]["wins"]))
+        worst_p = min(active_price_buckets.items(), key=lambda x: (x[1]["pnl"], -x[1]["losses"]))
+        best_price_corridor = best_p[0]
+        best_price_stats = f"{best_p[1]['wins']}W-{best_p[1]['losses']}L, PnL: ${best_p[1]['pnl']:+.2f}"
+        worst_price_corridor = worst_p[0]
+        worst_price_stats = f"{worst_p[1]['wins']}W-{worst_p[1]['losses']}L, PnL: ${worst_p[1]['pnl']:+.2f}"
+    else:
+        best_price_corridor = "N/A"
+        best_price_stats = "No trades"
+        worst_price_corridor = "N/A"
+        worst_price_stats = "No trades"
+
+    # Determine best and worst tau windows
+    active_tau_buckets = {k: v for k, v in tau_buckets.items() if (v["wins"] + v["losses"]) > 0}
+    if active_tau_buckets:
+        best_t = max(active_tau_buckets.items(), key=lambda x: (x[1]["pnl"], x[1]["wins"]))
+        worst_t = min(active_tau_buckets.items(), key=lambda x: (x[1]["pnl"], -x[1]["losses"]))
+        best_tau_window = best_t[0]
+        best_tau_stats = f"{best_t[1]['wins']}W-{best_t[1]['losses']}L, PnL: ${best_t[1]['pnl']:+.2f}"
+        worst_tau_window = worst_t[0]
+        worst_tau_stats = f"{worst_t[1]['wins']}W-{worst_t[1]['losses']}L, PnL: ${worst_t[1]['pnl']:+.2f}"
+    else:
+        best_tau_window = "N/A"
+        best_tau_stats = "No trades"
+        worst_tau_window = "N/A"
+        worst_tau_stats = "No trades"
+
+    avg_win_ep = sum(win_entries) / len(win_entries) if win_entries else Decimal("0.00")
+    avg_loss_ep = sum(loss_entries) / len(loss_entries) if loss_entries else Decimal("0.00")
+
+    serializable_price = {
+        k: {"wins": v["wins"], "losses": v["losses"], "pnl": str(v["pnl"])}
+        for k, v in price_buckets.items()
+    }
+    serializable_tau = {
+        k: {"wins": v["wins"], "losses": v["losses"], "pnl": str(v["pnl"])}
+        for k, v in tau_buckets.items()
+    }
+
+    return {
+        "asset": asset.upper(),
+        "best_price_corridor": best_price_corridor,
+        "best_price_stats": best_price_stats,
+        "worst_price_corridor": worst_price_corridor,
+        "worst_price_stats": worst_price_stats,
+        "best_tau_window": best_tau_window,
+        "best_tau_stats": best_tau_stats,
+        "worst_tau_window": worst_tau_window,
+        "worst_tau_stats": worst_tau_stats,
+        "avg_win_entry": float(avg_win_ep),
+        "avg_loss_entry": float(avg_loss_ep),
+        "yes_record": f"{yes_wins}W - {yes_losses}L",
+        "no_record": f"{no_wins}W - {no_losses}L",
+        "price_buckets": serializable_price,
+        "tau_buckets": serializable_tau,
+    }
+
+
 async def run_gemini_batch_assessment(
     batch_num: int,
     recent_trades: List[Dict[str, Any]],
@@ -113,6 +264,8 @@ async def run_gemini_batch_assessment(
         "transition_reason": "Baseline market regime",
     }
 
+    sweetspot = compute_batch_sweetspot_profile(recent_trades, asset=asset)
+
     prompt = f"""You are the Lead Quantitative Auditor and Post-Occupancy Evaluator (POE) for an institutional Kalshi {asset_upper} binary options trading algorithm (Bot 1 V4 {asset_upper}).
 
 You are evaluating Batch #{batch_num} consisting of the last {len(recent_trades)} settled {asset_upper} trades.
@@ -129,6 +282,16 @@ Transition Reason: {cond.get('transition_reason', '')}
 
 === BATCH TRADES LEDGER ({asset_upper} ONLY) ===
 {json.dumps(recent_trades, indent=2)}
+
+=== BATCH SWEETSPOT & ORDERBOOK PROFILE ({asset_upper}) ===
+Best Performing Entry Corridor: {sweetspot['best_price_corridor']} ({sweetspot['best_price_stats']})
+Worst Performing Entry Corridor: {sweetspot['worst_price_corridor']} ({sweetspot['worst_price_stats']})
+Best Timing Window (Tau): {sweetspot['best_tau_window']} ({sweetspot['best_tau_stats']})
+Worst Timing Window (Tau): {sweetspot['worst_tau_window']} ({sweetspot['worst_tau_stats']})
+Average Entry: Wins: ${sweetspot['avg_win_entry']:.2f} | Losses: ${sweetspot['avg_loss_entry']:.2f}
+Side Distribution: YES ({sweetspot['yes_record']}), NO ({sweetspot['no_record']})
+Price Buckets: {json.dumps(sweetspot['price_buckets'], indent=2)}
+Tau Windows: {json.dumps(sweetspot['tau_buckets'], indent=2)}
 
 === CONTINUOUS EXPERIENCE BUFFER TELEMETRY ===
 Brier Score (rolling calibration): {exp_summary.get('brier_score', 0.25):.4f} (0.00 is perfect, 0.25 is random coin-flip)
@@ -187,6 +350,7 @@ Return ONLY valid JSON.
             "probability_calibration_review": f"Brier score at {exp_summary.get('brier_score', 0.25):.4f}; Platt Alpha at {exp_summary.get('platt_alpha', 1.0):.2f}.",
             "allowed_tweaks": {},
             "tweaks_rationale": f"Maintained baseline parameters within council bounds for {cond.get('tag')} market conditions.",
+            "sweetspot_profile": sweetspot,
         }
 
     # Validate and clamp all proposed tweaks strictly within council bounds
@@ -200,6 +364,7 @@ Return ONLY valid JSON.
                 clamped_tweaks[param] = clamped_val
 
     parsed["validated_tweaks"] = clamped_tweaks
+    parsed["sweetspot_profile"] = sweetspot
     return parsed
 
 
@@ -402,6 +567,52 @@ def build_assessment_markdown_report(
         else f"`Bot 1 V4 (BTC Quolas Engine) / Dual Warrior Architecture`"
     )
 
+    # Build Section 2.2: Empirical Sweetspot & Orderbook Corridor Profile
+    sweetspot_data = gemini_data.get("sweetspot_profile") or compute_batch_sweetspot_profile(recent_trades, asset=asset)
+    price_b_rows = []
+    for b_name, b_val in sweetspot_data.get("price_buckets", {}).items():
+        w = b_val.get("wins", 0)
+        l = b_val.get("losses", 0)
+        tot = w + l
+        wr = f"{(w / tot * 100.0):.1f}%" if tot > 0 else "N/A"
+        pnl_str = f"${float(b_val.get('pnl', 0.0)):+.2f}"
+        status = "🟢 SWEETSPOT" if w > l else ("🔴 ADVERSE" if l > w else ("⚪ NEUTRAL" if tot > 0 else "— UNTESTED"))
+        price_b_rows.append(f"| {b_name} | {w} | {l} | {wr} | {pnl_str} | {status} |")
+    price_b_table = "\n".join(price_b_rows)
+
+    tau_b_rows = []
+    for t_name, t_val in sweetspot_data.get("tau_buckets", {}).items():
+        w = t_val.get("wins", 0)
+        l = t_val.get("losses", 0)
+        tot = w + l
+        wr = f"{(w / tot * 100.0):.1f}%" if tot > 0 else "N/A"
+        pnl_str = f"${float(t_val.get('pnl', 0.0)):+.2f}"
+        status = "🟢 SWEETSPOT" if w > l else ("🔴 HAZARD" if l > w else ("⚪ NEUTRAL" if tot > 0 else "— UNTESTED"))
+        tau_b_rows.append(f"| {t_name} | {w} | {l} | {wr} | {pnl_str} | {status} |")
+    tau_b_table = "\n".join(tau_b_rows)
+
+    sweetspot_section = f"""
+---
+
+## 2.2. Empirical Sweetspot & Orderbook Corridor Profile
+
+### Entry Price Corridors:
+| Price Corridor | Wins | Losses | Win Rate | Net PnL | Sweetspot Verdict |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+{price_b_table}
+
+### Expiration Timing Windows (Tau $\\tau$):
+| Tau Window | Wins | Losses | Win Rate | Net PnL | Timing Verdict |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+{tau_b_table}
+
+- **Optimal Entry Sweetspot:** `{sweetspot_data.get('best_price_corridor', 'N/A')}` ({sweetspot_data.get('best_price_stats', '')})
+- **Adverse Selection Hazard:** `{sweetspot_data.get('worst_price_corridor', 'N/A')}` ({sweetspot_data.get('worst_price_stats', '')})
+- **Optimal Tau Timing Window:** `{sweetspot_data.get('best_tau_window', 'N/A')}` ({sweetspot_data.get('best_tau_stats', '')})
+- **Average Entry Price:** Wins: `${sweetspot_data.get('avg_win_entry', 0.0):.2f}` | Losses: `${sweetspot_data.get('avg_loss_entry', 0.0):.2f}`
+- **Side Distribution:** YES: `{sweetspot_data.get('yes_record', '0W-0L')}` | NO: `{sweetspot_data.get('no_record', '0W-0L')}`
+"""
+
     report = f"""# 6-Trade Evaluation Assessment Series: Batch #{batch_num} ({asset.upper()})
 
 **Document ID:** `assessment_{now_date}_#{batch_num}_{asset.upper()}_`  
@@ -440,6 +651,7 @@ Audited under Zero Float Financial Math (`decimal.Decimal`):
 | :-: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 {ledger_table}
 {failure_scorecard_section}
+{sweetspot_section}
 ---
 
 ## 3. What Happened: Gemini Forensic Diagnostic & Root-Cause Autopsy

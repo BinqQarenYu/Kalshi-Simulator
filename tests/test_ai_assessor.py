@@ -7,6 +7,7 @@ from kalshi_sim.ai_assessor import (
     extract_json_payload,
     build_assessment_markdown_report,
     apply_validated_tweaks,
+    compute_batch_sweetspot_profile,
 )
 
 
@@ -32,6 +33,36 @@ def test_allowed_parameter_bounds():
     assert min_p <= 0.44 <= max_p
 
 
+def test_compute_batch_sweetspot_profile():
+    recent_trades = [
+        {"entry_price": 0.45, "time_to_expiry_s": 420.0, "outcome": "win", "pnl": 0.55, "bot_side": "yes"},
+        {"entry_price": 0.46, "time_to_expiry_s": 350.0, "outcome": "win", "pnl": 0.54, "bot_side": "yes"},
+        {"entry_price": 0.40, "time_to_expiry_s": 700.0, "outcome": "win", "pnl": 0.60, "bot_side": "no"},
+        {"entry_price": 0.55, "time_to_expiry_s": 120.0, "outcome": "loss", "pnl": -0.55, "bot_side": "yes"},
+        {"entry_price": 0.54, "time_to_expiry_s": 150.0, "outcome": "loss", "pnl": -0.54, "bot_side": "yes"},
+        {"entry_price": 0.47, "time_to_expiry_s": 480.0, "outcome": "win", "pnl": 0.53, "bot_side": "no"},
+    ]
+    profile = compute_batch_sweetspot_profile(recent_trades, asset="BTC")
+    assert profile["asset"] == "BTC"
+    assert "PRIME_SWEETSPOT ($0.44-$0.48)" in profile["price_buckets"]
+    prime = profile["price_buckets"]["PRIME_SWEETSPOT ($0.44-$0.48)"]
+    assert prime["wins"] == 3
+    assert prime["losses"] == 0
+    assert Decimal(prime["pnl"]) == Decimal("1.62")
+
+    high = profile["price_buckets"]["HIGH_CEILING (>$0.52)"]
+    assert high["wins"] == 0
+    assert high["losses"] == 2
+
+    assert "PRIME_SWEETSPOT" in profile["best_price_corridor"]
+    assert "HIGH_CEILING" in profile["worst_price_corridor"]
+    assert "PIN_ZONE" in profile["worst_tau_window"]
+    assert profile["yes_record"] == "2W - 2L"
+    assert profile["no_record"] == "2W - 0L"
+    assert 0.44 <= profile["avg_win_entry"] <= 0.48
+    assert 0.54 <= profile["avg_loss_entry"] <= 0.55
+
+
 def test_build_assessment_markdown_report():
     recent_trades = [
         {
@@ -43,6 +74,7 @@ def test_build_assessment_markdown_report():
             "outcome": "win",
             "net_pnl": 0.52,
             "balance_after": 45.23,
+            "time_to_expiry_s": 450.0,
         }
     ]
     gemini_data = {
@@ -68,3 +100,6 @@ def test_build_assessment_markdown_report():
     assert "Batch #109" in report
     assert "Clean victory on high momentum." in report
     assert "`discount_limit_price` = 0.46" in report
+    assert "2.2. Empirical Sweetspot & Orderbook Corridor Profile" in report
+    assert "Optimal Entry Sweetspot:" in report
+    assert "Optimal Tau Timing Window:" in report
