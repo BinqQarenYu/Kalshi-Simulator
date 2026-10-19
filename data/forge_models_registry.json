@@ -1,0 +1,250 @@
+{
+  "onnx_assets": [
+    {
+      "id": "btc_microstructure_14d",
+      "name": "BTC 14-D Microstructure MLP",
+      "asset": "BTC",
+      "architecture": "14d_microstructure",
+      "input_dim": 28,
+      "hidden_layers": [
+        64,
+        32
+      ],
+      "output_classes": [
+        "UP",
+        "DOWN",
+        "WAIT"
+      ],
+      "status": "READY",
+      "epochs_trained": 140,
+      "validation_accuracy": "64.80",
+      "final_loss": "0.5120",
+      "inference_latency_ms": "1.18",
+      "samples_count": 2840,
+      "model_path": "models/btc_microstructure_14d.onnx",
+      "sha256": "5c07fe7c67925555",
+      "updated_at": "2026-10-19T15:51:33.111441+00:00",
+      "loss_curve": [
+        "0.94",
+        "0.82",
+        "0.73",
+        "0.66",
+        "0.61",
+        "0.56",
+        "0.53",
+        "0.51"
+      ]
+    },
+    {
+      "id": "eth_microstructure_14d",
+      "name": "ETH 14-D Microstructure MLP",
+      "asset": "ETH",
+      "architecture": "14d_microstructure",
+      "input_dim": 28,
+      "hidden_layers": [
+        64,
+        32
+      ],
+      "output_classes": [
+        "UP",
+        "DOWN",
+        "WAIT"
+      ],
+      "status": "READY",
+      "epochs_trained": 115,
+      "validation_accuracy": "63.20",
+      "final_loss": "0.5340",
+      "inference_latency_ms": "1.21",
+      "samples_count": 1920,
+      "model_path": "models/eth_microstructure_14d.onnx",
+      "sha256": "ebc0bb153ada2460",
+      "updated_at": "2026-10-19T15:51:33.111441+00:00",
+      "loss_curve": [
+        "0.98",
+        "0.85",
+        "0.76",
+        "0.69",
+        "0.63",
+        "0.59",
+        "0.55",
+        "0.53"
+      ]
+    },
+    {
+      "id": "btc_gold_32d",
+      "name": "BTC 32-D Gold Champion Brain",
+      "asset": "BTC",
+      "architecture": "32d_gold",
+      "input_dim": 32,
+      "hidden_layers": [
+        128,
+        64,
+        32
+      ],
+      "output_classes": [
+        "UP",
+        "DOWN",
+        "WAIT"
+      ],
+      "status": "READY",
+      "epochs_trained": 220,
+      "validation_accuracy": "68.40",
+      "final_loss": "0.4610",
+      "inference_latency_ms": "1.64",
+      "samples_count": 4150,
+      "model_path": "models/btc_gold_32d.onnx",
+      "sha256": "739f69aef5b6e231",
+      "updated_at": "2026-10-19T15:51:33.111441+00:00",
+      "loss_curve": [
+        "0.91",
+        "0.78",
+        "0.68",
+        "0.60",
+        "0.54",
+        "0.50",
+        "0.48",
+        "0.46"
+      ]
+    },
+    {
+      "id": "eth_gold_32d",
+      "name": "ETH 32-D Gold Champion Brain",
+      "asset": "ETH",
+      "architecture": "32d_gold",
+      "input_dim": 32,
+      "hidden_layers": [
+        128,
+        64,
+        32
+      ],
+      "output_classes": [
+        "UP",
+        "DOWN",
+        "WAIT"
+      ],
+      "status": "READY",
+      "epochs_trained": 180,
+      "validation_accuracy": "66.90",
+      "final_loss": "0.4830",
+      "inference_latency_ms": "1.69",
+      "samples_count": 2610,
+      "model_path": "models/eth_gold_32d.onnx",
+      "sha256": "c059d5c9eec4cca0",
+      "updated_at": "2026-10-19T15:51:33.111441+00:00",
+      "loss_curve": [
+        "0.93",
+        "0.80",
+        "0.71",
+        "0.63",
+        "0.57",
+        "0.52",
+        "0.50",
+        "0.48"
+      ]
+    }
+  ],
+  "hmm_assets": [
+    {
+      "id": "hmm_btc_3state",
+      "name": "BTC QuoLas 3-State Gaussian HMM",
+      "asset": "BTC",
+      "n_states": 3,
+      "states": [
+        "STABLE_RANGE",
+        "VOL_EXPANSION",
+        "RISK_OFF"
+      ],
+      "active_regime": "VOL_EXPANSION",
+      "confidence": "0.8100",
+      "samples_fitted": 1440,
+      "log_likelihood": "-218.45",
+      "transition_matrix": [
+        [
+          "0.82",
+          "0.15",
+          "0.03"
+        ],
+        [
+          "0.14",
+          "0.79",
+          "0.07"
+        ],
+        [
+          "0.09",
+          "0.21",
+          "0.70"
+        ]
+      ],
+      "emission_volatility_bps": [
+        "11.2",
+        "34.8",
+        "78.5"
+      ],
+      "updated_at": "2026-10-19T15:51:33.111441+00:00"
+    },
+    {
+      "id": "hmm_eth_3state",
+      "name": "ETH QuoLas 3-State Gaussian HMM",
+      "asset": "ETH",
+      "n_states": 3,
+      "states": [
+        "STABLE_RANGE",
+        "VOL_EXPANSION",
+        "RISK_OFF"
+      ],
+      "active_regime": "STABLE_RANGE",
+      "confidence": "0.7850",
+      "samples_fitted": 1440,
+      "log_likelihood": "-234.10",
+      "transition_matrix": [
+        [
+          "0.80",
+          "0.16",
+          "0.04"
+        ],
+        [
+          "0.16",
+          "0.76",
+          "0.08"
+        ],
+        [
+          "0.11",
+          "0.24",
+          "0.65"
+        ]
+      ],
+      "emission_volatility_bps": [
+        "14.5",
+        "41.2",
+        "89.0"
+      ],
+      "updated_at": "2026-10-19T15:51:33.111441+00:00"
+    }
+  ],
+  "ensemble_weights": {
+    "BTC": {
+      "ofi_weight": "0.24",
+      "vpin_shield_weight": "0.16",
+      "spot_velocity_weight": "0.22",
+      "moneyness_cdf_weight": "0.14",
+      "hmm_regime_weight": "0.10",
+      "onnx_confidence_weight": "0.14",
+      "win_rate_pct": "64.20",
+      "profit_factor": "1.68",
+      "expected_value_cents": "6.40",
+      "evaluated_cycles": 120
+    },
+    "ETH": {
+      "ofi_weight": "0.22",
+      "vpin_shield_weight": "0.18",
+      "spot_velocity_weight": "0.25",
+      "moneyness_cdf_weight": "0.13",
+      "hmm_regime_weight": "0.10",
+      "onnx_confidence_weight": "0.12",
+      "win_rate_pct": "62.50",
+      "profit_factor": "1.59",
+      "expected_value_cents": "5.80",
+      "evaluated_cycles": 96
+    }
+  }
+}

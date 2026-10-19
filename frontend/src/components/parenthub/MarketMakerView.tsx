@@ -142,7 +142,7 @@ export const MarketMakerView: React.FC<MarketMakerViewProps> = ({ reports, tradi
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
               <div className="p-3 bg-[#0c0f12] rounded-lg border border-[#2a3038]">
                 <div className="text-xs text-[#8c9ba5] mb-1">Min Spread</div>
-                <div className="font-mono text-white text-sm">2.0 ¢</div>
+                <div className="font-mono text-white text-sm">2.0 ï¿½</div>
               </div>
               <div className="p-3 bg-[#0c0f12] rounded-lg border border-[#2a3038]">
                 <div className="text-xs text-[#8c9ba5] mb-1">Max Contracts</div>
@@ -150,7 +150,7 @@ export const MarketMakerView: React.FC<MarketMakerViewProps> = ({ reports, tradi
               </div>
               <div className="p-3 bg-[#0c0f12] rounded-lg border border-[#2a3038]">
                 <div className="text-xs text-[#8c9ba5] mb-1">Inventory Skew</div>
-                <div className="font-mono text-purple-400 text-sm">1.0 ¢</div>
+                <div className="font-mono text-purple-400 text-sm">1.0 ï¿½</div>
               </div>
               <div className="p-3 bg-[#0c0f12] rounded-lg border border-[#2a3038]">
                 <div className="text-xs text-[#8c9ba5] mb-1">Vol Multiplier</div>

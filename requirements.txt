@@ -1,9 +1,9 @@
 # Production requirements for Kalshi Bot 1 V4 Trading Engine
-aiohttp>=3.9,<4
-cryptography>=42,<44
-python-dotenv>=1.0,<2
-pydantic>=2.5,<3
-orjson>=3.9,<4
+aiohttp>=3.9
+cryptography>=42
+python-dotenv>=1.0
+pydantic>=2.5
+orjson>=3.9
 numpy>=1.26
 onnxruntime>=1.18
 fastapi>=0.110.0
@@ -11,5 +11,11 @@ uvicorn[standard]>=0.28.0
 psutil>=5.9.0
 websockets>=12.0
 requests>=2.31.0
+aiosqlite>=0.20.0
+hmmlearn>=0.3.2
+langgraph>=0.2.0
+pyyaml>=6.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+
+

@@ -132,7 +132,7 @@ export function App() {
   const handleRunAuditNow = async () => {
     setIsLoadingAudit(true);
     try {
-      const res = await fetch('http://localhost:8000/api/integrity/audit-now', {
+      const res = await fetch('/api/integrity/audit-now', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });

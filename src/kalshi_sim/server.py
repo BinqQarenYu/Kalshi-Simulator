@@ -1322,6 +1322,7 @@ if "*" in allowed_origins:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"https://.*\.run\.app|http://localhost:\d+|http://127\.0\.0\.1:\d+",
     allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1329,11 +1330,12 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def add_security_headers(request, call_next):
+async def add_security_headers(request: Request, call_next):
     """SECURITY: Add HTTP response headers to harden against clickjacking, MIME sniffing, and XSS."""
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    if request.url.path.startswith("/api"):
+        response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
@@ -1551,6 +1553,11 @@ app.include_router(presets_router)
 from kalshi_sim.routers.council import router as council_router
 app.include_router(council_router)
 
+from kalshi_sim.routers.forge import router as forge_router, init_forge_router
+init_forge_router(lambda: state, trigger_instant_broadcast)
+app.include_router(forge_router)
+
+
 
 # ---------------------------------------------------------------------------
 # Frontend Static Mount (if built)
@@ -1625,7 +1632,8 @@ patch_windows_proactor_accept()
 
 def main() -> None:
     patch_windows_proactor_accept()
-    uvicorn.run("kalshi_sim.server:app", host="0.0.0.0", port=8000, reload=False, log_level="info")
+    port = int(os.environ.get("PORT", "3000"))
+    uvicorn.run("kalshi_sim.server:app", host="0.0.0.0", port=port, reload=False, log_level="info")
 
 
 if __name__ == "__main__":

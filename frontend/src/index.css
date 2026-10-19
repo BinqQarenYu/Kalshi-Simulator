@@ -4,33 +4,45 @@
 
 :root {
   color-scheme: dark;
-  --bg: #0f1319;
-  --panel: #12161a;
-  --panel2: #0c0f12;
-  --rowa: #171c22;
-  --rowb: #13171c;
-  --bd: #262d35;
-  --bd2: #1f262d;
+  --bg: #0b0d13;
+  --panel: #121621;
+  --panel2: #0e111a;
+  --rowa: #161b28;
+  --rowb: #121621;
+  --bd: #1e2536;
+  --bd2: #171d2b;
   --m: #8c9ba5;
-  --t: #ffffff;
-  --teal: #00bda5;
-  --teal2: #2dd4bf;
-  --tealbg: #115e59;
-  --gr: #34d399;
-  --gr2: #10b981;
-  --red: #d31a38;
-  --red2: #f43f5e;
-  --redbg: #4c111e;
-  --org: #d9a752;
+  --t: #f8fafc;
+  --teal: #06b6d4;
+  --teal2: #22d3ee;
+  --tealbg: #083344;
+  --gr: #10b981;
+  --gr2: #34d399;
+  --red: #f43f5e;
+  --red2: #fb7185;
+  --redbg: #4c0519;
+  --org: #f59e0b;
   --grdbg: #064e3b;
+  --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
 }
 
 body {
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-sans);
   background-color: var(--bg);
   color: var(--t);
   overflow-x: hidden;
+}
+
+h1, h2, h3, .font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono, .tabular-nums {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Custom modern scrollbar */
@@ -40,30 +52,53 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #111620;
+  background: #0b0d13;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #232d3f;
+  background: #1e2536;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #374151;
+  background: #334155;
 }
 
-/* Pulse animation for live dot */
 @keyframes pulseGlow {
   0%, 100% {
     opacity: 1;
     transform: scale(1);
   }
   50% {
-    opacity: 0.6;
-    transform: scale(1.15);
+    opacity: 0.65;
+    transform: scale(1.1);
   }
 }
 
 .animate-pulse-glow {
   animation: pulseGlow 1.8s infinite ease-in-out;
+}
+
+@keyframes robotHover {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.animate-robot-float {
+  animation: robotHover 3.2s infinite ease-in-out;
+}
+
+@keyframes synapseDash {
+  to {
+    stroke-dashoffset: -48;
+  }
+}
+
+.animate-synapse-flow {
+  stroke-dasharray: 6 6;
+  animation: synapseDash 1.4s linear infinite;
 }

@@ -1,0 +1,5 @@
+{
+  "name": "Kalshi BTC Quantitative Simulator & AI Engine",
+  "description": "High-frequency quantitative simulation, L2 orderbook analysis, and ONNX AI execution engine for Kalshi crypto markets.",
+  "requestFramePermissions": []
+}
