@@ -455,7 +455,7 @@ class ServerState:
         # The ONNX Strategy Execution Instance (Dual-Brain Contradiction & Momentum Arbitrage)
         self.dual_onnx_bot = DualONNXArbitrageBot(hmm_brain=self.hmm_brain)
 
-        # Autonomous 6-Trade Batch Supervisor (Parallel Evaluation & Evolution Daemon)
+        # Autonomous 6-Trade Batch Supervisor (Parallel Evaluation & Evolution Daemon for BTC & ETH)
         from kalshi_sim.batch_supervisor import AutonomousBatchSupervisor
         self.batch_supervisor = AutonomousBatchSupervisor(
             guardrails=self.guardrails_agent,
@@ -463,6 +463,15 @@ class ServerState:
             win_loss_path=self.data_dir / "win_loss_reports.json",
             eval_batch_size=6,
             poll_interval_s=5.0,
+            asset="BTC",
+        )
+        self.eth_batch_supervisor = AutonomousBatchSupervisor(
+            guardrails=self.guardrails_agent,
+            bot_parameters_path=self.data_dir / "bot_parameters_domination.json",
+            win_loss_path=self.data_dir / "eth_win_loss_reports.json",
+            eval_batch_size=6,
+            poll_interval_s=5.0,
+            asset="ETH",
         )
 
         # 15-Minute Event Win/Loss Reports Ledger (Disk-Persisted, No Auto-Reset)
@@ -1238,6 +1247,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("Gold 32-D ONNX Continuous Trainer started (Lane 2 Incubator).")
     if hasattr(state, "batch_supervisor") and state.batch_supervisor:
         state.batch_supervisor.start()
+    if hasattr(state, "eth_batch_supervisor") and state.eth_batch_supervisor:
+        state.eth_batch_supervisor.start()
     yield
     try:
         engine_lock.release()
@@ -1245,6 +1256,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pass
     if hasattr(state, "batch_supervisor") and state.batch_supervisor:
         state.batch_supervisor.stop()
+    if hasattr(state, "eth_batch_supervisor") and state.eth_batch_supervisor:
+        state.eth_batch_supervisor.stop()
     if hasattr(state, "continuous_trainer") and state.continuous_trainer:
         state.continuous_trainer.stop()
     if hasattr(state, "gold_continuous_trainer") and state.gold_continuous_trainer:
@@ -1356,32 +1369,37 @@ async def get_state() -> dict[str, Any]:
 
 
 @app.post("/api/batch-supervisor/evaluate")
-async def force_batch_evaluation() -> dict[str, Any]:
+async def force_batch_evaluation(asset: str = "BTC") -> dict[str, Any]:
     """Manually trigger a 6-trade evaluation batch, generate the report with market condition, and email operator."""
-    if hasattr(state, "batch_supervisor") and state.batch_supervisor:
-        res = await state.batch_supervisor.force_trigger_batch_evaluation()
+    target_bs = state.eth_batch_supervisor if asset.upper() == "ETH" else state.batch_supervisor
+    if target_bs:
+        res = await target_bs.force_trigger_batch_evaluation()
         return {"status": "success", "result": res}
-    raise HTTPException(status_code=503, detail="Batch supervisor not initialized")
+    raise HTTPException(status_code=503, detail=f"Batch supervisor for {asset} not initialized")
 
 
 @app.get("/api/batch-supervisor/status")
-async def get_batch_supervisor_status() -> dict[str, Any]:
+async def get_batch_supervisor_status(asset: str = "BTC") -> dict[str, Any]:
     """Get batch supervisor current progress and active market condition."""
-    if hasattr(state, "batch_supervisor") and state.batch_supervisor:
-        bs = state.batch_supervisor
+    target_bs = state.eth_batch_supervisor if asset.upper() == "ETH" else state.batch_supervisor
+    if target_bs:
+        bs = target_bs
         market_info = bs.determine_market_condition([])
+        unprocessed_count = len(bs._get_unprocessed_trades()) if hasattr(bs, "_get_unprocessed_trades") else 0
         return {
+            "asset": bs.asset,
             "current_batch_num": bs.current_batch_num,
             "cumulative_trades": bs.cumulative_trades,
             "cumulative_wins": bs.cumulative_wins,
             "cumulative_losses": bs.cumulative_losses,
             "cumulative_pnl": str(bs.cumulative_pnl),
-            "batch_trades_completed": getattr(state.guardrails_agent, "batch_trades_completed", 0),
-            "batch_trades_quota": getattr(state.guardrails_agent, "batch_trades_quota", 6),
+            "batch_trades_completed": unprocessed_count % bs.eval_batch_size,
+            "batch_trades_quota": bs.eval_batch_size,
+            "unprocessed_trades_count": unprocessed_count,
             "market_condition": market_info,
             "is_running": bs.is_running,
         }
-    raise HTTPException(status_code=503, detail="Batch supervisor not initialized")
+    raise HTTPException(status_code=503, detail=f"Batch supervisor for {asset} not initialized")
 
 # ---------------------------------------------------------------------------
 # WebSocket Broadcast Logic

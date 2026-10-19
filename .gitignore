@@ -32,6 +32,7 @@ data/*.db-wal
 data/*.db-shm
 data/*.csv
 data/*.tmp
+data/supervisor_processed_trades_*.json
 *.tmp
 src/data/
 scratch/
