@@ -1,6 +1,7 @@
 {
   "sent_batches": [
     1,
+    5,
     91,
     92,
     93,
@@ -34,13 +35,16 @@
     121,
     122,
     123,
-    145
+    145,
+    151
   ],
   "topic_last_sent": {
     "batch_assessment_123": 1791952980.0,
     "btc_batch_assessment_145": 1792398921.1396928,
-    "eth_batch_assessment_1": 1792399398.8736584
+    "eth_batch_assessment_1": 1792399398.8736584,
+    "eth_batch_assessment_5": 1792404059.1066751,
+    "btc_batch_assessment_151": 1792405827.4686415
   },
-  "last_email_sent_ts": 1792399398.8736584,
-  "last_updated_utc": "2026-10-19T08:43:18.873714+00:00"
+  "last_email_sent_ts": 1792405827.4686415,
+  "last_updated_utc": "2026-10-19T10:30:27.468723+00:00"
 }
