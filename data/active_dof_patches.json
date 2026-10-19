@@ -1,12 +1,12 @@
 {
   "version": "1.0",
-  "last_updated": "2026-10-19T08:36:09.812568+00:00",
+  "last_updated": "2026-10-19T08:45:29.904021+00:00",
   "ETH": {
     "dof_01_vol_moat": {
       "name": "Dynamic Volatility Moat",
-      "active": false,
+      "active": true,
       "error_code": "ERR_DISPERSION_EXCURSION",
-      "triggered_in_batch": null,
+      "triggered_in_batch": 1,
       "cycles_since_activation": 0,
       "params": {
         "k_vol_mult": 2.0,
