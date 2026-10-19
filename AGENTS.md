@@ -9,6 +9,7 @@ NEVER use IEEE 754 floating-point math (`float` in Python / `number` in JS) for 
 - **1-Trade-Per-Cycle**: Once a bot enters a cycle, it is locked. No cannibalism or wash trading.
 - **Micro-Bankroll Sizing**: Max 1 contract per trade.
 - **Seal of Excellence**: Bots must hold a verified SHA-256 seal on disk to trade live capital.
+- **Unified Qualification Ticket**: Every cycle evaluation emits an immutable qualification ticket recording decision metrics and `first_failed_gate` for counterfactual regret learning.
 
 ## 3. ASVL (Autonomous Self-Verification Loop)
 Never guess if code works. Always run tests before declaring a task complete:

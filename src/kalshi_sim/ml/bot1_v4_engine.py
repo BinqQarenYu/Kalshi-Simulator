@@ -33,7 +33,15 @@ from kalshi_sim.ml.statistical_ev_engine import ExpectedValueResult, Statistical
 from kalshi_sim.ml.wave_classifier import MarketWavePhysics, WaveRegimeClassifier, compute_wave_physics
 from kalshi_sim.ml.bleed_defender import BleedDefender
 from kalshi_sim.ml.healing_protocol import HealingProtocol
-from kalshi_sim.schemas import CryptoAsset, L2BookState, OrderSide, TradeEvent, extract_strike_from_ticker, get_asset_config
+from kalshi_sim.schemas import (
+    CryptoAsset,
+    L2BookState,
+    OrderSide,
+    QualificationTicket,
+    TradeEvent,
+    extract_strike_from_ticker,
+    get_asset_config,
+)
 
 logger = logging.getLogger("kalshi_sim.bot1_v4_engine")
 
@@ -71,6 +79,62 @@ class Bot1V4Decision:
     onnx_confidence: float = 0.0
     fused_source: str = "macro_erf"
     regime: str = "STORM"  # 'STORM' (Warrior 1) | 'CHOP' (Warrior 2)
+    ticket_id: str = ""
+    first_failed_gate: str = "NONE"
+    first_failed_reason: str = ""
+    candidate_side: str = "wait"
+    clob_depth_available: int = 0
+    adverse_ev: Optional[float] = None
+    contract_truth_verified: bool = True
+
+    def to_qualification_ticket(
+        self,
+        asset: str = "BTC",
+        target_strike: float = 0.0,
+        spot_price: float = 0.0,
+        ticker: str = "",
+    ) -> QualificationTicket:
+        """Convert decision into immutable QualificationTicket (Sweet Spot Architecture)."""
+        action = (
+            "BUY_YES" if self.recommended_side == "yes"
+            else ("BUY_NO" if self.recommended_side == "no" else "WAIT")
+        )
+        cand = self.candidate_side if self.candidate_side != "wait" else (
+            "yes" if self.p_up > self.p_down and self.p_up > 0.50
+            else ("no" if self.p_down > self.p_up and self.p_down > 0.50 else "wait")
+        )
+        cand_p = self.p_up if cand == "yes" else (self.p_down if cand == "no" else max(self.p_up, self.p_down))
+        cand_ev = self.ev_yes if cand == "yes" else (self.ev_no if cand == "no" else 0.0)
+
+        t_id = self.ticket_id or f"TICK-{asset.upper()}-{int(time.time()*1000)}"
+        return QualificationTicket(
+            ticket_id=t_id,
+            timestamp_iso=datetime.now(timezone.utc).isoformat(),
+            asset=asset.upper(),
+            ticker=ticker,
+            action=action,
+            first_failed_gate=self.first_failed_gate,
+            first_failed_reason=self.first_failed_reason or self.rationale,
+            candidate_side=cand,
+            calibrated_probability=round(float(cand_p), 4),
+            executable_price=Decimal(str(round(self.limit_price, 2))),
+            net_ev=Decimal(str(round(cand_ev, 4))),
+            required_edge=Decimal(str(round(self.ev_hurdle_dollars, 4))),
+            approved_contracts=int(self.recommended_contracts),
+            spot_price=Decimal(str(round(spot_price, 2))),
+            target_strike=Decimal(str(round(target_strike, 2))),
+            time_to_expiry_s=round(float(self.time_to_expiry_s), 1),
+            vpin=round(float(self.vpin), 3),
+            l2_spread=Decimal("0.00"),
+            adverse_ev=Decimal(str(round(self.adverse_ev, 4))) if self.adverse_ev is not None else None,
+            evidence_hashes={
+                "strategy_id": self.strategy_id,
+                "regime": self.regime,
+                "onnx_signal": self.onnx_signal,
+                "fused_source": self.fused_source,
+            },
+        )
+
 
 
 
@@ -260,11 +324,83 @@ class Bot1V4DominationEngine:
         self.exit_evaluator = DominationExitEvaluator(self)
         self.vpin_window: list[float] = []
 
-        # Cycle turnover state tracking
         self._current_cycle_id: Optional[str] = None
         self._completed_turnovers_map: dict[str, int] = {}
         self._last_exit_timestamp: float = 0.0
         self._session: Optional[aiohttp.ClientSession] = None
+
+        # Unified One-Decision Framework (Sweet Spot Edition) Qualification Ticket Stores
+        self._latest_qualification_ticket: Optional[QualificationTicket] = None
+        self._recent_qualification_tickets: list[QualificationTicket] = []
+        self._skipped_qualification_tickets: list[QualificationTicket] = []
+
+    def _record_decision(
+        self,
+        decision: Bot1V4Decision,
+        asset: CryptoAsset | str,
+        target_strike: float,
+        spot_price: float,
+        ticker: str = "",
+    ) -> Bot1V4Decision:
+        """Record and serialize the evaluation as an immutable QualificationTicket."""
+        try:
+            asset_str = asset.value if hasattr(asset, "value") else str(asset).upper()
+
+            # Auto-infer first failed gate from playbook if not already explicitly set
+            gate = decision.first_failed_gate
+            reason = decision.first_failed_reason or decision.rationale
+            if gate == "NONE" and decision.recommended_side == "wait":
+                playbook = decision.active_playbook.lower()
+                if "contract_truth" in playbook or "pinning" in playbook:
+                    gate = "G1_CONTRACT_TRUTH"
+                elif "frozen_sensor" in playbook or "vpin" in playbook:
+                    gate = "G2_DATA_HEALTH"
+                elif "clob_spread" in playbook or "otm_ask" in playbook or "insufficient_clob_depth" in playbook:
+                    gate = "G5_NOT_EXECUTABLE"
+                elif "quarantine" in playbook or "blackout" in playbook or "stand_down" in playbook or "freeze" in playbook:
+                    gate = "G1_CONTRACT_TRUTH"
+                elif "proximity" in playbook or "pruning" in playbook or "edge" in playbook:
+                    gate = "G8_EDGE_TOO_SMALL"
+                elif "slippage" in playbook or "adverse" in playbook:
+                    gate = "G12_ADVERSE_EXECUTION"
+                elif "turnover" in playbook:
+                    gate = "G10_MAX_TURNOVERS"
+                else:
+                    gate = "G3_PROBABILITY_LOW"
+
+            ticket = decision.to_qualification_ticket(
+                asset=asset_str,
+                target_strike=target_strike,
+                spot_price=spot_price,
+                ticker=ticker or getattr(self, "target_ticker", "") or "",
+            )
+            if gate != "NONE" and ticket.first_failed_gate == "NONE":
+                ticket = ticket.model_copy(update={"first_failed_gate": gate, "first_failed_reason": reason})
+
+            self._latest_qualification_ticket = ticket
+            self._recent_qualification_tickets.append(ticket)
+            if len(self._recent_qualification_tickets) > 100:
+                self._recent_qualification_tickets.pop(0)
+
+            # Counterfactual Regret Tracking: record skipped candidate trades
+            cand = decision.candidate_side if decision.candidate_side in ("yes", "no") else ticket.candidate_side
+            if decision.recommended_side == "wait" and cand in ("yes", "no"):
+                self._skipped_qualification_tickets.append(ticket)
+                if len(self._skipped_qualification_tickets) > 100:
+                    self._skipped_qualification_tickets.pop(0)
+        except Exception as e:
+            logger.debug("Failed recording qualification ticket: %s", e)
+        return decision
+
+
+    def get_latest_qualification_ticket(self) -> Optional[QualificationTicket]:
+        """Return the latest emitted qualification ticket."""
+        return self._latest_qualification_ticket
+
+    def get_skipped_qualification_tickets(self, limit: int = 20) -> list[QualificationTicket]:
+        """Return recently skipped qualification tickets for counterfactual regret auditing."""
+        return self._skipped_qualification_tickets[-limit:]
+
 
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or reuse connection-pooled HTTP session to prevent socket exhaustion."""
@@ -828,9 +964,58 @@ class Bot1V4DominationEngine:
         spot_diff = spot_price - target_strike
         turnovers = self.get_completed_turnovers(cycle_id)
 
+        # Gate 1: Contract Truth & CF Benchmarks Settlement Expiration Parity
+        if target_strike <= 0.0 or spot_price <= 0.0:
+            return self._record_decision(Bot1V4Decision(
+                strategy_id=self.STRATEGY_ID,
+                strategy_name=self.STRATEGY_NAME,
+                active_playbook="invalid_contract_truth",
+                playbook_stage="none",
+                p_up=0.5, p_down=0.5, p_wait=1.0,
+                vpin=vpin, vpin_is_safe=True,
+                ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                kelly_f_yes=0.0, kelly_f_no=0.0,
+                recommended_side="wait", recommended_contracts=0,
+                rationale="Contract Truth Veto: Strike price or spot price is non-positive or undefined.",
+                edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                limit_price=float(self.discount_limit_price),
+                turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                first_failed_gate="G1_CONTRACT_TRUTH",
+                first_failed_reason="Strike price or spot price is non-positive or undefined",
+                contract_truth_verified=False,
+            ), asset=asset, target_strike=target_strike, spot_price=spot_price)
+
+        if time_to_expiry_s <= 120.0:
+            vol = max(1.0, self.default_btc_1m_volatility)
+            t_factor = math.sqrt(max(0.1, time_to_expiry_s / 60.0))
+            z_norm = spot_diff / (vol * t_factor)
+            p_up_pin = 0.5 * (1.0 + math.erf(z_norm / math.sqrt(2.0)))
+            p_down_pin = 1.0 - p_up_pin
+            cand_side = "yes" if spot_diff > 0 else ("no" if spot_diff < 0 else "wait")
+            return self._record_decision(Bot1V4Decision(
+                strategy_id=self.STRATEGY_ID,
+                strategy_name=self.STRATEGY_NAME,
+                active_playbook="twap_pinning_blackout",
+                playbook_stage="none",
+                p_up=p_up_pin, p_down=p_down_pin, p_wait=1.0,
+                vpin=vpin, vpin_is_safe=True,
+                ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                kelly_f_yes=0.0, kelly_f_no=0.0,
+                recommended_side="wait", recommended_contracts=0,
+                rationale=f"Silas TWAP Pinning Veto: T={int(time_to_expiry_s)}s <= 120s remaining. 60s trailing average cannot catch up; trading halted to prevent pin loss.",
+                edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                limit_price=float(self.discount_limit_price),
+                turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                first_failed_gate="G1_CONTRACT_TRUTH_PINNING",
+                first_failed_reason="T <= 120s settlement TWAP pinning window",
+                candidate_side=cand_side,
+            ), asset=asset, target_strike=target_strike, spot_price=spot_price)
+
         # 1. Check Max Turnover Cap
         if turnovers >= self.max_turnover_per_event:
-            return Bot1V4Decision(
+            return self._record_decision(Bot1V4Decision(
                 strategy_id=self.STRATEGY_ID,
                 strategy_name=self.STRATEGY_NAME,
                 active_playbook="max_turnover_cap",
@@ -845,7 +1030,10 @@ class Bot1V4DominationEngine:
                 limit_price=float(self.discount_limit_price),
                 turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
                 ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
-            )
+                first_failed_gate="G10_MAX_TURNOVERS",
+                first_failed_reason=f"Max turnover cap hit ({turnovers}/{self.max_turnover_per_event})",
+            ), asset=asset, target_strike=target_strike, spot_price=spot_price)
+
 
         # 2. Bayesian Fused Win Probability & VPIN Check
         p_up, p_down, p_wait_micro, onnx_res = self.compute_fused_probabilities(
@@ -1200,7 +1388,81 @@ class Bot1V4DominationEngine:
                     f"(Deep Discount Limit ${chosen_limit_price:.2f}, Net EV +${ev_no:.3f}, {regime_reason})"
                 )
 
-            return Bot1V4Decision(
+            # Gate 5: Vance Executable CLOB Depth Availability (CHOP)
+            clob_depth_available = 0
+            if recommended_side in ("yes", "no"):
+                if l2_book is not None:
+                    if recommended_side == "yes":
+                        yes_items = l2_book.yes_book.items() if hasattr(l2_book.yes_book, "items") else l2_book.yes_book
+                        clob_depth_available = int(sum(qty for p, qty in yes_items if p <= Decimal(str(round(chosen_limit_price + 0.05, 2)))))
+                    else:
+                        if l2_book.no_book:
+                            no_items = l2_book.no_book.items() if hasattr(l2_book.no_book, "items") else l2_book.no_book
+                            clob_depth_available = int(sum(qty for p, qty in no_items if p <= Decimal(str(round(chosen_limit_price + 0.05, 2)))))
+                        elif l2_book.yes_book:
+                            yes_items = l2_book.yes_book.items() if hasattr(l2_book.yes_book, "items") else l2_book.yes_book
+                            clob_depth_available = int(sum(qty for p, qty in yes_items))
+
+                if clob_depth_available < 1:
+                    return self._record_decision(Bot1V4Decision(
+                        strategy_id=self.STRATEGY_ID,
+                        strategy_name=self.STRATEGY_NAME,
+                        active_playbook="insufficient_clob_depth_veto",
+                        playbook_stage="none",
+                        p_up=p_up, p_down=p_down, p_wait=1.0,
+                        vpin=vpin_eval, vpin_is_safe=True,
+                        ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                        kelly_f_yes=0.0, kelly_f_no=0.0,
+                        recommended_side="wait", recommended_contracts=0,
+                        rationale=f"Vance CLOB Depth Veto: 0 contracts available at executable depth for {recommended_side.upper()}. Suppressing phantom fill.",
+                        edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                        limit_price=float(self.discount_limit_price),
+                        turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                        ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                        onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                        regime="CHOP",
+                        first_failed_gate="G5_NOT_EXECUTABLE",
+                        first_failed_reason="Zero executable depth in CLOB",
+                        candidate_side=recommended_side,
+                        clob_depth_available=clob_depth_available,
+                    ), asset=asset, target_strike=target_strike, spot_price=spot_price)
+
+                # Gate 12: Adverse Execution 1-Tick Slippage Stress Test (+ $0.01 slippage)
+                cand_p_win = p_up if recommended_side == "yes" else p_down
+                stressed_price = chosen_limit_price + 0.01
+                taker_fee_f = float(self.fee_per_contract)
+                stressed_ev = cand_p_win * (1.0 - stressed_price) - (1.0 - cand_p_win) * stressed_price - taker_fee_f
+                if stressed_ev <= 0.0:
+                    return self._record_decision(Bot1V4Decision(
+                        strategy_id=self.STRATEGY_ID,
+                        strategy_name=self.STRATEGY_NAME,
+                        active_playbook="adverse_slippage_stress_veto",
+                        playbook_stage="none",
+                        p_up=p_up, p_down=p_down, p_wait=1.0,
+                        vpin=vpin_eval, vpin_is_safe=True,
+                        ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                        kelly_f_yes=0.0, kelly_f_no=0.0,
+                        recommended_side="wait", recommended_contracts=0,
+                        rationale=f"Adverse 1-Tick Slippage Veto: A +$0.01 fill shock drops net EV to ${stressed_ev:+.3f} <= $0.00. Margin of safety insufficient.",
+                        edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                        limit_price=float(self.discount_limit_price),
+                        turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                        ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                        onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                        regime="CHOP",
+                        first_failed_gate="G12_ADVERSE_EXECUTION",
+                        first_failed_reason=f"1-tick slippage shock reduces net EV to ${stressed_ev:.3f} <= $0.00",
+                        candidate_side=recommended_side,
+                        adverse_ev=stressed_ev,
+                    ), asset=asset, target_strike=target_strike, spot_price=spot_price)
+
+            cand_side_chop = recommended_side if recommended_side in ("yes", "no") else (
+                "yes" if p_up > p_down and p_up > 0.50 else ("no" if p_down > p_up and p_down > 0.50 else "wait")
+            )
+            gate_status_chop = "NONE" if recommended_side in ("yes", "no") else "G8_EDGE_TOO_SMALL"
+            gate_reason_chop = "" if recommended_side in ("yes", "no") else f"Warrior 2: No chop edge meeting EV hurdle (${self.min_ev_hurdle_dollars:.3f})"
+
+            return self._record_decision(Bot1V4Decision(
                 strategy_id=self.STRATEGY_ID,
                 strategy_name=self.STRATEGY_NAME,
                 active_playbook="playbook4_chop_harvester",
@@ -1213,7 +1475,7 @@ class Bot1V4DominationEngine:
                 kelly_f_yes=0.25 if recommended_side == "yes" else 0.0,
                 kelly_f_no=0.25 if recommended_side == "no" else 0.0,
                 recommended_side=recommended_side,
-                recommended_contracts=(
+                recommended_contracts=min(1, (
                     StatisticalEVEngine.compute_conviction_tier(
                         ai_prob=p_up if recommended_side == "yes" else p_down,
                         price=Decimal(str(chosen_limit_price)),
@@ -1226,7 +1488,7 @@ class Bot1V4DominationEngine:
                         has_seal_of_the_brave=self.has_seal_of_the_brave(),
                     )
                     if recommended_side != "wait" else 0
-                ),
+                )),
                 rationale=rationale,
                 edge_pct=max(p_up, p_down) - chosen_limit_price,
                 time_to_expiry_s=time_to_expiry_s,
@@ -1239,7 +1501,11 @@ class Bot1V4DominationEngine:
                 onnx_confidence=onnx_conf,
                 fused_source=fused_source,
                 regime="CHOP",
-            )
+                first_failed_gate=gate_status_chop,
+                first_failed_reason=gate_reason_chop,
+                candidate_side=cand_side_chop,
+                clob_depth_available=clob_depth_available,
+            ), asset=asset, target_strike=target_strike, spot_price=spot_price)
 
         # =========================================================================
         # WARRIOR 1: STORM HUNTER (Regime == 'STORM')
@@ -1345,6 +1611,45 @@ class Bot1V4DominationEngine:
         playbook_stage = "breakout" if active_playbook == "playbook1_breakout" else "drift"
         order_type_val = "limit"
 
+        # Gate 5: Vance Executable CLOB Depth Availability
+        clob_depth_available = 0
+        if recommended_side in ("yes", "no"):
+            if l2_book is not None:
+                if recommended_side == "yes":
+                    yes_items = l2_book.yes_book.items() if hasattr(l2_book.yes_book, "items") else l2_book.yes_book
+                    clob_depth_available = int(sum(qty for p, qty in yes_items if p <= Decimal(str(round(chosen_limit_price + 0.05, 2)))))
+                else:
+                    if l2_book.no_book:
+                        no_items = l2_book.no_book.items() if hasattr(l2_book.no_book, "items") else l2_book.no_book
+                        clob_depth_available = int(sum(qty for p, qty in no_items if p <= Decimal(str(round(chosen_limit_price + 0.05, 2)))))
+                    elif l2_book.yes_book:
+                        yes_items = l2_book.yes_book.items() if hasattr(l2_book.yes_book, "items") else l2_book.yes_book
+                        clob_depth_available = int(sum(qty for p, qty in yes_items))
+
+            if clob_depth_available < 1:
+                return self._record_decision(Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="insufficient_clob_depth_veto",
+                    playbook_stage="none",
+                    p_up=p_up, p_down=p_down, p_wait=1.0,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale=f"Vance CLOB Depth Veto: 0 contracts available at executable depth for {recommended_side.upper()}. Suppressing phantom fill.",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=float(self.discount_limit_price),
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                    regime="STORM",
+                    first_failed_gate="G5_NOT_EXECUTABLE",
+                    first_failed_reason="Zero executable depth in CLOB",
+                    candidate_side=recommended_side,
+                    clob_depth_available=clob_depth_available,
+                ), asset=asset, target_strike=target_strike, spot_price=spot_price)
+
         # Guardrail: Minimum Viable Ask Floor ($0.38) & Non-Crossing Maker Clamp
         if recommended_side in ("yes", "no") and l2_book is not None and (l2_book.yes_book or l2_book.no_book):
             live_side_ask = (
@@ -1355,7 +1660,7 @@ class Bot1V4DominationEngine:
             if live_side_ask is not None:
                 ask_f = float(live_side_ask)
                 if ask_f < 0.38:
-                    return Bot1V4Decision(
+                    return self._record_decision(Bot1V4Decision(
                         strategy_id=self.STRATEGY_ID,
                         strategy_name=self.STRATEGY_NAME,
                         active_playbook="adverse_otm_ask_veto",
@@ -1372,7 +1677,41 @@ class Bot1V4DominationEngine:
                         ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
                         onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
                         regime="STORM",
-                    )
+                        first_failed_gate="G5_ADVERSE_OTM_FLOOR",
+                        first_failed_reason=f"Live {recommended_side.upper()} ask ${ask_f:.2f} < $0.38 minimum floor",
+                        candidate_side=recommended_side,
+                    ), asset=asset, target_strike=target_strike, spot_price=spot_price)
+
+        # Gate 12: Adverse Execution 1-Tick Slippage Stress Test (+ $0.01 slippage)
+        stressed_ev = None
+        if recommended_side in ("yes", "no"):
+            cand_p_win = p_up if recommended_side == "yes" else p_down
+            stressed_price = chosen_limit_price + 0.01
+            taker_fee_f = float(self.fee_per_contract)
+            stressed_ev = cand_p_win * (1.0 - stressed_price) - (1.0 - cand_p_win) * stressed_price - taker_fee_f
+            if stressed_ev <= 0.0:
+                return self._record_decision(Bot1V4Decision(
+                    strategy_id=self.STRATEGY_ID,
+                    strategy_name=self.STRATEGY_NAME,
+                    active_playbook="adverse_slippage_stress_veto",
+                    playbook_stage="none",
+                    p_up=p_up, p_down=p_down, p_wait=1.0,
+                    vpin=vpin_eval, vpin_is_safe=True,
+                    ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
+                    kelly_f_yes=0.0, kelly_f_no=0.0,
+                    recommended_side="wait", recommended_contracts=0,
+                    rationale=f"Adverse 1-Tick Slippage Veto: A +$0.01 fill shock drops net EV to ${stressed_ev:+.3f} <= $0.00. Margin of safety insufficient.",
+                    edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
+                    limit_price=float(self.discount_limit_price),
+                    turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
+                    ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
+                    onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
+                    regime="STORM",
+                    first_failed_gate="G12_ADVERSE_EXECUTION",
+                    first_failed_reason=f"1-tick slippage shock reduces net EV to ${stressed_ev:.3f} <= $0.00",
+                    candidate_side=recommended_side,
+                    adverse_ev=stressed_ev,
+                ), asset=asset, target_strike=target_strike, spot_price=spot_price)
 
         # Part 3: Taker Dynamic Breakout Entry (High-Velocity Wave Penetration)
         # When high kinetic energy and high conviction confirm a runaway breakout,
@@ -1401,7 +1740,13 @@ class Bot1V4DominationEngine:
                         f"taking ask ${chosen_limit_price:.2f} with fee to penetrate momentum wave."
                     )
 
-        return Bot1V4Decision(
+        cand_side = recommended_side if recommended_side in ("yes", "no") else (
+            "yes" if p_up > p_down and p_up > 0.50 else ("no" if p_down > p_up and p_down > 0.50 else "wait")
+        )
+        gate_status = "NONE" if recommended_side in ("yes", "no") else "G8_EDGE_TOO_SMALL"
+        gate_reason = "" if recommended_side in ("yes", "no") else f"Warrior 1: No storm edge meeting EV hurdle (${self.min_ev_hurdle_dollars:.3f})"
+
+        return self._record_decision(Bot1V4Decision(
             strategy_id=self.STRATEGY_ID,
             strategy_name=self.STRATEGY_NAME,
             active_playbook=active_playbook,
@@ -1414,7 +1759,7 @@ class Bot1V4DominationEngine:
             kelly_f_yes=0.25 if recommended_side == "yes" else 0.0,
             kelly_f_no=0.25 if recommended_side == "no" else 0.0,
             recommended_side=recommended_side,
-            recommended_contracts=(
+            recommended_contracts=min(1, (
                 StatisticalEVEngine.compute_conviction_tier(
                     ai_prob=p_up if recommended_side == "yes" else p_down,
                     price=Decimal(str(chosen_limit_price)),
@@ -1427,7 +1772,7 @@ class Bot1V4DominationEngine:
                     has_seal_of_the_brave=self.has_seal_of_the_brave(),
                 )
                 if recommended_side != "wait" else 0
-            ),
+            )),
             rationale=rationale,
             edge_pct=max(p_up, p_down) - chosen_limit_price,
             time_to_expiry_s=time_to_expiry_s,
@@ -1441,7 +1786,13 @@ class Bot1V4DominationEngine:
             onnx_confidence=onnx_conf,
             fused_source=fused_source,
             regime="STORM",
-        )
+            first_failed_gate=gate_status,
+            first_failed_reason=gate_reason,
+            candidate_side=cand_side,
+            clob_depth_available=clob_depth_available,
+            adverse_ev=stressed_ev,
+        ), asset=asset, target_strike=target_strike, spot_price=spot_price)
+
 
     async def fetch_active_market(self, rest_base: Optional[str] = None) -> Optional[Any]:
         """Fetch active 15-minute market for this engine's asset."""
