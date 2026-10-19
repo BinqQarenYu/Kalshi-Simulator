@@ -196,6 +196,24 @@ This document is the authoritative institutional repository of all quantitative 
 
 ---
 
+### Lesson T9: The Pinnacle Archetype & Symmetric Dual-Polarity Learning (9–11 Consecutive Win Streaks)
+* **The Incident / Operator Realization (2026-10-19)**:
+  * The bot achieved a flawless, high-conviction streak of 9 to 11+ consecutive winning cycles under `STORM` market conditions with $+138\%$ ROI ($+\$0.58$ net profit per $\$0.42$ maker contract).
+  * However, historical learning frameworks were **asymmetrically negative-biased** — aggressively indexing mistakes (`ERR_COUNTER_TREND`, `STRIKE_PROXIMITY_TRAP`, Bleed mode) while suffering from "positive exemplar amnesia" (failing to explicitly profile and reinforce the golden winning condition).
+* **The Hardened Invariant (Dual-Polarity Learning)**:
+  1. **The Pinnacle Execution Signature**:
+     - *Asset*: `KXETH15M` & `KXBTC15M`
+     - *Market Regime*: `STORM` (Kinetic directional expansion with high OFI alignment).
+     - *Entry Pricing Corridor*: Deep discount maker limit strictly clamped at **$\$0.42\text{--}\$0.45$** (zero taker fees, $+138\%$ gain-to-risk ratio).
+     - *Moneyness Cushion*: Wide strike separation ($> \$5.00$ ETH / $> \$60$ BTC), safely outside the Brownian dead-zone.
+     - *Tau Horizon*: Prime Mid-Cycle ($300\text{s} \le \tau \le 600\text{s}$), where directional drift dominates over terminal gamma noise.
+     - *Sizing*: Micro-bankroll invariant strictly capped at **1 contract ($\le \$0.48$ max risk)**.
+  2. **Golden Quadrant & Corridor Memory**:
+     - `ContinuousExperienceBuffer` must actively identify and index **`golden_regime_quadrants`** ($\ge 70\%$ win rate across $\ge 4$ cycles) and **`golden_price_corridors`**, alongside `pruned_regime_quadrants`.
+     - `ai_assessor.py` and Gemini must protect these high-win corridors from being diluted or over-filtered during transient market variance.
+
+---
+
 # 🧠 PILLAR III: QUANTITATIVE LOGIC, MATHEMATICAL RIGOR & ALPHA
 
 ### Lesson Q1: The Razor-Tight Dead Zone & Proximity Moat ($|\Delta \text{Spot}| < \text{Threshold}$)
@@ -304,6 +322,7 @@ During every 6-trade batch review, Quant Council audit, or post-mortem, the agen
 | **DoF-05** | **Execution / Flow** | **Retail Momentum Exhaustion (`ERR_MOMENTUM_EXHAUSTION`):** Chasing breakouts at the extreme top/bottom of extended wicks. | $\ge 1$ loss entered when 3m RSI $> 80$ or wick-to-body ratio $> 2.5\times$. | Barnaby Retail Inversion Gate: block taker entries during overextended wick exhaustion. | *"Did the bot chase retail breakout FOMO at the top of a candle wick? Is DoF-05 needed?"* |
 | **DEF-06** | **Execution / Settlement** | **Late-Cycle Gamma Trap & Resting Cannibalism (`PATCH-DRSA-2026-10-17-4M-BLACKOUT`):** Trading or maintaining resting orders within final 4 minutes of expiry ($T \le 240\text{s}$) or accepting toxic $\ge \$0.94$ fills. | Any trade entered with remaining cycle $\le 240\text{s}$ or toxic fill $\ge \$0.94$. | Universal 4-minute blackout ($T \le 240\text{s}$) across strategy state machine, Guardrails Gate 0e, Bot1 V4 Gate 2.26, and automatic resting maker order cancellation. | *"Did the bot enter within 4 minutes of expiry or suffer a late resting order fill? Is DEF-06 enforced?"* |
 | **DEF-07** | **Learning / Regret** | **Unobservable Opportunity Regret & Skipped Trade Blindness:** Experience buffer and AI assessor only audit settled fills, ignoring skipped `WAIT` cycles (unable to detect over-filtering). | The bot goes $\ge 30$ cycles with 0 trades during active trending moves. | Emit immutable `QualificationTicket` with `first_failed_gate` on every tick; pass skipped candidate tickets to `ai_assessor.py` for counterfactual regret analysis. | *"Did the bot suffer from opportunity starvation by skipping profitable trends? Is DEF-07 counterfactual telemetry active?"* |
+| **DEF-08** | **Learning / Archetype** | **Positive Exemplar Amnesia (Asymmetric Negative Bias):** Learning buffer only catalogs losses and prunes mistakes, failing to remember and prioritize pinnacle winning conditions. | Bot experiences $\ge 5$ consecutive wins in an identified high-performing regime/corridor. | Track `golden_regime_quadrants` and `golden_price_corridors` in `ContinuousExperienceBuffer`; feed `pinnacle_exemplars` to `ai_assessor.py` to lock and reinforce winning setups. | *"Did the bot fail to capitalize on a proven winning corridor because the learning system only focuses on bleed defense? Is DEF-08 active?"* |
 
 
 

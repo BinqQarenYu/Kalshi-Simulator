@@ -318,6 +318,9 @@ Tau Windows: {json.dumps(sweetspot['tau_buckets'], indent=2)}
 Brier Score (rolling calibration): {exp_summary.get('brier_score', 0.25):.4f} (0.00 is perfect, 0.25 is random coin-flip)
 Platt Scaling Alpha: {exp_summary.get('platt_alpha', 1.0):.2f} (values < 1.0 indicate shrinkage of overconfidence)
 Pruned Quadrants (historically toxic state spaces): {exp_summary.get('pruned_quadrants', [])}
+Golden Quadrants (Pinnacle High-Win Archetypes >= 70% WR): {exp_summary.get('golden_quadrants', [])}
+Golden Price Corridors: {exp_summary.get('golden_corridors', [])}
+Recent Pinnacle Winning Exemplars: {json.dumps(exp_summary.get('pinnacle_exemplars', []))}
 Loss Causes Breakdown: {json.dumps(exp_summary.get('loss_causes', {}))}
 Recommended Take-Profit Ceiling: ${exp_summary.get('recommended_tp', 0.85):.2f}
 Adaptive Proximity Moat Multiplier: {exp_summary.get('moat_multiplier', 1.0):.2f}x

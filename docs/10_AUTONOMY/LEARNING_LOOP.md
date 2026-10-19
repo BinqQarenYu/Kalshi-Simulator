@@ -56,6 +56,18 @@ During 6-trade batch reviews:
 2. **True Negatives vs. False Negatives:** If vetoed candidates would have resulted in losses, gate efficacy is confirmed. If vetoed candidates would have won, the Quant Council detects over-conservatism and recalibrates `ALLOWED_PARAMETER_BOUNDS` (e.g., widening `silas_pinning_blackout_seconds` or adjusting `min_viable_ask_floor`).
 3. **Hot-Sync Invariant:** Newly calibrated gate parameters are hot-synced into live engine memory via `batch_supervisor.py` without restarting the process.
 
+### 2.6 The Pinnacle Archetype & Symmetric Dual-Polarity Learning (DEF-08)
+Learning is inherently **dual-polarity**: the system must not merely prune failure modes (Bleed defense), but also actively identify, profile, and prioritize **Pinnacle Winning Archetypes**:
+1. **The Storm Sweetspot (9–11 Consecutive Win Signature):**
+   - Regime: `STORM` (Directional velocity expansion with aligned OFI).
+   - Maker Price Corridor: **`$0.42 - $0.45`** (Deep discount maker entry, zero taker fees).
+   - Proximity: Wide strike separation ($> \$5.00$ ETH / $> \$60$ BTC).
+   - Expiration Tau ($\tau$): Prime Mid-Cycle ($300\text{s} - 600\text{s}$).
+   - Payoff: $+58\text{¢}$ net profit per contract ($+138\%$ ROI).
+2. **Golden State-Space Indexing:**
+   - `ContinuousExperienceBuffer` actively maintains `golden_regime_quadrants` ($\ge 70\%$ win rate across $\ge 4$ cycles) and `golden_price_corridors`.
+   - `ai_assessor.py` directly ingests `golden_quadrants` and `pinnacle_exemplars` into the Gemini prompt context, ensuring that high-performing configurations are preserved and protected from over-conservative dilutive tuning.
+
 ---
 
 ## 3. The Supreme Governor: Learning as the Constitutional Leader

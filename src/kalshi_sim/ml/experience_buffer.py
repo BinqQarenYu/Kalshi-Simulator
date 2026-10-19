@@ -61,13 +61,17 @@ class ContinuousExperienceBuffer:
         asset: Optional[str] = None,
     ):
         self.max_buffer_size = max_buffer_size
-        self.history_file = history_file or Path("data/win_loss_reports.json")
         if asset:
             self.asset = str(asset).upper()
-        elif "eth" in str(self.history_file).lower():
+        elif history_file and "eth" in str(history_file).lower():
             self.asset = "ETH"
         else:
             self.asset = "BTC"
+
+        if history_file is not None:
+            self.history_file = Path(history_file)
+        else:
+            self.history_file = Path("data/eth_win_loss_reports.json") if self.asset == "ETH" else Path("data/win_loss_reports.json")
 
         # Asset-specific thresholds for Causal Attribution and Quadrant Pruning:
         if self.asset == "ETH":
@@ -91,6 +95,8 @@ class ContinuousExperienceBuffer:
         # Pruning & Adaptation Structures
         self.pruned_price_deciles: List[int] = []
         self.pruned_regime_quadrants: List[str] = []
+        self.golden_regime_quadrants: List[str] = []
+        self.golden_price_corridors: List[int] = []
         self.loss_cause_counts: Dict[str, int] = {
             "EXTREME_VOLATILITY_SWEEP": 0,
             "ADVERSE_SELECTION_SWEEP": 0,
@@ -271,6 +277,8 @@ class ContinuousExperienceBuffer:
             self.platt_beta = 0.0
             self.pruned_price_deciles = []
             self.pruned_regime_quadrants = []
+            self.golden_regime_quadrants = []
+            self.golden_price_corridors = []
             return
 
         total_sq_err = 0.0
@@ -325,19 +333,33 @@ class ContinuousExperienceBuffer:
         else:
             self.platt_alpha = min(1.10, round(1.0 - confidence_bias, 2))
 
-        # 2. Multi-Dimensional Quadrant Pruning (Blocks unprofitable state-spaces)
+        # 2. Multi-Dimensional Quadrant Pruning & Golden Reinforcement
         pruned_quads = []
+        golden_quads = []
         for quad, pnls in quadrant_pnl.items():
-            if len(pnls) >= 4 and sum(pnls) < 0.0 and (sum(1 for p in pnls if p > 0) / len(pnls)) < 0.35:
+            tot_trades = len(pnls)
+            pos_trades = sum(1 for p in pnls if p > 0)
+            win_r = pos_trades / tot_trades if tot_trades > 0 else 0.0
+            if tot_trades >= 4 and sum(pnls) < 0.0 and win_r < 0.35:
                 pruned_quads.append(quad)
+            elif tot_trades >= 4 and sum(pnls) > 0.0 and win_r >= 0.70:
+                golden_quads.append(quad)
         self.pruned_regime_quadrants = pruned_quads
+        self.golden_regime_quadrants = golden_quads
 
-        # 3. 1D Price Decile Pruning
+        # 3. 1D Price Decile Pruning & Golden Corridors
         pruned = []
+        golden_deciles = []
         for decile, pnls in decile_pnl.items():
-            if len(pnls) >= 4 and sum(pnls) < 0.0:
+            tot_trades = len(pnls)
+            pos_trades = sum(1 for p in pnls if p > 0)
+            win_r = pos_trades / tot_trades if tot_trades > 0 else 0.0
+            if tot_trades >= 4 and sum(pnls) < 0.0:
                 pruned.append(decile * 10)
+            elif tot_trades >= 4 and sum(pnls) > 0.0 and win_r >= 0.70:
+                golden_deciles.append(decile * 10)
         self.pruned_price_deciles = sorted(pruned)
+        self.golden_price_corridors = sorted(golden_deciles)
 
         # 4. Self-Tuning Parameter Feedback
         # If Late-Cycle Gamma reversals are frequent, lower take profit ceiling to bank gains early
@@ -379,6 +401,13 @@ class ContinuousExperienceBuffer:
         quad_key = f"{h_tag}_{d_tag}"
         return (quad_key in self.pruned_regime_quadrants)
 
+    def is_quadrant_golden(self, time_to_expiry_s: float, spot_diff: float) -> bool:
+        """Check if current execution condition falls into a high-win Golden Pinnacle Archetype."""
+        h_tag = "EARLY" if time_to_expiry_s > 600 else ("MID" if time_to_expiry_s > 180 else "LATE")
+        d_tag = "TIGHT" if abs(spot_diff) < self.tight_spot_diff_threshold else ("MID" if abs(spot_diff) < self.mid_spot_diff_threshold else "WIDE")
+        quad_key = f"{h_tag}_{d_tag}"
+        return (quad_key in self.golden_regime_quadrants)
+
     def get_effective_price_cap(self, default_cap: Decimal = Decimal("0.65")) -> Decimal:
         """Return the effective price ceiling respecting empirical decile pruning."""
         cap = default_cap
@@ -409,8 +438,11 @@ class ContinuousExperienceBuffer:
                 "platt_alpha": self.platt_alpha,
                 "pruned_deciles": self.pruned_price_deciles,
                 "pruned_quadrants": self.pruned_regime_quadrants,
+                "golden_quadrants": self.golden_regime_quadrants,
+                "golden_corridors": [f"{d}¢" for d in self.golden_price_corridors],
                 "loss_causes": self.loss_cause_counts,
                 "recent_mistakes": [],
+                "pinnacle_exemplars": [],
             }
 
         wins = sum(1 for e in recent if e.outcome == "win")
@@ -418,12 +450,23 @@ class ContinuousExperienceBuffer:
         win_rate = round((wins / len(recent)) * 100, 1)
 
         mistakes = []
+        pinnacle_exemplars = []
         for e in recent:
-            if e.outcome == "loss":
+            if e.outcome == "win":
+                pinnacle_exemplars.append({
+                    "ticker": e.ticker,
+                    "side": e.bot_side.upper(),
+                    "entry_cents": int(round(e.entry_price * 100)),
+                    "spot_diff": round(e.spot_diff, 2),
+                    "gain_dollars": round(e.net_pnl, 2),
+                    "playbook": e.active_playbook,
+                    "macro_regime": e.macro_regime,
+                })
+            elif e.outcome == "loss":
                 mistakes.append({
                     "ticker": e.ticker,
                     "side": e.bot_side.upper(),
-                    "entry_cents": int(e.entry_price * 100),
+                    "entry_cents": int(round(e.entry_price * 100)),
                     "spot_diff": round(e.spot_diff, 2),
                     "loss_dollars": round(abs(e.net_pnl), 2),
                     "loss_cause": e.loss_cause,
@@ -440,8 +483,11 @@ class ContinuousExperienceBuffer:
             "platt_alpha": self.platt_alpha,
             "pruned_deciles": [f"{d}¢" for d in self.pruned_price_deciles],
             "pruned_quadrants": self.pruned_regime_quadrants,
+            "golden_quadrants": self.golden_regime_quadrants,
+            "golden_corridors": [f"{d}¢" for d in self.golden_price_corridors],
             "loss_causes": self.loss_cause_counts,
             "recommended_tp": self.recommended_take_profit_cap,
             "moat_multiplier": self.adaptive_proximity_moat_multiplier,
             "recent_mistakes": mistakes[-5:],
+            "pinnacle_exemplars": pinnacle_exemplars[-5:],
         }
