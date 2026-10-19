@@ -48,6 +48,14 @@ The system stores both active engine decisions and Kev AI Shadow Oracle recommen
 ### 2.4 Pre-Inference Zero Credit Burning Gate (AGENTS.md Rule 8 & Law 2)
 To prevent blackhole credit burning, the bot evaluates the 1-trade-per-cycle lock and active open inventory *before* invoking `kev_oracle.evaluate()`. If a trade is already completed or held for the cycle, Kev LLM inference is bypassed entirely.
 
+### 2.5 Counterfactual Regret Learning (The One-Decision Telemetry Stream)
+In accordance with [`ONE_DECISION_FRAMEWORK_SWEETSPOT.md`](file:///f:/012D_TRADE/Kalshi%20Simulator/docs/01_ARCHITECTURE/ONE_DECISION_FRAMEWORK_SWEETSPOT.md), the learning loop does not solely learn from executed trades. For every 15-minute cycle where candidate entry is evaluated but vetoed (`WAIT`), an immutable `QualificationTicket` records the `first_failed_gate` (G1 Silas Pinning, G5 Vance Depth & Ask Floor, or G12 Nash Slippage Stress). 
+
+During 6-trade batch reviews:
+1. **Regret Attribution:** Skipped candidate directions are counterfactually compared against actual market settlement.
+2. **True Negatives vs. False Negatives:** If vetoed candidates would have resulted in losses, gate efficacy is confirmed. If vetoed candidates would have won, the Quant Council detects over-conservatism and recalibrates `ALLOWED_PARAMETER_BOUNDS` (e.g., widening `silas_pinning_blackout_seconds` or adjusting `min_viable_ask_floor`).
+3. **Hot-Sync Invariant:** Newly calibrated gate parameters are hot-synced into live engine memory via `batch_supervisor.py` without restarting the process.
+
 ---
 
 ## 3. The Supreme Governor: Learning as the Constitutional Leader
