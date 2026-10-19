@@ -34,6 +34,9 @@ ALLOWED_PARAMETER_BOUNDS: Dict[str, Tuple[float, float]] = {
     "take_profit_price_threshold": (0.80, 0.95), # Peak take profit target ceiling
     "min_take_profit_roi": (30.0, 55.0),         # Minimum scalp ROI percentage
     "moneyness_moat_multiplier": (1.00, 1.50),   # Proximity moat volatility multiplier
+    "min_viable_ask_floor": (0.35, 0.42),        # Live executable ask floor (anti-OTM dump)
+    "silas_pinning_blackout_seconds": (60.0, 180.0), # Gate 1 Silas TWAP Pinning Blackout window (s)
+    "adverse_slippage_stress_cents": (0.01, 0.03),   # Gate 12 1-tick / 2-tick slippage shock net EV stress test ($)
 }
 
 
@@ -346,7 +349,10 @@ Please perform a cold, factual, empirical audit factoring in the active market c
     "vpin_toxic_threshold": 0.70,  // optional, within [0.50, 0.75]
     "take_profit_price_threshold": 0.92, // optional, within [0.80, 0.95]
     "min_take_profit_roi": 45.0,   // optional, within [30.0, 55.0]
-    "moneyness_moat_multiplier": 1.25 // optional, within [1.00, 1.50]
+    "moneyness_moat_multiplier": 1.25, // optional, within [1.00, 1.50]
+    "min_viable_ask_floor": 0.38,   // optional, within [0.35, 0.42]
+    "silas_pinning_blackout_seconds": 120.0, // optional, within [60.0, 180.0]
+    "adverse_slippage_stress_cents": 0.01   // optional, within [0.01, 0.03]
   }},
   "tweaks_rationale": "Clear statistical and microstructural explanation for any proposed parameter adjustments."
 }}

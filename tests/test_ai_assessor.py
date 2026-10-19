@@ -31,6 +31,12 @@ def test_allowed_parameter_bounds():
     assert "discount_limit_price" in ALLOWED_PARAMETER_BOUNDS
     min_p, max_p = ALLOWED_PARAMETER_BOUNDS["discount_limit_price"]
     assert min_p <= 0.44 <= max_p
+    assert "min_viable_ask_floor" in ALLOWED_PARAMETER_BOUNDS
+    assert ALLOWED_PARAMETER_BOUNDS["min_viable_ask_floor"] == (0.35, 0.42)
+    assert "silas_pinning_blackout_seconds" in ALLOWED_PARAMETER_BOUNDS
+    assert ALLOWED_PARAMETER_BOUNDS["silas_pinning_blackout_seconds"] == (60.0, 180.0)
+    assert "adverse_slippage_stress_cents" in ALLOWED_PARAMETER_BOUNDS
+    assert ALLOWED_PARAMETER_BOUNDS["adverse_slippage_stress_cents"] == (0.01, 0.03)
 
 
 def test_compute_batch_sweetspot_profile():

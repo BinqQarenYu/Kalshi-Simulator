@@ -248,6 +248,9 @@ class Bot1V4DominationEngine:
         self.min_fast_lock_bid = min_fast_lock_bid
         self.min_fast_lock_roi = min_fast_lock_roi
         self.fast_lock_late_cycle_roi = fast_lock_late_cycle_roi
+        self.min_viable_ask_floor: float = float(kwargs.get("min_viable_ask_floor", 0.38))
+        self.silas_pinning_blackout_seconds: float = float(kwargs.get("silas_pinning_blackout_seconds", 120.0))
+        self.adverse_slippage_stress_cents: float = float(kwargs.get("adverse_slippage_stress_cents", 0.01))
         self.require_reversal_for_asymmetric_peak = require_reversal_for_asymmetric_peak
         self.enable_taker_breakout_entry = enable_taker_breakout_entry
         self.taker_breakout_min_velocity = taker_breakout_min_velocity
@@ -418,7 +421,7 @@ class Bot1V4DominationEngine:
         """
         ev_hurdle = float(self.min_ev_hurdle_dollars)
         dynamic_price = win_prob - ev_hurdle
-        min_p = float(self.chop_discount_limit_price)
+        min_p = float(getattr(self, "min_viable_ask_floor", self.chop_discount_limit_price))
         max_p = float(self.chop_max_entry_price)
         clamped = max(min_p, min(dynamic_price, max_p))
         return Decimal(str(round(clamped, 2)))
@@ -798,6 +801,9 @@ class Bot1V4DominationEngine:
             "taker_breakout_min_velocity": float(self.taker_breakout_min_velocity),
             "taker_breakout_min_confidence": float(self.taker_breakout_min_confidence),
             "enable_warrior_2_chop": bool(self.enable_warrior_2_chop),
+            "min_viable_ask_floor": float(getattr(self, "min_viable_ask_floor", 0.38)),
+            "silas_pinning_blackout_seconds": float(getattr(self, "silas_pinning_blackout_seconds", 120.0)),
+            "adverse_slippage_stress_cents": float(getattr(self, "adverse_slippage_stress_cents", 0.01)),
             "healing_status": self.healing_protocol.get_status(),
         }
 
@@ -877,6 +883,12 @@ class Bot1V4DominationEngine:
             self.moneyness_moat_multiplier = float(kwargs["dynamic_moat_multiplier"])
         elif kwargs.get("moneyness_moat_multiplier") is not None:
             self.moneyness_moat_multiplier = float(kwargs["moneyness_moat_multiplier"])
+        if kwargs.get("min_viable_ask_floor") is not None:
+            self.min_viable_ask_floor = float(kwargs["min_viable_ask_floor"])
+        if kwargs.get("silas_pinning_blackout_seconds") is not None:
+            self.silas_pinning_blackout_seconds = float(kwargs["silas_pinning_blackout_seconds"])
+        if kwargs.get("adverse_slippage_stress_cents") is not None:
+            self.adverse_slippage_stress_cents = float(kwargs["adverse_slippage_stress_cents"])
         return self.get_parameters()
 
     def has_star_player_seal(self) -> bool:
@@ -986,7 +998,8 @@ class Bot1V4DominationEngine:
                 contract_truth_verified=False,
             ), asset=asset, target_strike=target_strike, spot_price=spot_price)
 
-        if time_to_expiry_s <= 120.0:
+        silas_pin_s = float(getattr(self, "silas_pinning_blackout_seconds", 120.0))
+        if time_to_expiry_s <= silas_pin_s:
             vol = max(1.0, self.default_btc_1m_volatility)
             t_factor = math.sqrt(max(0.1, time_to_expiry_s / 60.0))
             z_norm = spot_diff / (vol * t_factor)
@@ -1003,13 +1016,13 @@ class Bot1V4DominationEngine:
                 ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
                 kelly_f_yes=0.0, kelly_f_no=0.0,
                 recommended_side="wait", recommended_contracts=0,
-                rationale=f"Silas TWAP Pinning Veto: T={int(time_to_expiry_s)}s <= 120s remaining. 60s trailing average cannot catch up; trading halted to prevent pin loss.",
+                rationale=f"Silas TWAP Pinning Veto: T={int(time_to_expiry_s)}s <= {int(silas_pin_s)}s remaining. 60s trailing average cannot catch up; trading halted to prevent pin loss.",
                 edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
                 limit_price=float(self.discount_limit_price),
                 turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
                 ev_hurdle_dollars=float(self.min_ev_hurdle_dollars),
                 first_failed_gate="G1_CONTRACT_TRUTH_PINNING",
-                first_failed_reason="T <= 120s settlement TWAP pinning window",
+                first_failed_reason=f"T <= {int(silas_pin_s)}s settlement TWAP pinning window",
                 candidate_side=cand_side,
             ), asset=asset, target_strike=target_strike, spot_price=spot_price)
 
@@ -1427,9 +1440,10 @@ class Bot1V4DominationEngine:
                         clob_depth_available=clob_depth_available,
                     ), asset=asset, target_strike=target_strike, spot_price=spot_price)
 
-                # Gate 12: Adverse Execution 1-Tick Slippage Stress Test (+ $0.01 slippage)
+                # Gate 12: Adverse Execution 1-Tick Slippage Stress Test
                 cand_p_win = p_up if recommended_side == "yes" else p_down
-                stressed_price = chosen_limit_price + 0.01
+                slip_shock = float(getattr(self, "adverse_slippage_stress_cents", 0.01))
+                stressed_price = chosen_limit_price + slip_shock
                 taker_fee_f = float(self.fee_per_contract)
                 stressed_ev = cand_p_win * (1.0 - stressed_price) - (1.0 - cand_p_win) * stressed_price - taker_fee_f
                 if stressed_ev <= 0.0:
@@ -1443,7 +1457,7 @@ class Bot1V4DominationEngine:
                         ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
                         kelly_f_yes=0.0, kelly_f_no=0.0,
                         recommended_side="wait", recommended_contracts=0,
-                        rationale=f"Adverse 1-Tick Slippage Veto: A +$0.01 fill shock drops net EV to ${stressed_ev:+.3f} <= $0.00. Margin of safety insufficient.",
+                        rationale=f"Adverse 1-Tick Slippage Veto: A +${slip_shock:.2f} fill shock drops net EV to ${stressed_ev:+.3f} <= $0.00. Margin of safety insufficient.",
                         edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
                         limit_price=float(self.discount_limit_price),
                         turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
@@ -1451,7 +1465,7 @@ class Bot1V4DominationEngine:
                         onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
                         regime="CHOP",
                         first_failed_gate="G12_ADVERSE_EXECUTION",
-                        first_failed_reason=f"1-tick slippage shock reduces net EV to ${stressed_ev:.3f} <= $0.00",
+                        first_failed_reason=f"1-tick slippage shock (+${slip_shock:.2f}) reduces net EV to ${stressed_ev:.3f} <= $0.00",
                         candidate_side=recommended_side,
                         adverse_ev=stressed_ev,
                     ), asset=asset, target_strike=target_strike, spot_price=spot_price)
@@ -1650,7 +1664,8 @@ class Bot1V4DominationEngine:
                     clob_depth_available=clob_depth_available,
                 ), asset=asset, target_strike=target_strike, spot_price=spot_price)
 
-        # Guardrail: Minimum Viable Ask Floor ($0.38) & Non-Crossing Maker Clamp
+        # Guardrail: Minimum Viable Ask Floor & Non-Crossing Maker Clamp
+        ask_floor = float(getattr(self, "min_viable_ask_floor", 0.38))
         if recommended_side in ("yes", "no") and l2_book is not None and (l2_book.yes_book or l2_book.no_book):
             live_side_ask = (
                 l2_book.best_yes_ask
@@ -1659,7 +1674,7 @@ class Bot1V4DominationEngine:
             )
             if live_side_ask is not None:
                 ask_f = float(live_side_ask)
-                if ask_f < 0.38:
+                if ask_f < ask_floor:
                     return self._record_decision(Bot1V4Decision(
                         strategy_id=self.STRATEGY_ID,
                         strategy_name=self.STRATEGY_NAME,
@@ -1670,7 +1685,7 @@ class Bot1V4DominationEngine:
                         ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
                         kelly_f_yes=0.0, kelly_f_no=0.0,
                         recommended_side="wait", recommended_contracts=0,
-                        rationale=f"Adverse OTM Ask Veto: Live {recommended_side.upper()} ask ${ask_f:.2f} < $0.38 minimum viable floor (prevents buying doomed OTM dumps).",
+                        rationale=f"Adverse OTM Ask Veto: Live {recommended_side.upper()} ask ${ask_f:.2f} < ${ask_floor:.2f} minimum viable floor (prevents buying doomed OTM dumps).",
                         edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
                         limit_price=float(self.discount_limit_price),
                         turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
@@ -1678,15 +1693,16 @@ class Bot1V4DominationEngine:
                         onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
                         regime="STORM",
                         first_failed_gate="G5_ADVERSE_OTM_FLOOR",
-                        first_failed_reason=f"Live {recommended_side.upper()} ask ${ask_f:.2f} < $0.38 minimum floor",
+                        first_failed_reason=f"Live {recommended_side.upper()} ask ${ask_f:.2f} < ${ask_floor:.2f} minimum floor",
                         candidate_side=recommended_side,
                     ), asset=asset, target_strike=target_strike, spot_price=spot_price)
 
-        # Gate 12: Adverse Execution 1-Tick Slippage Stress Test (+ $0.01 slippage)
+        # Gate 12: Adverse Execution 1-Tick Slippage Stress Test
         stressed_ev = None
         if recommended_side in ("yes", "no"):
             cand_p_win = p_up if recommended_side == "yes" else p_down
-            stressed_price = chosen_limit_price + 0.01
+            slip_shock = float(getattr(self, "adverse_slippage_stress_cents", 0.01))
+            stressed_price = chosen_limit_price + slip_shock
             taker_fee_f = float(self.fee_per_contract)
             stressed_ev = cand_p_win * (1.0 - stressed_price) - (1.0 - cand_p_win) * stressed_price - taker_fee_f
             if stressed_ev <= 0.0:
@@ -1700,7 +1716,7 @@ class Bot1V4DominationEngine:
                     ev_yes=0.0, ev_no=0.0, edge_yes=0.0, edge_no=0.0,
                     kelly_f_yes=0.0, kelly_f_no=0.0,
                     recommended_side="wait", recommended_contracts=0,
-                    rationale=f"Adverse 1-Tick Slippage Veto: A +$0.01 fill shock drops net EV to ${stressed_ev:+.3f} <= $0.00. Margin of safety insufficient.",
+                    rationale=f"Adverse 1-Tick Slippage Veto: A +${slip_shock:.2f} fill shock drops net EV to ${stressed_ev:+.3f} <= $0.00. Margin of safety insufficient.",
                     edge_pct=0.0, time_to_expiry_s=time_to_expiry_s, spot_diff=spot_diff,
                     limit_price=float(self.discount_limit_price),
                     turnovers_completed=turnovers, max_turnovers=self.max_turnover_per_event,
@@ -1708,7 +1724,7 @@ class Bot1V4DominationEngine:
                     onnx_signal=onnx_sig, onnx_confidence=onnx_conf, fused_source=fused_source,
                     regime="STORM",
                     first_failed_gate="G12_ADVERSE_EXECUTION",
-                    first_failed_reason=f"1-tick slippage shock reduces net EV to ${stressed_ev:.3f} <= $0.00",
+                    first_failed_reason=f"1-tick slippage shock (+${slip_shock:.2f}) reduces net EV to ${stressed_ev:.3f} <= $0.00",
                     candidate_side=recommended_side,
                     adverse_ev=stressed_ev,
                 ), asset=asset, target_strike=target_strike, spot_price=spot_price)
