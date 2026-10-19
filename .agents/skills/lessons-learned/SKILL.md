@@ -182,6 +182,20 @@ This document is the authoritative institutional repository of all quantitative 
 
 ---
 
+### Lesson T8: The Unified One-Decision Qualification & Counterfactual Learning Architecture
+* **The Incident / Dilemma (2026-10-19)**:
+  * Proposing a 12-file full OOP pipeline with 4 compounding penalty haircuts (probability lower bound + net EV + extra safety margin + adverse slippage) risked total strategy starvation (~0 trades) and execution latency in sub-second orderflow windows.
+* **The Hardened Invariants (The Sweet Spot)**:
+  1. **The 3 Golden Gates**:
+     - *G1 Contract Truth*: Strike $> 0$, spot $> 0$, and remaining time $T > 120\text{s}$ (Silas CF Benchmarks 60s TWAP settlement pinning veto).
+     - *G5 Executable Book Depth*: Inside ask depth verified $\ge 1$ contract (no phantom book assumption).
+     - *G12 Adverse 1-Tick Slippage Stress*: Stressed price $= P + \$0.01$; Stressed Net EV must remain $> \$0.00$.
+  2. **Immutable Qualification Ticket**: Every evaluation emits a `QualificationTicket` capturing the first failed gate and decision metrics.
+  3. **Counterfactual Regret Learning**: Skipped candidate trades (`WAIT`) are logged and audited alongside the 6 settled trades in `ai_assessor.py` to diagnose False Negatives (over-filtering) vs True Negatives (capital salvage).
+  4. **Strict Micro-Bankroll Preservation**: Position sizing strictly clamped to 1 contract ($\le \$0.48$ max risk). Dynamic fractional Kelly is forbidden on micro-bankrolls under $\$75$.
+
+---
+
 # 🧠 PILLAR III: QUANTITATIVE LOGIC, MATHEMATICAL RIGOR & ALPHA
 
 ### Lesson Q1: The Razor-Tight Dead Zone & Proximity Moat ($|\Delta \text{Spot}| < \text{Threshold}$)
@@ -289,6 +303,8 @@ During every 6-trade batch review, Quant Council audit, or post-mortem, the agen
 | **DoF-04** | **Risk / Whipsaw** | **Premature Salvage & Rebound (`ERR_SALVAGE_WHIPSAW`):** Trade salvaged at a loss on a temporary wick, then market reversed and won. | $\ge 1$ premature salvage at $\tau > 300\text{s}$ where market subsequently settled as a win. | Require 2-tick adverse persistence ($\ge 3\text{s}$) + negative OFI before triggering salvage at $\tau > 300\text{s}$. | *"Did the bot salvage prematurely on a fleeting wick? Should we activate DoF-04?"* |
 | **DoF-05** | **Execution / Flow** | **Retail Momentum Exhaustion (`ERR_MOMENTUM_EXHAUSTION`):** Chasing breakouts at the extreme top/bottom of extended wicks. | $\ge 1$ loss entered when 3m RSI $> 80$ or wick-to-body ratio $> 2.5\times$. | Barnaby Retail Inversion Gate: block taker entries during overextended wick exhaustion. | *"Did the bot chase retail breakout FOMO at the top of a candle wick? Is DoF-05 needed?"* |
 | **DEF-06** | **Execution / Settlement** | **Late-Cycle Gamma Trap & Resting Cannibalism (`PATCH-DRSA-2026-10-17-4M-BLACKOUT`):** Trading or maintaining resting orders within final 4 minutes of expiry ($T \le 240\text{s}$) or accepting toxic $\ge \$0.94$ fills. | Any trade entered with remaining cycle $\le 240\text{s}$ or toxic fill $\ge \$0.94$. | Universal 4-minute blackout ($T \le 240\text{s}$) across strategy state machine, Guardrails Gate 0e, Bot1 V4 Gate 2.26, and automatic resting maker order cancellation. | *"Did the bot enter within 4 minutes of expiry or suffer a late resting order fill? Is DEF-06 enforced?"* |
+| **DEF-07** | **Learning / Regret** | **Unobservable Opportunity Regret & Skipped Trade Blindness:** Experience buffer and AI assessor only audit settled fills, ignoring skipped `WAIT` cycles (unable to detect over-filtering). | The bot goes $\ge 30$ cycles with 0 trades during active trending moves. | Emit immutable `QualificationTicket` with `first_failed_gate` on every tick; pass skipped candidate tickets to `ai_assessor.py` for counterfactual regret analysis. | *"Did the bot suffer from opportunity starvation by skipping profitable trends? Is DEF-07 counterfactual telemetry active?"* |
+
 
 
 

@@ -470,6 +470,19 @@ class AutonomousBatchSupervisor:
             except Exception:
                 pass
 
+        # 3.1 Harvest recent skipped qualification tickets for counterfactual regret auditing
+        skipped_tickets: list[dict[str, Any]] = []
+        try:
+            from kalshi_sim.server import state
+            eng = getattr(state, "eth_bot1_v4_engine", None) if self.asset == "ETH" else getattr(state, "bot1_v4_engine", None)
+            if not eng and hasattr(state, "sim_agent") and state.sim_agent:
+                eng = getattr(state.sim_agent, "_eth_bot1v4_engine", None) if self.asset == "ETH" else getattr(state.sim_agent, "_bot1_v4_engine", None)
+            if eng and hasattr(eng, "get_skipped_qualification_tickets"):
+                tickets = eng.get_skipped_qualification_tickets(limit=15)
+                skipped_tickets = [t.model_dump() if hasattr(t, "model_dump") else t for t in tickets]
+        except Exception:
+            pass
+
         # 4. Run Gemini Forensic Assessment & Allowed Tweaks Formulation
         from kalshi_sim.ai_assessor import (
             run_gemini_batch_assessment,
@@ -483,8 +496,8 @@ class AutonomousBatchSupervisor:
         }
 
         logger.info(
-            "🧠 [AI ASSESSOR] Invoking Gemini to analyze %s Batch #%d (Condition: %s) and formulate forensic conclusions...",
-            self.asset, self.current_batch_num, market_info["tag"]
+            "🧠 [AI ASSESSOR] Invoking Gemini to analyze %s Batch #%d (Condition: %s, Skipped Tickets: %d) and formulate forensic conclusions...",
+            self.asset, self.current_batch_num, market_info["tag"], len(skipped_tickets)
         )
         gemini_data = await run_gemini_batch_assessment(
             batch_num=self.current_batch_num,
@@ -494,6 +507,7 @@ class AutonomousBatchSupervisor:
             current_params=current_params,
             market_condition_info=market_info,
             asset=self.asset,
+            skipped_tickets=skipped_tickets,
         )
 
         # 5. Apply validated tweaks within Quant Council bounds
@@ -548,7 +562,9 @@ class AutonomousBatchSupervisor:
             macro_sample=macro_sample,
             market_condition_info=market_info,
             asset=self.asset,
+            skipped_tickets=skipped_tickets,
         )
+
 
         try:
             self.docs_dir.mkdir(parents=True, exist_ok=True)

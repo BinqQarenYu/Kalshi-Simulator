@@ -1075,6 +1075,43 @@ class IntegrityStatusResponse(BaseModel):
 IntegrityStatusResponse.model_rebuild()
 
 
+# ---------------------------------------------------------------------------
+# Unified One-Decision Qualification Ticket (Sweet Spot Architecture)
+# ---------------------------------------------------------------------------
+
+class QualificationTicket(BaseModel):
+    """Immutable Trade Qualification Ticket emitted for every cycle evaluation.
+
+    Adheres to the Unified One-Decision Framework (Sweet Spot Edition).
+    Captures exact gate status, first failed gate, and telemetry for both
+    executed orders and skipped opportunities (Counterfactual Regret learning).
+    """
+    ticket_id: str = Field(description="Unique UUID or timestamp-based ticket identifier")
+    timestamp_iso: str = Field(description="ISO-8601 UTC timestamp of evaluation")
+    asset: str = Field(description="Underlying crypto asset, e.g. BTC or ETH")
+    ticker: str = Field(default="", description="Kalshi market contract ticker")
+    action: str = Field(default="WAIT", description="BUY_YES | BUY_NO | WAIT | HOLD | EXIT_LIMIT | EXIT_MARKETABLE_LIMIT | WAIT_FOR_SETTLEMENT")
+    first_failed_gate: str = Field(default="NONE", description="Machine-readable gate ID that first halted entry, e.g. G1_CONTRACT_TRUTH, G5_NOT_EXECUTABLE, G12_ADVERSE_EXECUTION, or NONE")
+    first_failed_reason: str = Field(default="", description="Human-readable rationale for the first failed gate")
+    candidate_side: str = Field(default="wait", description="Candidate direction evaluated: 'yes' | 'no' | 'wait'")
+    calibrated_probability: float = Field(default=0.50, description="Calibrated win probability of the candidate side")
+    executable_price: Decimal = Field(default=Decimal("0.00"), description="Executable limit or VWAP price in USD")
+    net_ev: Decimal = Field(default=Decimal("0.00"), description="Calculated conservative expected value in USD")
+    required_edge: Decimal = Field(default=Decimal("0.00"), description="Minimum required edge hurdle in USD")
+    approved_contracts: int = Field(default=0, description="Approved contract quantity (strictly clamped to max 1 for micro-bankroll)")
+    spot_price: Decimal = Field(default=Decimal("0.00"), description="Underlying spot price in USD at evaluation")
+    target_strike: Decimal = Field(default=Decimal("0.00"), description="Kalshi target strike price in USD")
+    time_to_expiry_s: float = Field(default=0.0, description="Seconds remaining until contract settlement")
+    vpin: float = Field(default=0.0, description="Observed or model orderflow toxicity metric")
+    l2_spread: Decimal = Field(default=Decimal("0.00"), description="CLOB bid-ask spread in USD")
+    adverse_ev: Optional[Decimal] = Field(default=None, description="Stressed net EV after 1-tick adverse slippage shock")
+    evidence_hashes: dict[str, str] = Field(default_factory=dict, description="Diagnostic hashes (manifest, commit, ONNX model)")
+
+
+QualificationTicket.model_rebuild()
+
+
+
 
 
 

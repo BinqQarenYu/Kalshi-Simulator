@@ -250,6 +250,7 @@ async def run_gemini_batch_assessment(
     current_params: Dict[str, Any],
     market_condition_info: Optional[Dict[str, Any]] = None,
     asset: str = "BTC",
+    skipped_tickets: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Execute prompt formulation, Gemini inference, and parameter validation."""
     asset_upper = asset.upper()
@@ -265,6 +266,20 @@ async def run_gemini_batch_assessment(
     }
 
     sweetspot = compute_batch_sweetspot_profile(recent_trades, asset=asset)
+
+    skipped_summary = []
+    for t in (skipped_tickets or [])[:10]:
+        skipped_summary.append({
+            "ticker": t.get("ticker", ""),
+            "action": t.get("action", ""),
+            "candidate_side": t.get("candidate_side", ""),
+            "first_failed_gate": t.get("first_failed_gate", ""),
+            "first_failed_reason": t.get("first_failed_reason", ""),
+            "prob": t.get("calibrated_probability", 0.0),
+            "spot": str(t.get("spot_price", "0.00")),
+            "strike": str(t.get("target_strike", "0.00")),
+            "tau_s": t.get("time_to_expiry_s", 0.0),
+        })
 
     prompt = f"""You are the Lead Quantitative Auditor and Post-Occupancy Evaluator (POE) for an institutional Kalshi {asset_upper} binary options trading algorithm (Bot 1 V4 {asset_upper}).
 
@@ -282,6 +297,9 @@ Transition Reason: {cond.get('transition_reason', '')}
 
 === BATCH TRADES LEDGER ({asset_upper} ONLY) ===
 {json.dumps(recent_trades, indent=2)}
+
+=== SKIPPED QUALIFICATION TICKETS (COUNTERFACTUAL REGRET TELEMETRY) ===
+{json.dumps(skipped_summary, indent=2) if skipped_summary else "No candidate trades skipped during this window."}
 
 === BATCH SWEETSPOT & ORDERBOOK PROFILE ({asset_upper}) ===
 Best Performing Entry Corridor: {sweetspot['best_price_corridor']} ({sweetspot['best_price_stats']})
@@ -319,6 +337,7 @@ Please perform a cold, factual, empirical audit factoring in the active market c
   "winning_trades_autopsy": "Analysis of what went right on winning fills (timing, pricing, orderflow, market condition alignment).",
   "losing_trades_autopsy": "Root cause failure attribution for losing fills (strike proximity, adverse selection, gamma reversal, regime shift, wave violence).",
   "probability_calibration_review": "Assessment of model confidence calibration (Brier score & Platt alpha damping).",
+  "counterfactual_regret_review": "Analysis of skipped qualification tickets: did conservative gates save capital (True Negatives) or miss profitable moves (False Negatives)?",
   "allowed_tweaks": {{
     "discount_limit_price": 0.44, // optional, only if justified, within [0.42, 0.52]
     "min_confidence": 79.0,        // optional, within [75.0, 88.0]
@@ -333,6 +352,7 @@ Please perform a cold, factual, empirical audit factoring in the active market c
 }}
 Return ONLY valid JSON.
 """
+
 
     raw_response = await call_gemini_api(prompt)
     parsed = extract_json_payload(raw_response or "") if raw_response else None
@@ -425,7 +445,9 @@ def build_assessment_markdown_report(
     macro_sample: Dict[str, Any],
     market_condition_info: Optional[Dict[str, Any]] = None,
     asset: str = "BTC",
+    skipped_tickets: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
+
     """Format full institutional Markdown document conforming to assessment series standard."""
     total_trades = max(1, batch_wins + batch_losses)
     win_rate = (batch_wins / total_trades) * 100.0
@@ -613,6 +635,31 @@ def build_assessment_markdown_report(
 - **Side Distribution:** YES: `{sweetspot_data.get('yes_record', '0W-0L')}` | NO: `{sweetspot_data.get('no_record', '0W-0L')}`
 """
 
+    skipped_count = len(skipped_tickets or [])
+    counterfactual_diag = gemini_data.get('counterfactual_regret_review', 'All candidate gates verified without false-negative opportunity regret.')
+    skipped_table = ""
+    if skipped_tickets:
+        st_rows = []
+        for idx, t in enumerate(skipped_tickets[:10], 1):
+            t_id = t.get("ticket_id", f"TICK-{idx}")
+            t_act = t.get("action", "WAIT")
+            t_gate = t.get("first_failed_gate", "UNKNOWN")
+            t_cand = str(t.get("candidate_side", "wait")).upper()
+            t_p = float(t.get("calibrated_probability", 0.0))
+            t_reason = t.get("first_failed_reason", "")
+            st_rows.append(f"| **S{idx}** | `{t_id}` | `{t_act}` | **{t_cand}** | {t_p:.1%} | `{t_gate}` | {t_reason} |")
+        skipped_table = "\n\n| # | Ticket ID | Action | Candidate | Prob | Failed Gate | Reason |\n| :-: | :--- | :---: | :---: | :---: | :---: | :--- |\n" + "\n".join(st_rows)
+
+    counterfactual_section = f"""
+---
+
+## 2.3. Unified One-Decision Qualification & Counterfactual Regret Audit
+
+- **Skipped Candidate Tickets Audited:** {skipped_count}
+- **Gate Diagnostics:** {counterfactual_diag}
+{skipped_table}
+"""
+
     report = f"""# 6-Trade Evaluation Assessment Series: Batch #{batch_num} ({asset.upper()})
 
 **Document ID:** `assessment_{now_date}_#{batch_num}_{asset.upper()}_`  
@@ -652,7 +699,9 @@ Audited under Zero Float Financial Math (`decimal.Decimal`):
 {ledger_table}
 {failure_scorecard_section}
 {sweetspot_section}
+{counterfactual_section}
 ---
+
 
 ## 3. What Happened: Gemini Forensic Diagnostic & Root-Cause Autopsy
 
