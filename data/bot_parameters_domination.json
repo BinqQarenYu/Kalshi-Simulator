@@ -1,20 +1,20 @@
 {
   "assets": {
     "BTC": {
-      "discount_limit_price": 0.45,
+      "discount_limit_price": 0.44,
       "momentum_max_price": 0.55,
-      "min_confidence": 78.0,
+      "min_confidence": 82.0,
       "min_edge_pct": 6.0,
-      "min_ev_dollars": 0.04,
-      "min_spot_diff": 55.0,
+      "min_ev_dollars": 0.035,
+      "min_spot_diff": 35.0,
       "typical_1m_volatility": 16.0,
-      "vpin_toxic_threshold": 0.6,
+      "vpin_toxic_threshold": 0.65,
       "take_profit_price_threshold": 0.88,
       "enable_take_profit_ceiling": true,
       "require_reversal_for_tp_ceiling": true,
       "enable_reverse_take_profit_roi": true,
       "reverse_indicator_threshold": 82.0,
-      "min_take_profit_roi": 35.0,
+      "min_take_profit_roi": 40.0,
       "enable_trailing_ratchet": true,
       "trailing_ratchet_buffer": 0.08,
       "spot_delta_front_run_threshold": 55.0,
@@ -33,7 +33,7 @@
       "dynamic_moat_multiplier": 1.2,
       "enable_dynamic_spot_velocity": true,
       "velocity_z_score_threshold": 2.5,
-      "moneyness_moat_multiplier": 2.0,
+      "moneyness_moat_multiplier": 1.25,
       "twap_fading_quarantine_seconds": 15.0,
       "twap_fading_window_seconds": 60.0,
       "twap_immutability_sniper_cents": 0.75,
@@ -101,7 +101,7 @@
   ],
   "asset_mode": "multi",
   "is_armed": true,
-  "updated_at": "2026-10-17T19:22:00.474841+00:00",
+  "updated_at": "2026-10-19T08:35:19.571435+00:00",
   "max_contracts": 1,
   "discount_limit_price": 0.45,
   "momentum_max_price": 0.55,
@@ -140,5 +140,6 @@
   "bot_id": "macro_trend_dominion",
   "limit_price_cents": 51,
   "min_confidence_pct": 70.0,
-  "volatility_moat_dollars": 30.0
+  "volatility_moat_dollars": 30.0,
+  "last_tuning_rationale": "Tightening discount_limit_price to 0.44 and capping entry prices eliminates high-ceiling (> $0.52) fills that generated -$1.63 in net losses. Raising min_confidence to 82.0% aligns confidence thresholds with Platt Alpha shrinkage (0.65) to penalize overconfident setups. Adjusting min_spot_diff to 35.0 and moneyness_moat_multiplier to 1.25 enforces sufficient distance from strike price to insulate executions against BLEED regime dispersion wicks."
 }
