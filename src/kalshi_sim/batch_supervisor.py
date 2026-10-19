@@ -161,6 +161,9 @@ class AutonomousBatchSupervisor:
             if not matching:
                 return processed
 
+            # Sort newest first so slicing preserves recent trades
+            matching.sort(key=lambda r: str(r.get("timestamp_utc") or r.get("cycle_time") or ""), reverse=True)
+
             eval_cutoff = self._find_latest_assessment_eval_time()
             if eval_cutoff:
                 for r in matching:
