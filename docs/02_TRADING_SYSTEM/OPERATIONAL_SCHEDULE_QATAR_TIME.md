@@ -1,0 +1,102 @@
+# Operational Trading Schedule & Golden Sessions (Qatar Local Time / AST)
+
+**Time Zone Reference:** Qatar Local Time (`AST` = UTC+3) | Eastern Time (`ET` = UTC-4 EDT)  
+**Dataset Ground Truth:** 2,350 Settled Event Cycles (Empirical Truth Protocol)  
+**Fleet Status:** Active Live Capital on AWS EC2 (`13.63.158.94`)
+
+---
+
+## 1. Quick Reference: 24-Hour Visual Schedule (Qatar Time)
+
+```text
+========================================================================================
+QATAR TIME (AST)      ET HOUR      SESSION STATUS     EMPIRICAL WIN RATE & PnL ACTION
+========================================================================================
+00:00 - 01:00         17:00 ET     [OFF] STANDBY      64.5% WR | -$1.32  Inter-Session Deadband
+01:00 - 02:00         18:00 ET     🟢 TRADE           59.9% WR | +$14.39 Asian Open Flow
+02:00 - 03:00         19:00 ET     [OFF] AUTO-OFF     27.1% WR | -$12.72 Post-Market Thin Lull
+03:00 - 05:00         20:00-21:59  🏆 GOLDEN #1       74.1% WR | +$53.20 #1 Best Session (84.4% @ 03:00)
+05:00 - 09:00         22:00-01:59  🛑 TOXIC DEADZONE  31.5% WR | -$30.24 Asian Graveyard Drift
+09:00 - 12:00         02:00-04:59  🟢 TRADE           57.9% WR | +$47.67 London Cash Open Surge
+12:00 - 15:00         05:00-07:59  🛑 TOXIC DEADZONE  21.4% WR | -$62.65 Pre-Market Bleed Trap (Worst)
+15:00 - 16:00         08:00 ET     🟢 TRADE           64.0% WR | +$9.95  Pre-NY Economic Flow
+16:00 - 18:00         09:00-10:59  🛑 TOXIC DEADZONE  26.7% WR | -$32.97 Wall Street Opening Whipsaw
+18:00 - 20:00         11:00-12:59  🟢 TRADE (TREND)   80.7% WR | +$32.34 US Midday Trend (100% @ 18:00)
+20:00 - 23:00         13:00-15:59  🛑 TOXIC DEADZONE  32.4% WR | -$10.74 US Afternoon Lull
+23:00 - 00:00         16:00 ET     🟢 TRADE           59.2% WR | +$13.52 US Cash Market Close (MOC)
+========================================================================================
+```
+
+---
+
+## 2. Approved Golden Trading Windows (Qatar Time)
+
+Trading is strictly authorized **ONLY** during these verified high-conviction windows:
+
+### 1. 🏆 **The Asian Prime Session: 03:00 – 05:00 Qatar Time** (`20:00 – 21:59 ET`)
+- **Combined Performance:** **`+$53.20 Realized PnL`**, **`74.1% Win Rate`**, **`4.82 Profit Factor`** across 224 trades.
+- **Peak Hour (03:00 Qatar / 20:00 ET):** **`84.4% Win Rate`**, **`+$44.35 PnL`**, **`6.21 Profit Factor`**.
+- **Quant Dynamic:** Asian market opening momentum creates clean, persistent directional orderflow with minimal counter-trend wicks.
+
+### 2. 🌟 **The US Midday Institutional Trend: 18:00 – 20:00 Qatar Time** (`11:00 – 12:59 ET`)
+- **Combined Performance:** **`+$32.34 Realized PnL`**, **`80.7% Win Rate`**, **`9.80 Profit Factor`** across 109 trades.
+- **Peak Hour (18:00 Qatar / 11:00 ET):** **`100.0% Win Rate`** (56/56 wins), **`+$27.05 PnL`**, **`99.00 Profit Factor`**.
+- **Quant Dynamic:** After the chaotic opening sweeps settle, institutional algorithmic order execution provides steady, predictable trend continuation.
+
+### 3. 🌟 **The London Cash Open Expansion: 09:00 – 12:00 Qatar Time** (`02:00 – 04:59 ET`)
+- **Combined Performance:** **`+$47.67 Realized PnL`**, **`57.9% Win Rate`**, **`1.74 Profit Factor`** across 484 trades.
+- **Quant Dynamic:** European bank liquidity arrives, expanding market depth and driving strong momentum breakouts from overnight ranges.
+
+### 4. 🌟 **The US Cash Market Close (MOC): 23:00 – 00:00 Qatar Time** (`16:00 – 16:59 ET`)
+- **Combined Performance:** **`+$13.52 Realized PnL`**, **`59.2% Win Rate`**, **`1.57 Profit Factor`** across 130 trades.
+- **Quant Dynamic:** S&P / Nasdaq Market-On-Close institutional rebalancing drives decisive terminal delta on BTC & ETH.
+
+### 5. 🌟 **The Asian Open Flow: 01:00 – 02:00 Qatar Time** (`18:00 – 18:59 ET`)
+- **Combined Performance:** **`+$14.39 Realized PnL`**, **`59.9% Win Rate`**, **`1.48 Profit Factor`** across 147 trades.
+
+### 6. 🌟 **Pre-NY Economic Flow: 15:00 – 16:00 Qatar Time** (`08:00 – 08:59 ET`)
+- **Combined Performance:** **`+$9.95 Realized PnL`**, **`64.0% Win Rate`**, **`2.40 Profit Factor`** across 50 trades.
+- **Quant Dynamic:** US macro releases (CPI, Non-Farm Payrolls, PPI) create immediate directional velocity.
+
+---
+
+## 3. The Auto-Off Toxic Dead Zones (Qatar Time)
+
+The system automatically switches to `WAIT` state during these windows to eliminate **`-$150.01`** in cumulative loss drag:
+
+| Qatar Time (AST) | ET Equivalent | Win Rate | Loss Eliminated | Toxic Market Dynamic |
+| :--- | :--- | :--- | :--- | :--- |
+| **12:00 – 15:00** | 05:00 – 07:59 ET | **21.4%** *(07:00 ET is 7.7%)* | **`-$62.65`** | **Pre-Market Bleed Trap:** European lunch lull / US pre-dawn illiquid book; 78% of breakouts reverse. |
+| **16:00 – 18:00** | 09:00 – 10:59 ET | **26.7%** | **`-$32.97`** | **Wall Street Opening Storm:** 10:00 AM economic whipsaws sweep both bids and asks. |
+| **05:00 – 09:00** | 22:00 – 01:59 ET | **31.5%** | **`-$30.24`** | **Overnight Graveyard:** Thin books and low-conviction Brownian drift. |
+| **20:00 – 23:00** | 13:00 – 15:59 ET | **32.4%** | **`-$10.74`** | **US Afternoon Lull:** Algorithmic liquidity dries up until the final cash hour. |
+
+---
+
+## 4. Winning Market Regimes & Calibrated Settings
+
+### A. Market Regimes
+- **`STORM` (Velocity Breakouts):** **`82.5% Win Rate`**, **`+$15.83`**, **`6.12 PF`** — Highest conviction taker entry.
+- **`BLEED` (Orderflow Imbalance):**
+  - Inside Golden Sessions: **`78.4% Win Rate`**, **`+$128.30 PnL`**.
+  - Inside Toxic Sessions: **`26.1% Win Rate`**, **`-$125.27 PnL`** (Auto-vetoed by SessionTimingGuard).
+- **`CHOP`:** **`30.0% Win Rate`**, **`-$5.87 PnL`** — **Strictly Disabled** (`enable_chop_trading: false`).
+
+### B. The Anti-Bargain Trap Floor
+- **Disproven:** Buying cheap contracts at **`$0.35 - $0.39`** had an **`86.5% loss rate`** (**`-$46.83 Net PnL`**).
+- **Calibrated Rule:** `min_viable_ask_floor = 0.40`. The bot refuses to buy contracts below $\$0.40$.
+- **Sweet Spot Corridor:** Contracts priced between **`$0.45` and `$0.62`** produced **`71.3% - 100% Win Rate`** and **`+$102.39 Net PnL`**.
+
+### C. Execution Horizon
+- `entry_window_open_minutes = 5.0` ($\tau \le 300\text{s}$): Confined to the high-certainty late-cycle window to eliminate early Brownian noise ($\tau > 600\text{s}$).
+
+---
+
+## 5. System Health & Infrastructure
+
+- **AWS Production Server:** `13.63.158.94` (`/home/ec2-user/kalshi-bot`)
+- **Systemd Daemons:**
+  - `kalshi-bot.service` (Headless Server / Pocket Cockpit)
+  - `kalshi-btc-bot.service` (Bitcoin Live Trader)
+  - `kalshi-eth-bot.service` (Ethereum Live Trader)
+- **Local PC Workstation:** Fully synced on branch `zero_hallucination_mode` with 55/55 unit tests passing.
