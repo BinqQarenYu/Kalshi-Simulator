@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2026-10-19T14:54:51.806010+00:00",
+  "last_updated": "2026-10-20T02:45:37.164433+00:00",
   "ETH": {
     "dof_01_vol_moat": {
       "name": "Dynamic Volatility Moat",
@@ -27,9 +27,9 @@
     },
     "dof_03_stepped_salvage": {
       "name": "Stepped Liquidity Salvage Floor",
-      "active": false,
+      "active": true,
       "error_code": "ERR_DOOMED_HOLD_TO_ZERO",
-      "triggered_in_batch": null,
+      "triggered_in_batch": 9,
       "cycles_since_activation": 0,
       "params": {
         "floor_price": "0.10",
@@ -65,7 +65,7 @@
       "name": "Dynamic Volatility Moat",
       "active": true,
       "error_code": "ERR_DISPERSION_EXCURSION",
-      "triggered_in_batch": 145,
+      "triggered_in_batch": 153,
       "cycles_since_activation": 0,
       "params": {
         "k_vol_mult": 2.0,

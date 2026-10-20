@@ -791,3 +791,177 @@ class KalshiMarginOrderClient(KalshiLiveOrderClient):
         except Exception:
             pass
         return time.time()
+
+
+class KalshiShadowOrderClient(KalshiLiveOrderClient):
+    """Zero-Capital Shadow Execution Client for live learning without capital risk.
+
+    Subscribes to live Kalshi production feeds, intercepts order placement to record
+    virtual/paper executions, and reconciles settled cycles against live Kalshi market results.
+    """
+
+    def __init__(
+        self,
+        api_key_id: Optional[str] = None,
+        private_key_path: Optional[str | Path | Any] = None,
+        base_url: str = PROD_REST_BASE,
+        shadow_log_file: Optional[Path] = None,
+    ) -> None:
+        super().__init__(api_key_id=api_key_id, private_key_path=private_key_path, base_url=base_url)
+        self.is_shadow: bool = True
+        self.shadow_log_file: Path = shadow_log_file or (Path("data") / "shadow_orders_active.json")
+        self._pending_shadow_orders: Dict[str, Dict[str, Any]] = {}
+        self._load_pending_shadow_orders()
+
+    def _load_pending_shadow_orders(self) -> None:
+        if self.shadow_log_file.exists():
+            try:
+                data = json.loads(self.shadow_log_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._pending_shadow_orders = data
+            except Exception:
+                self._pending_shadow_orders = {}
+
+    def _save_pending_shadow_orders(self) -> None:
+        try:
+            self.shadow_log_file.parent.mkdir(parents=True, exist_ok=True)
+            self.shadow_log_file.write_text(json.dumps(self._pending_shadow_orders, indent=2), encoding="utf-8")
+        except Exception as exc:
+            logger.warning("[SHADOW CLIENT] Failed to save pending shadow orders: %s", exc)
+
+    async def place_order(
+        self,
+        ticker: str,
+        side: OrderSide | str,
+        count: int,
+        order_type: OrderType | str = OrderType.LIMIT,
+        price_dollars: Optional[Decimal] = None,
+        time_in_force: Optional[str] = None,
+        post_only: bool = False,
+        resting_only: bool = False,
+        action: str = "buy",
+        client_order_id: Optional[str] = None,
+        exchange_index: Optional[int] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Virtual order placement: intercepts real order execution and logs shadow fill."""
+        order_uuid = client_order_id or str(uuid.uuid4())
+        side_val = side.value if isinstance(side, OrderSide) else str(side).lower()
+        price_val = price_dollars if price_dollars is not None else Decimal("0.45")
+
+        shadow_order_id = f"shadow_{ticker}_{int(time.time() * 1000)}"
+        logger.info(
+            "👻 [SHADOW VIRTUAL ORDER EXECUTED] %s %s %d %s @ $%s | ID: %s | Zero Capital Risk",
+            action.upper(),
+            side_val.upper(),
+            count,
+            ticker,
+            price_val,
+            shadow_order_id,
+        )
+
+        record = {
+            "order_id": shadow_order_id,
+            "ticker": ticker,
+            "side": side_val,
+            "count": count,
+            "price": str(price_val),
+            "placed_ts": time.time(),
+        }
+        self._pending_shadow_orders[shadow_order_id] = record
+        self._save_pending_shadow_orders()
+
+        v2_side = "bid" if side_val == "yes" else "ask"
+        return {
+            "order_id": shadow_order_id,
+            "client_order_id": order_uuid,
+            "ticker": ticker,
+            "side": v2_side,
+            "count": f"{count:.2f}",
+            "price": f"{price_val:.4f}",
+            "status": "executed",
+            "fill_count": f"{count:.2f}",
+            "is_shadow": True,
+        }
+
+    async def get_market_result(self, ticker: str) -> Optional[str]:
+        """Fetch market result ('yes', 'no') from Kalshi public API."""
+        endpoint = f"/trade-api/v2/markets/{ticker}"
+        url = f"{self.base_url}/markets/{ticker}"
+        headers = get_auth_headers(self.api_key_id, self.private_key, "GET", endpoint)
+        session = await self._get_session()
+        try:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    market = data.get("market", {})
+                    res = market.get("result")
+                    if res:
+                        return str(res).lower()
+                    if market.get("status") in ("finalized", "closed", "settled"):
+                        exp_val = market.get("expiration_value")
+                        floor_str = market.get("floor_strike")
+                        if exp_val is not None and floor_str is not None:
+                            return "yes" if float(exp_val) > float(floor_str) else "no"
+        except Exception as exc:
+            logger.debug("[SHADOW CLIENT] Failed to fetch market result for %s: %s", ticker, exc)
+        return None
+
+    async def get_settlements(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """Reconcile pending shadow orders against Kalshi market resolution."""
+        settlements: List[Dict[str, Any]] = []
+        now = time.time()
+        to_remove = []
+
+        for ord_id, o in list(self._pending_shadow_orders.items()):
+            ticker = o.get("ticker", "")
+            # Only check if placed at least 30s ago
+            if now - o.get("placed_ts", 0) < 30:
+                continue
+
+            market_result = await self.get_market_result(ticker)
+            if market_result in ("yes", "no"):
+                side_val = o.get("side", "yes")
+                price_dec = Decimal(str(o.get("price", "0.45")))
+                cnt = int(o.get("count", 1))
+                won = (side_val == market_result)
+                revenue = Decimal("100") * cnt if won else Decimal("0")
+                cost = price_dec * Decimal(str(cnt))
+
+                settlements.append({
+                    "ticker": ticker,
+                    "market_result": market_result,
+                    "yes_count_fp": f"{cnt:.2f}" if side_val == "yes" else "0.00",
+                    "no_count_fp": f"{cnt:.2f}" if side_val == "no" else "0.00",
+                    "yes_total_cost_dollars": str(cost) if side_val == "yes" else "0.00",
+                    "no_total_cost_dollars": str(cost) if side_val == "no" else "0.00",
+                    "revenue": int(revenue),
+                    "fee_cost": "0.00",
+                    "is_shadow": True,
+                })
+                to_remove.append(ord_id)
+
+        for rid in to_remove:
+            self._pending_shadow_orders.pop(rid, None)
+        if to_remove:
+            self._save_pending_shadow_orders()
+
+        # Also merge real settlements if available
+        try:
+            real_settlements = await super().get_settlements(limit=limit)
+            settlements.extend(real_settlements)
+        except Exception:
+            pass
+
+        return settlements
+
+    async def cancel_order(self, order_id: str, ticker: Optional[str] = None) -> bool:
+        """Shadow cancel order."""
+        if order_id in self._pending_shadow_orders:
+            self._pending_shadow_orders.pop(order_id, None)
+            self._save_pending_shadow_orders()
+        return True
+
+    async def get_open_orders(self, ticker: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Shadow open orders are executed immediately in shadow mode."""
+        return []
+

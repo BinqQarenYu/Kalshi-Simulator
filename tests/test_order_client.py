@@ -56,5 +56,62 @@ class TestKalshiDemoOrderClient(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.client._primary_exchange_index, 0)
 
 
+class TestKalshiShadowOrderClient(unittest.IsolatedAsyncioTestCase):
+    """Test suite for KalshiShadowOrderClient (Zero-Capital Shadow Fleet)."""
+
+    @patch("kalshi_sim.order_client.load_private_key")
+    def setUp(self, mock_load_key) -> None:
+        mock_load_key.return_value = "mock_key"
+        from kalshi_sim.order_client import KalshiShadowOrderClient
+        from pathlib import Path
+        import tempfile
+        self.tmp_dir = tempfile.TemporaryDirectory()
+        self.shadow_file = Path(self.tmp_dir.name) / "shadow_orders.json"
+        self.client = KalshiShadowOrderClient(
+            api_key_id="test_key_id",
+            private_key_path="./keys/kalshi_live.pem",
+            shadow_log_file=self.shadow_file,
+        )
+
+    def tearDown(self) -> None:
+        self.tmp_dir.cleanup()
+
+    async def test_shadow_client_flags(self) -> None:
+        self.assertTrue(self.client.is_shadow)
+        self.assertEqual(len(self.client._pending_shadow_orders), 0)
+
+    async def test_shadow_order_placement_and_settlement(self) -> None:
+        # 1. Virtual order execution without exchange network calls
+        res = await self.client.place_order(
+            ticker="KXETH15M-26OCT200700-00",
+            side=OrderSide.YES,
+            count=1,
+            price_dollars=Decimal("0.42"),
+        )
+        self.assertIsNotNone(res)
+        self.assertTrue(res["is_shadow"])
+        self.assertEqual(res["status"], "executed")
+        self.assertEqual(len(self.client._pending_shadow_orders), 1)
+
+        # 2. Simulate pending order age > 30s
+        for ord_id in self.client._pending_shadow_orders:
+            self.client._pending_shadow_orders[ord_id]["placed_ts"] -= 35.0
+
+        # 3. Mock market result resolution ('yes')
+        with patch.object(self.client, "get_market_result", new_callable=AsyncMock) as mock_res:
+            mock_res.return_value = "yes"
+            with patch.object(self.client, "_get_session", new_callable=AsyncMock):
+                settlements = await self.client.get_settlements()
+                self.assertEqual(len(settlements), 1)
+                s = settlements[0]
+                self.assertEqual(s["ticker"], "KXETH15M-26OCT200700-00")
+                self.assertEqual(s["market_result"], "yes")
+                self.assertEqual(s["revenue"], 100)
+                self.assertTrue(s["is_shadow"])
+                # Pending orders should now be empty (reconciled)
+                self.assertEqual(len(self.client._pending_shadow_orders), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
+

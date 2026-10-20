@@ -38,7 +38,7 @@ load_dotenv(_ROOT / ".env")
 
 from kalshi_sim.auth import DEMO_REST_BASE, PROD_REST_BASE
 from kalshi_sim.db import get_eth_db_writer
-from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
+from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient, KalshiShadowOrderClient
 from kalshi_sim.orderflow.eth_orderflow_feed import EthOrderflowFeed
 from kalshi_sim.ml.eth_bot1v4.eth_bot1v4_engine import EthBot1V4Engine
 
@@ -92,7 +92,9 @@ async def run_eth_bot(
     if not api_key_id or not private_key_path:
         raise RuntimeError("Kalshi credentials not set in environment or arguments.")
 
-    is_live = mode.lower() == "live"
+    mode_lower = mode.lower()
+    is_live = mode_lower == "live"
+    is_shadow = mode_lower in ("shadow", "paper")
     if is_live:
         if not verify_seal_of_excellence():
             raise PermissionError("Aborting live deployment: eth_bot1_v4 failed Seal of Excellence verification.")
@@ -103,6 +105,14 @@ async def run_eth_bot(
         logger.warning("  Endpoint: %s", PROD_REST_BASE)
         logger.warning("==================================================================")
         order_client = KalshiLiveOrderClient(api_key_id, private_key_path, base_url=PROD_REST_BASE)
+    elif is_shadow:
+        logger.info("==================================================================")
+        logger.info("  👻 ZERO-CAPITAL LIVE SHADOW FLEET ENGAGED (LEARNING MODE)       ")
+        logger.info("  Evaluating live production market data without risking capital  ")
+        logger.info("  Continuous Experience Buffer & Platt Calibration Active         ")
+        logger.info("  Endpoint: %s", PROD_REST_BASE)
+        logger.info("==================================================================")
+        order_client = KalshiShadowOrderClient(api_key_id, private_key_path, base_url=PROD_REST_BASE)
     else:
         logger.info("==================================================================")
         logger.info("  🧪 DEMO / PAPER TRADING ENGAGED: ETH BOT 1 V4 (KXETH15M)        ")
@@ -211,7 +221,7 @@ async def run_eth_bot(
                                     settlement_spot_price=spot_dec,
                                     strike_price=strike_dec,
                                     contracts=total_cnt,
-                                    execution_mode="live" if is_live else "demo",
+                                    execution_mode="live" if is_live else ("shadow" if is_shadow else "demo"),
                                 )
                                 processed_settlements.add(s_ticker)
                                 if rep:
@@ -253,8 +263,8 @@ async def run_eth_bot(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Runner for ETH Bot 1 V4 (Demo & Live).")
-    parser.add_argument("--mode", choices=["demo", "live"], default="demo", help="Execution mode: 'demo' or 'live'.")
+    parser = argparse.ArgumentParser(description="Runner for ETH Bot 1 V4 (Shadow, Demo & Live).")
+    parser.add_argument("--mode", choices=["demo", "live", "shadow", "paper"], default="shadow", help="Execution mode: 'shadow' (zero-capital live learning), 'live', or 'demo'.")
     parser.add_argument("--ticker", default=None, help="Specific contract ticker (optional; auto-discovers if omitted).")
     parser.add_argument("--cycle-interval", type=int, default=5, help="Seconds between cycles (default: 5).")
     parser.add_argument("--api-key-id", help="Override KALSHI_API_KEY_ID.")

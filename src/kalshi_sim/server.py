@@ -86,7 +86,7 @@ from kalshi_sim.ml.quolas_core.hmm_brain import HMMBrain
 from kalshi_sim.ml.statistical_ev_engine import StatisticalEVEngine
 from kalshi_sim.notifications import TelemetryAlertDispatcher
 from kalshi_sim.ohlcv_aggregator import OHLCVAggregator
-from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient
+from kalshi_sim.order_client import KalshiDemoOrderClient, KalshiLiveOrderClient, KalshiShadowOrderClient
 from kalshi_sim.orderbook import OrderBookManager
 from kalshi_sim.orderflow.btc_orderflow_feed import BtcOrderflowFeed
 from kalshi_sim.orderflow.eth_orderflow_feed import EthOrderflowFeed
@@ -1060,15 +1060,29 @@ async def start_background_simulation() -> None:
     order_client = state.order_client
     if order_client is None and key_id and private_key_source:
         try:
-            env = os.getenv("KALSHI_ENV", "live").lower()
-            base_url = DEMO_REST_BASE if env == "demo" else PROD_REST_BASE
-            order_client = KalshiLiveOrderClient(
-                api_key_id=key_id,
-                private_key_path=private_key_source,
-                base_url=base_url,
-            )
+            env = os.getenv("KALSHI_ENV", "shadow").lower()
+            if env in ("shadow", "paper"):
+                order_client = KalshiShadowOrderClient(
+                    api_key_id=key_id,
+                    private_key_path=private_key_source,
+                    base_url=PROD_REST_BASE,
+                )
+                logger.info("👻 Attached Kalshi Shadow Order Client (Zero-Capital Live Learning) to SimulationAgent.")
+            elif env == "demo":
+                order_client = KalshiDemoOrderClient(
+                    api_key_id=key_id,
+                    private_key_path=private_key_source,
+                    base_url=DEMO_REST_BASE,
+                )
+                logger.info("Attached Kalshi Demo Order Client to SimulationAgent.")
+            else:
+                order_client = KalshiLiveOrderClient(
+                    api_key_id=key_id,
+                    private_key_path=private_key_source,
+                    base_url=PROD_REST_BASE,
+                )
+                logger.info("Attached Kalshi Live Production Order Client to SimulationAgent for live order routing.")
             state.order_client = order_client
-            logger.info("Attached Kalshi Live Production Order Client to SimulationAgent for live order routing.")
         except Exception as exc:
             logger.warning("Failed to initialize live order client for sim_agent: %s", exc)
 

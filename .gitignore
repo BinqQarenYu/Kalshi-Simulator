@@ -39,6 +39,8 @@ scratch/
 # Node & Frontend
 node_modules/
 frontend/node_modules/
+frontend/dist/
+dist/
 frontend/test-results/
 frontend/playwright-report/
 
