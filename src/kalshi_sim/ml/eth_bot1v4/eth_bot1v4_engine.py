@@ -42,6 +42,7 @@ from kalshi_sim.schemas import (
 )
 from kalshi_sim.ml.dof_governor import get_dof_governor
 from kalshi_sim.ml.kev_oracle import KevDecisionOracle, KevQuestion, KevQuestionType
+from kalshi_sim.ml.session_timing_guard import get_session_timing_guard
 from kalshi_sim.ws_connection import create_aiohttp_connector
 
 logger = logging.getLogger("kalshi_sim.eth_bot1v4_engine")
@@ -104,6 +105,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         self._session: Optional[aiohttp.ClientSession] = None
         self.kev_oracle = KevDecisionOracle()
         self.dof_governor = get_dof_governor()
+        self.timing_guard = get_session_timing_guard()
         self._salvage_adverse_ticks: dict[str, int] = {}
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -740,6 +742,19 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
                     macro_slope, float(spot_price - target_strike)
                 )
                 return decision
+
+        # 3e. Empirical Session Timing Guard (Automatic Time-of-Day Veto & Golden Boost)
+        timing_guard = getattr(self, "timing_guard", None) or get_session_timing_guard()
+        timing_verdict = timing_guard.evaluate_timing(
+            ref_time=now_utc,
+            macro_regime=getattr(self, "_current_regime", "CHOP"),
+            spot_diff=abs(spot_price - target_strike),
+        )
+        if not timing_verdict.allowed:
+            logger.warning("%s Stand down to WAIT.", timing_verdict.reason)
+            return decision
+        if timing_verdict.is_golden:
+            logger.info("%s", timing_verdict.reason)
 
         # 4. Continuous Math-of-Winning Formulation & Physics Dispersion Gate
         diff_float = float(spot_price - target_strike)
