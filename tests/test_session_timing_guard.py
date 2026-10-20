@@ -26,15 +26,27 @@ class TestSessionTimingGuard(unittest.TestCase):
             self.assertFalse(verdict.allowed, f"Hour {h}:00 ET should be vetoed")
             self.assertTrue(verdict.is_toxic)
             self.assertEqual(verdict.session_name, "PRE_MARKET_DEAD_ZONE")
-            self.assertIn("🛑 [TIMING VETO: PRE-MARKET DEAD ZONE]", verdict.reason)
+            self.assertIn("🛑 [AUTO-OFF: PRE-MARKET DEAD ZONE]", verdict.reason)
 
     def test_toxic_late_night_chop(self) -> None:
-        """22:00 - 22:59 ET must be strictly vetoed."""
-        dt = self._make_et_dt(22)
-        verdict = self.guard.evaluate_timing(ref_time=dt)
-        self.assertFalse(verdict.allowed)
-        self.assertTrue(verdict.is_toxic)
-        self.assertEqual(verdict.session_name, "LATE_NIGHT_ASIA_CHOP")
+        """22:00 - 23:59 ET must be strictly vetoed."""
+        for h in [22, 23]:
+            dt = self._make_et_dt(h)
+            verdict = self.guard.evaluate_timing(ref_time=dt)
+            self.assertFalse(verdict.allowed)
+            self.assertTrue(verdict.is_toxic)
+            self.assertEqual(verdict.session_name, "LATE_NIGHT_ASIA_CHOP")
+            self.assertIn("🛑 [AUTO-OFF: LATE NIGHT CHOP]", verdict.reason)
+
+    def test_pre_open_standby(self) -> None:
+        """00:00 - 01:59 ET (07:00 - 08:59 Qatar) must be in standby until 09:00 AM Qatar."""
+        for h in [0, 1]:
+            dt = self._make_et_dt(h)
+            verdict = self.guard.evaluate_timing(ref_time=dt)
+            self.assertFalse(verdict.allowed)
+            self.assertFalse(verdict.is_toxic)
+            self.assertEqual(verdict.session_name, "PRE_OPEN_STANDBY")
+            self.assertIn("⏸️ [PRE-OPEN STANDBY]", verdict.reason)
 
     def test_us_cash_open_whipsaw(self) -> None:
         """10:00 ET is vetoed unless wide STORM."""

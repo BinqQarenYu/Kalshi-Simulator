@@ -37,8 +37,9 @@ class TimingVerdict(NamedTuple):
 class SessionTimingGuard:
     """Evaluates time-of-day edge and enforces automatic session vetoes / golden boosts."""
 
-    TOXIC_HOURS = {5, 6, 7, 22}
+    TOXIC_HOURS = {5, 6, 7, 22, 23}
     WHIPSAW_HOURS = {10}
+    STANDBY_HOURS = {0, 1}
     PRIME_GOLDEN_HOURS = {20, 21, 11, 12}
     SECONDARY_GOLDEN_HOURS = {2, 3, 4, 16, 17, 18}
 
@@ -78,31 +79,32 @@ class SessionTimingGuard:
 
         now_et = self.get_current_et_datetime(ref_time)
         hour = now_et.hour
+        hour_qatar = (hour + 7) % 24
         regime_upper = (macro_regime or "CHOP").upper()
         diff_val = abs(Decimal(str(spot_diff))) if spot_diff is not None else Decimal("0.0")
 
-        # 1. Hard Toxic Hours (05:00-07:59 ET & 22:00-22:59 ET)
+        # 1. Hard Toxic Hours (05:00-07:59 ET & 22:00-23:59 ET -> AUTO-OFF)
         if hour in (5, 6, 7):
             return TimingVerdict(
                 allowed=False,
                 is_golden=False,
                 is_toxic=True,
-                reason=f"🛑 [TIMING VETO: PRE-MARKET DEAD ZONE] Hour {hour:02d}:00 ET has 23.5% empirical WR and -$62.83 cumulative deficit. Standing down.",
+                reason=f"🛑 [AUTO-OFF: PRE-MARKET DEAD ZONE] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) has 23.5% empirical WR and -$62.83 cumulative deficit. Standing down.",
                 hour_et=hour,
                 session_name="PRE_MARKET_DEAD_ZONE",
             )
 
-        if hour == 22:
+        if hour in (22, 23):
             return TimingVerdict(
                 allowed=False,
                 is_golden=False,
                 is_toxic=True,
-                reason=f"🛑 [TIMING VETO: LATE NIGHT CHOP] Hour 22:00 ET has 20.7% empirical WR and -$23.83 cumulative deficit. Standing down.",
+                reason=f"🛑 [AUTO-OFF: LATE NIGHT CHOP] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) has 20.7% empirical WR and -$23.83 cumulative deficit. Standing down.",
                 hour_et=hour,
                 session_name="LATE_NIGHT_ASIA_CHOP",
             )
 
-        # 2. US Cash Open Whipsaw (10:00-10:59 ET): Allowed only under wide STORM
+        # 2. US Cash Open Whipsaw (10:00-10:59 ET -> AUTO-OFF unless wide STORM)
         if hour in self.WHIPSAW_HOURS:
             is_storm = "STORM" in regime_upper or "VOLCANO" in regime_upper
             wide_separation = diff_val >= Decimal("4.00")  # ETH $4 or BTC $40+
@@ -111,18 +113,29 @@ class SessionTimingGuard:
                     allowed=False,
                     is_golden=False,
                     is_toxic=True,
-                    reason=f"🛑 [TIMING VETO: US OPEN WHIPSAW] Hour 10:00 ET has 24.4% empirical WR (-$24.61). Vetoed unless wide STORM (|diff| >= 4.00, got {diff_val}).",
+                    reason=f"🛑 [AUTO-OFF: US OPEN WHIPSAW] Hour 10:00 ET ({hour_qatar:02d}:00 Qatar) has 24.4% empirical WR (-$24.61). Vetoed unless wide STORM (|diff| >= 4.00, got {diff_val}).",
                     hour_et=hour,
                     session_name="US_OPEN_WHIPSAW",
                 )
 
-        # 3. Prime Golden Windows
+        # 3. Pre-Open Standby (00:00-01:59 ET / 07:00-08:59 Qatar -> Standby until 09:00 AM Qatar)
+        if hour in self.STANDBY_HOURS:
+            return TimingVerdict(
+                allowed=False,
+                is_golden=False,
+                is_toxic=False,
+                reason=f"⏸️ [PRE-OPEN STANDBY] Live trading begins at 09:00 AM Qatar (02:00 ET London Open). Current time is {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar). Standing down to WAIT.",
+                hour_et=hour,
+                session_name="PRE_OPEN_STANDBY",
+            )
+
+        # 4. Prime Golden Windows
         if hour in (20, 21):
             return TimingVerdict(
                 allowed=True,
                 is_golden=True,
                 is_toxic=False,
-                reason=f"🌟 [GOLDEN TIMING: ASIA OPEN ALPHA] Hour {hour:02d}:00 ET is #1 all-time best session (85.5% WR, +$44.32 PnL). Priority Unlocked.",
+                reason=f"🌟 [GOLDEN TIMING: ASIA OPEN ALPHA] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) is #1 all-time best session (85.5% WR, +$44.32 PnL). Priority Unlocked.",
                 hour_et=hour,
                 session_name="ASIA_OPEN_ALPHA",
             )
@@ -132,18 +145,18 @@ class SessionTimingGuard:
                 allowed=True,
                 is_golden=True,
                 is_toxic=False,
-                reason=f"🌟 [GOLDEN TIMING: US MIDDAY TREND] Hour {hour:02d}:00 ET is 100% empirical WR window (+$26.04 PnL). Priority Unlocked.",
+                reason=f"🌟 [GOLDEN TIMING: US MIDDAY TREND] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) is 100% empirical WR window (+$26.04 PnL). Priority Unlocked.",
                 hour_et=hour,
                 session_name="US_MIDDAY_TREND",
             )
 
-        # 4. Secondary Golden Windows
+        # 5. Secondary Golden Windows
         if hour in (2, 3, 4):
             return TimingVerdict(
                 allowed=True,
                 is_golden=True,
                 is_toxic=False,
-                reason=f"🌟 [GOLDEN TIMING: LONDON OPEN] Hour {hour:02d}:00 ET London liquidity expansion (57-69% WR, +$40.37 PnL). Priority Unlocked.",
+                reason=f"🌟 [GOLDEN TIMING: LONDON OPEN] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) London liquidity expansion (57-69% WR, +$40.37 PnL). Priority Unlocked.",
                 hour_et=hour,
                 session_name="LONDON_OPEN",
             )
@@ -153,17 +166,17 @@ class SessionTimingGuard:
                 allowed=True,
                 is_golden=True,
                 is_toxic=False,
-                reason=f"🌟 [GOLDEN TIMING: US CASH CLOSE] Hour {hour:02d}:00 ET US Close flow (59-61% WR, +$28.22 PnL). Priority Unlocked.",
+                reason=f"🌟 [GOLDEN TIMING: US CASH CLOSE] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) US Close flow (59-61% WR, +$28.22 PnL). Priority Unlocked.",
                 hour_et=hour,
                 session_name="US_CASH_CLOSE",
             )
 
-        # 5. Standard Neutral Session
+        # 6. Standard Neutral Session
         return TimingVerdict(
             allowed=True,
             is_golden=False,
             is_toxic=False,
-            reason=f"Standard session window ({hour:02d}:00 ET). Normal regime filters apply.",
+            reason=f"Standard session window ({hour:02d}:00 ET / {hour_qatar:02d}:00 Qatar). Normal regime filters apply.",
             hour_et=hour,
             session_name="STANDARD_SESSION",
         )
