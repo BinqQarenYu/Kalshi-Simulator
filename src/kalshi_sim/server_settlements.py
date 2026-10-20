@@ -262,8 +262,15 @@ def record_win_loss_event_report(
     if resolved_params:
         report["bot_parameters"] = resolved_params
 
-    state.win_loss_reports.insert(0, report)
-    state.save_persisted_reports()
+    if str(exec_mode_resolved).lower() == "live":
+        state.win_loss_reports.insert(0, report)
+        state.save_persisted_reports()
+    else:
+        logger.info(
+            "🧪 [SHADOW/PAPER MODE] Settlement report %s processed in-memory (mode: %s); skipping disk persistence to win_loss_reports.json",
+            report.get("report_id"),
+            exec_mode_resolved,
+        )
 
     # Determine if ETH asset
     is_eth_asset = (
@@ -273,8 +280,8 @@ def record_win_loss_event_report(
     )
     db_writer = get_eth_db_writer() if is_eth_asset else get_db_writer()
 
-    # Route persistence to dedicated ETH report store if ETH asset
-    if is_eth_asset:
+    # Route persistence to dedicated ETH report store if ETH asset AND live execution mode
+    if is_eth_asset and str(exec_mode_resolved).lower() == "live":
         try:
             eth_file = Path("data/eth_win_loss_reports.json")
             eth_file.parent.mkdir(parents=True, exist_ok=True)
@@ -427,21 +434,22 @@ def record_win_loss_event_report(
                 f_code = "ERR_DISPERSION_EXCURSION"
 
             report["failure_code"] = f_code
-            state.save_persisted_reports()
+            if str(exec_mode_resolved).lower() == "live":
+                state.save_persisted_reports()
 
-            if is_eth_asset:
-                try:
-                    eth_file = Path("data/eth_win_loss_reports.json")
-                    if eth_file.exists():
-                        eth_reports = json.loads(eth_file.read_text(encoding="utf-8"))
-                        if eth_reports and isinstance(eth_reports, list):
-                            for r in eth_reports:
-                                if r.get("report_id") == report.get("report_id"):
-                                    r["failure_code"] = f_code
-                                    break
-                            eth_file.write_text(json.dumps(eth_reports, indent=2), encoding="utf-8")
-                except Exception:
-                    pass
+                if is_eth_asset:
+                    try:
+                        eth_file = Path("data/eth_win_loss_reports.json")
+                        if eth_file.exists():
+                            eth_reports = json.loads(eth_file.read_text(encoding="utf-8"))
+                            if eth_reports and isinstance(eth_reports, list):
+                                for r in eth_reports:
+                                    if r.get("report_id") == report.get("report_id"):
+                                        r["failure_code"] = f_code
+                                        break
+                                eth_file.write_text(json.dumps(eth_reports, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
 
             db_writer.enqueue_failure_autopsy(
                 trade_id=report["report_id"],

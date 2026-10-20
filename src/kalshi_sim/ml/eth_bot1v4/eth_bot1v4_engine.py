@@ -751,7 +751,12 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             spot_diff=abs(spot_price - target_strike),
         )
         if not timing_verdict.allowed:
-            logger.warning("%s Stand down to WAIT.", timing_verdict.reason)
+            if timing_verdict.is_warmup:
+                logger.info("%s [WARM-UP ACTIVE] Feeds & ONNX primed; holding order execution until top-of-hour.", timing_verdict.reason)
+            elif timing_verdict.is_shadow:
+                logger.info("%s [SHADOW ACTIVE] Model inferencing & updating in shadow mode; live execution held.", timing_verdict.reason)
+            else:
+                logger.warning("%s Stand down to WAIT.", timing_verdict.reason)
             return decision
         if timing_verdict.is_golden:
             logger.info("%s", timing_verdict.reason)
@@ -1098,21 +1103,29 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             "bot_parameters": self.get_parameters(),
         }
 
-        # Save to data/eth_win_loss_reports.json
-        try:
-            self.history_file.parent.mkdir(parents=True, exist_ok=True)
-            reports = []
-            if self.history_file.exists():
-                try:
-                    reports = json.loads(self.history_file.read_text(encoding="utf-8"))
-                    if not isinstance(reports, list):
+        # Save to data/eth_win_loss_reports.json (STRICTLY for live trades only - do not pollute with paper/shadow trades)
+        if str(execution_mode).lower() == "live":
+            try:
+                self.history_file.parent.mkdir(parents=True, exist_ok=True)
+                reports = []
+                if self.history_file.exists():
+                    try:
+                        reports = json.loads(self.history_file.read_text(encoding="utf-8"))
+                        if not isinstance(reports, list):
+                            reports = []
+                    except Exception:
                         reports = []
-                except Exception:
-                    reports = []
-            reports.insert(0, report)
-            self.history_file.write_text(json.dumps(reports, indent=2), encoding="utf-8")
-        except Exception as file_exc:
-            logger.warning("[ETH BOT] Error persisting report to %s: %s", self.history_file, file_exc)
+                reports.insert(0, report)
+                self.history_file.write_text(json.dumps(reports, indent=2), encoding="utf-8")
+                logger.info("[ETH BOT] Persisted live trade settlement report to %s", self.history_file)
+            except Exception as file_exc:
+                logger.warning("[ETH BOT] Error persisting report to %s: %s", self.history_file, file_exc)
+        else:
+            logger.info(
+                "🧪 [ETH SHADOW/PAPER SETTLEMENT] Cycle %s (%s) processed in-memory for continuous ONNX/Brier calibration; skipping disk persistence",
+                target_ticker,
+                execution_mode,
+            )
 
         # 5. Feed Continuous Experience Buffer for online sharpening & Platt calibration
         if self.experience_buffer:

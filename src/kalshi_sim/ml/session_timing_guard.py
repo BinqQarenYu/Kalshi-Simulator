@@ -32,6 +32,8 @@ class TimingVerdict(NamedTuple):
     reason: str
     hour_et: int
     session_name: str
+    is_warmup: bool = False
+    is_shadow: bool = False
 
 
 class SessionTimingGuard:
@@ -81,13 +83,33 @@ class SessionTimingGuard:
                 reason="Session timing guard disabled by configuration.",
                 hour_et=-1,
                 session_name="DISABLED",
+                is_warmup=False,
+                is_shadow=False,
             )
 
         now_et = self.get_current_et_datetime(ref_time)
         hour = now_et.hour
+        minute = now_et.minute
         hour_qatar = (hour + 7) % 24
+        next_hour = (hour + 1) % 24
+        next_hour_qatar = (next_hour + 7) % 24
         regime_upper = (macro_regime or "CHOP").upper()
         diff_val = abs(Decimal(str(spot_diff))) if spot_diff is not None else Decimal("0.0")
+
+        # 0. 15-Minute Pre-Session Warm-Up Gate:
+        # Exactly 15 minutes before an approved golden session (minute >= 45 of preceding hour)
+        is_entering_golden = (next_hour in self.APPROVED_GOLDEN_HOURS) and (hour not in self.APPROVED_GOLDEN_HOURS)
+        if minute >= 45 and is_entering_golden:
+            return TimingVerdict(
+                allowed=False,
+                is_golden=False,
+                is_toxic=False,
+                reason=f"🔥 [WARM-UP BUFFER: 15-MIN PRE-SESSION] Primes orderflow feeds, ONNX inference, and feature buffers 15m before Golden Session ({next_hour_qatar:02d}:00 Qatar / {next_hour:02d}:00 ET). Ready to fire on the hour.",
+                hour_et=hour,
+                session_name="GOLDEN_SESSION_WARMUP",
+                is_warmup=True,
+                is_shadow=False,
+            )
 
         # 1. Hard Toxic Hours (05:00-07:59 ET & 22:00-23:59 ET -> AUTO-OFF)
         if hour in (5, 6, 7):
@@ -95,9 +117,11 @@ class SessionTimingGuard:
                 allowed=False,
                 is_golden=False,
                 is_toxic=True,
-                reason=f"🛑 [AUTO-OFF: PRE-MARKET DEAD ZONE] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) has 23.5% empirical WR and -$62.83 cumulative deficit. Standing down.",
+                reason=f"🛑 [AUTO-OFF: PRE-MARKET DEAD ZONE] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) has 23.5% empirical WR and -$62.83 cumulative deficit. Standing down in shadow learning mode.",
                 hour_et=hour,
                 session_name="PRE_MARKET_DEAD_ZONE",
+                is_warmup=False,
+                is_shadow=True,
             )
 
         if hour in (22, 23):
@@ -105,9 +129,11 @@ class SessionTimingGuard:
                 allowed=False,
                 is_golden=False,
                 is_toxic=True,
-                reason=f"🛑 [AUTO-OFF: LATE NIGHT CHOP] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) has 20.7% empirical WR and -$23.83 cumulative deficit. Standing down.",
+                reason=f"🛑 [AUTO-OFF: LATE NIGHT CHOP] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) has 20.7% empirical WR and -$23.83 cumulative deficit. Standing down in shadow learning mode.",
                 hour_et=hour,
                 session_name="LATE_NIGHT_ASIA_CHOP",
+                is_warmup=False,
+                is_shadow=True,
             )
 
         # 2. US Cash Open Whipsaw (10:00-10:59 ET -> AUTO-OFF unless wide STORM)
@@ -122,14 +148,18 @@ class SessionTimingGuard:
                     reason=f"🌟 [STORM OVERRIDE: US CASH OPEN] Hour 10:00 ET wide STORM exception granted (|diff| = {diff_val} >= 4.00).",
                     hour_et=hour,
                     session_name="US_OPEN_STORM_OVERRIDE",
+                    is_warmup=False,
+                    is_shadow=False,
                 )
             return TimingVerdict(
                 allowed=False,
                 is_golden=False,
                 is_toxic=True,
-                reason=f"🛑 [AUTO-OFF: US OPEN WHIPSAW] Hour 10:00 ET ({hour_qatar:02d}:00 Qatar) has 24.4% empirical WR (-$24.61). Vetoed unless wide STORM (|diff| >= 4.00, got {diff_val}).",
+                reason=f"🛑 [AUTO-OFF: US OPEN WHIPSAW] Hour 10:00 ET ({hour_qatar:02d}:00 Qatar) has 24.4% empirical WR (-$24.61). Vetoed unless wide STORM (|diff| >= 4.00, got {diff_val}). Standing down in shadow learning mode.",
                 hour_et=hour,
                 session_name="US_OPEN_WHIPSAW",
+                is_warmup=False,
+                is_shadow=True,
             )
 
         # 3. Pre-Open Standby (00:00-01:59 ET / 07:00-08:59 Qatar -> Standby until 09:00 AM Qatar)
@@ -138,9 +168,11 @@ class SessionTimingGuard:
                 allowed=False,
                 is_golden=False,
                 is_toxic=False,
-                reason=f"⏸️ [PRE-OPEN STANDBY] Live trading begins at 09:00 AM Qatar (02:00 ET London Open). Current time is {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar). Standing down to WAIT.",
+                reason=f"⏸️ [PRE-OPEN STANDBY] Live trading begins at 09:00 AM Qatar (02:00 ET London Open). Current time is {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar). Standing down in shadow learning mode.",
                 hour_et=hour,
                 session_name="PRE_OPEN_STANDBY",
+                is_warmup=False,
+                is_shadow=True,
             )
 
         # 4. Prime Golden Windows
@@ -195,15 +227,17 @@ class SessionTimingGuard:
                 session_name="US_CASH_CLOSE",
             )
 
-        # 6. Strict Mode Gate for Non-Golden Sessions
+        # 6. Strict Mode Gate for Non-Golden Sessions (Shift to Shadow Mode for Continuous ONNX Learning)
         if self.strict_golden_only:
             return TimingVerdict(
                 allowed=False,
                 is_golden=False,
                 is_toxic=False,
-                reason=f"🛑 [AUTO-OFF: NON-GOLDEN SESSION] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) is an unproven / unprofitable session window. Strict Golden Sessions policy active. Standing down to WAIT.",
+                reason=f"🛑 [AUTO-OFF: NON-GOLDEN SESSION] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) is an unproven / unprofitable session window. Strict Golden Sessions policy active. Shifted to shadow mode for continuous ONNX learning.",
                 hour_et=hour,
-                session_name="NON_GOLDEN_STANDBY",
+                session_name="NON_GOLDEN_SHADOW",
+                is_warmup=False,
+                is_shadow=True,
             )
 
         # 7. Standard Neutral Session (Permissive fallback)

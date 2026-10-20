@@ -21,6 +21,7 @@ import pytest
 from kalshi_sim.council.orchestrator import CouncilOrchestrator
 from kalshi_sim.ml.bot1_v4_engine import Bot1V4Decision
 from kalshi_sim.ml.eth_bot1v4.eth_bot1v4_engine import EthBot1V4Engine
+from kalshi_sim.ml.session_timing_guard import SessionTimingGuard
 from kalshi_sim.orderflow.eth_orderflow_feed import EthOrderflowFeed
 from kalshi_sim.schemas import CryptoAsset, L2BookState, MarketInfo, MarketStatus
 
@@ -138,6 +139,7 @@ async def test_eth_bot1v4_run_cycle_with_mock_order_client() -> None:
     engine.fetch_orderbook = mock_fetch_orderbook
     engine.get_macro_1h_slope = lambda: 0.0
     engine.experience_buffer = None
+    engine.timing_guard = SessionTimingGuard(enabled=False)
 
     # Cycle 1: Execute opportunity
     decision = await engine.run_cycle()
@@ -226,6 +228,7 @@ def test_eth_bot1v4_record_cycle_settlement_tolerance() -> None:
         entry_price=Decimal("0.42"),
         pnl=Decimal("0.58"),
         side="yes",
+        execution_mode="paper",
     )
     assert res is not None
     assert res.get("outcome") == "win"

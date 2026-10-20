@@ -99,4 +99,30 @@ The system automatically switches to `WAIT` state during these windows to elimin
   - `kalshi-bot.service` (Headless Server / Pocket Cockpit)
   - `kalshi-btc-bot.service` (Bitcoin Live Trader)
   - `kalshi-eth-bot.service` (Ethereum Live Trader)
-- **Local PC Workstation:** Fully synced on branch `zero_hallucination_mode` with 55/55 unit tests passing.
+- **Local PC Workstation:** Fully synced on branch `zero_hallucination_mode` with 65/65 unit tests passing.
+
+---
+
+## 6. Pre-Session Warm-Up, Auto-Off Shadow Mode & Anti-Paper Clutter Policy
+
+### A. 15-Minute Pre-Session Warm-Up (`WARM_UP` Mode)
+- **Trigger:** Exactly at minute $\ge 45$ of the preceding hour before any approved Golden Session (e.g., `14:45 AST` before the `15:00 AST` Pre-NY window; `17:45 AST` before the `18:00 AST` US Midday Trend; `02:45 AST` before the `03:00 AST` Asian Prime window).
+- **Engine State:**
+  - Connects and primes Binance L2 WebSocket feeds and Kalshi orderbook state.
+  - Warms up rolling orderflow metrics: Order Flow Imbalance (OFI L1), Volume-Synchronized Probability of Toxicity (VPIN), 1m rolling volatility, and macro slope cache.
+  - Runs ONNX neural inference and Kev Decision Oracle forward passes to hot-cache weights and model latency.
+  - **Live Order Execution Gate:** Live order submission is held until `:00` at top-of-the-hour.
+
+### B. Auto-Off & Shift to Shadow Mode (`SHADOW` Mode)
+- **Trigger:** Immediately upon the conclusion of each approved Golden Session (e.g., at `13:00 ET` / `20:00 AST` after the US Midday window closes).
+- **Engine State:**
+  - Auto-off live order submission.
+  - Shifts engine into shadow evaluation mode to continuously track market regimes, test ONNX predictions against market outcomes, and adapt continuous experience buffers.
+  - In-memory Platt calibration alpha ($\alpha$) and Brier calibration scores continue to update in real-time.
+
+### C. Zero Paper-Trade Persistence Protocol (Empirical Data Purity)
+- **User Directive:** "dont save its paper trade, i dont need fake report like that papertrading."
+- **Enforcement:**
+  - `data/win_loss_reports.json` and `data/eth_win_loss_reports.json` strictly accept records where `execution_mode.lower() == "live"`.
+  - Non-live (shadow, demo, paper) settlements update the in-memory learning models and continuous experience buffers only, and are **NEVER** written to disk reports.
+  - This guarantees 100% data integrity for historical auditing, PnL tracking, and executive review.

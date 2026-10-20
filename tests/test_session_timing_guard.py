@@ -107,15 +107,45 @@ class TestSessionTimingGuard(unittest.TestCase):
         self.assertIn("🌟 [GOLDEN TIMING: PRE-NY EXPANSION]", v.reason)
 
     def test_strict_golden_non_golden_veto(self) -> None:
-        """Non-golden hours (9, 13, 14, 19) must be auto-vetoed under strict golden policy."""
+        """Non-golden hours (9, 13, 14, 19) must be auto-vetoed under strict golden policy and shifted to shadow."""
         strict_guard = SessionTimingGuard(enabled=True, strict_golden_only=True)
         for h in [9, 13, 14, 19]:
             dt = self._make_et_dt(h)
             v = strict_guard.evaluate_timing(ref_time=dt)
             self.assertFalse(v.allowed)
             self.assertFalse(v.is_golden)
-            self.assertEqual(v.session_name, "NON_GOLDEN_STANDBY")
+            self.assertTrue(v.is_shadow)
+            self.assertEqual(v.session_name, "NON_GOLDEN_SHADOW")
             self.assertIn("🛑 [AUTO-OFF: NON-GOLDEN SESSION]", v.reason)
+
+    def test_15_minute_pre_session_warmup(self) -> None:
+        """At 15 minutes before an approved golden session (minute >= 45), warm-up must activate."""
+        # 10:45 ET is 15 minutes before 11:00 ET (US Midday Trend)
+        dt_warmup = self._make_et_dt(10, 45)
+        v = self.guard.evaluate_timing(ref_time=dt_warmup)
+        self.assertFalse(v.allowed)
+        self.assertTrue(v.is_warmup)
+        self.assertFalse(v.is_shadow)
+        self.assertEqual(v.session_name, "GOLDEN_SESSION_WARMUP")
+        self.assertIn("🔥 [WARM-UP BUFFER: 15-MIN PRE-SESSION]", v.reason)
+
+        # 01:50 ET is 10 minutes before 02:00 ET (London Open)
+        dt_london_warmup = self._make_et_dt(1, 50)
+        v2 = self.guard.evaluate_timing(ref_time=dt_london_warmup)
+        self.assertFalse(v2.allowed)
+        self.assertTrue(v2.is_warmup)
+        self.assertFalse(v2.is_shadow)
+        self.assertEqual(v2.session_name, "GOLDEN_SESSION_WARMUP")
+
+    def test_shift_to_shadow_after_profitable_window(self) -> None:
+        """Immediately after golden window concludes (e.g. 13:00 ET after 12:00 ET), shift to shadow mode."""
+        strict_guard = SessionTimingGuard(enabled=True, strict_golden_only=True)
+        dt_after = self._make_et_dt(13, 5)
+        v = strict_guard.evaluate_timing(ref_time=dt_after)
+        self.assertFalse(v.allowed)
+        self.assertTrue(v.is_shadow)
+        self.assertFalse(v.is_warmup)
+        self.assertEqual(v.session_name, "NON_GOLDEN_SHADOW")
 
 
 if __name__ == "__main__":
