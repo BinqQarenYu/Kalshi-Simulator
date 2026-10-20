@@ -81,9 +81,9 @@ class StrategyEvaluationCoordinator:
         self._eth_bot1_v4_engine = eth_bot1_v4_engine
         self._eth_orderflow_feed = eth_orderflow_feed
         self._dynamic_regime_engines: dict[str, DynamicRegimeStrategy] = {
-            "BTC": dynamic_regime_engine or DynamicRegimeStrategy(asset="BTC"),
-            "ETH": DynamicRegimeStrategy(asset="ETH"),
-            "SOL": DynamicRegimeStrategy(asset="SOL"),
+            "BTC": dynamic_regime_engine or DynamicRegimeStrategy(asset="BTC", enable_timing_guard=True),
+            "ETH": DynamicRegimeStrategy(asset="ETH", enable_timing_guard=True),
+            "SOL": DynamicRegimeStrategy(asset="SOL", enable_timing_guard=True),
         }
 
         # Cooldown and rate-limiting caches
@@ -100,12 +100,12 @@ class StrategyEvaluationCoordinator:
 
     @property
     def _dynamic_regime_engine(self) -> DynamicRegimeStrategy:
-        return self._dynamic_regime_engines.get("BTC", DynamicRegimeStrategy(asset="BTC"))
+        return self._dynamic_regime_engines.get("BTC", DynamicRegimeStrategy(asset="BTC", enable_timing_guard=True))
 
     def get_dynamic_regime_engine(self, ticker: str) -> DynamicRegimeStrategy:
         asset_str = detect_asset_from_ticker(ticker).value
         if asset_str not in self._dynamic_regime_engines:
-            self._dynamic_regime_engines[asset_str] = DynamicRegimeStrategy(asset=asset_str)
+            self._dynamic_regime_engines[asset_str] = DynamicRegimeStrategy(asset=asset_str, enable_timing_guard=True)
         return self._dynamic_regime_engines[asset_str]
 
     def _resolve_target_strike(self, ticker: str, market_info: Optional[MarketInfo]) -> Decimal:

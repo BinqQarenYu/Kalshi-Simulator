@@ -97,6 +97,26 @@ class TestSessionTimingGuard(unittest.TestCase):
             self.assertTrue(v.is_golden)
             self.assertEqual(v.session_name, "US_CASH_CLOSE")
 
+    def test_pre_ny_expansion(self) -> None:
+        """Hour 08:00 ET (15:00 Qatar) pre-NY flow must be golden."""
+        dt = self._make_et_dt(8)
+        v = self.guard.evaluate_timing(ref_time=dt)
+        self.assertTrue(v.allowed)
+        self.assertTrue(v.is_golden)
+        self.assertEqual(v.session_name, "PRE_NY_EXPANSION")
+        self.assertIn("🌟 [GOLDEN TIMING: PRE-NY EXPANSION]", v.reason)
+
+    def test_strict_golden_non_golden_veto(self) -> None:
+        """Non-golden hours (9, 13, 14, 19) must be auto-vetoed under strict golden policy."""
+        strict_guard = SessionTimingGuard(enabled=True, strict_golden_only=True)
+        for h in [9, 13, 14, 19]:
+            dt = self._make_et_dt(h)
+            v = strict_guard.evaluate_timing(ref_time=dt)
+            self.assertFalse(v.allowed)
+            self.assertFalse(v.is_golden)
+            self.assertEqual(v.session_name, "NON_GOLDEN_STANDBY")
+            self.assertIn("🛑 [AUTO-OFF: NON-GOLDEN SESSION]", v.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

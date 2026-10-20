@@ -474,5 +474,31 @@ def test_multi_asset_dual_bot_live_execution_gates():
     assert "kalshi_history_eth.db" not in str(writer_btc.db_manager.db_path)
 
 
+def test_dynamic_strategy_session_timing_guard_integration():
+    """Verify that DynamicRegimeStrategy integrates seamlessly with SessionTimingGuard."""
+    # 1. Guard disabled -> does not veto based on wall clock
+    strat_unguarded = DynamicRegimeStrategy(asset="BTC", enable_timing_guard=False)
+    assert strat_unguarded.enable_timing_guard is False
+
+    # 2. Guard enabled -> cleanly vetoes during toxic pre-market window (06:00 ET / 11:00 UTC)
+    strat_guarded = DynamicRegimeStrategy(asset="BTC", enable_timing_guard=True)
+    assert strat_guarded.enable_timing_guard is True
+
+    # Pre-market dead zone timestamp: 2026-10-20 11:00:00 UTC (06:00 ET)
+    toxic_time = datetime(2026, 10, 20, 11, 0, 0, tzinfo=timezone.utc)
+    book = _mock_book("0.46", "0.48")
+    dec_toxic = strat_guarded.evaluate(
+        ticker="KXBTC15M-T80000",
+        book=book,
+        spot_price=Decimal("80150.00"),
+        strike_price=Decimal("80000.00"),
+        expiration_time=toxic_time + timedelta(minutes=7),
+        volatility_1m=Decimal("45.00"),
+    )
+    assert dec_toxic.recommended_side == "wait"
+    assert "AUTO-OFF" in dec_toxic.rationale or "DEAD ZONE" in dec_toxic.rationale
+
+
+
 
 

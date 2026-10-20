@@ -737,7 +737,10 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
         if self.experience_buffer:
             base_cap = self.experience_buffer.get_effective_price_cap(base_cap)
         max_taker_price = Decimal(str(round(p_win, 2))) - hurdle
-        max_taker_price = min(base_cap, max(Decimal("0.38"), max_taker_price))
+        ask_floor = getattr(self, "min_viable_ask_floor", None) or Decimal("0.40")
+        if isinstance(ask_floor, float):
+            ask_floor = Decimal(str(ask_floor))
+        max_taker_price = min(base_cap, max(ask_floor, max_taker_price))
 
         # 5. Live L2 Orderbook Taker Pricing
         best_ask = book.best_yes_ask if chosen_side == OrderSide.YES else book.best_no_ask
@@ -745,9 +748,9 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
             logger.warning("🛑 [BTC ZERO LIQUIDITY TRAP] Book has no resting asks for %s on %s. Stand down.", chosen_side.value.upper(), target_ticker)
             return decision
 
-        # Adverse OTM Ask Floor ($0.38 Minimum Viable Floor)
-        if best_ask < Decimal("0.38"):
-            logger.info("⏸️ [BTC ADVERSE OTM ASK VETO] Best ask $%s < $0.38 minimum viable floor. Stand down.", best_ask)
+        # Adverse OTM Ask Floor ($0.40 Minimum Viable Floor)
+        if best_ask < ask_floor:
+            logger.info("⏸️ [BTC ADVERSE OTM ASK VETO] Best ask $%s < $%s minimum viable floor. Stand down.", best_ask, ask_floor)
             return decision
 
         if best_ask > max_taker_price:

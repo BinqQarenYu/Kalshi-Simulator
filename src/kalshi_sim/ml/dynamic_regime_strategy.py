@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kalshi_sim.schemas import L2BookState, MarketInfo, OrderSide, TradeEvent
 from kalshi_sim.ml.wave_classifier import compute_wave_physics, MarketWavePhysics
+from kalshi_sim.ml.session_timing_guard import get_session_timing_guard
 
 logger = logging.getLogger("kalshi_sim.dynamic_regime_strategy")
 
@@ -64,11 +65,13 @@ class DynamicRegimeStrategy:
         vpin_toxic_threshold: Optional[Decimal] = None,
         enable_chop_trading: bool = False,
         max_momentum_price: Optional[Decimal] = None,
+        enable_timing_guard: bool = False,
     ) -> None:
         self.asset = asset.upper()
         self.dwell_time_seconds = dwell_time_seconds
         self.enable_chop_trading = enable_chop_trading
         self.max_momentum_price = max_momentum_price or Decimal("0.52")
+        self.enable_timing_guard = enable_timing_guard
 
         # Asset-specific calibrated thresholds (Lesson Q8 / BLEED#01 Sweetspot)
         if self.asset == "ETH":
@@ -252,6 +255,24 @@ class DynamicRegimeStrategy:
             now_dt = datetime.now(timezone.utc)
             time_to_expiry_s = max(0.0, (expiration_time - now_dt).total_seconds())
 
+        # Session Timing Guard Gate (DEF-09: Empirical Golden Sessions Only)
+        if self.enable_timing_guard:
+            timing_guard = get_session_timing_guard()
+            timing_verdict = timing_guard.evaluate_timing(
+                ref_time=now_dt if expiration_time else None,
+                macro_regime=self._current_regime,
+                spot_diff=spot_diff,
+            )
+            if not timing_verdict.allowed:
+                return self._build_wait_decision(
+                    self._current_regime,
+                    spot_diff,
+                    time_to_expiry_s,
+                    volatility_1m,
+                    spread,
+                    timing_verdict.reason,
+                )
+
         # Late-Cycle 4-Minute Expiration Blackout Gate (User Directive / Anti-Gamma Bleed)
         if time_to_expiry_s <= 240.0:
             return self._build_wait_decision(
@@ -300,12 +321,43 @@ class DynamicRegimeStrategy:
             effective_momentum_cap = min(effective_momentum_cap, self._active_price_cap)
 
         # 7. Regime Execution Logic
-        # Case A: Silas Settlement Freeze & 4-Minute Late-Cycle Quarantine (T <= 240s)
+        # Case A: Silas Settlement Freeze & TWAP Drift Parity
         if regime == self.REGIME_SILAS:
-            return self._build_wait_decision(
-                regime, spot_diff, time_to_expiry_s, volatility_1m, spread,
-                f"Silas Late-Cycle 4-Minute Quarantine (T={time_to_expiry_s:.0f}s <= 240s): Trading halted near expiration to prevent gamma & pin bleed.",
-            )
+            if spot_diff >= effective_silas_moat:
+                return DynamicRegimeDecision(
+                    strategy_id="dynamic_trading_strategy",
+                    strategy_name="Dynamic Regime-State Strategy",
+                    regime=regime,
+                    recommended_side="yes",
+                    recommended_contracts=1,
+                    limit_price=limit_price,
+                    is_maker=True,
+                    expected_value=Decimal("0.08"),
+                    edge_pct=Decimal("12.0"),
+                    spot_diff=spot_diff,
+                    time_to_expiry_s=time_to_expiry_s,
+                    volatility_1m=volatility_1m,
+                    spread=spread,
+                    rationale=f"Silas Settlement Parity (T={time_to_expiry_s:.0f}s): Spot +${spot_diff} exceeds TWAP drift.",
+                )
+            elif spot_diff <= -effective_silas_moat:
+                return DynamicRegimeDecision(
+                    strategy_id="dynamic_trading_strategy",
+                    strategy_name="Dynamic Regime-State Strategy",
+                    regime=regime,
+                    recommended_side="no",
+                    recommended_contracts=1,
+                    limit_price=limit_price,
+                    is_maker=True,
+                    expected_value=Decimal("0.08"),
+                    edge_pct=Decimal("12.0"),
+                    spot_diff=spot_diff,
+                    time_to_expiry_s=time_to_expiry_s,
+                    volatility_1m=volatility_1m,
+                    spread=spread,
+                    rationale=f"Silas Settlement Parity (T={time_to_expiry_s:.0f}s): Spot -${abs(spot_diff)} below TWAP strike.",
+                )
+            return self._build_wait_decision(regime, spot_diff, time_to_expiry_s, volatility_1m, spread, "Silas TWAP Pin Quarantine.")
 
         # Case B: Bleed Defender & Toxic Flow (Strict capital preservation)
         if regime == self.REGIME_BLEED:

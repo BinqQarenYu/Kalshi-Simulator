@@ -41,11 +41,17 @@ class SessionTimingGuard:
     WHIPSAW_HOURS = {10}
     STANDBY_HOURS = {0, 1}
     PRIME_GOLDEN_HOURS = {20, 21, 11, 12}
-    SECONDARY_GOLDEN_HOURS = {2, 3, 4, 16, 17, 18}
+    SECONDARY_GOLDEN_HOURS = {2, 3, 4, 8, 16, 17, 18}
+    APPROVED_GOLDEN_HOURS = PRIME_GOLDEN_HOURS | SECONDARY_GOLDEN_HOURS
 
-    def __init__(self, enabled: bool = True) -> None:
+    def __init__(self, enabled: bool = True, strict_golden_only: Optional[bool] = None) -> None:
         env_val = os.getenv("ENABLE_SESSION_TIMING_GUARD", "true").lower()
         self.enabled = enabled and (env_val not in ("false", "0", "off"))
+        if strict_golden_only is not None:
+            self.strict_golden_only = strict_golden_only
+        else:
+            env_strict = os.getenv("STRICT_GOLDEN_SESSIONS_ONLY", "true").lower()
+            self.strict_golden_only = env_strict in ("true", "1", "yes")
 
     def get_current_et_datetime(self, ref_time: Optional[datetime] = None) -> datetime:
         """Return current or reference datetime localized to America/New_York (Eastern Time)."""
@@ -108,15 +114,23 @@ class SessionTimingGuard:
         if hour in self.WHIPSAW_HOURS:
             is_storm = "STORM" in regime_upper or "VOLCANO" in regime_upper
             wide_separation = diff_val >= Decimal("4.00")  # ETH $4 or BTC $40+
-            if not (is_storm and wide_separation):
+            if is_storm and wide_separation:
                 return TimingVerdict(
-                    allowed=False,
+                    allowed=True,
                     is_golden=False,
-                    is_toxic=True,
-                    reason=f"🛑 [AUTO-OFF: US OPEN WHIPSAW] Hour 10:00 ET ({hour_qatar:02d}:00 Qatar) has 24.4% empirical WR (-$24.61). Vetoed unless wide STORM (|diff| >= 4.00, got {diff_val}).",
+                    is_toxic=False,
+                    reason=f"🌟 [STORM OVERRIDE: US CASH OPEN] Hour 10:00 ET wide STORM exception granted (|diff| = {diff_val} >= 4.00).",
                     hour_et=hour,
-                    session_name="US_OPEN_WHIPSAW",
+                    session_name="US_OPEN_STORM_OVERRIDE",
                 )
+            return TimingVerdict(
+                allowed=False,
+                is_golden=False,
+                is_toxic=True,
+                reason=f"🛑 [AUTO-OFF: US OPEN WHIPSAW] Hour 10:00 ET ({hour_qatar:02d}:00 Qatar) has 24.4% empirical WR (-$24.61). Vetoed unless wide STORM (|diff| >= 4.00, got {diff_val}).",
+                hour_et=hour,
+                session_name="US_OPEN_WHIPSAW",
+            )
 
         # 3. Pre-Open Standby (00:00-01:59 ET / 07:00-08:59 Qatar -> Standby until 09:00 AM Qatar)
         if hour in self.STANDBY_HOURS:
@@ -161,6 +175,16 @@ class SessionTimingGuard:
                 session_name="LONDON_OPEN",
             )
 
+        if hour == 8:
+            return TimingVerdict(
+                allowed=True,
+                is_golden=True,
+                is_toxic=False,
+                reason=f"🌟 [GOLDEN TIMING: PRE-NY EXPANSION] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) US Pre-Market Economic Release Flow (64.0% WR, +$9.95 PnL). Priority Unlocked.",
+                hour_et=hour,
+                session_name="PRE_NY_EXPANSION",
+            )
+
         if hour in (16, 17, 18):
             return TimingVerdict(
                 allowed=True,
@@ -171,7 +195,18 @@ class SessionTimingGuard:
                 session_name="US_CASH_CLOSE",
             )
 
-        # 6. Standard Neutral Session
+        # 6. Strict Mode Gate for Non-Golden Sessions
+        if self.strict_golden_only:
+            return TimingVerdict(
+                allowed=False,
+                is_golden=False,
+                is_toxic=False,
+                reason=f"🛑 [AUTO-OFF: NON-GOLDEN SESSION] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) is an unproven / unprofitable session window. Strict Golden Sessions policy active. Standing down to WAIT.",
+                hour_et=hour,
+                session_name="NON_GOLDEN_STANDBY",
+            )
+
+        # 7. Standard Neutral Session (Permissive fallback)
         return TimingVerdict(
             allowed=True,
             is_golden=False,

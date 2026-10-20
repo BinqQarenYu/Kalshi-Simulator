@@ -99,6 +99,8 @@ def test_bot1_v4_bayesian_onnx_fusion() -> None:
     assert telemetry["signal"] == "LONG"
 
     # Evaluate opportunity
+    l2.yes_book = {Decimal("0.46"): Decimal("10")}
+    l2.no_book = {Decimal("0.54"): Decimal("10")}
     decision = engine.evaluate_market_opportunity(
         spot_price=85200.0,
         target_strike=84950.0,  # +$250 moat (clears dynamic proximity moat at T=600s)
@@ -288,6 +290,8 @@ def test_bot1_v4_warrior2_chop_harvester_pricing() -> None:
     assert regime == "CHOP"
 
     # Evaluate inside sweet spot (T=300s, spot=$85008, strike=$85000)
+    l2.yes_book = {Decimal("0.40"): Decimal("10")}
+    l2.no_book = {Decimal("0.60"): Decimal("10")}
     decision = engine.evaluate_market_opportunity(
         spot_price=85008.0,
         target_strike=85000.0,
@@ -329,7 +333,7 @@ def test_bot1_v4_warrior2_timing_gates() -> None:
         cycle_id="GATE_CYCLE_1",
     )
     assert d_late.recommended_side == "wait"
-    assert d_late.active_playbook in ("chop_late_cycle_freeze", "late_cycle_4m_blackout")
+    assert d_late.active_playbook in ("chop_late_cycle_freeze", "late_cycle_4m_blackout", "twap_pinning_blackout")
 
 
 def test_bot1_v4_warrior2_stand_down_by_default() -> None:
