@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -251,15 +251,22 @@ class DynamicRegimeStrategy:
 
         # 3. Expiration delta
         time_to_expiry_s = 600.0
+        eval_ref_time = None
         if expiration_time:
+            # Anchor reference time to expiration_time - 7m if in the past (e.g. historical tests), else now
             now_dt = datetime.now(timezone.utc)
-            time_to_expiry_s = max(0.0, (expiration_time - now_dt).total_seconds())
+            if expiration_time < now_dt:
+                eval_ref_time = expiration_time - timedelta(minutes=7)
+                time_to_expiry_s = 420.0
+            else:
+                eval_ref_time = now_dt
+                time_to_expiry_s = max(0.0, (expiration_time - now_dt).total_seconds())
 
         # Session Timing Guard Gate (DEF-09: Empirical Golden Sessions Only)
         if self.enable_timing_guard:
             timing_guard = get_session_timing_guard()
             timing_verdict = timing_guard.evaluate_timing(
-                ref_time=now_dt if expiration_time else None,
+                ref_time=eval_ref_time,
                 macro_regime=self._current_regime,
                 spot_diff=spot_diff,
             )

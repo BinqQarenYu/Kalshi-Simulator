@@ -510,7 +510,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
 
             # 2. Catastrophic Derisk / Salvage Stop (DEF-03 Anti-Dispersion Armor):
             # Dynamic salvage breach: In a macro bleed (slope <= -0.10%), adverse drift breach is tightened to $1.25
-            salvage_breach = Decimal("1.25") if macro_slope <= -0.10 else Decimal("2.00")
+            salvage_breach = Decimal("2.50") if macro_slope <= -0.10 else Decimal("3.50")
             is_doomed = False
             if pos_side == "yes" and spot_price < (target_strike - salvage_breach):
                 is_doomed = True
@@ -543,10 +543,10 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
             # Determine salvage floor (DoF-03 & Bleed Inversion Floor)
             ofi_val = float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0)
             if (patch_03_active and ofi_val <= -0.70) or macro_slope <= -0.10:
-                salvage_floor = Decimal("0.08")
+                salvage_floor = Decimal("0.20")
                 logger.info("🛡️ [ETH STEPPED SALVAGE ACTIVE] Macro bleed / negative OFI. Salvage floor lowered to $0.08.")
             else:
-                salvage_floor = Decimal("0.15")
+                salvage_floor = Decimal("0.20")
 
             if can_salvage and bid_to_sell is not None and bid_to_sell >= salvage_floor and time_to_expiry_s >= 45.0:
 
@@ -646,7 +646,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         # 1d. Opening Noise Maturity Gate (Anti-Brownian Noise Trap)
         # The first 5 minutes of a 15m cycle (tau > 600s) have high Brownian dispersion (+- $5.80 on ETH).
         # Require tau <= 600s before committing capital unless a structural breakout (|diff| >= $4.50) occurs.
-        if time_to_expiry_s > 600.0:
+        if time_to_expiry_s > 360.0:
             if abs(spot_price - target_strike) < Decimal("4.50"):
                 logger.info(
                     "⏸️ [ETH OPENING NOISE MATURITY GATE] Tau %.0fs > 600s (|diff| $%.2f < $4.50). Waiting for cycle direction to mature.",
@@ -657,7 +657,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         # 2. Dynamic Moneyness Moat (Anti-Dispersion Excursion Shield)
         # Baseline freedom: flat $1.50 moat. When DoF-01 active: dynamic sqrt(tau) scaling moat.
         patch_01_active = dof_gov.is_patch_active("ETH", "dof_01_vol_moat")
-        effective_moat = Decimal("1.50")
+        effective_moat = Decimal("2.50")
         if patch_01_active:
             if time_to_expiry_s > 720.0:
                 effective_moat = Decimal("3.00")
