@@ -75,7 +75,7 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
         # Enforce BTC asset calibration
         kwargs.setdefault("asset", CryptoAsset.BTC)
         kwargs.setdefault("default_btc_1m_volatility", 16.00)  # BTC 1m rolling volatility (~$16.00)
-        kwargs.setdefault("min_spot_diff", 25.00)              # BTC strike proximity moat
+        kwargs.setdefault("min_spot_diff", 45.00)              # BTC strike proximity moat; $45.00 prevents dispersion excursion
         kwargs.setdefault("chop_range_threshold", 75.00)       # Range threshold for BTC
         kwargs.setdefault("chop_vol_threshold", 14.00)
         kwargs.setdefault("taker_breakout_min_velocity", 12.00) # $/3s spot velocity threshold
@@ -743,7 +743,7 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
         if self.experience_buffer:
             base_cap = self.experience_buffer.get_effective_price_cap(base_cap)
         max_taker_price = Decimal(str(round(p_win, 2))) - hurdle
-        ask_floor = getattr(self, "min_viable_ask_floor", None) or Decimal("0.40")
+        ask_floor = getattr(self, "min_viable_ask_floor", None) or Decimal("0.48")
         if isinstance(ask_floor, float):
             ask_floor = Decimal(str(ask_floor))
         max_taker_price = min(base_cap, max(ask_floor, max_taker_price))

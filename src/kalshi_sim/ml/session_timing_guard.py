@@ -43,7 +43,8 @@ class SessionTimingGuard:
     WHIPSAW_HOURS = {10}
     STANDBY_HOURS = {0, 1}
     PRIME_GOLDEN_HOURS = {20, 21, 11, 12}
-    SECONDARY_GOLDEN_HOURS = {2, 3, 4, 8, 16, 17, 18}
+    # Tightened Golden Sessions: Disallow 03:00 ET (10:00 Qatar whipsaw) and 17:00 ET (00:00 Qatar deadband)
+    SECONDARY_GOLDEN_HOURS = {2, 4, 8, 16, 18}
     APPROVED_GOLDEN_HOURS = PRIME_GOLDEN_HOURS | SECONDARY_GOLDEN_HOURS
 
     def __init__(self, enabled: bool = True, strict_golden_only: Optional[bool] = None) -> None:
@@ -197,7 +198,7 @@ class SessionTimingGuard:
             )
 
         # 5. Secondary Golden Windows
-        if hour in (2, 3, 4):
+        if hour in (2, 4):
             return TimingVerdict(
                 allowed=True,
                 is_golden=True,
@@ -217,7 +218,7 @@ class SessionTimingGuard:
                 session_name="PRE_NY_EXPANSION",
             )
 
-        if hour in (16, 17, 18):
+        if hour in (16, 18):
             return TimingVerdict(
                 allowed=True,
                 is_golden=True,

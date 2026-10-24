@@ -82,15 +82,15 @@ class TestSessionTimingGuard(unittest.TestCase):
             self.assertEqual(v.session_name, "US_MIDDAY_TREND")
 
     def test_secondary_golden_windows(self) -> None:
-        """London Open (02-04 ET) and US Close (16-18 ET) must be golden."""
-        for h in [2, 3, 4]:
+        """London Open (02, 04 ET) and US Close (16, 18 ET) must be golden."""
+        for h in [2, 4]:
             dt = self._make_et_dt(h)
             v = self.guard.evaluate_timing(ref_time=dt)
             self.assertTrue(v.allowed)
             self.assertTrue(v.is_golden)
             self.assertEqual(v.session_name, "LONDON_OPEN")
 
-        for h in [16, 17, 18]:
+        for h in [16, 18]:
             dt = self._make_et_dt(h)
             v = self.guard.evaluate_timing(ref_time=dt)
             self.assertTrue(v.allowed)

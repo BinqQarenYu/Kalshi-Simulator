@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Autonomous Anti-Bloat Maintenance Every 6 Hours
+Requires=kalshi-antibloat.service
+
+[Timer]
+Unit=kalshi-antibloat.service
+OnBootSec=10min
+OnUnitActiveSec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

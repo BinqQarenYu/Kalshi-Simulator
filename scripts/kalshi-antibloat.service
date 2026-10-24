@@ -1,0 +1,10 @@
+[Unit]
+Description=Autonomous Anti-Bloat Maintenance Service for Kalshi Simulator
+After=network.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+ExecStart=/home/ec2-user/kalshi-bot/scripts/auto_antibloat.sh
+StandardOutput=journal
+StandardError=journal

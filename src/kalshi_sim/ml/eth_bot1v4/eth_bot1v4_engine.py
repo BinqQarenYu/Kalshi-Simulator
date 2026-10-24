@@ -71,7 +71,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         # Enforce ETH asset calibration
         kwargs.setdefault("asset", CryptoAsset.ETH)
         kwargs.setdefault("default_btc_1m_volatility", 0.60)  # ETH 1m rolling volatility (~$0.60 vs BTC $14)
-        kwargs.setdefault("min_spot_diff", 2.50)              # Typical Kalshi ETH strike step is $2.50
+        kwargs.setdefault("min_spot_diff", 5.00)              # Typical Kalshi ETH strike step is $2.50; $5.00 moat prevents dispersion excursion
         kwargs.setdefault("chop_range_threshold", 7.50)       # 0.25% range of ~$3,000 spot
         kwargs.setdefault("chop_vol_threshold", 0.60)
         kwargs.setdefault("taker_breakout_min_velocity", 1.50) # $/3s spot velocity threshold
@@ -785,7 +785,7 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         if self.experience_buffer:
             base_cap = self.experience_buffer.get_effective_price_cap(base_cap)
         max_taker_price = Decimal(str(round(p_win, 2))) - hurdle
-        ask_floor = getattr(self, "min_viable_ask_floor", None) or Decimal("0.40")
+        ask_floor = getattr(self, "min_viable_ask_floor", None) or Decimal("0.48")
         if isinstance(ask_floor, float):
             ask_floor = Decimal(str(ask_floor))
         max_taker_price = min(base_cap, max(ask_floor, max_taker_price))
