@@ -73,6 +73,12 @@ The Kalshi Simulator operates an autonomous, hierarchical multi-agent fleet stru
 - **How am I measured?** Brier score calibration error ($\Delta < 0.05$), Platt alpha stability ($0.8 \le \alpha \le 1.2$).
 - **How do I improve?** Prunes underperforming regime quadrants and price deciles across settled cycles.
 
+### 2.8 Dynamic Session Timing & Shadow Re-Admission Engine
+- **Primary Source:** [`src/kalshi_sim/ml/session_timing_guard.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/ml/session_timing_guard.py)
+- **Why do I exist?** To balance historical win-rate priors with real-time market evolution by maintaining strict Golden Sessions while dynamically re-admitting off-peak hours that demonstrate consistent shadow profitability.
+- **What value do I create?** Eliminates the $150.01 toxic dead-zone drawdown while continuously observing live L2 ticks to unlock new emerging trading regimes.
+- **How am I measured?** Zero capital bleed in unproven hours, latency of shadow promotion (< 100ms), 100% adherence to the 1-loss reversion shield.
+
 ### 2.9 Guardrails & Micro-Bankroll Sizing Agent
 - **Primary Source:** [`src/kalshi_sim/guardrails.py`](file:///f:/012D_TRADE/Kalshi%20Simulator/src/kalshi_sim/guardrails.py), [`.agents/skills/agent-guardrails/SKILL.md`](file:///.agents/skills/agent-guardrails/SKILL.md)
 - **Why do I exist?** To protect trading capital against ruinous loss streaks, fat-finger sizing errors, and account drawdowns.

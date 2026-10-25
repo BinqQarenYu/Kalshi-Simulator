@@ -1,25 +1,30 @@
-"""Session Timing Guard — Empirical Time-of-Day Veto & Golden Boost Engine.
+"""Session Timing Guard — Empirical Time-of-Day Veto & Dynamic Shadow Re-Admission Engine.
 
-Enforces institutional session gating derived from 2,249 real trades:
-1. Toxic Bleed Windows (Auto-Veto):
-   - 05:00 - 07:59 ET (Pre-Market Dead Zone: 23.5% WR, -$62.83 deficit, 07:00 ET is 2.7% WR)
-   - 10:00 - 10:59 ET (US Cash Open Whipsaw: 24.4% WR, -$24.61 deficit)
-   - 22:00 - 22:59 ET (Late Night Asia Chop: 20.7% WR, -$23.83 deficit)
+Architecture:
+1. Strict Golden Sessions (Base Institutional Alpha):
+   - Asia Open Momentum: 20:00 - 21:59 ET (03:00 - 04:59 Qatar) -> 84.4% WR
+   - US Midday Trend: 11:00 - 12:59 ET (18:00 - 19:59 Qatar) -> 100% WR
+   - London Cash Open: 02:00, 04:00 ET (09:00, 11:00 Qatar) -> 57-68% WR
+   - Pre-NY Economic: 08:00 ET (15:00 Qatar) -> 64.0% WR
+   - US Market Close: 16:00, 18:00 ET (23:00, 01:00 Qatar) -> 59-61% WR
 
-2. Golden Liquidity Windows (Priority Boost):
-   - 20:00 - 21:59 ET (Asia Open Momentum: 85.5% WR, +$44.32 Net PnL - #1 All-Time Best Hour)
-   - 11:00 - 12:59 ET (Midday US Trend: 100% WR, +$26.04 Net PnL)
-   - 02:00 - 04:59 ET (London Cash Open: 57-69% WR, +$40.37 Net PnL)
-   - 16:00 - 18:59 ET (US Market Close: 59-61% WR, +$28.22 Net PnL)
+2. Dynamic Shadow Re-Admission & Storm Override (Looking Forward While Looking at the Past):
+   - Off-peak / non-golden hours default to SHADOW MODE (model trains, evaluates ticks, zero capital risk).
+   - Dynamic Storm Breakout Unlock: If market expands into a wide confirmed trend (|diff| >= $10 ETH / $85 BTC),
+     the time gate dynamically grants a 1-cycle execution pass.
+   - Dynamic Re-Admission Ledger (data/session_dynamic_readmission.json):
+     Tracks rolling shadow performance. If an off-peak hour achieves >= 3 consecutive winning shadow cycles,
+     it is promoted to PROBATIONARY_LIVE with a strict 1-loss reversion shield.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import logging
 import os
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Dict, Any, Set
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger("kalshi_sim.session_timing_guard")
@@ -34,20 +39,25 @@ class TimingVerdict(NamedTuple):
     session_name: str
     is_warmup: bool = False
     is_shadow: bool = False
+    is_probationary: bool = False
 
 
 class SessionTimingGuard:
-    """Evaluates time-of-day edge and enforces automatic session vetoes / golden boosts."""
+    """Evaluates time-of-day edge with Bayesian online adaptation and dynamic shadow re-admission."""
 
     TOXIC_HOURS = {5, 6, 7, 22, 23}
     WHIPSAW_HOURS = {10}
     STANDBY_HOURS = {0, 1}
     PRIME_GOLDEN_HOURS = {20, 21, 11, 12}
-    # Tightened Golden Sessions: Disallow 03:00 ET (10:00 Qatar whipsaw) and 17:00 ET (00:00 Qatar deadband)
     SECONDARY_GOLDEN_HOURS = {2, 4, 8, 16, 18}
     APPROVED_GOLDEN_HOURS = PRIME_GOLDEN_HOURS | SECONDARY_GOLDEN_HOURS
 
-    def __init__(self, enabled: bool = True, strict_golden_only: Optional[bool] = None) -> None:
+    def __init__(
+        self,
+        enabled: bool = True,
+        strict_golden_only: Optional[bool] = None,
+        readmission_file: str = "data/session_dynamic_readmission.json"
+    ) -> None:
         env_val = os.getenv("ENABLE_SESSION_TIMING_GUARD", "true").lower()
         self.enabled = enabled and (env_val not in ("false", "0", "off"))
         if strict_golden_only is not None:
@@ -55,6 +65,65 @@ class SessionTimingGuard:
         else:
             env_strict = os.getenv("STRICT_GOLDEN_SESSIONS_ONLY", "true").lower()
             self.strict_golden_only = env_strict in ("true", "1", "yes")
+
+        self.readmission_file = readmission_file
+        self._dynamic_promoted_hours: Set[int] = set()
+        self._load_readmission_state()
+
+    def _load_readmission_state(self) -> None:
+        """Load dynamically promoted hours from the persistent readmission ledger."""
+        if not os.path.exists(self.readmission_file):
+            return
+        try:
+            with open(self.readmission_file, "r") as f:
+                data = json.load(f)
+            promoted = set(data.get("promoted_hours_et", []))
+            self._dynamic_promoted_hours = promoted
+        except Exception as e:
+            logger.warning("Could not read session readmission ledger: %s", e)
+
+    def record_shadow_settlement(self, hour_et: int, won: bool) -> None:
+        """Record shadow outcome for an hour to dynamically evaluate re-admission."""
+        try:
+            data: Dict[str, Any] = {"hours": {}, "promoted_hours_et": []}
+            if os.path.exists(self.readmission_file):
+                try:
+                    with open(self.readmission_file, "r") as f:
+                        data = json.load(f)
+                except Exception:
+                    pass
+
+            h_key = str(hour_et)
+            h_stat = data.get("hours", {}).get(h_key, {
+                "consecutive_shadow_wins": 0,
+                "shadow_trades": 0,
+                "shadow_wins": 0,
+                "status": "SHADOW"
+            })
+
+            h_stat["shadow_trades"] += 1
+            if won:
+                h_stat["shadow_wins"] += 1
+                h_stat["consecutive_shadow_wins"] += 1
+                # If 3 consecutive shadow wins, promote to PROBATIONARY_LIVE
+                if h_stat["consecutive_shadow_wins"] >= 3:
+                    h_stat["status"] = "PROBATIONARY_LIVE"
+            else:
+                h_stat["consecutive_shadow_wins"] = 0
+                h_stat["status"] = "SHADOW"  # Immediate 1-loss reversion
+
+            data["hours"][h_key] = h_stat
+            promoted = [int(k) for k, v in data["hours"].items() if v.get("status") == "PROBATIONARY_LIVE"]
+            data["promoted_hours_et"] = promoted
+            data["last_updated"] = datetime.now(timezone.utc).isoformat()
+
+            os.makedirs(os.path.dirname(self.readmission_file) or ".", exist_ok=True)
+            with open(self.readmission_file, "w") as f:
+                json.dump(data, f, indent=2)
+
+            self._dynamic_promoted_hours = set(promoted)
+        except Exception as e:
+            logger.warning("Error updating session readmission ledger: %s", e)
 
     def get_current_et_datetime(self, ref_time: Optional[datetime] = None) -> datetime:
         """Return current or reference datetime localized to America/New_York (Eastern Time)."""
@@ -65,7 +134,6 @@ class SessionTimingGuard:
         try:
             return datetime.now(ZoneInfo("America/New_York"))
         except Exception:
-            # Fallback to UTC - 4
             now_utc = datetime.now(timezone.utc)
             return now_utc.astimezone(timezone(timedelta(hours=-4)))
 
@@ -98,7 +166,6 @@ class SessionTimingGuard:
         diff_val = abs(Decimal(str(spot_diff))) if spot_diff is not None else Decimal("0.0")
 
         # 0. 15-Minute Pre-Session Warm-Up Gate:
-        # Exactly 15 minutes before an approved golden session (minute >= 45 of preceding hour)
         is_entering_golden = (next_hour in self.APPROVED_GOLDEN_HOURS) and (hour not in self.APPROVED_GOLDEN_HOURS)
         if minute >= 45 and is_entering_golden:
             return TimingVerdict(
@@ -112,7 +179,37 @@ class SessionTimingGuard:
                 is_shadow=False,
             )
 
-        # 1. Hard Toxic Hours (05:00-07:59 ET & 22:00-23:59 ET -> AUTO-OFF)
+        # 1. Dynamic Storm Override (Looking Forward into Live Momentum)
+        # If market enters a confirmed breakout with deep cushion (|diff| >= $10 ETH / $85 BTC)
+        is_storm = "STORM" in regime_upper or "VOLCANO" in regime_upper
+        is_massive_breakout = diff_val >= Decimal("10.00") or diff_val >= Decimal("85.00")
+        if is_storm and is_massive_breakout:
+            return TimingVerdict(
+                allowed=True,
+                is_golden=False,
+                is_toxic=False,
+                reason=f"⚡ [DYNAMIC STORM OVERRIDE: LIVE REGIME MOMENTUM] Confirmed STORM breakout (|diff| = {diff_val}) overrules static time filter. Dynamic execution pass granted for hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar).",
+                hour_et=hour,
+                session_name="DYNAMIC_STORM_OVERRIDE",
+                is_warmup=False,
+                is_shadow=False,
+            )
+
+        # 2. Dynamic Shadow Re-Admission Check (Promoted via Online Experience)
+        if hour in self._dynamic_promoted_hours:
+            return TimingVerdict(
+                allowed=True,
+                is_golden=False,
+                is_toxic=False,
+                reason=f"🌟 [DYNAMIC RE-ADMISSION: PROBATIONARY LIVE] Hour {hour:02d}:00 ET ({hour_qatar:02d}:00 Qatar) achieved >= 3 consecutive shadow wins. Unlocked on probation (1-loss reversion active).",
+                hour_et=hour,
+                session_name="PROBATIONARY_LIVE_ADAPTATION",
+                is_warmup=False,
+                is_shadow=False,
+                is_probationary=True
+            )
+
+        # 3. Hard Toxic Hours (05:00-07:59 ET & 22:00-23:59 ET -> AUTO-OFF)
         if hour in (5, 6, 7):
             return TimingVerdict(
                 allowed=False,
@@ -137,10 +234,9 @@ class SessionTimingGuard:
                 is_shadow=True,
             )
 
-        # 2. US Cash Open Whipsaw (10:00-10:59 ET -> AUTO-OFF unless wide STORM)
+        # 4. US Cash Open Whipsaw (10:00-10:59 ET -> AUTO-OFF unless wide STORM)
         if hour in self.WHIPSAW_HOURS:
-            is_storm = "STORM" in regime_upper or "VOLCANO" in regime_upper
-            wide_separation = diff_val >= Decimal("4.00")  # ETH $4 or BTC $40+
+            wide_separation = diff_val >= Decimal("4.00")
             if is_storm and wide_separation:
                 return TimingVerdict(
                     allowed=True,
@@ -163,7 +259,7 @@ class SessionTimingGuard:
                 is_shadow=True,
             )
 
-        # 3. Pre-Open Standby (00:00-01:59 ET / 07:00-08:59 Qatar -> Standby until 09:00 AM Qatar)
+        # 5. Pre-Open Standby (00:00-01:59 ET / 07:00-08:59 Qatar -> Standby until 09:00 AM Qatar)
         if hour in self.STANDBY_HOURS:
             return TimingVerdict(
                 allowed=False,
@@ -176,7 +272,7 @@ class SessionTimingGuard:
                 is_shadow=True,
             )
 
-        # 4. Prime Golden Windows
+        # 6. Prime Golden Windows
         if hour in (20, 21):
             return TimingVerdict(
                 allowed=True,
@@ -197,7 +293,7 @@ class SessionTimingGuard:
                 session_name="US_MIDDAY_TREND",
             )
 
-        # 5. Secondary Golden Windows
+        # 7. Secondary Golden Windows
         if hour in (2, 4):
             return TimingVerdict(
                 allowed=True,
@@ -228,7 +324,7 @@ class SessionTimingGuard:
                 session_name="US_CASH_CLOSE",
             )
 
-        # 6. Strict Mode Gate for Non-Golden Sessions (Shift to Shadow Mode for Continuous ONNX Learning)
+        # 8. Strict Mode Gate for Non-Golden Sessions (Shift to Shadow Mode for Continuous ONNX Learning)
         if self.strict_golden_only:
             return TimingVerdict(
                 allowed=False,
@@ -241,7 +337,7 @@ class SessionTimingGuard:
                 is_shadow=True,
             )
 
-        # 7. Standard Neutral Session (Permissive fallback)
+        # 9. Standard Neutral Session (Permissive fallback)
         return TimingVerdict(
             allowed=True,
             is_golden=False,
@@ -253,6 +349,7 @@ class SessionTimingGuard:
 
 
 _DEFAULT_GUARD = SessionTimingGuard()
+
 
 def get_session_timing_guard() -> SessionTimingGuard:
     """Return default singleton SessionTimingGuard."""

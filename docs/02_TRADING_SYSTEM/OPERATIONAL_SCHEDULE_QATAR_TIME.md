@@ -128,3 +128,27 @@ The system automatically switches to `WAIT` state during these windows to elimin
   - `data/win_loss_reports.json` and `data/eth_win_loss_reports.json` strictly accept records where `execution_mode.lower() == "live"`.
   - Non-live (shadow, demo, paper) settlements update the in-memory learning models and continuous experience buffers only, and are **NEVER** written to disk reports.
   - This guarantees 100% data integrity for historical auditing, PnL tracking, and executive review.
+
+---
+
+## 3. Dynamic Shadow Re-Admission Engine ("Looking Forward While Looking at the Past")
+
+Markets are non-stationary. A region that was historically a "losing chop zone" may transform into a high-momentum winning session as macro liquidity shifts. To ensure the bot adapts without risking capital blindly, the fleet deploys **Autonomous Shadow Re-Admission**:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    SHADOW : Shadow Observation (Zero Capital)
+    PROBATION : Probationary Live (1 Contract)
+    GOLDEN : Approved Golden Window (Full Live)
+
+    SHADOW --> PROBATION : >= 3 Consecutive Winning Shadow Cycles
+    PROBATION --> SHADOW : 1-Loss Reversion Shield (Instant Revocation)
+    PROBATION --> GOLDEN : Trailing Win Rate >= 65% across 10 Cycles
+```
+
+### Operational Rules:
+1. **Shadow Mode Observation**: During off-peak or non-golden hours, the bot actively streams Binance L2 order flow and generates ONNX inferences. Zero capital is committed.
+2. **Dynamic Re-Admission Gate**: If an off-peak session records **$\ge 3$ consecutive winning shadow cycles**, it is promoted to `PROBATIONARY_LIVE` status in [`session_dynamic_readmission.json`](file:///f:/012D_TRADE/Kalshi%20Simulator/data/session_dynamic_readmission.json).
+3. **1-Loss Reversion Shield**: Any probationary hour that incurs a single real-capital loss is immediately stripped of live trading authority and returned to Shadow Mode.
+4. **Dynamic Storm Breakout Override**: If a sudden macro breakout occurs during an off-peak hour ($|S - K| \ge \$10.00$ on ETH / $\$85.00$ on BTC in confirmed STORM regime), the time filter dynamically grants a 1-cycle execution pass.
