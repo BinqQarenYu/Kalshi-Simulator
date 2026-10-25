@@ -678,16 +678,16 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
 
         # 3c. Adverse Selection Flow Shield (Veto if queue pressure is aggressively opposing trade side)
         ofi_val = float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0)
-        if chosen_side == OrderSide.YES and ofi_val <= -0.65:
-            logger.warning("🛑 [BTC ADVERSE FLOW VETO] Aggressive sell flow against YES (OFI: %+.2f <= -0.65). Stand down.", ofi_val)
+        if chosen_side == OrderSide.YES and ofi_val < 0.00:
+            logger.warning("🛑 [BTC ADVERSE FLOW VETO] Opposing sell flow against YES (OFI: %+.2f < 0.00). Refusing adverse taker fill. Stand down.", ofi_val)
             return decision
-        if chosen_side == OrderSide.NO and ofi_val >= 0.65:
-            logger.warning("🛑 [BTC ADVERSE FLOW VETO] Aggressive buy flow against NO (OFI: %+.2f >= +0.65). Stand down.", ofi_val)
+        if chosen_side == OrderSide.NO and ofi_val > 0.00:
+            logger.warning("🛑 [BTC ADVERSE FLOW VETO] Opposing buy flow against NO (OFI: %+.2f > 0.00). Refusing adverse taker fill. Stand down.", ofi_val)
             return decision
 
         # 3d. Asymmetric Macro-Trend Alignment Guard (Anti-Bleed Inversion)
         if macro_slope <= -0.10 and chosen_side == OrderSide.YES:
-            if (spot_price - target_strike) < Decimal("50.00") or ofi_val < 0.20:
+            if (spot_price - target_strike) < Decimal("65.00") or ofi_val < 0.20:
                 logger.warning(
                     "🛑 [BTC MACRO BLEED VETO] Macro 1h slope (%.2f%%) is bearish. Refusing counter-trend YES (Diff: $%.2f). Stand down.",
                     macro_slope, float(spot_price - target_strike)
@@ -695,7 +695,7 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
                 return decision
 
         if macro_slope >= 0.10 and chosen_side == OrderSide.NO:
-            if (target_strike - spot_price) < Decimal("50.00") or ofi_val > -0.20:
+            if (target_strike - spot_price) < Decimal("65.00") or ofi_val > -0.20:
                 logger.warning(
                     "🛑 [BTC MACRO EXPANSION VETO] Macro 1h slope (+%.2f%%) is bullish. Refusing counter-trend NO (Diff: $%.2f). Stand down.",
                     macro_slope, float(spot_price - target_strike)
@@ -729,8 +729,8 @@ class BtcBot1V4Engine(Bot1V4DominationEngine):
         p_physics_side = p_physics if chosen_side == OrderSide.YES else (1.0 - p_physics)
 
         # Physics Dispersion Gate: spot must have a statistical diffusion edge in trade direction
-        if p_physics_side < 0.52:
-            logger.info("⏸️ [BTC PHYSICS DISPERSION GATE] P(Physics) %.1f%% < 52%% hurdle. Insufficient diffusion edge against dispersion. Stand down.", p_physics_side * 100.0)
+        if p_physics_side < 0.58:
+            logger.info("⏸️ [BTC PHYSICS DISPERSION GATE] P(Physics) %.1f%% < 58%% hurdle. Insufficient diffusion edge against dispersion. Stand down.", p_physics_side * 100.0)
             return decision
 
         # Balanced 50/50 synthesis of Kev qualitative conviction and diffusion physics
