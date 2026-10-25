@@ -12,17 +12,19 @@
 ========================================================================================
 QATAR TIME (AST)      ET HOUR      SESSION STATUS     EMPIRICAL WIN RATE & PnL ACTION
 ========================================================================================
-00:00 - 01:00         17:00 ET     [OFF] STANDBY      64.5% WR | -$1.32  Inter-Session Deadband
-01:00 - 02:00         18:00 ET     🟢 TRADE           59.9% WR | +$14.39 Asian Open Flow
+00:00 - 01:00         17:00 ET     [OFF] STANDBY      Inter-Session Deadband (Auto-Off)
+01:00 - 02:00         18:00 ET     🟢 TRADE           59.9% WR | +$14.39 US Close Flow
 02:00 - 03:00         19:00 ET     [OFF] AUTO-OFF     27.1% WR | -$12.72 Post-Market Thin Lull
 03:00 - 05:00         20:00-21:59  🏆 GOLDEN #1       74.1% WR | +$53.20 #1 Best Session (84.4% @ 03:00)
-05:00 - 09:00         22:00-01:59  🛑 TOXIC DEADZONE  31.5% WR | -$30.24 Asian Graveyard Drift
-09:00 - 12:00         02:00-04:59  🟢 TRADE           57.9% WR | +$47.67 London Cash Open Surge
+05:00 - 09:00         22:00-01:59  🛑 TOXIC DEADZONE  31.5% WR | -$30.24 Asian Graveyard Drift (Shadow Mode)
+09:00 - 10:00         02:00 ET     🟢 TRADE           56.8% WR | +$22.64 London Cash Open Surge
+10:00 - 11:00         03:00 ET     [OFF] STANDBY      49.0% WR | Whipsaw Pruned (Shadow Mode)
+11:00 - 12:00         04:00 ET     🟢 TRADE           68.1% WR | +$17.25 European Mid-Morning Flow
 12:00 - 15:00         05:00-07:59  🛑 TOXIC DEADZONE  21.4% WR | -$62.65 Pre-Market Bleed Trap (Worst)
 15:00 - 16:00         08:00 ET     🟢 TRADE           64.0% WR | +$9.95  Pre-NY Economic Flow
 16:00 - 18:00         09:00-10:59  🛑 TOXIC DEADZONE  26.7% WR | -$32.97 Wall Street Opening Whipsaw
 18:00 - 20:00         11:00-12:59  🟢 TRADE (TREND)   80.7% WR | +$32.34 US Midday Trend (100% @ 18:00)
-20:00 - 23:00         13:00-15:59  🛑 TOXIC DEADZONE  32.4% WR | -$10.74 US Afternoon Lull
+20:00 - 23:00         13:00-15:59  🛑 TOXIC DEADZONE  32.4% WR | -$10.74 US Afternoon Lull (Shadow Mode)
 23:00 - 00:00         16:00 ET     🟢 TRADE           59.2% WR | +$13.52 US Cash Market Close (MOC)
 ========================================================================================
 ```

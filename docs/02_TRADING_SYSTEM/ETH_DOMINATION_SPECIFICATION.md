@@ -27,6 +27,9 @@ flowchart TD
         VPIN["ETH-Tuned VPIN: VPIN < 0.60 - 0.70"]
         Spread["CLOB Spread Corridor: <= $0.05"]
         Iso["Asset Isolation: Reject any non-ETH contract"]
+        OFI_Shield["Adverse Selection OFI Shield: Veto if OFI < 0.00 opposing"]
+        Trend_Cushion["Macro-Trend Cushion: Diff >= $7.50 if counter-trend"]
+        Physics_Gate["Physics Dispersion Gate: P(Physics) >= 58.0%"]
     end
     
     T1_Orderflow --> T2_Intelligence

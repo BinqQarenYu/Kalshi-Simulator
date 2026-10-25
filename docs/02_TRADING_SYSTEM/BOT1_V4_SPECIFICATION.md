@@ -24,6 +24,9 @@ flowchart TD
         F3["VPIN Flow Toxicity Filter: VPIN < 0.65"]
         F4["Spread Corridor Cap: Spread <= $0.05"]
         F5["Asset Isolation Gate: Reject non-BTC symbols"]
+        F6["Adverse Selection OFI Shield: Veto if OFI < 0.00 opposing"]
+        F7["Macro-Trend Cushion: Diff >= $65.00 if counter-trend"]
+        F8["Physics Dispersion Gate: P(Physics) >= 58.0%"]
     end
     
     T1_Filters --> T2_Intelligence
