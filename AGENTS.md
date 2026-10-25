@@ -41,5 +41,9 @@ Tokens and API credits are physical assets. Prevent "blackhole burning" (infinit
 - Apply the `agent-token-credit` philosophy: Batch your tool calls.
 - Stop immediately and report if a test or script loops or fails repeatedly. Do not blind-fire solutions and drain credits.
 
-
-
+## 9. Autonomous Fleet Lifecycle Protocol (Profit-Maximization Agency)
+The fleet operates with full self-governing agency managed by AutonomousFleetController. It must continuously execute the 4-stage lifecycle without manual intervention:
+1. **START**: Aggressively engages live capital during Golden Sessions or confirmed wide Storm Breakouts.
+2. **ASSESS**: Triggers Agent POE's 5-stage LangGraph Quant Pipeline every 6-trade batch to audit Brier scores, failure modes, and auto-tune dynamic parameters.
+3. **PAUSE**: Gracefully steps down to shadow mode during toxic sessions (pre-market dead zones, late-night chop) or upon taking 1 loss (1-loss reversion shield) to verify recovery.
+4. **STOP**: Immediately halts live capital upon tripping the Harakiri 3-loss streak breaker or emergency drawdown thresholds.
