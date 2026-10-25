@@ -81,7 +81,7 @@ def test_btc_bot1v4_engine_calibration_and_defaults(tmp_path: Path) -> None:
     assert engine.STRATEGY_NAME == "Bot 1 V4 (BTC Domination)"
     assert engine.asset == CryptoAsset.BTC
     assert engine.default_btc_1m_volatility == 16.00
-    assert engine.min_spot_diff == 25.00
+    assert engine.min_spot_diff == 45.00
     assert engine.chop_range_threshold == 75.00
     assert engine.chop_vol_threshold == 14.00
     assert engine.min_spot_diff_bleed == 45.00

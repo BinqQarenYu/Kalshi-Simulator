@@ -37,6 +37,7 @@ class CryptoAsset(str, Enum):
     """Supported underlying tradeable assets."""
     BTC = "BTC"
     ETH = "ETH"
+    BNB = "BNB"
     SOL = "SOL"
     DOGE = "DOGE"
     GOLD = "GOLD"
@@ -122,6 +123,18 @@ CRYPTO_ASSETS: dict[CryptoAsset, AssetConfig] = {
         typical_strike_step=Decimal("2.50"),
         typical_1m_volatility=Decimal("0.60"),
     ),
+    CryptoAsset.BNB: AssetConfig(
+        asset=CryptoAsset.BNB,
+        name="Binance Coin",
+        series_ticker_15m="KXBNB15M",
+        cf_index_id="BNBUSD_RTI",
+        price_decimals=2,
+        min_spot_diff=Decimal("1.50"),
+        typical_strike_step=Decimal("1.00"),
+        typical_1m_volatility=Decimal("0.25"),
+        display_prefix="$",
+        coinbase_pair_override="BNB-USD",
+    ),
     CryptoAsset.SOL: AssetConfig(
         asset=CryptoAsset.SOL,
         name="Solana",
@@ -187,6 +200,8 @@ def detect_asset_from_ticker(ticker: str) -> CryptoAsset:
     t = ticker.upper()
     if "ETH" in t:
         return CryptoAsset.ETH
+    if "BNB" in t:
+        return CryptoAsset.BNB
     if "SOL" in t:
         return CryptoAsset.SOL
     if "DOGE" in t:
@@ -219,7 +234,7 @@ def extract_strike_from_ticker(ticker: str, asset: CryptoAsset | str | None = No
     has_t_prefix = last_part.startswith("T") or last_part.startswith("B")
     candidate_str = last_part[1:] if has_t_prefix else last_part
     # Reject 2-digit minute suffixes (00, 05, 15, 30, 45) when not T-prefixed
-    if not has_t_prefix and len(candidate_str) <= 2 and resolved_asset in (CryptoAsset.BTC, CryptoAsset.ETH, CryptoAsset.GOLD, CryptoAsset.SOL):
+    if not has_t_prefix and len(candidate_str) <= 2 and resolved_asset in (CryptoAsset.BTC, CryptoAsset.ETH, CryptoAsset.BNB, CryptoAsset.GOLD, CryptoAsset.SOL):
         return None
     try:
         val = Decimal(candidate_str)
@@ -231,6 +246,8 @@ def extract_strike_from_ticker(ticker: str, asset: CryptoAsset | str | None = No
         return val if val >= Decimal("10000") else None
     elif resolved_asset == CryptoAsset.ETH:
         return val if Decimal("100") <= val <= Decimal("15000") else None
+    elif resolved_asset == CryptoAsset.BNB:
+        return val if Decimal("50") <= val <= Decimal("5000") else None
     elif resolved_asset == CryptoAsset.SOL:
         return val if Decimal("5") <= val <= Decimal("2000") else None
     elif resolved_asset == CryptoAsset.GOLD:

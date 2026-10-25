@@ -502,6 +502,31 @@
       "details": {
         "evaluated_mode": "simulated"
       }
+    },
+    "bnb_bot1_v4": {
+      "bot_id": "bnb_bot1_v4",
+      "bot_name": "BNB Bot 1 V4 (Binance Coin Domination)",
+      "seal_status": "IN_INCUBATION",
+      "seal_token": "INCUBATING-BNB-000000",
+      "live_trading_authorized": false,
+      "granted_at": null,
+      "council_signoff": null,
+      "settled_cycles_verified": 0,
+      "graduation_threshold": 30,
+      "empirical_win_rate": 0.0,
+      "profit_factor": 0.0,
+      "pillars_passed": 0,
+      "pillars_total": 5,
+      "quarantine_lane": "Lane 2 Shadow",
+      "net_expected_value": 0.0,
+      "max_drawdown_pct": 0.0,
+      "git_commit_hash": null,
+      "harakiri_verified": false,
+      "simsim_verified": false,
+      "regime_distribution": {},
+      "details": {
+        "evaluated_mode": "local_pc_incubation"
+      }
     }
   }
 }
