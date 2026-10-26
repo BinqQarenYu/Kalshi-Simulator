@@ -107,6 +107,9 @@ class BnbOrderflowFeed:
         builder = self.candle_builder_5m if interval_seconds >= 300 else self.candle_builder_1m
         return builder.get_candles(symbol, count=count)
 
+    def get_book_state(self) -> L2BookState:
+        return self.get_bnb_l2_state()[0]
+
     def get_bnb_l2_state(self) -> Tuple[L2BookState, List[TradeEvent]]:
         """Return an atomic snapshot of the continuous BNB L2 orderbook and recent trades."""
         snapshot_book = L2BookState(self.book.market_ticker, is_spot=True)

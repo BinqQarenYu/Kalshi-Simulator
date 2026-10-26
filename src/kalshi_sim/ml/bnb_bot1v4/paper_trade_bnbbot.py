@@ -123,13 +123,9 @@ async def run_bnb_bot(mode: str = "demo", ticker: Optional[str] = None) -> None:
                 market = await engine.get_active_market()
                 if market:
                     # Ingest book state
-                    orderflow_book = orderflow.get_book_state()
-                    spot_price = orderflow.last_spot_price
-                    decision = engine.evaluate(orderflow_book, spot_price=spot_price, market=market)
-                    if decision.should_trade:
-                        logger.info("[BNB BOT SIGNAL] %s %d contracts @ %s (Strike: %s, Spot: %s, Moat: %s)",
-                                    decision.side.name, decision.order_size, decision.limit_price,
-                                    market.strike_price, spot_price, engine.min_spot_diff)
+                    decision = await engine.run_cycle()
+                    if decision and decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
+                        logger.info("[BNB BOT SIGNAL] %s %d contracts @ %s (Strike: %s, Spot: %s, Moat: %s)", decision.recommended_side.upper(), decision.recommended_contracts, decision.limit_price, market.strike_price, engine.get_spot_price(), engine.min_spot_diff)
                 await asyncio.sleep(2.0)
             except asyncio.CancelledError:
                 break
