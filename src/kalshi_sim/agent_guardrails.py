@@ -91,6 +91,8 @@ class AgentGuardrails:
             "eth_bot1_v4",
             "eth_bot1v4",
             "dynamic_trading_strategy",
+            "bnb_bot1_v4",
+            "bnb_bot1v4",
         }
 
         # Telemetry & Audit
