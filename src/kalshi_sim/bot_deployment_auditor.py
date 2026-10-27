@@ -671,30 +671,39 @@ class BotDeploymentAuditor:
                 logger.error("[BOT AUDITOR] Error reading incubator state: %s", e)
 
         if not trades:
-            wl_path = Path("data") / "win_loss_reports.json"
-            if wl_path.exists():
-                try:
-                    wl_content = json.loads(wl_path.read_text(encoding="utf-8"))
-                    trades = [
-                        {
-                            "bot_id": bot_id,
-                            "settled": True,
-                            "won": r.get("outcome", "").lower() == "win",
-                            "realized_pnl": str(r.get("pnl", "0.00")),
-                            "adverse_drift": False,
-                            "vpin_at_entry": 0.15,
-                        }
-                        for r in wl_content
-                        if (
-                            bot_id == r.get("bot_id")
-                            or bot_id == r.get("strategy_id")
-                            or (bot_id in ("macro_trend_dominion", "macro_onnx") and any(k in str(r.get("bot_id", "")) for k in ("macro_onnx", "onnx_macro_v2", "macro_trend")))
-                            or (bot_id in ("3_step_domination_bot", "domination_bot") and "domination" in str(r.get("bot_id", "")))
-                        )
-                    ]
-                except Exception as e:
-                    logger.error("[BOT AUDITOR] Error reading win_loss_reports: %s", e)
-
+            candidate_files = []
+            if "bnb" in bot_id.lower():
+                candidate_files.append(Path("data") / "bnb_win_loss_reports.json")
+            elif "eth" in bot_id.lower():
+                candidate_files.append(Path("data") / "eth_win_loss_reports.json")
+            candidate_files.append(Path("data") / "win_loss_reports.json")
+            for wl_path in candidate_files:
+                if wl_path.exists():
+                    try:
+                        wl_content = json.loads(wl_path.read_text(encoding="utf-8"))
+                        matched = [
+                            {
+                                "bot_id": bot_id,
+                                "settled": True,
+                                "won": r.get("outcome", "").lower() == "win",
+                                "realized_pnl": str(r.get("pnl", "0.00")),
+                                "adverse_drift": False,
+                                "vpin_at_entry": 0.15,
+                            }
+                            for r in wl_content
+                            if (
+                                bot_id == r.get("bot_id")
+                                or bot_id == r.get("strategy_id")
+                                or (bot_id in ("macro_trend_dominion", "macro_onnx") and any(k in str(r.get("bot_id", "")) for k in ("macro_onnx", "onnx_macro_v2", "macro_trend")))
+                                or (bot_id in ("3_step_domination_bot", "domination_bot") and "domination" in str(r.get("bot_id", "")))
+                                or (bot_id == "bnb_bot1_v4" and "bnb" in str(r.get("bot_id", "") or r.get("strategy_id", "")).lower())
+                            )
+                        ]
+                        if matched:
+                            trades.extend(matched)
+                            break
+                    except Exception as e:
+                        logger.error("[BOT AUDITOR] Error reading %s: %s", wl_path, e)
         settled_count = len(trades)
         wins = sum(1 for t in trades if t.get("won", False))
         win_rate = (wins / settled_count) if settled_count > 0 else 0.0

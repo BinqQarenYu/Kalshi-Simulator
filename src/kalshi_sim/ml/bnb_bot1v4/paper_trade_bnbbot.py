@@ -1,4 +1,4 @@
-"""Runner script for the BNB-specific Bot 1 V4 engine (Demo & Live).
+"""Runner script for the BNB-specific Bot 1 V4 engine (Demo, Shadow, & Live).
 
 This utility runs `BnbBot1V4Engine` on local PC:
 * Connects the real-time institutional `BnbOrderflowFeed` (Binance BNB-USDT L2 depth and trades).
@@ -6,10 +6,14 @@ This utility runs `BnbBot1V4Engine` on local PC:
 * Evaluates quantitative entry criteria within calibrated sweet spots ($1.50 moat, timing, CLOB discount).
 * In live mode, verifies the SHA-256 Seal of Excellence before placing live capital orders.
 * Adheres strictly to AGENTS.md Law 1 (Zero Float Math) and Law 2 (1 contract micro-sizing, 1-trade-per-cycle lock).
+* Performs periodic 30-second settlement reconciliation against Kalshi resolutions to advance incubation cycles.
 
 Usage examples:
     # Autonomous Paper-Trading on Kalshi Demo
     python src/kalshi_sim/ml/bnb_bot1v4/paper_trade_bnbbot.py --mode demo
+
+    # Zero-Capital Live Shadow Mode (Incubation & Experience Buffer Learning)
+    python src/kalshi_sim/ml/bnb_bot1v4/paper_trade_bnbbot.py --mode shadow
 
     # Authorized Live Trading with Micro-Bankroll Protection
     python src/kalshi_sim/ml/bnb_bot1v4/paper_trade_bnbbot.py --mode live
@@ -116,16 +120,116 @@ async def run_bnb_bot(mode: str = "demo", ticker: Optional[str] = None) -> None:
         ticker=ticker,
     )
 
-    logger.info("Orderflow feed connected. Launching quantitative evaluation loop...")
+    # Track already processed settlements to prevent duplicate counting
+    processed_settlements: set[str] = set()
+    bnb_reports_file = _ROOT / "data" / "bnb_win_loss_reports.json"
+    if bnb_reports_file.exists():
+        try:
+            prior = json.loads(bnb_reports_file.read_text(encoding="utf-8"))
+            if isinstance(prior, list):
+                for p in prior:
+                    if p.get("ticker"):
+                        processed_settlements.add(p["ticker"])
+        except Exception:
+            pass
+
+    last_settlement_check = 0.0
+
+    logger.info("Orderflow feed connected. Launching quantitative evaluation and settlement loop...")
     try:
         while True:
             try:
+                now_mono = asyncio.get_running_loop().time()
+
+                # 1. Evaluate and execute 15-minute cycle
                 market = await engine.get_active_market()
                 if market:
-                    # Ingest book state
                     decision = await engine.run_cycle()
                     if decision and decision.recommended_side in ("yes", "no") and decision.recommended_contracts > 0:
-                        logger.info("[BNB BOT SIGNAL] %s %d contracts @ %s (Strike: %s, Spot: %s, Moat: %s)", decision.recommended_side.upper(), decision.recommended_contracts, decision.limit_price, market.strike_price, engine.get_spot_price(), engine.min_spot_diff)
+                        logger.info(
+                            "[BNB BOT SIGNAL] %s %d contracts @ %s (Strike: %s, Spot: %s, Moat: %s)",
+                            decision.recommended_side.upper(),
+                            decision.recommended_contracts,
+                            decision.limit_price,
+                            market.strike_price,
+                            engine.get_spot_price(),
+                            engine.min_spot_diff,
+                        )
+
+                # 2. Periodic Live/Shadow/Demo Settlement Reconciliation (every 30s)
+                if now_mono - last_settlement_check >= 30.0:
+                    last_settlement_check = now_mono
+                    if order_client and hasattr(order_client, "get_settlements"):
+                        try:
+                            settlements = await order_client.get_settlements(limit=20)
+                            for s in settlements:
+                                s_ticker = s.get("ticker", "")
+                                if not s_ticker or not s_ticker.startswith("KXBNB"):
+                                    continue
+                                if s_ticker in processed_settlements:
+                                    continue
+
+                                market_result = s.get("market_result", "").lower()
+                                if not market_result:
+                                    continue
+
+                                yes_cnt = int(float(str(s.get("yes_count_fp", "0") or "0")))
+                                no_cnt = int(float(str(s.get("no_count_fp", "0") or "0")))
+                                yes_cost = Decimal(str(s.get("yes_total_cost_dollars", "0") or "0"))
+                                no_cost = Decimal(str(s.get("no_total_cost_dollars", "0") or "0"))
+                                revenue = Decimal(str(s.get("revenue", 0) or 0)) / Decimal("100")
+                                fee = Decimal(str(s.get("fee_cost", "0") or "0"))
+
+                                total_cnt = max(1, yes_cnt + no_cnt)
+                                cost = yes_cost + no_cost
+                                side_det = "yes" if yes_cnt > no_cnt else "no"
+                                won_det = (revenue > cost) or (side_det == market_result and revenue > Decimal("0"))
+                                pnl_val = revenue - cost - fee
+                                entry_p_val = (cost / Decimal(str(total_cnt))) if total_cnt > 0 else Decimal("0.42")
+
+                                # Extract strike price from ticker
+                                strike_dec = Decimal("740.00")
+                                parts = s_ticker.split("-")
+                                if len(parts) >= 3:
+                                    try:
+                                        strike_dec = Decimal(parts[-1])
+                                    except Exception:
+                                        pass
+
+                                spot_dec = strike_dec + (Decimal("1.50") if market_result == "yes" else Decimal("-1.50"))
+
+                                rep = engine.record_cycle_settlement(
+                                    won_or_pnl=pnl_val,
+                                    ticker=s_ticker,
+                                    side=side_det,
+                                    entry_price=entry_p_val,
+                                    settlement_spot_price=spot_dec,
+                                    strike_price=strike_dec,
+                                    contracts=total_cnt,
+                                    execution_mode=mode,
+                                )
+                                processed_settlements.add(s_ticker)
+                                if rep:
+                                    logger.info(
+                                        "🎯 [BNB SETTLEMENT RECONCILED] %s | %s | PnL: $%+.4f",
+                                        s_ticker,
+                                        rep["outcome"].upper(),
+                                        rep["pnl"],
+                                    )
+
+                            if engine.experience_buffer:
+                                summ = engine.experience_buffer.get_recent_summary(10)
+                                if summ["total_recent"] > 0:
+                                    logger.info(
+                                        "📈 [BNB INCUBATION PROGRESS] Cycles: %d/30 | WR: %.1f%% | Net: $%+.2f | Brier: %.4f",
+                                        summ["total_recent"],
+                                        summ["win_rate"],
+                                        summ["net_pnl"],
+                                        summ["brier_score"],
+                                    )
+                        except Exception as e_settle:
+                            logger.debug("[BNB SETTLEMENT ERROR] %s", e_settle)
+
                 await asyncio.sleep(2.0)
             except asyncio.CancelledError:
                 break
