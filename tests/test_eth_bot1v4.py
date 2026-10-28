@@ -78,13 +78,13 @@ def test_eth_bot1v4_engine_calibration_and_defaults(tmp_path: Path) -> None:
     assert engine.STRATEGY_NAME == "ETH Bot 1 V4 (Ethereum Domination)"
     assert engine.asset == CryptoAsset.ETH
     assert engine.default_btc_1m_volatility == 0.60
-    assert engine.min_spot_diff == 5.00
+    assert engine.min_spot_diff == 2.50
     assert engine.chop_range_threshold == 7.50
     assert engine.chop_vol_threshold == 0.60
     assert engine.min_spot_diff_bleed == 5.00
     assert engine.taker_breakout_min_velocity == 1.50
-    assert engine.discount_limit_price == Decimal("0.42")
-    assert engine.max_entry_price == Decimal("0.45")
+    assert engine.discount_limit_price == Decimal("0.46")
+    assert engine.max_entry_price == Decimal("0.54")
     assert engine.max_turnover_per_event == 1
 
 
