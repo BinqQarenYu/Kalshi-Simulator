@@ -873,21 +873,100 @@ class BnbBot1V4Engine(Bot1V4DominationEngine):
         """Alias for get_active_market conforming to Bot1V4 interface."""
         return await self.get_active_market()
 
-    async def fetch_orderbook(self, ticker: str) -> Optional[L2BookState]:
-        """Fetch live L2 orderbook for a specific KXBNB15M ticker."""
-        base_url = PROD_REST_BASE if (self.order_client and getattr(self.order_client, "is_live", False)) else DEMO_REST_BASE
-        url = f"{base_url}/markets/{ticker}/orderbook"
-        headers = get_auth_headers("GET", f"/trade-api/v2/markets/{ticker}/orderbook") if (self.order_client and getattr(self.order_client, "is_live", False)) else {}
+    async def fetch_orderbook(self, ticker: str, rest_base: Optional[str] = None) -> Optional[L2BookState]:
+        """Fetch live Level-2 Orderbook snapshot for the target BNB contract."""
+        if rest_base is None:
+            is_live_or_shadow = (self.order_client and getattr(self.order_client, "is_live", False)) or (self.order_client and getattr(self.order_client, "is_shadow", False)) or os.getenv("KALSHI_ENV", "live").lower() in ("prod", "live")
+            rest_base = PROD_REST_BASE if is_live_or_shadow else DEMO_REST_BASE
+
+        url = f"{rest_base}/markets/{ticker}/orderbook"
+        headers = {
+            "User-Agent": "KalshiSim-BnbBot1V4/1.0",
+            "Accept": "application/json",
+        }
+        if self.order_client and getattr(self.order_client, "is_live", False):
+            headers.update(get_auth_headers("GET", f"/trade-api/v2/markets/{ticker}/orderbook"))
+
         try:
+            timeout = aiohttp.ClientTimeout(total=4.0)
             session = await self._get_session()
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=4.0)) as resp:
+            async with session.get(url, headers=headers, timeout=timeout) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    ob = data.get("orderbook", {})
-                    book = L2BookState(market_ticker=ticker)
-                    book.yes_book = ob.get("yes", [])
-                    book.no_book = ob.get("no", [])
+                    raw_book = data.get("orderbook_fp") or data.get("orderbook") or {}
+                    bids = raw_book.get("yes_dollars") or raw_book.get("yes") or []
+                    asks = raw_book.get("no_dollars") or raw_book.get("no") or []
+
+                    book = L2BookState(ticker)
+                    new_yes: dict[Decimal, Decimal] = {}
+                    new_no: dict[Decimal, Decimal] = {}
+
+                    for p_val, q_val in bids:
+                        new_yes[Decimal(str(p_val))] = Decimal(str(q_val))
+                    for p_val, q_val in asks:
+                        new_no[Decimal(str(p_val))] = Decimal(str(q_val))
+
+                    book.yes_book = new_yes
+                    book.no_book = new_no
+                    book.last_update = datetime.now(timezone.utc)
+                    book._stale = False
                     return book
         except Exception as e:
             logger.debug("[BNB BOT] Error fetching orderbook for %s: %s", ticker, e)
         return None
+
+    def get_empirical_vpin(self) -> float:
+        """Compute empirical Volume-Synchronized Probability of Toxicity (VPIN) from aggressive trade tape."""
+        if not self.orderflow_feed or not hasattr(self.orderflow_feed, "trades") or not self.orderflow_feed.trades:
+            return 0.15
+        trades = list(self.orderflow_feed.trades)
+        if len(trades) < 5:
+            return 0.15
+        buy_vol = sum(float(getattr(t, "count", 0.0)) for t in trades if getattr(t, "taker_side", "") == "buy")
+        sell_vol = sum(float(getattr(t, "count", 0.0)) for t in trades if getattr(t, "taker_side", "") == "sell")
+        tot = buy_vol + sell_vol
+        if tot <= 0.0001:
+            return 0.15
+        return float(min(0.99, max(0.01, abs(buy_vol - sell_vol) / tot)))
+
+    def get_macro_1h_slope(self) -> float:
+        """Fetch 1h macro trend percentage slope with 60-second caching for BNB."""
+        now_mono = time.monotonic()
+        if hasattr(self, "_last_1h_slope") and hasattr(self, "_last_1h_slope_ts"):
+            if now_mono - getattr(self, "_last_1h_slope_ts", 0.0) < 60.0:
+                return float(self._last_1h_slope)
+
+        symbol = "BNBUSDT"
+        fallback = 0.0
+        try:
+            import urllib.request
+            url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1h&limit=2"
+            req = urllib.request.Request(url, headers={"User-Agent": "KalshiSim-BnbBot1V4/1.0"})
+            resp = urllib.request.urlopen(req, timeout=2.5)
+            data = json.loads(resp.read().decode())
+            if data and len(data) >= 1:
+                curr_kline = data[-1]
+                open_pr = float(curr_kline[1])
+                close_pr = float(curr_kline[4])
+                if open_pr > 0.0:
+                    slope_pct = ((close_pr - open_pr) / open_pr) * 100.0
+                    self._last_1h_slope = slope_pct
+                    self._last_1h_slope_ts = now_mono
+                    return slope_pct
+        except Exception as e:
+            logger.debug("[BNB MACRO SLOPE] Fallback reading candles: %s", e)
+
+        if self.orderflow_feed and hasattr(self.orderflow_feed, "candle_builder_5m"):
+            candles = self.orderflow_feed.candle_builder_5m.get_candles(symbol, count=12)
+            if len(candles) >= 2:
+                o = float(candles[0].open)
+                c = float(candles[-1].close)
+                if o > 0.0:
+                    slope = ((c - o) / o) * 100.0
+                    self._last_1h_slope = slope
+                    self._last_1h_slope_ts = now_mono
+                    return slope
+
+        self._last_1h_slope = fallback
+        self._last_1h_slope_ts = now_mono
+        return fallback
