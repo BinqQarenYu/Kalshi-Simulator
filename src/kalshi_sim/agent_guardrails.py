@@ -76,6 +76,9 @@ class AgentGuardrails:
         self._eth_consecutive_losses: int = 0
         self.eth_loss_limit: int = 7
         self.is_btc_bot_armed: bool = True
+        self.is_bnb_bot_armed: bool = True
+        self._bnb_consecutive_losses: int = 0
+        self.bnb_loss_limit: int = 3
         self._btc_trades_count: int = 0
         self._btc_pnl: Decimal = Decimal("0.00")
         self.btc_gate_evaluated: bool = False
