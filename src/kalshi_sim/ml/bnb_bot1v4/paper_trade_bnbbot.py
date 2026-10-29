@@ -187,14 +187,23 @@ async def run_bnb_bot(mode: str = "demo", ticker: Optional[str] = None) -> None:
                                 pnl_val = revenue - cost - fee
                                 entry_p_val = (cost / Decimal(str(total_cnt))) if total_cnt > 0 else Decimal("0.42")
 
-                                # Extract strike price from ticker
-                                strike_dec = Decimal("740.00")
-                                parts = s_ticker.split("-")
-                                if len(parts) >= 3:
-                                    try:
-                                        strike_dec = Decimal(parts[-1])
-                                    except Exception:
-                                        pass
+                                # Extract strike price: first attempt live market floor_strike, fallback to parsing
+                                strike_dec = Decimal("750.00")
+                                try:
+                                    m_info = await engine.get_active_market()
+                                    if m_info and m_info.ticker == s_ticker and m_info.floor_strike:
+                                        strike_dec = m_info.floor_strike
+                                    else:
+                                        # Query Kalshi market directly for ground truth floor_strike
+                                        async with aiohttp.ClientSession() as sess:
+                                            async with sess.get(f"https://api.elections.kalshi.com/trade-api/v2/markets/{s_ticker}", timeout=3.0) as m_resp:
+                                                if m_resp.status == 200:
+                                                    m_data = await m_resp.json()
+                                                    fs = m_data.get("market", {}).get("floor_strike")
+                                                    if fs is not None:
+                                                        strike_dec = Decimal(str(fs))
+                                except Exception:
+                                    pass
 
                                 spot_dec = strike_dec + (Decimal("1.50") if market_result == "yes" else Decimal("-1.50"))
 

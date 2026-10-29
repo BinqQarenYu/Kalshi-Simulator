@@ -490,26 +490,26 @@ class BnbBot1V4Engine(Bot1V4DominationEngine):
                 return decision
 
         # 1d. Opening Noise Maturity Gate (Anti-Brownian Noise Trap)
-        # The first 5 minutes of a 15m cycle (tau > 600s) have high Brownian dispersion (+- $5.80 on BNB).
-        # Require tau <= 600s before committing capital unless a structural breakout (|diff| >= $4.50) occurs.
-        if time_to_expiry_s > 360.0:
-            if abs(spot_price - target_strike) < Decimal("4.50"):
+        # In early cycle (tau > 540s), require a minimal structural divergence (|diff| >= $1.50 on BNB).
+        # Calibrated for BNB's ~$0.25/min volatility so the bot is not frozen during golden breakout opportunities.
+        if time_to_expiry_s > 540.0:
+            if abs(spot_price - target_strike) < Decimal("1.50"):
                 logger.info(
-                    "⏸️ [BNB OPENING NOISE MATURITY GATE] Tau %.0fs > 600s (|diff| $%.2f < $4.50). Waiting for cycle direction to mature.",
+                    "⏸️ [BNB OPENING NOISE MATURITY GATE] Tau %.0fs > 540s (|diff| $%.2f < $1.50). Waiting for cycle direction to mature.",
                     time_to_expiry_s, float(abs(spot_price - target_strike))
                 )
                 return decision
 
         # 2. Dynamic Moneyness Moat (Anti-Dispersion Excursion Shield)
-        # Baseline freedom: flat $1.50 moat. When DoF-01 active: dynamic sqrt(tau) scaling moat.
+        # Calibrated BNB base moat: $0.75 (matching active bot parameters and tight BNB spreads).
         patch_01_active = dof_gov.is_patch_active("BNB", "dof_01_vol_moat")
-        effective_moat = Decimal("2.50")
+        effective_moat = Decimal(str(getattr(self, "min_spot_diff", 0.75)))
         if patch_01_active:
             if time_to_expiry_s > 720.0:
-                effective_moat = Decimal("3.00")
+                effective_moat = Decimal("1.25")
             elif time_to_expiry_s > 450.0:
                 scale = math.sqrt(time_to_expiry_s / 450.0)
-                effective_moat = Decimal(str(round(1.50 * scale, 2)))
+                effective_moat = Decimal(str(round(0.75 * scale, 2)))
             logger.info("🛡️ [BNB DoF-01 VOL MOAT ACTIVE] Dynamic scaling moat: $%.2f (Tau: %.0fs)", float(effective_moat), time_to_expiry_s)
 
         # Apply Supreme Governor (Experience Buffer) adaptive proximity moat multiplier
@@ -549,14 +549,14 @@ class BnbBot1V4Engine(Bot1V4DominationEngine):
 
 
         # 3b. Moneyness Consistency Check (Anti-OTM Trap Filter)
-        # Prevent buying out-of-the-money contracts when spot is adverse to strike
-        if chosen_side == OrderSide.YES and spot_price < (target_strike - Decimal("2.50")):
+        # Prevent buying out-of-the-money contracts when spot is adverse to strike ($1.00 tolerance on BNB)
+        if chosen_side == OrderSide.YES and spot_price < (target_strike - Decimal("1.00")):
             logger.warning(
                 "🛑 [OTM TRAP FILTER] Kev recommended YES, but spot ($%s) is deep below strike ($%s) by -$%.2f. Stand down to WAIT.",
                 spot_price, target_strike, float(target_strike - spot_price)
             )
             return decision
-        if chosen_side == OrderSide.NO and spot_price > (target_strike + Decimal("2.50")):
+        if chosen_side == OrderSide.NO and spot_price > (target_strike + Decimal("1.00")):
             logger.warning(
                 "🛑 [OTM TRAP FILTER] Kev recommended NO, but spot ($%s) is deep above strike ($%s) by +$%.2f. Stand down to WAIT.",
                 spot_price, target_strike, float(spot_price - target_strike)
@@ -565,16 +565,16 @@ class BnbBot1V4Engine(Bot1V4DominationEngine):
 
         # 3c. Adverse Selection Flow Shield (Veto if queue pressure is aggressively opposing trade side)
         ofi_val = float(self.orderflow_feed.ofi_l1 if self.orderflow_feed else 0.0)
-        if chosen_side == OrderSide.YES and ofi_val < 0.00:
-            logger.warning("🛑 [BNB ADVERSE FLOW VETO] Opposing sell flow against YES (OFI: %+.2f < 0.00). Refusing adverse taker fill. Stand down.", ofi_val)
+        if chosen_side == OrderSide.YES and ofi_val < -0.20:
+            logger.warning("🛑 [BNB ADVERSE FLOW VETO] Strongly opposing sell flow against YES (OFI: %+.2f < -0.20). Refusing adverse taker fill. Stand down.", ofi_val)
             return decision
-        if chosen_side == OrderSide.NO and ofi_val > 0.00:
-            logger.warning("🛑 [BNB ADVERSE FLOW VETO] Opposing buy flow against NO (OFI: %+.2f > 0.00). Refusing adverse taker fill. Stand down.", ofi_val)
+        if chosen_side == OrderSide.NO and ofi_val > 0.20:
+            logger.warning("🛑 [BNB ADVERSE FLOW VETO] Strongly opposing buy flow against NO (OFI: %+.2f > +0.20). Refusing adverse taker fill. Stand down.", ofi_val)
             return decision
 
         # 3d. Asymmetric Macro-Trend Alignment Guard (Anti-Bleed Inversion)
         if macro_slope <= -0.10 and chosen_side == OrderSide.YES:
-            if (spot_price - target_strike) < Decimal("7.50") or ofi_val < 0.20:
+            if (spot_price - target_strike) < Decimal("2.50") or ofi_val < 0.20:
                 logger.warning(
                     "🛑 [BNB MACRO BLEED VETO] Macro 1h slope (%.2f%%) is bearish. Refusing counter-trend YES (Diff: $%.2f). Stand down.",
                     macro_slope, float(spot_price - target_strike)
@@ -582,7 +582,7 @@ class BnbBot1V4Engine(Bot1V4DominationEngine):
                 return decision
 
         if macro_slope >= 0.10 and chosen_side == OrderSide.NO:
-            if (target_strike - spot_price) < Decimal("7.50") or ofi_val > -0.20:
+            if (target_strike - spot_price) < Decimal("2.50") or ofi_val > -0.20:
                 logger.warning(
                     "🛑 [BNB MACRO EXPANSION VETO] Macro 1h slope (+%.2f%%) is bullish. Refusing counter-trend NO (Diff: $%.2f). Stand down.",
                     macro_slope, float(spot_price - target_strike)
@@ -609,29 +609,31 @@ class BnbBot1V4Engine(Bot1V4DominationEngine):
 
         # 4. Continuous Math-of-Winning Formulation & Physics Dispersion Gate
         diff_float = float(spot_price - target_strike)
-        sigma_15m = 6.0  # typical 15m BNB volatility
+        sigma_15m = 3.5  # calibrated 15m BNB volatility (~$0.25/min * sqrt(15) ~ $1.0 - $3.5)
         tau_norm = max(0.01, time_to_expiry_s / 900.0)
         z = diff_float / (sigma_15m * math.sqrt(tau_norm))
         p_physics = 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
         p_physics_side = p_physics if chosen_side == OrderSide.YES else (1.0 - p_physics)
 
         # Physics Dispersion Gate: spot must have a statistical diffusion edge in trade direction
-        if p_physics_side < 0.58:
-            logger.info("⏸️ [PHYSICS DISPERSION GATE] P(Physics) %.1f%% < 58%% hurdle. Insufficient diffusion edge against dispersion. Stand down.", p_physics_side * 100.0)
+        if p_physics_side < 0.52:
+            logger.info("⏸️ [PHYSICS DISPERSION GATE] P(Physics) %.1f%% < 52%% hurdle. Insufficient diffusion edge against dispersion. Stand down.", p_physics_side * 100.0)
             return decision
 
         # Balanced 50/50 synthesis of Kev qualitative conviction and diffusion physics
         p_win = (0.50 * kev_conf) + (0.50 * p_physics_side)
         p_win = max(0.51, min(0.99, p_win))
 
-        # Dynamic Anti-Toxic Hurdle: widens when VPIN is elevated
-        hurdle = Decimal("0.08") + Decimal(str(round(vpin_score * 0.10, 4)))
-        # Cap at $0.55 winning corridor to maintain favorable risk/reward payoff asymmetry
-        base_cap = Decimal("0.55")
+        # Dynamic Anti-Toxic Hurdle: calibrated for BNB
+        hurdle = Decimal("0.04") + Decimal(str(round(vpin_score * 0.06, 4)))
+        # DEF-10 Sweet spot corridor: 46c - 54c
+        base_cap = getattr(self, "max_entry_price", None) or Decimal("0.54")
+        if isinstance(base_cap, float):
+            base_cap = Decimal(str(base_cap))
         if self.experience_buffer:
             base_cap = self.experience_buffer.get_effective_price_cap(base_cap)
         max_taker_price = Decimal(str(round(p_win, 2))) - hurdle
-        ask_floor = getattr(self, "min_viable_ask_floor", None) or Decimal("0.48")
+        ask_floor = getattr(self, "min_viable_ask_floor", None) or Decimal("0.44")
         if isinstance(ask_floor, float):
             ask_floor = Decimal(str(ask_floor))
         max_taker_price = min(base_cap, max(ask_floor, max_taker_price))
