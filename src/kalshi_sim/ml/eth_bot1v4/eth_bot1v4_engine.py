@@ -463,8 +463,11 @@ class EthBot1V4Engine(Bot1V4DominationEngine):
         # IN-FLIGHT ACTIVE POSITION DERISKING & TAKE-PROFIT
         # Check active position from local forensics or live exchange portfolio (survives restarts)
         active_info = self._active_trade_forensics.get(target_ticker)
-        if not active_info and self.order_client and hasattr(self.order_client, "get_live_portfolio_state"):
+        now_ts = time.time()
+        last_port_sync = getattr(self, "_last_portfolio_sync_ts", 0.0)
+        if not active_info and self.order_client and hasattr(self.order_client, "get_live_portfolio_state") and (now_ts - last_port_sync >= 30.0):
             try:
+                self._last_portfolio_sync_ts = now_ts
                 st = await self.order_client.get_live_portfolio_state()
                 for p in st.positions:
                     if p.ticker == target_ticker and p.position > 0:

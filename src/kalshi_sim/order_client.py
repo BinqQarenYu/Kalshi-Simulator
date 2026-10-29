@@ -209,6 +209,8 @@ class KalshiLiveOrderClient:
         endpoint = "/trade-api/v2/portfolio/intra_exchange_instance_transfer"
         url = f"{self.base_url}/portfolio/intra_exchange_instance_transfer"
         # Kalshi intra-exchange transfer API amount is in cent-fractions: $1.00 = 10,000 units
+        if not isinstance(amount_dollars, Decimal):
+            amount_dollars = Decimal(str(amount_dollars))
         amount_units = int(amount_dollars * Decimal("10000"))
         payload = {
             "source": "event_contract",

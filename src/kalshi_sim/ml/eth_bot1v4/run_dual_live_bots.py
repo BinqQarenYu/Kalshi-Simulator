@@ -253,10 +253,15 @@ def main() -> None:
 
     # Run both engines and settlement reconciler concurrently.
     async def _async_main():
+        try:
+            await client.ensure_crypto_collateral()
+        except Exception as exc:
+            logging.getLogger("DualFleet").warning("Initial collateral rebalance warning: %s", exc)
+
         tasks = [
             _run_engine(eth_engine, "ETH_Bot", args.eth_interval, guardrails),
             _run_engine(secondary_engine, f"{args.secondary_asset.upper()}_Bot", args.secondary_interval, guardrails),
-            _reconcile_settlements_loop(client, guardrails, eth_engine, secondary_engine, interval=15.0),
+            _reconcile_settlements_loop(client, guardrails, eth_engine, secondary_engine, interval=30.0),
             _periodic_telemetry_loop(guardrails, interval=30.0),
         ]
         await asyncio.gather(*tasks)
