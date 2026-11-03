@@ -217,7 +217,7 @@
   "is_armed": true,
   "updated_at": "2026-09-12T12:06:57.803132+00:00",
   "max_contracts": 1,
-  "discount_limit_price": 0.51,
+  "discount_limit_price": 0.42,
   "momentum_max_price": 0.63,
   "min_confidence": 81.0,
   "min_edge_pct": 6.0,

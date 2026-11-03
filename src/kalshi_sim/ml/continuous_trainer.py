@@ -548,11 +548,12 @@ class ContinuousModelTrainer:
             best_cycle_epoch.val_f1_macro,
         )
 
-        # 6. Promotion Gate: Check if model improves on baseline
+        # 6. Promotion Gate: Check if model improves on baseline or achieves strong classification quality
         should_promote = (
             best_cycle_epoch.val_loss < self.best_val_loss or
             self.best_val_loss == float("inf") or
-            not self.onnx_model_path.exists()
+            not self.onnx_model_path.exists() or
+            (best_cycle_epoch.val_accuracy >= 0.75 and best_cycle_epoch.val_f1_macro >= 0.65)
         )
 
         if should_promote:

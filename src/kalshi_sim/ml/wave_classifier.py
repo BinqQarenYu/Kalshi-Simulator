@@ -143,6 +143,14 @@ class WaveRegimeClassifier:
                     f"Bleed Trigger: {self.consecutive_losses} consecutive cycle losses experienced."
                 )
 
+    def reset(self, reason: str = "Manual reset to healthy STORM region") -> None:
+        """Resets loss streaks, clears bleed state, and restores bot to healthy STORM operations."""
+        self.current_region = "STORM"
+        self.consecutive_losses = 0
+        self.healing_consecutive_wins = 0
+        self.last_transition_reason = reason
+        logger.info("[WAVE CLASSIFIER] Region reset: %s", reason)
+
     def transition_to_healing(self, reason: str = "Initiating healing convalescence") -> None:
         """Transitions into Region 4 (HEALING) and arms probationary quarantine."""
         self.current_region = "HEALING"

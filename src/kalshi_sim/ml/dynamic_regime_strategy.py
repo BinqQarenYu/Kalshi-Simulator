@@ -262,24 +262,6 @@ class DynamicRegimeStrategy:
                 eval_ref_time = now_dt
                 time_to_expiry_s = max(0.0, (expiration_time - now_dt).total_seconds())
 
-        # Session Timing Guard Gate (DEF-09: Empirical Golden Sessions Only)
-        if self.enable_timing_guard:
-            timing_guard = get_session_timing_guard()
-            timing_verdict = timing_guard.evaluate_timing(
-                ref_time=eval_ref_time,
-                macro_regime=self._current_regime,
-                spot_diff=spot_diff,
-            )
-            if not timing_verdict.allowed:
-                return self._build_wait_decision(
-                    self._current_regime,
-                    spot_diff,
-                    time_to_expiry_s,
-                    volatility_1m,
-                    spread,
-                    timing_verdict.reason,
-                )
-
         # Late-Cycle 4-Minute Expiration Blackout Gate (User Directive / Anti-Gamma Bleed)
         if time_to_expiry_s <= 240.0:
             return self._build_wait_decision(
@@ -313,6 +295,24 @@ class DynamicRegimeStrategy:
             is_double_wick=wave_physics.is_double_wick_meatgrinder,
             now_ts=ts,
         )
+
+        # Session Timing Guard Gate (DEF-09: Empirical Golden Sessions Only & Dynamic Storm Override)
+        if self.enable_timing_guard:
+            timing_guard = get_session_timing_guard()
+            timing_verdict = timing_guard.evaluate_timing(
+                ref_time=eval_ref_time,
+                macro_regime=regime,
+                spot_diff=spot_diff,
+            )
+            if not timing_verdict.allowed:
+                return self._build_wait_decision(
+                    regime,
+                    spot_diff,
+                    time_to_expiry_s,
+                    volatility_1m,
+                    spread,
+                    timing_verdict.reason,
+                )
 
         # 5. Parameter Surfaces
         limit_price = self.compute_dynamic_limit_price(volatility_1m)

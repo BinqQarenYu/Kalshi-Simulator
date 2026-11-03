@@ -1004,7 +1004,7 @@ async def live_balance_sync_loop() -> None:
                         logger.debug("Periodic live settlement sync exception: %s", s_exc)
             except Exception as exc:
                 logger.debug("Live balance sync loop iteration exception: %s", exc)
-            await asyncio.sleep(5.0)
+            await asyncio.sleep(20.0)
     finally:
         await client.close()
 

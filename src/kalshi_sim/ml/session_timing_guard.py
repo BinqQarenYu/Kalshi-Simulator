@@ -182,7 +182,7 @@ class SessionTimingGuard:
         # 1. Dynamic Storm Override (Looking Forward into Live Momentum)
         # If market enters a confirmed breakout with deep cushion (|diff| >= $10 ETH / $85 BTC)
         is_storm = "STORM" in regime_upper or "VOLCANO" in regime_upper
-        is_massive_breakout = diff_val >= Decimal("10.00") or diff_val >= Decimal("85.00")
+        is_massive_breakout = diff_val >= Decimal("3.00") or diff_val >= Decimal("35.00")
         if is_storm and is_massive_breakout:
             return TimingVerdict(
                 allowed=True,

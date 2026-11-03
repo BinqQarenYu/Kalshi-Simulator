@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import yaml
 import os
 import shutil
@@ -33,7 +34,7 @@ log_path = Path("aws/logs/onnx_reload.log")
 try:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(log_path.resolve()) for h in logger.handlers):
-        file_handler = logging.FileHandler(str(log_path), mode="a", encoding="utf-8")
+        file_handler = RotatingFileHandler(str(log_path), maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8")
         formatter = logging.Formatter("[%(asctime)s] %(levelname)s %(name)s: %(message)s")
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
