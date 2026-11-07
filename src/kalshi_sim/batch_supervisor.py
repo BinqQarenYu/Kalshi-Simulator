@@ -633,6 +633,14 @@ class AutonomousBatchSupervisor:
             self._processed_trade_ids.add(self._get_trade_id(t))
         self._save_processed_trade_ids()
 
+        # 8.1 Execute Anti-Bloat Assessment Hygiene Duty (Clean AWS & Free Memory, Retain Brains)
+        try:
+            from kalshi_sim.utils.system_hygiene import run_assessment_hygiene_duty
+            hygiene_stats = run_assessment_hygiene_duty()
+            logger.info("🧹 [ASSESSMENT HYGIENE] Autonomous anti-bloat duty completed: %s", hygiene_stats)
+        except Exception as hyg_err:
+            logger.warning("[ASSESSMENT HYGIENE] Failed to run hygiene duty: %s", hyg_err)
+
         # 9. Execution Gate Verdict & Next Quota Reset
         if self.guardrails:
             self.guardrails.batch_trades_completed = 0
