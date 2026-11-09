@@ -131,6 +131,23 @@ class DynamicRegimeStrategy:
     def current_regime(self) -> str:
         return self._current_regime
 
+    def update_parameters(self, **kwargs: Any) -> None:
+        """Update strategy parameters dynamically from single source of truth."""
+        if "enable_chop_trading" in kwargs:
+            self.enable_chop_trading = bool(kwargs["enable_chop_trading"])
+        if "regime_chop_vol_ceiling" in kwargs:
+            self.vol_chop_trigger = Decimal(str(kwargs["regime_chop_vol_ceiling"]))
+        if "regime_trend_vol_floor" in kwargs:
+            self.vol_trend_trigger = Decimal(str(kwargs["regime_trend_vol_floor"]))
+        if "regime_dwell_time_seconds" in kwargs:
+            self.dwell_time_seconds = float(kwargs["regime_dwell_time_seconds"])
+        if "dynamic_moat_multiplier" in kwargs:
+            self._adaptive_moat_multiplier = Decimal(str(kwargs["dynamic_moat_multiplier"]))
+        if "momentum_max_price" in kwargs:
+            self.max_momentum_price = Decimal(str(kwargs["momentum_max_price"]))
+        if "discount_limit_price" in kwargs:
+            self.max_discount_limit_price = min(Decimal("0.51"), Decimal(str(kwargs["discount_limit_price"])))
+
     def update_learning_dials(
         self,
         adaptive_moat_multiplier: float = 1.0,

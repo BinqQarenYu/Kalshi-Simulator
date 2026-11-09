@@ -433,6 +433,13 @@ class StrategyEvaluationCoordinator:
 
                 engine = self.get_dynamic_regime_engine(ticker)
 
+                # Hot-reload strategy parameters from Single Source of Truth
+                try:
+                    from kalshi_sim.truth_synchronizer import truth_synchronizer
+                    truth_synchronizer.sync_engine(engine, asset=asset.value if hasattr(asset, "value") else str(asset))
+                except Exception as sync_err:
+                    logger.debug("[DYNAMIC STRATEGY SYNC ERROR] %s", sync_err)
+
                 # Sync learning dials from asset ContinuousExperienceBuffer (Closing Siloed Learning Loop)
                 exp_buf = None
                 if asset == CryptoAsset.ETH and self._eth_bot1_v4_engine and hasattr(self._eth_bot1_v4_engine, "experience_buffer"):
