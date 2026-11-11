@@ -1,7 +1,7 @@
 {
   "version": "1.0",
   "last_updated": "2026-11-03T19:22:22.735944+00:00",
-  "active_live_strategy": "dynamic_trading_strategy",
+  "active_live_strategy": "3_step_domination_bot",
   "seals": {
     "3_step_domination_bot": {
       "bot_id": "3_step_domination_bot",
